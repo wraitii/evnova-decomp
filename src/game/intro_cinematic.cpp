@@ -76,18 +76,20 @@ void RunPostIntroTextStub(const GameState &state) {
 
 // Per-iteration input poll of the intro wait loop. Mirrors the original's
 // split:
-//   - Enter (0x1c) and Space (0x39) end only the current frame's wait
-//     (the outer loop then presents the next configured PICT);
-//   - the primary command (g_player_key_bindings[0x17], default 0x01 = the
-//     primary mouse command) latches bVar9, which breaks out of the wait AND
-//     the frame loop, skipping all remaining frames.
+//   - Enter (0x1c), Space (0x39) and an in-rect left click (the original's
+//     local_19 latch, reachable while the button is held inside the
+//     render-owner rect) end only the current frame's wait (the outer loop
+//     then presents the next configured PICT);
+//   - the skip command (g_nova_control_bits[0x48] == g_player_key_bindings
+//     [0x17], default 0x01 = PC scancode 1 = Escape; NovaPrefs_ResetKeyBindings
+//     0x004b4400) latches bVar9, which breaks out of the wait AND the frame
+//     loop, skipping all remaining frames.
 // Input_PumpAndTestCommand polls a key-state table (FUN_004f1900:
-// DAT_0086e098[code] & 1) and the wait loop spins without a delay, so a
-// pressed button is observed on the next iteration and trips the skip latch;
-// the separate in-rect click path (local_19, frame-advance only) is only
-// reachable for a full press+release inside one poll interval. Our 16 ms
-// polling loop therefore maps every primary press to the skip latch.
-// TODO(decomp): read the binding slot instead of assuming the default.
+// g_key_state_snapshot[code] & 1) that only keyboard scancodes feed
+// (FUN_004d7330 case 0x100); the mouse button only raises the platform ready
+// flag (DAT_008701a0), which is what drives the in-rect frame advance. So a
+// single click advances exactly one slide, and Escape skips the whole intro.
+// TODO(decomp): read the live binding slot instead of assuming the default.
 struct IntroInput {
   bool frame_done = false;
   bool skip_all = false;
@@ -97,10 +99,11 @@ IntroInput PollIntroInput(SdlPlatform &platform) {
   IntroInput result;
   for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
     if (input->key == TextKey::enter ||
-        (input->key == TextKey::character && input->character == ' ')) {
+        (input->key == TextKey::character && input->character == ' ') ||
+        input->key == TextKey::primary) {
       result.frame_done = true;
     }
-    if (input->key == TextKey::primary) {
+    if (input->key == TextKey::escape) {
       result.skip_all = true;
     }
   }
@@ -176,11 +179,12 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
   SDL_Renderer *const renderer = platform.renderer();
   const auto &cinematic = state.intro_cinematic;
 
-  // The skip latch is polled at entry too: a primary press already held when
-  // the cinematic starts skips straight to the epilogue gate.
+  // The skip latch is polled at entry too: Escape already held when the
+  // cinematic starts skips straight to the epilogue gate (the original tests
+  // g_player_key_bindings[0x17] once before the frame loop).
   IntroInput input_state;
   for (std::optional<TextInput> held; (held = platform.PollTextEvent());) {
-    if (held->key == TextKey::primary) {
+    if (held->key == TextKey::escape) {
       input_state.skip_all = true;
     }
   }
@@ -249,8 +253,8 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
       }
       platform.Present();
 
-      // Wait out the per-frame duration; Enter/Space advance one frame, the
-      // primary command skips the rest.
+      // Wait out the per-frame duration; Enter/Space/in-rect click advance one
+      // frame, Escape skips the rest.
       const auto polled = PollIntroInput(platform);
       input_state.skip_all = input_state.skip_all || polled.skip_all;
       if (platform.quit_requested() || input_state.skip_all ||

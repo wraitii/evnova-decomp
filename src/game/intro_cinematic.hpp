@@ -2,14 +2,15 @@
 
 // Clean-room reconstruction of the new-game intro cinematic, mirroring Ghidra
 // 0x0048adc0 IntroCinematic_Run. Plays the pre-configured IntroCinematicData
-// frame art (PICTs), each for its 1/60s-tick duration. Enter (0x1c) / Space
-// (0x39) fast-forward only the current frame; the primary mouse command
-// (_DAT_00591514) latches bVar9 and skips the whole sequence. After the last
+// frame art (PICTs), each for its 1/60s-tick duration. Enter (0x1c), Space
+// (0x39) and an in-rect left click (the local_19 latch) fast-forward only the
+// current frame; the skip command (g_player_key_bindings[0x17], default 0x01 =
+// Escape) latches bVar9 and skips the whole sequence. After the last
 // frame, if bVar9 was not set and intro_text_desc_id != -1, it shows that
 // desc in (a stub of) the generic text-reader dialog.
 //
 // The return value mirrors bVar9 (true = the intro ran, intro-text dialog
-// gate holds; false = skipped by the primary mouse command, dialog suppressed).
+// gate holds; false = skipped by the skip command, dialog suppressed).
 //
 // Note: like IntroCinematic_Run itself, this function does *not* flip the
 // intro-played latch; Ship_RunSpaceflightMode sets g_intro_played after the
@@ -34,8 +35,8 @@ void NovaIntroCinematic_SetupFrames(GameState &state,
 
 // Plays the intro cinematic sequence described by state.intro_cinematic.
 // Returns the mirror of the original's bVar9 skip latch: true if the sequence
-// was not skipped by the primary mouse command (so the intro-text dialog may
-// open), false if skipped by a primary click. Enter/Space
+// was not skipped by the skip command (so the intro-text dialog may open),
+// false if skipped (Escape by default). Enter/Space/in-rect click
 // fast-forward only the current frame and do not flip the return value, exactly
 // as in Ghidra.
 bool NovaIntroCinematic_Run(SdlPlatform &platform,
