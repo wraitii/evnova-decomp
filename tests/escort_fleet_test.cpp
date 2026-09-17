@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "game/escort_formation.hpp"
 #include "game/landed_store.hpp"
 #include "game/scenario_data.hpp"
 #include "game/ship_comm_dialog.hpp"
@@ -205,4 +206,71 @@ TEST_CASE("mission-fleet escorts are exempt from payroll",
   CHECK(escort.is_active);
   CHECK(state.player.credits == 0);
   CHECK_FALSE(messaged);
+}
+
+TEST_CASE("escort loss uses the original caller-specific cargo denominator",
+          "[escort][cargo]") {
+  GameState state;
+  state.scenario.ships.assign(3, {});
+  for (auto &cls : state.scenario.ships) {
+    cls.default_ai_behavior = 1;
+    cls.base_armor = 100;
+    cls.capability_flags = 0x400; // No hull splash during the destruction test.
+  }
+  state.scenario.ships[0].cargo_holds = 4000;
+  state.scenario.ships[1].cargo_holds = 4000;
+  state.scenario.ships[1].cost = 10000;
+  state.scenario.ships[2].cargo_holds = 2000;
+  state.player.ship_class_id = 0;
+  state.player.current_system_id = 0;
+  state.player.ai_station_hold_timer = 0;
+  state.player.credits = 0;
+  Ship &lost = MakeEscort(state, 1, 1);
+  Ship &survivor = MakeEscort(state, 2, 2);
+  lost.armor_points = survivor.armor_points = 100;
+  lost.current_system_id = survivor.current_system_id = 0;
+  lost.escort_origin_mark = 1;
+  state.inventory.cargo_bins.fill(101);
+  state.inventory.junk_counts.fill(57);
+
+  int cargo_remaining = 61; // trunc(101 * 40 / 100) removed.
+  int junk_remaining = 35;  // trunc(57 * 40 / 100) removed.
+  SECTION("unpaid escort transfers before deactivation") {
+    game::Player_ProcessEscortPayroll(state, 1, {});
+    CHECK(lost.squad_leader_ship_slot == -1);
+  }
+  SECTION("destroyed recipient remains in denominator until finale ends") {
+    lost.armor_points = 0;
+    game::NovaShip_RunShipDestructionFinale(state, lost);
+    CHECK(lost.squad_leader_ship_slot == -1);
+  }
+  SECTION("disabled adoption clears active before transferring") {
+    lost.armor_points = 1;
+    game::NovaSystem_RestorePlayerEscorts(state, false, 0);
+    cargo_remaining = 34; // trunc(101 * 40 / 60) removed.
+    junk_remaining = 19;  // trunc(57 * 40 / 60) removed.
+    CHECK(lost.squad_leader_ship_slot == 0);
+  }
+  SECTION("combat escort payroll loss takes no cargo") {
+    state.scenario.ships[1].default_ai_behavior = 3;
+    game::Player_ProcessEscortPayroll(state, 1, {});
+    cargo_remaining = 101;
+    junk_remaining = 57;
+  }
+  SECTION("mission escort destruction takes no cargo") {
+    lost.mission_fleet_slot = 0;
+    lost.armor_points = 0;
+    game::NovaShip_RunShipDestructionFinale(state, lost);
+    cargo_remaining = 101;
+    junk_remaining = 57;
+  }
+  CHECK_FALSE(lost.is_active);
+  CHECK(survivor.is_active);
+  for (std::size_t bin = 0; bin < state.inventory.cargo_bins.size(); ++bin) {
+    CHECK(state.inventory.cargo_bins[bin] == cargo_remaining);
+    CHECK(lost.cargo_bins[bin] == 101 - cargo_remaining);
+  }
+  for (const auto junk : state.inventory.junk_counts) {
+    CHECK(junk == junk_remaining);
+  }
 }

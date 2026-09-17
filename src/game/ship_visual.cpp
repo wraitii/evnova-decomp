@@ -4,9 +4,11 @@
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "impact_effects.hpp"
+#include "landed_store.hpp"
 #include "mission.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
+#include "weapon.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -338,10 +340,16 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
     }
   }
 
-  // TODO(decomp) skipped: the escort cargo-return arm (destroyed escort with
-  // squad_leader_ship_slot 0 / behavior 6 / default AI < 3 runs
-  // Player_TransferCargoAndJunkToEscortByRatio 0x00469810 plus the weapon-bank
-  // pool reconciliation), and the finale audio de-registrations.
+  if (ship.squad_leader_ship_slot == 0 && ship.ai_behavior_code == 6 &&
+      ship.mission_fleet_slot == -1 && cls != nullptr &&
+      cls->default_ai_behavior < 3) {
+    // The active wreck remains in the capacity denominator as the transfer
+    // recipient, even though other destroyed escorts are excluded.
+    Player_TransferCargoAndJunkToEscortByRatio(state, self_slot);
+    NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+    state.stat_cache_valid = false;
+  }
+  // TODO(decomp): finale audio de-registrations.
 
   // Personality deactivation: the wreck's personality def leaves the ambient
   // spawn pool (1-in-8 chance for the 0x3fe forced sentinel; otherwise unless
