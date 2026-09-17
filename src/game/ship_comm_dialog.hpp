@@ -30,9 +30,8 @@
 // DAT_007d82ee/f0/f2 label table.
 // The assistance button is hidden for special-scan-mask governments (mirroring
 // the same function's local_10[1] gate), and the Greetings button then drops
-// down to the middle rect (item 1, y=153). Behavior-6 ships with no AI target
-// and no mission fleet open the escort-management window instead (not
-// reconstructed; see scope).
+// down to the middle rect (item 1, y=153). Behavior-6 ships attached to the
+// player with no mission fleet open the escort-management window instead.
 //
 // The comm state machine the original keeps in globals is derived here and
 // carried explicitly on the dialog frame: the per-launch random flavour index
@@ -53,12 +52,11 @@
 // comm-aid / distress / fuel-bribe branches), the bribe payment sub-window
 // (single-pass DLOG 0x3f0-style confirm, 35% acceptance, 0.75x discount,
 // +1000 haggle) and the escort release side-effects on close are
-// reconstructed. Deferred with loud Todo(decomp) logs: the escort-management
-// window handoff (behavior-6 ships, NovaUi_RunEscortShipManagementWindow
-// 0x004853a0), the mission-fleet escort-def branches (fleet defs not
+// reconstructed. The dedicated DLOG 0x3fe escort-management window supports
+// release plus mutually exclusive upgrade/sale scheduling. Deferred with loud
+// Todo(decomp) logs: the mission-fleet escort-def branches (fleet defs not
 // modelled), the full hail-info text assembly beyond the default fragment
-// (NovaUi_BuildShipCommHailInfoText 0x004819d0 branch 0) and
-// Player_TransferCargoAndJunkToEscortByRatio (0x00469810).
+// (NovaUi_BuildShipCommHailInfoText 0x004819d0 branch 0).
 
 #include <cstdint>
 
@@ -70,6 +68,22 @@ namespace game {
 
 class HudRenderer;
 class SpaceflightView;
+
+enum class EscortManagementAction : std::uint8_t {
+  kClose,
+  kRelease,
+  kToggleUpgrade,
+  kToggleSale,
+};
+
+// Applies one action from the escort-management modal. Returns true when the
+// window should close (Close/Release). Release transfers cargo before
+// detaching the escort, matching NovaUi_RunEscortShipManagementWindow.
+[[nodiscard]] bool
+NovaEscortManagement_ApplyAction(GameState &state,
+                                 Ship &escort,
+                                 EscortManagementAction action,
+                                 std::uint32_t now_ms);
 
 // Runs the DLOG 0x3ef ship-comm modal for the ship in `ship_slot` (must be a
 // valid active NPC slot). Draws PICT 0x213f as the window backdrop over the

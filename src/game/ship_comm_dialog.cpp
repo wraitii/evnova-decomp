@@ -17,7 +17,9 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
+#include "landed_store.hpp"
 #include "landed_window.hpp"
+#include "mission.hpp"
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
@@ -33,6 +35,7 @@ namespace {
 // ---- Resource ids ----------------------------------------------------------
 // The ship-comm window's backdrop PICT (DLOG 0x3ef, the Communications frame).
 constexpr std::uint16_t kCommFramePict = 0x213f;
+constexpr std::uint16_t kEscortManagementFramePict = 0x2141;
 
 // ---- DLOG 0x3ef / DITL 0x3ef geometry -------------------------------------
 // The comm window is 423x215 (DLOG 0x3ef bounds = the backdrop PICT 0x213f,
@@ -78,6 +81,61 @@ struct CommFrameLayout {
   SDL_FRect picture{};      // item 10 (200x200 portrait)
   SDL_FRect info_panel{};   // item 11 (Class:/comm-name/Status: block)
 };
+
+struct EscortManagementLayout {
+  SDL_FRect window{};
+  std::array<SDL_FRect, 4> buttons{};
+  SDL_FRect details{};
+  SDL_FRect picture{};
+  SDL_FRect status{};
+};
+
+[[nodiscard]] EscortManagementLayout LoadEscortManagementLayout() {
+  EscortManagementLayout layout;
+  layout.window = {108.0F, 110.0F, 424.0F, 259.0F};
+  const auto local = [&](float x, float y, float w, float h) {
+    return SDL_FRect{layout.window.x + x, layout.window.y + y, w, h};
+  };
+  layout.buttons = {local(29, 225, 146, 26),
+                    local(29, 197, 146, 26),
+                    local(29, 141, 146, 26),
+                    local(29, 169, 146, 26)};
+  layout.status = local(14, 9, 192, 58);
+  layout.picture = local(217, 30, 200, 200);
+  layout.details = local(14, 79, 192, 52);
+
+  const auto definition = NovaResource_LoadDialogDefinition(0x3fe);
+  const auto items =
+      definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
+                 : std::nullopt;
+  if (!definition || !items) {
+    NovaLog::Todo("DLOG/DITL 0x3fe unavailable; using shipped "
+                  "escort-management geometry");
+    return layout;
+  }
+  const float width = static_cast<float>(definition->right - definition->left);
+  const float height = static_cast<float>(definition->bottom - definition->top);
+  layout.window = {std::truncf((640.0F - width) * 0.5F),
+                   std::truncf((480.0F - height) * 0.5F),
+                   width,
+                   height};
+  for (const auto &item : *items) {
+    const SDL_FRect rect{layout.window.x + static_cast<float>(item.left),
+                         layout.window.y + static_cast<float>(item.top),
+                         static_cast<float>(item.right - item.left),
+                         static_cast<float>(item.bottom - item.top)};
+    if (item.index < 4) {
+      layout.buttons[item.index] = rect;
+    } else if (item.index == 9) {
+      layout.status = rect;
+    } else if (item.index == 10) {
+      layout.picture = rect;
+    } else if (item.index == 11) {
+      layout.details = rect;
+    }
+  }
+  return layout;
+}
 
 [[nodiscard]] CommFrameLayout LoadCommFrameLayout() {
   CommFrameLayout layout;
@@ -306,6 +364,16 @@ LoadCommPrompt(std::int16_t random_index, std::uint16_t prompt_index) {
     return *s;
   }
   return "?";
+}
+
+[[nodiscard]] std::string GroupedUnsigned(std::uint32_t value) {
+  std::string digits = std::to_string(value);
+  for (std::ptrdiff_t pos = static_cast<std::ptrdiff_t>(digits.size()) - 3;
+       pos > 0;
+       pos -= 3) {
+    digits.insert(static_cast<std::size_t>(pos), 1, ',');
+  }
+  return digits;
 }
 
 // Loads one PICT resource into a texture (null on failure to locate/decode).
@@ -711,7 +779,306 @@ LoadMoodPromptPayFirst(std::int16_t random_index, double personality) {
   return text;
 }
 
+void DrawEscortManagementDialog(SdlPlatform &platform,
+                                const GameState &state,
+                                SpaceflightView &view,
+                                HudRenderer &hud,
+                                NovaFontCache &font_cache,
+                                const ServicesButtonArt &button_art,
+                                SDL_Texture *backdrop,
+                                SDL_Texture *ship_picture,
+                                const Ship &escort,
+                                const ShipClass &ship_class,
+                                bool can_upgrade,
+                                bool can_sell,
+                                const EscortManagementLayout &layout) {
+  view.DrawGameFrame(platform, state, hud);
+  platform.SetCenteredPlayfield();
+  SDL_Renderer *renderer = platform.renderer();
+  constexpr float kScreenFontSize = 9.0F;
+  if (backdrop != nullptr) {
+    SDL_RenderTexture(renderer, backdrop, nullptr, &layout.window);
+  } else {
+    SDL_SetRenderDrawColor(renderer, 16, 40, 72, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &layout.window);
+  }
+  if (ship_picture != nullptr) {
+    SDL_RenderTexture(renderer, ship_picture, nullptr, &layout.picture);
+  }
+
+  const auto draw_line = [&](const SDL_FRect &rect,
+                             float x,
+                             float y,
+                             SDL_Color color,
+                             std::string_view text) {
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  kScreenFontSize,
+                  kNovaFontStyleRegular,
+                  color,
+                  rect.x + x,
+                  rect.y + y,
+                  text);
+  };
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &layout.details);
+  SDL_RenderFillRect(renderer, &layout.status);
+  draw_line(layout.details,
+            0,
+            12,
+            kPanelGrey,
+            NovaHud_LoadStringEntry(
+                kMiscStr, escort.escort_origin_mark == 0 ? 0xa7 : 0xa6)
+                .value_or(escort.escort_origin_mark == 0 ? "Captured Escort"
+                                                         : "Hired Escort"));
+  draw_line(layout.details, 3, 27, kTitle, ship_class.display_name);
+  if (!ship_class.subtitle.empty()) {
+    draw_line(layout.details, 3, 41, kTitle, ship_class.subtitle);
+  }
+
+  if (!can_upgrade) {
+    draw_line(layout.status,
+              0,
+              12,
+              kPanelGrey,
+              NovaHud_LoadStringEntry(kMiscStr, 0x126)
+                  .value_or("No upgrades available"));
+  } else if (escort.escort_upgrade_mark != 0) {
+    draw_line(layout.status,
+              0,
+              12,
+              kPanelGrey,
+              NovaHud_LoadStringEntry(kMiscStr, 0x124)
+                  .value_or("Marked for upgrade"));
+  } else {
+    draw_line(
+        layout.status,
+        0,
+        12,
+        kPanelGrey,
+        NovaHud_LoadStringEntry(kMiscStr, 0x125).value_or("Upgrade cost:"));
+    draw_line(layout.status,
+              70,
+              12,
+              kTitle,
+              GroupedUnsigned(static_cast<std::uint32_t>(
+                  std::max(0, ship_class.escort_upgrade_cost))) +
+                  " " +
+                  (ship_class.escort_upgrade_cost == 1 ? "credit" : "credits"));
+  }
+  if (can_sell) {
+    if (escort.escort_pending_sale_mark != 0) {
+      draw_line(
+          layout.status,
+          0,
+          28,
+          kPanelGrey,
+          NovaHud_LoadStringEntry(kMiscStr, 0x127).value_or("Marked for sale"));
+    } else {
+      draw_line(
+          layout.status,
+          0,
+          28,
+          kPanelGrey,
+          NovaHud_LoadStringEntry(kMiscStr, 0x128).value_or("Sale value:"));
+      draw_line(layout.status,
+                70,
+                28,
+                kTitle,
+                GroupedUnsigned(static_cast<std::uint32_t>(
+                    std::max(0, ship_class.escort_sell_value))) +
+                    " " +
+                    (ship_class.escort_sell_value == 1 ? "credit" : "credits"));
+    }
+  }
+  if (escort.escort_origin_mark != 0) {
+    const auto daily_cost =
+        static_cast<std::int32_t>(static_cast<double>(ship_class.cost) * 0.01);
+    draw_line(layout.status,
+              0,
+              42,
+              kPanelGrey,
+              NovaHud_LoadStringEntry(kMiscStr, 0x129).value_or("Pay:"));
+    draw_line(layout.status,
+              30,
+              42,
+              kTitle,
+              GroupedUnsigned(static_cast<std::uint32_t>(
+                  std::max(std::int32_t{0}, daily_cost))) +
+                  " " + (daily_cost == 1 ? "credit" : "credits") + " " +
+                  NovaHud_LoadStringEntry(kMiscStr, 0x10b).value_or("per day"));
+  }
+
+  const std::array<std::string, 4> labels{
+      LoadButtonLabel(0x15),
+      LoadButtonLabel(0x20),
+      LoadButtonLabel(escort.escort_upgrade_mark == 0 ? 0x34 : 0x35),
+      LoadButtonLabel(escort.escort_pending_sale_mark == 0 ? 0x36 : 0x37)};
+  const SDL_FPoint mouse = platform.mouse_position();
+  const bool mouse_down =
+      (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0U;
+  for (std::size_t i = 0; i < layout.buttons.size(); ++i) {
+    const bool enabled = i < 2 || (i == 2 ? can_upgrade : can_sell);
+    const bool pressed = enabled && mouse_down &&
+                         SDL_PointInRectFloat(&mouse, &layout.buttons[i]);
+    button_art.Draw(platform,
+                    layout.buttons[i],
+                    !enabled  ? ButtonState::kDisabled
+                    : pressed ? ButtonState::kHover
+                              : ButtonState::kNormal);
+    DrawThreeStateButtonLabel(platform,
+                              font_cache,
+                              layout.buttons[i],
+                              labels[i],
+                              enabled ? kTitle : kPanelGrey);
+  }
+}
+
+// Ghidra 0x004853a0 NovaUi_RunEscortShipManagementWindow; drawing function
+// 0x00485970 and button helpers 0x004a1d90/0x004a1ed0 run inline here.
+[[nodiscard]] bool RunEscortManagementDialog(SdlPlatform &platform,
+                                             GameState &state,
+                                             Ship &escort,
+                                             SpaceflightView &view,
+                                             HudRenderer &hud) {
+  const ShipClass *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(escort.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    return false;
+  }
+  const ShipClass *upgrade = state.scenario.Ship(
+      static_cast<std::int16_t>(ship_class->upgrade_to_ship_class_id + 0x80));
+  const bool can_upgrade =
+      ship_class->upgrade_to_ship_class_id >= 0 && upgrade != nullptr &&
+      Mission_CheckReactionConditionSatisfied(state,
+                                              upgrade->availability_expr);
+  const bool can_sell = escort.escort_origin_mark == 0;
+  const EscortManagementLayout layout = LoadEscortManagementLayout();
+  auto backdrop = LoadPictTexture(platform, kEscortManagementFramePict);
+  auto ship_picture =
+      LoadPictTexture(platform, ship_class->pict_fallback_sprite_resource_id);
+  NovaFontCache font_cache;
+  ServicesButtonArt button_art;
+  (void)button_art.Initialize(platform);
+
+  while (!platform.quit_requested()) {
+    DrawEscortManagementDialog(platform,
+                               state,
+                               view,
+                               hud,
+                               font_cache,
+                               button_art,
+                               backdrop ? backdrop->get() : nullptr,
+                               ship_picture ? ship_picture->get() : nullptr,
+                               escort,
+                               *ship_class,
+                               can_upgrade,
+                               can_sell,
+                               layout);
+    platform.Present();
+    for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
+      std::optional<EscortManagementAction> action;
+      if (in->key == TextKey::escape || in->key == TextKey::enter) {
+        action = EscortManagementAction::kClose;
+      } else if (in->key == TextKey::character) {
+        switch (in->character) {
+        case 'c':
+        case 'C':
+          action = EscortManagementAction::kClose;
+          break;
+        case 'r':
+        case 'R':
+          action = EscortManagementAction::kRelease;
+          break;
+        case 'u':
+        case 'U':
+          action = EscortManagementAction::kToggleUpgrade;
+          break;
+        case 's':
+        case 'S':
+          action = EscortManagementAction::kToggleSale;
+          break;
+        default:
+          break;
+        }
+      } else if (in->key == TextKey::primary) {
+        const SDL_FPoint point = platform.mouse_position();
+        for (std::size_t i = 0; i < layout.buttons.size(); ++i) {
+          if (SDL_PointInRectFloat(&point, &layout.buttons[i])) {
+            action = static_cast<EscortManagementAction>(i);
+            break;
+          }
+        }
+      }
+      if (!action ||
+          (*action == EscortManagementAction::kToggleUpgrade && !can_upgrade) ||
+          (*action == EscortManagementAction::kToggleSale && !can_sell)) {
+        continue;
+      }
+      if (NovaEscortManagement_ApplyAction(
+              state, escort, *action, platform.gameplay_ticks_ms())) {
+        return true;
+      }
+    }
+    platform.PaceFrame();
+  }
+  return true;
+}
+
 } // namespace
+
+bool NovaEscortManagement_ApplyAction(GameState &state,
+                                      Ship &escort,
+                                      EscortManagementAction action,
+                                      std::uint32_t now_ms) {
+  switch (action) {
+  case EscortManagementAction::kClose:
+    return true;
+  case EscortManagementAction::kRelease: {
+    const ShipClass *ship_class = state.scenario.Ship(
+        static_cast<std::int16_t>(escort.ship_class_id + 0x80));
+    Player_TransferCargoAndJunkToEscortByRatio(state, escort.ship_instance_id);
+    escort.squad_leader_ship_slot = -1;
+    escort.post_hit_mode_hint = -1;
+    escort.boarded_target_latch = 1;
+    escort.ai_behavior_code =
+        ship_class != nullptr ? ship_class->default_ai_behavior : 1;
+    NovaShip_ResetAiBehaviorRuntimeFields(escort);
+    NovaAi_EnterState2ClearPrimaryTarget(escort, now_ms);
+    state.stat_cache_valid = false;
+    return true;
+  }
+  case EscortManagementAction::kToggleUpgrade:
+    if (const ShipClass *ship_class = state.scenario.Ship(
+            static_cast<std::int16_t>(escort.ship_class_id + 0x80));
+        ship_class == nullptr || ship_class->upgrade_to_ship_class_id < 0) {
+      return false;
+    } else if (const ShipClass *upgrade =
+                   state.scenario.Ship(static_cast<std::int16_t>(
+                       ship_class->upgrade_to_ship_class_id + 0x80));
+               upgrade == nullptr || !Mission_CheckReactionConditionSatisfied(
+                                         state, upgrade->availability_expr)) {
+      return false;
+    }
+    escort.escort_upgrade_mark = escort.escort_upgrade_mark == 0 ? 1 : 0;
+    if (escort.escort_upgrade_mark != 0) {
+      escort.escort_pending_sale_mark = 0;
+    }
+    return false;
+  case EscortManagementAction::kToggleSale:
+    if (escort.escort_origin_mark != 0) {
+      return false;
+    }
+    escort.escort_pending_sale_mark =
+        escort.escort_pending_sale_mark == 0 ? 1 : 0;
+    if (escort.escort_pending_sale_mark != 0) {
+      escort.escort_upgrade_mark = 0;
+    }
+    return false;
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // The ship-comm modal
@@ -736,14 +1103,11 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   NovaLog::Info("opening ship-comm dialog 0x3ef for ship slot {}",
                 static_cast<int>(ship_slot));
 
-  // Behavior-6 escorts with no AI target and no mission fleet open the
-  // escort-management window in the original (NovaUi_RunEscortShipManagement-
-  // Window 0x004853a0); that window is not reconstructed, so the comm dialog
-  // stands in (the assistance button still runs the escort-release flow).
+  // Behavior-6 player escorts with no mission fleet open the
+  // dedicated escort-management window rather than ordinary communications.
   if (target.ai_behavior_code == 6 && target.squad_leader_ship_slot == 0 &&
       target.mission_fleet_slot == -1) {
-    NovaLog::Todo("ship-comm: escort-management window 0x004853a0 not "
-                  "reconstructed; showing the comm dialog instead");
+    return RunEscortManagementDialog(platform, state, target, view, hud);
   }
 
   // ---- Opening gates (mirrors 0x0047e470) ---------------------------------
