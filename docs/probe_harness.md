@@ -103,6 +103,48 @@ on the `text_reader` refuse dialog that follows, returning once no such modal
 has appeared for `settle_ms` (default 300, raise it to cover the Bar's delayed
 recheck timer).
 
+### Callable scenario fragments
+
+Any scenario can be invoked as a reusable, parameterized function from another
+scenario with a `call` step, which keeps shared workflows (new-pilot bootstrap,
+a travel leg, a trade circuit) in one file instead of copied into every route:
+
+```toml
+[[steps]]
+action = "call"
+scenario = "fragments/travel_leg"   # relative to the caller; .toml optional
+args = { destination = "Sol", timeout_ms = 180000 }
+```
+
+The callee's `[[steps]]` run in place; paths resolve relative to the calling
+file, falling back to the root scenario's directory for nested fragments (the
+`.toml` suffix is optional), `quit_on_finish` is ignored on callees, and a
+callee's own `[defaults] timeout_ms` applies to its steps. Callees declare parameters as an
+array of tables; a parameter without `default` is required and `args` may only
+name declared parameters (typos fail):
+
+```toml
+[[params]]
+name = "destination"
+
+[[params]]
+name = "timeout_ms"
+default = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "{{ destination }}"
+timeout_ms = "{{ timeout_ms }}"
+```
+
+`{{ name }}` placeholders substitute throughout the callee's step tree,
+including table keys such as `ui.items.{{ index }}.label`. A value that is
+exactly one placeholder keeps the parameter's own type, so numeric/boolean
+`expect` values survive; embedded placeholders are stringified. Undefined
+placeholders, unknown or missing arguments, recursive calls and call depth past
+32 all fail rather than silently doing nothing.
+
 Flight automation is input-only: `{"cmd":"land_at","target":"Earth"}` and
 `{"cmd":"jump_to","target":"Sol"}` install a controller that emits the same
 edge/held `FlightInput` commands as a pilot. A pure-decimal `target` for
