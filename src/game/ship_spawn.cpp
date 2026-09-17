@@ -1136,6 +1136,16 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
 // faces it toward the origin. The AI-state entry (slowdown / jump-in) and the
 // speed polar integration mirror Math_AddPolarVelocity (heading 0 = up, world
 // +y down).
+//
+// TODO(decomp(0x0041c710)) skipped: a few write-only differences from the
+// original have no gameplay effect and are deliberately not reproduced. The
+// slowdown arm's ai_mode_start_time_ms stamp is inert (state 8 / control mode
+// 0x0a never read it and jump spin-up re-stamps it); the extra
+// ai_state_code = 0 write is overwritten by the state-8/0x15 entry; the
+// slowdown bearing is not rounded to an integer degree (sub-pixel arrival
+// drift; the lookup-table vs std::sin divergence is tracked under
+// 0x0043b4a0); and jump_destination_system_id is left at its default -1 (only
+// read for the player).
 int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
                                          std::int16_t system_id) {
   int slot = -1;
@@ -1154,15 +1164,10 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
     slot = NovaEncounter_SpawnRandomSystemDudeShip(state, system_id, 8);
     if (slot >= 0) {
       Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
-      // Discard ships whose computed fuel capacity < 1 (the original's
-      // Ship_ComputeShipFuelCapacity). The clean-room NPC fuel is the class
-      // base_fuel; outfit-derived fuel bonuses (opcode-12 outfits) are not
-      // typically present on dude ships, so this is faithful for the stock
-      // scenario. TODO(decomp).
-      const ShipClass *cls = state.scenario.Ship(
-          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-      const std::int16_t fuel = cls != nullptr ? cls->base_fuel : 0;
-      if (fuel < 1) {
+      // Ghidra 0x0041c710 discards ships whose Ship_ComputeShipFuelCapacity
+      // (0x00463a20) is < 1. A dedicated dude ship is an NPC, so the shared
+      // helper resolves through its class base value.
+      if (NovaAi_ComputeShipFuelCapacity(state, ship) < 1.0) {
         ship.is_active = false;
         return -1;
       }

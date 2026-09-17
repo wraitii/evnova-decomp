@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "boarding_plunder.hpp"
+#include "compatibility.hpp"
 #include "escort_formation.hpp"
 #include "frame_timing.hpp"
 #include "government.hpp"
@@ -88,6 +89,11 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
   ship.waypoint_arrival_marker_b = 0;
   ship.turn_bank_animation_phase =
       -static_cast<float>(std::uniform_int_distribution<int>{0, 9}(state.rng));
+  ship.weapon_sprite_flash_level = 0.0F;
+
+  // Port-only probe instrumentation (no gameplay effect): the clean-room
+  // arrival monitor has no counterpart in the original, which arms it only
+  // through its spawn placements. See game_state.hpp:267.
   ship.arrival_monitor_elapsed_ticks = 0.0F;
   ship.arrival_monitor_active = true;
   ship.arrival_monitor_warning_logged = false;
@@ -101,8 +107,6 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
       ship.ai_control_mode,
       std::hypot(ship.vel_x, ship.vel_y),
       ship.ai_station_hold_timer);
-  // ShipState +0xC8E8 (weapon-sprite flash) is not represented in the
-  // clean-room Ship yet; allocation already supplies its zero default.
 }
 
 // Ghidra 0x004159e0 Ship_EnterShipAiState0x15_EmergeFromHypergate.
@@ -117,11 +121,12 @@ void NovaAi_EnterState15EmergeFromHypergate(GameState &state,
   ship.ai_station_hold_timer = -1.0F;
 
   if (stellar_id >= 0 && stellar_id < 0x800) {
-    const ShipClass *cls = state.scenario.Ship(
-        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    const bool can_jump =
-        cls != nullptr && static_cast<float>(cls->base_fuel) >= kJumpFuelCost;
-    ship.jump_destination_stellar_id = can_jump ? stellar_id : -2;
+    // Ghidra gates on Ship_ComputeShipFuelCapacity(ship) < 1 (0x00463a20): a
+    // hull able to carry any fuel at all records the emergence stellar. This
+    // is a much lower bar than the jump-sequence cost (kJumpFuelCost) checked
+    // by NovaTravel_CanShipInitiateJumpSequence.
+    ship.jump_destination_stellar_id =
+        NovaAi_ComputeShipFuelCapacity(state, ship) >= 1.0 ? stellar_id : -2;
 
     const Stellar *stellar = state.scenario.Stellar(stellar_id);
     if (stellar != nullptr) {
@@ -245,6 +250,51 @@ bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship) {
     }
   }
   return false;
+}
+
+// Ghidra 0x00463550 Ship_ComputeShipMaxShieldPoints. Player outfit aggregation
+// runs in Outfit_ComputePlayerEffectiveStats. Keep NPC capacity wide for the
+// original x87 threshold comparisons; behavior 5 explicitly rounds to float.
+double NovaAi_ComputeMaxShieldPoints(const GameState &state, const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return static_cast<double>(
+        Outfit_ComputePlayerEffectiveStats(state).max_shield_points);
+  }
+
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  double max_shield =
+      cls != nullptr ? static_cast<double>(cls->base_shield) : 0.0;
+  if (ship.pers_def_slot >= 0 && static_cast<std::size_t>(ship.pers_def_slot) <
+                                     state.scenario.pers_defs.size()) {
+    const double scale = static_cast<double>(
+        state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)]
+            .shield_armor_scale);
+    if (scale > 0.0) {
+      max_shield *= scale;
+    }
+  }
+  if (ship.ai_behavior_code == 5) {
+    // 0x004635c9..d2 stores the behavior-5 product to float before the
+    // caller reloads it; retain that one intermediate rounding step.
+    max_shield = static_cast<double>(static_cast<float>(max_shield * 1.333));
+  }
+  return max_shield;
+}
+
+// Ghidra 0x00463a20 Ship_ComputeShipFuelCapacity. The player's capacity folds
+// in opcode-12 outfit bonuses through the effective-stats pass; NPC ships use
+// the raw class value because the original skips the outfit loop for
+// ship_instance_id != 0.
+double NovaAi_ComputeShipFuelCapacity(const GameState &state,
+                                      const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return static_cast<double>(
+        Outfit_ComputePlayerEffectiveStats(state).fuel_capacity);
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  return cls != nullptr ? static_cast<double>(cls->base_fuel) : 0.0;
 }
 
 namespace {
@@ -500,6 +550,127 @@ void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
                        static_cast<float>(allied_strength);
 }
 
+// Ghidra 0x004152E0 Ship_IssueEscortOrders.
+// Commands are Formation=0, Defend=1, Attack=2, and Return=3.
+void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
+  std::array<std::int16_t, 4> commands{3, 3, 3, 3};
+  bool target_disabled = false;
+  bool target_can_hit_leader = false;
+  bool leader_can_hit_target = false;
+
+  if (ship.ai_behavior_code < 3) {
+    const long double max_shield =
+        static_cast<long double>(NovaAi_ComputeMaxShieldPoints(state, ship));
+    // DOUBLE_00575168 is 0.66. Keep the binary64 literal and the original
+    // x87 comparison width at the boundary.
+    if (static_cast<long double>(ship.shield_points) < max_shield * 0.66) {
+      commands[0] = 1;
+    } else {
+      commands[0] = 2;
+    }
+    commands[1] = 1;
+    commands[2] = 1;
+    commands[3] = 0;
+  } else {
+    if (ship.primary_target_ship_slot >= 0 &&
+        state.SlotInRange(
+            static_cast<std::size_t>(ship.primary_target_ship_slot))) {
+      const Ship &target =
+          state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+      if (NovaAiShip_IsShipLockedOnAttackerInState4(target, ship)) {
+        // BUGFIX(original): the executable passes weapon slot 1 for both
+        // directions, so it cannot distinguish an outranging target from an
+        // outranged leader. The inferred correction checks each class's stock
+        // weapon reach, without checking current ammo. Disabling the shared
+        // compatibility policy restores the literal index.
+        const std::int16_t range_weapon_slot =
+            kApplyOriginalBugFixes ? static_cast<std::int16_t>(-1)
+                                   : static_cast<std::int16_t>(1);
+        target_can_hit_leader = NovaWeapon_ShipWithinWeaponRangeOfTarget(
+            state, target, ship, range_weapon_slot);
+        leader_can_hit_target = NovaWeapon_ShipWithinWeaponRangeOfTarget(
+            state, ship, target, range_weapon_slot);
+      }
+      target_disabled = NovaAiShip_IsDisabled(state, target);
+    }
+
+    if (target_disabled && ship.ai_state_code == 0xd) {
+      commands = {3, 3, 3, 0};
+    } else {
+      const long double max_shield =
+          static_cast<long double>(NovaAi_ComputeMaxShieldPoints(state, ship));
+      if (static_cast<long double>(ship.shield_points) < max_shield * 0.33) {
+        if (!target_disabled) {
+          if (!target_can_hit_leader || leader_can_hit_target) {
+            commands[0] = 1;
+            commands[1] = 1;
+          } else {
+            commands[0] = 2;
+            commands[1] = 2;
+          }
+        } else {
+          commands[0] = 2;
+          commands[1] = 2;
+        }
+        commands[2] = 1;
+      } else if (static_cast<long double>(ship.shield_points) <
+                 max_shield * 0.66) {
+        if (!target_disabled) {
+          commands[0] =
+              (!target_can_hit_leader || leader_can_hit_target) ? 1 : 2;
+        } else {
+          commands[0] = 2;
+        }
+        commands[1] = 2;
+        commands[2] = 1;
+      } else {
+        commands[0] = (!target_disabled && leader_can_hit_target) ? 1 : 2;
+        commands[1] = 2;
+        commands[2] =
+            (ship.ai_odds_score >= 0.0F && ship.ai_odds_score < 0.5F) ? 2 : 0;
+      }
+      commands[3] = 0;
+    }
+  }
+
+  // State/control overrides are applied after the health/target tiers.
+  if (ship.ai_state_code != 3 && ship.ai_state_code != 4 &&
+      ship.ai_state_code != 0xd && ship.ai_state_code != 0x13) {
+    commands = {3, 3, 3, 3};
+  }
+  if (ship.ai_state_code == 3) {
+    if (ship.ai_control_mode == 4 || ship.ai_control_mode == 1) {
+      commands = {3, 3, 3, 3};
+    } else {
+      commands[0] = 1;
+      commands[1] = 1;
+    }
+  }
+  if (ship.ai_state_code == 2) {
+    commands = {3, 3, 3, 3};
+  }
+
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    if (static_cast<std::int16_t>(slot) == ship.ship_instance_id) {
+      continue;
+    }
+    Ship &escort = state.ShipAt(slot);
+    if (escort.squad_leader_ship_slot != ship.ship_instance_id ||
+        escort.ai_behavior_code <= 4) {
+      continue;
+    }
+    const ShipClass *escort_class = state.scenario.Ship(
+        static_cast<std::int16_t>(escort.ship_class_id + 0x80));
+    if (escort_class == nullptr || escort_class->class_category < 0 ||
+        escort_class->class_category >= 4) {
+      continue;
+    }
+    escort.escort_command_code =
+        commands[static_cast<std::size_t>(escort_class->class_category)];
+    escort.escort_command_pending = 1;
+  }
+}
+
 // ---- Ghidra 0x00401000 Ship_UpdateShipAI : the top-level dispatcher. ----
 // Applies the global "heavy AI" cadence gating/skips, recomputes the effective
 // movement stats cached on the ship when its class is the 0x2ff sentinel
@@ -556,6 +727,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   // reason disappears -- the player leader went disabled, or an NPC leader
   // left the hold (timer <= 1.0) into combat (state 4). Same reset writes as
   // the disabled path.
+  const std::int16_t entry_control_mode = ship.ai_control_mode;
   if (ship.ai_control_mode == 4 || ship.ai_control_mode == 0xd) {
     auto exit_jump_hold = [&]() {
       ship.ai_state_code = 0;
@@ -576,6 +748,18 @@ void NovaAi_UpdateShipAI(GameState &state,
         exit_jump_hold();
       }
     }
+  }
+
+  // Ghidra 0x00401000 calls Ship_IssueEscortOrders only after the arrival
+  // sentinel and entry/hold control-mode bypasses, and before the disabled
+  // auto-guard clears the leader's transient state. The frame phase is the
+  // original signed remainder of the signed 16-bit global counter.
+  const int frame_phase = static_cast<int>(state.spaceflight_frame_counter) % 8;
+  const int leader_phase = ship.ship_instance_id >> 3;
+  if (!arrival_slowdown_sentinel && entry_control_mode != 4 &&
+      entry_control_mode != 0xd && ship.is_any_ships_squad_leader &&
+      frame_phase == leader_phase) {
+    NovaAi_IssueEscortOrders(state, ship);
   }
 
   // Auto-guard: a disabled ship ignores the whole AI selection and just

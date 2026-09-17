@@ -50,6 +50,56 @@ Fire-restricted/disabled ships are not frozen in place. `Ship_HandleShip`
 (`DAT_00575448`) each frame before position integration. Their AI is suppressed
 and they receive no new thrust orders, so they coast down gradually.
 
+## Autonomous escort orders
+
+`Ship_IssueEscortOrders` (0x004152e0) assigns Formation (0), Defend (1),
+Attack (2), or Return (3) by the follower's class category. It scans NPC
+slots 1..63 for non-self followers whose leader ID matches and behavior is
+at least 5, then writes both the command and its pending latch.
+`Ship_UpdateShipAI` calls it for flagged squad leaders when
+`frame_counter % 8 == ship_instance_id >> 3`, before heavy-AI throttling
+and the disabled reset. Arrival slowdown and control modes 4/0x0d bypass
+that caller branch.
+
+For combat leaders (behavior >=3), the original's effective orders against
+an enabled target, before state overrides, are:
+
+| Shields | Category 0 | Category 1 | Category 2 | Category 3 |
+|---|---|---|---|---|
+| Below 0.33 × maximum | Defend | Defend | Defend | Formation |
+| Below 0.66 × maximum | Defend | Attack | Defend | Formation |
+| Otherwise | Defend if the range/target gate passes, otherwise Attack | Attack | Attack if `0 <= ai_odds_score < 0.5`, otherwise Formation | Formation |
+
+A disabled target selects Attack for categories 0/1, except leader state
+0x0d selects Return for categories 0/1/2. Passive leaders (behavior <=2)
+instead select `[shields < 0.66 * maximum ? Defend : Attack, Defend,
+Defend, Formation]`. States outside {3,4,0x0d,0x13} override all categories
+to Return. State 3 also returns all when control mode is 1 or 4; otherwise
+it overrides just categories 0/1 to Defend.
+
+The two weapon-range calls at 0x004154c8/0x004154e8 both pass literal
+weapon index 1 and swap their ship arguments. The explicit-index helper
+(0x00411600, arm 0x00411773) uses only symmetric position distance and the
+same global weapon definition. Thus, for ordinary finite gameplay
+coordinates, `target_can_hit && !leader_can_hit` cannot hold. That dead
+branch would select Attack for categories 0/1 below 33% shields, or
+category 0 below 66%. At high shields, the unrelated index-1 envelope
+instead controls category 0's order, gated on the target being in state 4
+and targeting the leader.
+
+The port's `BUGFIX(original)` uses the shared `kApplyOriginalBugFixes`
+policy to select helper mode -1 instead of 1. Mode -1 checks each ship
+class's stock-armed weapon definitions with weapon mode <9. It restores
+the asymmetric range decision; it does not check current ammunition or
+model escorts' own reach. This is an inferred correction, not recovered
+original intent. Disabling the policy preserves the literal-1 behavior.
+
+The practical distinction is pursuit distance: Defend in 0x004048a0
+acquires through 0x00412030 with a 550-pixel leader-radius limit and drops
+retained targets beyond squared distance 408375 (about 639 pixels).
+Attack uses radius -1, removing that limit. Both orders can enter combat
+state 4; Attack does not force acquisition of the leader's primary target.
+
 ## State machine (`ai_state_code`)
 
 The names below are descriptive; a few state arms still have deferred mission

@@ -275,32 +275,6 @@ RoundedAxisDistanceSquared(float x1, float y1, float x2, float y2) {
 // Ghidra 0x00411800 Ship_ComputePerceivedCombatStrengthAgainstShip.
 int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
                                               const Ship &ship) {
-  // Mirrors Ship_ComputeShipMaxShieldPoints (0x00463550): the player uses the
-  // cached outfit-derived value, NPCs the class base scaled by the personality
-  // shield/armor scale (when positive) and the behavior-5 difficulty factor.
-  const auto max_shield_for = [&state](const Ship &subject) -> float {
-    if (subject.ship_instance_id == 0) {
-      return Outfit_ComputePlayerEffectiveStats(state).max_shield_points;
-    }
-    const ShipClass *cls = state.scenario.Ship(
-        static_cast<std::int16_t>(subject.ship_class_id + 0x80));
-    float value = cls != nullptr ? static_cast<float>(cls->base_shield) : 0.0F;
-    if (subject.pers_def_slot != -1 &&
-        static_cast<std::size_t>(subject.pers_def_slot) <
-            state.scenario.pers_defs.size()) {
-      const float scale =
-          state.scenario
-              .pers_defs[static_cast<std::size_t>(subject.pers_def_slot)]
-              .shield_armor_scale;
-      if (scale > 0.0F) {
-        value *= scale;
-      }
-    }
-    if (subject.ai_behavior_code == 5) {
-      value *= 1.333F; // k_behavior5_difficulty_mult_f64 (0x00575760)
-    }
-    return value;
-  };
   // FIST at 0x0041187f and 0x00411a35 is followed by a residual/sign
   // correction (0x00411891..0x004118b7, 0x00411a41..0x00411a69) that turns
   // the round-to-nearest store into a truncation toward zero. Every ratio here
@@ -322,7 +296,8 @@ int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   // 0x00411a90: a non-positive max shield seeds the initial ratio with the
   // subject's raw shield points (then the same [0.25, 1.0] clamp), not 0.25.
-  const float ship_max_shield = max_shield_for(ship);
+  const float ship_max_shield =
+      static_cast<float>(NovaAi_ComputeMaxShieldPoints(state, ship));
   float shield_ratio =
       clamp_ratio(ship_max_shield > 0.0F ? ship.shield_points / ship_max_shield
                                          : ship.shield_points);
@@ -359,7 +334,8 @@ int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
     }
     // The original reuses one scratch across the base and candidate ratios; a
     // candidate with a non-positive max shield keeps the previous scratch.
-    const float candidate_max_shield = max_shield_for(candidate);
+    const float candidate_max_shield =
+        static_cast<float>(NovaAi_ComputeMaxShieldPoints(state, candidate));
     if (candidate_max_shield > 0.0F) {
       candidate_ratio = candidate.shield_points / candidate_max_shield;
     }
