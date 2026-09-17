@@ -511,6 +511,34 @@ void SdlPlatform::PumpProbe() {
           enabled, speed_multiplier, suppress_audio)) {
     ApplyProbeExecutionSettings(enabled, speed_multiplier, suppress_audio);
   }
+  ServiceX2SpeedDivergence();
+}
+
+// DIVERGENCE(original): the original's x2 mode is toggled by the key named in
+// EVNova.ini [EV Nova] key_x2mode, default "0x14" = VK_CAPITAL (Caps Lock)
+// (Settings_LoadIniAndPrefs 0x00872310; Settings_PollKeyX2Mode 0x00872375
+// forwards the code to GetKeyState and the caller tests the low/toggle bit).
+// Engaged x2 doubles the per-frame simulation cadence rather than the wall
+// clock (docs/frame_timing_and_cadence.md). The port has not reconstructed x2.
+// As a temporary testing convenience this maps the same toggle onto the probe
+// speed multiplier so a run can be accelerated 2x without the HTTP control
+// surface. It is gated on the probe being active so ordinary play is
+// unchanged, and it is not x2 fidelity: the whole gameplay clock is scaled,
+// including the maintenance work the original leaves at the normal cadence.
+// Remove once the real x2 scheduling is ported.
+void SdlPlatform::ServiceX2SpeedDivergence() {
+  if (!probe_.running()) {
+    return;
+  }
+  const bool engaged = (SDL_GetModState() & SDL_KMOD_CAPS) != 0;
+  if (engaged == x2_speed_divergence_active_) {
+    return;
+  }
+  x2_speed_divergence_active_ = engaged;
+  NovaLog::Warn("probe: x2 key divergence {} ({}x gameplay clock)",
+                engaged ? "engaged" : "released",
+                engaged ? 2 : 1);
+  ApplyProbeExecutionSettings(engaged, 2, false);
 }
 
 std::optional<TextInput> SdlPlatform::PollTextEvent() {

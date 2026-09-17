@@ -75,6 +75,11 @@ public:
   bool Start(int port);
   void Stop();
 
+  // True while the listener thread is running. SdlPlatform uses this to gate
+  // probe-only divergence hooks (see ServiceX2SpeedDivergence) so normal
+  // gameplay is unchanged when the harness is not active.
+  [[nodiscard]] bool running() const { return running_.load(); }
+
   // ---- main-thread side (called from SdlPlatform) -------------------------
 
   // Frame-boundary hook, called from SdlPlatform::Present() *before*
