@@ -307,7 +307,7 @@ struct Ship {
   // at the executable's 21 ms frame floor; banking it keeps the discrete RNG
   // and timed-debris cadence independent of the SDL presentation rate.
   float destruction_raw_tick_accumulator = 0.0F;
-  // Ghidra ShipState +0xC8F0. Shot_ResolveShipHitFromWeapon sets this to 32
+  // Ghidra ShipState +0xC8F0. Ship_ApplyDamageToShip sets this to 32
   // on non-bypass impacts. Ship_UpdateVisualState caps it by remaining shield
   // fraction, applies it to the shan ShieldImageID layer, then decays it by
   // g_avg_frame_tick_scale. That update/render branch remains deferred.
@@ -498,7 +498,7 @@ struct Ship {
   std::int16_t jump_destination_system_id = -1; // +0x94
   std::int16_t ai_hostility_accumulator = 0;    // +0x96
   // Ghidra ShipState +0xC910. Accumulates weapon reload * 1.75 per
-  // player-owned hit (Shot_ResolveShipHitFromWeapon), gates the player-retarget
+  // player-owned hit (Ship_ApplyDamageToShip), gates the player-retarget
   // chance, and decays by 0.5 per normalized tick in Ship_HandleShip; reset
   // when the ship retargets onto an attacker.
   float player_aggro_accumulator = 0.0F; // +0xC910
@@ -1492,7 +1492,7 @@ struct GameState {
   // frames while a bomb is carried; rerolled (Random(100)) once it expires.
   float bomb_detonation_timer = 0.0F;
   // g_player_recently_hit_timer (Ghidra DAT_0073549c): armed to 300 ticks
-  // when the player takes a hit (Shot_ResolveShipHitFromWeapon), decays one
+  // when the player takes a hit (Ship_ApplyDamageToShip), decays one
   // tick per frame while at or above the cutoff; suppresses armor
   // regeneration and the disabled auto-repair pass until below the cutoff.
   // Outfit_RecomputeOutfitDerivedState (0x0046d4b0) resets it to -1.0.
@@ -1512,7 +1512,7 @@ struct GameState {
   // normal play until the cheat command block is reconstructed.
   bool cheat_mode_active = false;
   // Ghidra g_player_disable_message_shown (0x007354aa): set when the disable
-  // arm of Shot_ResolveShipHitFromWeapon shows the STR# 0x7d2 0x11f "ship
+  // arm of Ship_ApplyDamageToShip shows the STR# 0x7d2 0x11f "ship
   // disabled" overlay, so the destruction arm of the same hit path suppresses
   // the duplicate STR# 0x7d2 0x120 "ship destroyed" overlay. Reset each
   // flight frame by the status tick (TODO(decomp): reset site).

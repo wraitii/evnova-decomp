@@ -88,7 +88,7 @@ truncation idiom:
 - `spaceflight.cpp` `Ship_HandlePlayerShipCore` 0x0044aa70 (self-destruct tick
   and seconds) and `Ship_HandleShip` 0x00433050 (debris timed-action interval).
 - `collision.cpp` `Shot_ResolveCollisions` 0x00437e20 (asteroid dist^2);
-  `Frame_AddCombatRatingPoints` 0x0046f1e0; `Shot_ResolveShipHitFromWeapon`
+  `Frame_AddCombatRatingPoints` 0x0046f1e0; `Ship_ApplyDamageToShip`
   0x004192d0 (disable-armor); `Weapon_ApplyWeaponOnHitEffects` 0x0046f3f0
   (ionization points); `Weapon_SpawnWeaponImpactEffectPackage` 0x00462550
   (yield boxes); and the collision-mask mirrors in the local

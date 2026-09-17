@@ -37,7 +37,7 @@ constexpr float kShieldDepletionFloorFraction =
 constexpr float kPlayerAggroPerHitScale = 1.75F;       // DAT_00575240
 constexpr float kPlayerAggroRetargetThreshold = 50.0F; // DAT_0057522c
 constexpr float kEscortDefenseRadiusPx = 320.0F;       // DAT_00575248
-// Shot_ResolveShipHitFromWeapon aggro extras.
+// Ship_ApplyDamageToShip aggro extras.
 constexpr int kHeadingLockSuppressDeg = 0x2d; // < 45 deg to desired heading
 constexpr float kHeadingLockDistanceDivisor = 4.0F; // DAT_00575220: 4.0
 constexpr float kStellarRedirectDistanceDivisor = 2.0F;
@@ -51,7 +51,7 @@ constexpr std::int16_t kShipClassInvalidSentinel = 0x2ff;
 // is available (the original scoop arm always uses the opaque-pixel test).
 // Only used when the spin set cannot be decoded (e.g. archive-free tests).
 constexpr int kFreeflightScoopCircleRadiusPx = 16;
-// Disable-transition armor pin (Shot_ResolveShipHitFromWeapon 0x0041a4b0):
+// Disable-transition armor pin (Ship_ApplyDamageToShip 0x0041a4b0):
 // _DAT_00575238 = 1/3 and _DAT_00575208 = 0.1 for capability-flags 0x10 hulls,
 // both +1.0 (_DAT_00575230).
 constexpr float kDisableArmorPinFraction = 1.0F / 3.0F;
@@ -85,7 +85,7 @@ void ClearState9OrFToIdle(Ship &ship) {
   ship.ai_control_mode = 0;
 }
 
-// Ghidra Shot_ResolveShipHitFromWeapon player arms: quick-fail the first
+// Ghidra Ship_ApplyDamageToShip player arms: quick-fail the first
 // active, unfailed mission with flags 0x0004 (fail when the player is
 // disabled/destroyed), with the STR# 0x7d2 0x11c overlay.
 void QuickFailPlayerDependencyMissions(GameState &state) {
@@ -519,7 +519,7 @@ void ApplyImpactImpulse(GameState &state,
   }
 }
 
-// Shot_ResolveShipHitFromWeapon's leave-one-armor rule: a disable-variant hit
+// Ship_ApplyDamageToShip's leave-one-armor rule: a disable-variant hit
 // stops at 1 armor point instead of destroying the hull.
 void ApplyArmorDamage(Ship &target, int armor_damage, bool force_armor_only) {
   if (armor_damage <= 0) {
@@ -634,7 +634,7 @@ void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
   state.player_combat_rating_points = static_cast<std::int32_t>(scaled);
 }
 
-// Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0). Core ship-hit
+// Ghidra Ship_ApplyDamageToShip (0x004192d0). Core ship-hit
 // resolution: impulse, shield-first/armor damage, disable-variant armor
 // clamping, and the aggro/hostility response (eligibility chain, retaliation,
 // cloak re-entry/deactivation, and the defense-fleet stellar redirect).
@@ -650,21 +650,21 @@ void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
 // disable-transition armor pin (33%/10% + 1 armor) and the mission DISABLE
 // bookkeeping (escort-goal quick-fail + goal_counter_c++, STR# 0x7d2 0x11c)
 // and the player "disabled" overlay (STR# 0x7d2 0x11f).
-void ResolveShipHitFromWeapon(GameState &state,
-                              std::int16_t target_slot,
-                              Ship &target,
-                              float impact_x,
-                              float impact_y,
-                              std::int16_t impact_impulse,
-                              std::int16_t armor_damage,
-                              std::int16_t shield_damage,
-                              std::int16_t attacker_ship_slot,
-                              bool allow_aggro_updates,
-                              bool suppress_retarget_logic,
-                              bool force_armor_only,
-                              bool bypass_shields,
-                              std::int16_t player_aggro_delta,
-                              bool check_fire_restriction_transition) {
+void Ship_ApplyDamageToShip(GameState &state,
+                            std::int16_t target_slot,
+                            Ship &target,
+                            float impact_x,
+                            float impact_y,
+                            std::int16_t impact_impulse,
+                            std::int16_t armor_damage,
+                            std::int16_t shield_damage,
+                            std::int16_t attacker_ship_slot,
+                            bool allow_aggro_updates,
+                            bool suppress_retarget_logic,
+                            bool force_armor_only,
+                            bool bypass_shields,
+                            std::int16_t player_aggro_delta,
+                            bool check_fire_restriction_transition) {
   if (!ValidShipSlot(target_slot) || !target.is_active ||
       target.ship_class_id < 0) {
     return;
@@ -745,7 +745,7 @@ void ResolveShipHitFromWeapon(GameState &state,
     ApplyArmorDamage(target, armor_damage, force_armor_only);
   }
 
-  // Shot_ResolveShipHitFromWeapon leaves destruction as an armor-state: the
+  // Ship_ApplyDamageToShip leaves destruction as an armor-state: the
   // hit site only records the alive -> destroyed transition and clears the
   // slot's targeting references. Ship_HandleShip (0x00433050) seeds and runs
   // the NPC death presentation, and Ship_UpdateVisualState (0x00428340) seeds
@@ -1322,7 +1322,7 @@ void ResolveShipHitFromWeapon(GameState &state,
     }
   }
 
-  // Shot_ResolveShipHitFromWeapon starts the shield-bubble flash on every
+  // Ship_ApplyDamageToShip starts the shield-bubble flash on every
   // non-bypass hit. Its Ship_UpdateVisualState decay/render branch is deferred.
   if (!bypass_shields) {
     target.shield_bubble_flash_intensity = 32.0F;
@@ -1385,21 +1385,21 @@ void ResolveShotCollisionHit(GameState &state,
       static_cast<std::int32_t>(weapon->reload_ticks));
   const bool target_was_destroyed = IsShipDestroyed(target);
 
-  ResolveShipHitFromWeapon(state,
-                           target_slot,
-                           target,
-                           shot.pos_x,
-                           shot.pos_y,
-                           weapon->impact_impulse,
-                           armor_damage,
-                           shield_damage,
-                           shot.owner_ship_slot,
-                           /*allow_aggro_updates=*/true,
-                           suppress_retarget_logic,
-                           /*force_armor_only=*/shot.impact_variant != 0,
-                           /*bypass_shields=*/
-                           (weapon->flags & 0x0020U) != 0U,
-                           player_aggro_delta);
+  Ship_ApplyDamageToShip(state,
+                         target_slot,
+                         target,
+                         shot.pos_x,
+                         shot.pos_y,
+                         weapon->impact_impulse,
+                         armor_damage,
+                         shield_damage,
+                         shot.owner_ship_slot,
+                         /*allow_aggro_updates=*/true,
+                         suppress_retarget_logic,
+                         /*force_armor_only=*/shot.impact_variant != 0,
+                         /*bypass_shields=*/
+                         (weapon->flags & 0x0020U) != 0U,
+                         player_aggro_delta);
 
   if (weapon->splash_radius > 0) {
     for (std::int16_t slot = 0;
@@ -1432,21 +1432,21 @@ void ResolveShotCollisionHit(GameState &state,
       }
       // Splash keeps the full damage (no variant reduction) but honors the
       // disable variant's leave-one-armor rule; no aggro updates.
-      ResolveShipHitFromWeapon(state,
-                               slot,
-                               splash_target,
-                               shot.pos_x,
-                               shot.pos_y,
-                               weapon->impact_impulse,
-                               weapon->mass_damage,
-                               weapon->energy_damage,
-                               shot.owner_ship_slot,
-                               /*allow_aggro_updates=*/false,
-                               /*suppress_retarget_logic=*/false,
-                               /*force_armor_only=*/shot.impact_variant != 0,
-                               /*bypass_shields=*/
-                               (weapon->flags & 0x0020U) != 0U,
-                               /*player_aggro_delta=*/0);
+      Ship_ApplyDamageToShip(state,
+                             slot,
+                             splash_target,
+                             shot.pos_x,
+                             shot.pos_y,
+                             weapon->impact_impulse,
+                             weapon->mass_damage,
+                             weapon->energy_damage,
+                             shot.owner_ship_slot,
+                             /*allow_aggro_updates=*/false,
+                             /*suppress_retarget_logic=*/false,
+                             /*force_armor_only=*/shot.impact_variant != 0,
+                             /*bypass_shields=*/
+                             (weapon->flags & 0x0020U) != 0U,
+                             /*player_aggro_delta=*/0);
       ApplyWeaponOnHitEffects(
           splash_target, *weapon, std::make_pair(shot.pos_x, shot.pos_y));
     }
@@ -1623,22 +1623,21 @@ void ResolveAsteroidSplashImpact(GameState &state,
               static_cast<float>(weapon->splash_radius)) {
         continue;
       }
-      ResolveShipHitFromWeapon(
-          state,
-          slot,
-          splash_target,
-          shot.pos_x,
-          shot.pos_y,
-          weapon->impact_impulse,
-          weapon->mass_damage,
-          weapon->energy_damage,
-          shot.owner_ship_slot,
-          /*allow_aggro_updates=*/false,
-          /*suppress_retarget_logic=*/false,
-          /*force_armor_only=*/shot.impact_variant != 0,
-          /*bypass_shields=*/(weapon->flags & 0x0020U) != 0U,
-          static_cast<std::int16_t>(
-              std::lround(static_cast<float>(weapon->reload_ticks))));
+      Ship_ApplyDamageToShip(state,
+                             slot,
+                             splash_target,
+                             shot.pos_x,
+                             shot.pos_y,
+                             weapon->impact_impulse,
+                             weapon->mass_damage,
+                             weapon->energy_damage,
+                             shot.owner_ship_slot,
+                             /*allow_aggro_updates=*/false,
+                             /*suppress_retarget_logic=*/false,
+                             /*force_armor_only=*/shot.impact_variant != 0,
+                             /*bypass_shields=*/(weapon->flags & 0x0020U) != 0U,
+                             static_cast<std::int16_t>(std::lround(
+                                 static_cast<float>(weapon->reload_ticks))));
       ApplyWeaponOnHitEffects(
           splash_target, *weapon, std::make_pair(shot.pos_x, shot.pos_y));
     }
@@ -1688,41 +1687,6 @@ void RemoveConsumedShots(GameState &state) {
 }
 
 namespace {} // namespace
-
-// Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0) wrapper: resolve a hit
-// against a ship given by slot (validates the slot / active state).
-void NovaCollision_ResolveShipHitFromWeaponSlot(
-    GameState &state,
-    std::int16_t target_slot,
-    float impact_x,
-    float impact_y,
-    std::int16_t impact_impulse,
-    std::int16_t armor_damage,
-    std::int16_t shield_damage,
-    std::int16_t attacker_ship_slot,
-    bool allow_aggro_updates,
-    bool suppress_retarget_logic,
-    bool force_armor_only,
-    bool bypass_shields,
-    std::int16_t player_aggro_delta) {
-  if (!ValidShipSlot(target_slot)) {
-    return;
-  }
-  ResolveShipHitFromWeapon(state,
-                           target_slot,
-                           state.ShipAt(static_cast<std::size_t>(target_slot)),
-                           impact_x,
-                           impact_y,
-                           impact_impulse,
-                           armor_damage,
-                           shield_damage,
-                           attacker_ship_slot,
-                           allow_aggro_updates,
-                           suppress_retarget_logic,
-                           force_armor_only,
-                           bypass_shields,
-                           player_aggro_delta);
-}
 
 // Public test seam for the internal RefreshCollisionMasks pass (resolves each
 // live entity's current-frame sprite mask from the non-SDL store).
@@ -2507,22 +2471,22 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
     // This clean-room path resolves only the beam queue's recorded ship
     // target. The original 0x0042f270 passes true for that intended contact;
     // its still-deferred incidental beam-contact sweep passes false.
-    ResolveShipHitFromWeapon(state,
-                             target_ship_slot,
-                             target,
-                             shot.pos_x,
-                             shot.pos_y,
-                             weapon->impact_impulse,
-                             weapon->mass_damage,
-                             weapon->energy_damage,
-                             owner_ship_slot,
-                             /*allow_aggro_updates=*/true,
-                             /*suppress_retarget_logic=*/true,
-                             /*force_armor_only=*/impact_variant != 0,
-                             /*bypass_shields=*/
-                             (weapon->flags & 0x0020U) != 0U,
-                             static_cast<std::int16_t>(std::lround(
-                                 static_cast<float>(weapon->reload_ticks))));
+    Ship_ApplyDamageToShip(state,
+                           target_ship_slot,
+                           target,
+                           shot.pos_x,
+                           shot.pos_y,
+                           weapon->impact_impulse,
+                           weapon->mass_damage,
+                           weapon->energy_damage,
+                           owner_ship_slot,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/impact_variant != 0,
+                           /*bypass_shields=*/
+                           (weapon->flags & 0x0020U) != 0U,
+                           static_cast<std::int16_t>(std::lround(
+                               static_cast<float>(weapon->reload_ticks))));
   }
 }
 

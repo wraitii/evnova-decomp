@@ -361,20 +361,20 @@ void DetonateCarriedBomb(GameState &state) {
         RandomBelow(state,
                     static_cast<int>(max_armor * kBombDamageArmorFraction +
                                      kBombDamageArmorAddend));
-    NovaCollision_ResolveShipHitFromWeaponSlot(
-        state,
-        0,
-        p.pos_x,
-        p.pos_y,
-        0,
-        static_cast<std::int16_t>(roll + max_armor),
-        0,
-        0xFFFF,
-        false,
-        false,
-        true,
-        true,
-        0);
+    Ship_ApplyDamageToShip(state,
+                           0,
+                           p,
+                           p.pos_x,
+                           p.pos_y,
+                           0,
+                           static_cast<std::int16_t>(roll + max_armor),
+                           0,
+                           0xFFFF,
+                           false,
+                           false,
+                           true,
+                           true,
+                           0);
     break;
   }
   // Ghidra g_player_status_panel_dirty + Outfit_RecomputeOutfitDerivedState:
