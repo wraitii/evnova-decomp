@@ -39,6 +39,24 @@ plausible map header but whose record table overflows the region; the parse now
 rejects any region whose every type entry's record table isn't fully in bounds,
 so the genuine map is found.
 
+## Install root and support folder
+
+`NovaPaths` (`src/nova_paths.hpp`) resolves two directories. The **install
+root** is the shipped, read-only folder next to the executable (with the
+`EV Nova` / `../../../EV Nova` working-directory fallbacks used by the dev
+build and `ctest`) that holds `Nova.rez`, `Nova Files/` and `Nova Plug-ins/`.
+The **support folder** is the per-user writable directory from
+`SDL_GetPrefPath("Ambrosia Software", "EV Nova")`; the port creates its
+`Pilots/` and `Nova Plug-ins/` children on demand.
+
+Archive precedence, weakest to strongest (later archives shadow earlier ones):
+`Nova.rez` -> install `Nova Files/*.rez` -> install `Nova Plug-ins/*.rez`
+(bare `Plug-ins/` when the former is absent, the CE Mac-compat fallback) ->
+support `Nova Plug-ins/*.rez`. `NovaResource_LocateFile` searches the same
+order reversed for media. The support-plugins layer is a port extension (the
+original only had one support folder); total-conversion folder selection via
+argv/`.nplay` is not yet ported.
+
 ## Clean-room model
 
 `src/game/scenario_data.hpp` defines `game::ShipClass`, `Outfit`, `Weapon`,

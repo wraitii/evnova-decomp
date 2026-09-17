@@ -249,10 +249,11 @@ enum class PilotLoadError : int {
 };
 
 // Writable directory used by the SDL port for pilot saves and the Last Pilot
-// marker. This is SDL's per-user EV Nova preference directory; it is created
-// on demand. The original used its configured Pilots folder
-// (Prefs_SetPilotsPathPrefix 0x004bd0c0 builds "Pilots:" from EVNova.ini
-// [130] S3); the SDL per-user path is a deliberate platform divergence.
+// marker. This is the per-user support folder's "Pilots" child (see
+// nova_paths.hpp); it is created on demand. The original used its configured
+// Pilots folder (Prefs_SetPilotsPathPrefix 0x004bd0c0 builds "Pilots:" from
+// EVNova.ini [130] S3); the per-user location is a deliberate platform
+// divergence.
 [[nodiscard]] std::optional<std::filesystem::path> PilotFileSaveDirectory();
 
 // Serialize PilotFile into the .plt byte layout. Mirrors PilotFile_SaveGameCore

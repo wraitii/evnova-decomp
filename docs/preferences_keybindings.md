@@ -238,12 +238,16 @@ Version `0x69`. Reserved slots 0x7e..0x88 are zeroed on save
 `Settings_PollKeyX2Mode` (poll of `g_key_x2mode`, default 0x14 = Caps Lock).
 
 The SDL3 port deliberately stores the same 0x8c-byte payload as
-`EV Nova Prefs.prf` under `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`.
-On macOS this is `~/Library/Application Support/EV Nova/`; SDL selects the
-corresponding per-user application-data directory on other platforms and
-creates it when necessary. Loading occurs after SDL platform initialization;
-the normalized block is written at startup and at the original Preferences
-and Key Settings commit points.
+`EV Nova Prefs.prf` in the per-user support folder
+(`NovaPaths::SupportDirectory()` = `SDL_GetPrefPath("Ambrosia Software",
+"EV Nova")`). On macOS this is `~/Library/Application Support/EV Nova/`; SDL
+selects the corresponding per-user application-data directory on other
+platforms and creates it when necessary. Loading occurs after SDL platform
+initialization; the normalized block is written at startup and at the original
+Preferences and Key Settings commit points. Decomp-only settings that have no
+slot in the original payload are planned for a sibling `EV Nova Extra Prefs`
+INI so the `.prf` stays byte-compatible and the shipped game never reads them
+(format TODO).
 
 ## EVNova.ini settings outside the `.prf` preferences
 

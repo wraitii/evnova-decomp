@@ -2,8 +2,10 @@
 
 Reverse-engineering notes on how EV Nova persists a pilot's game state to
 `<Pilots>/<pilot name>.plt` and restores it. The SDL port writes the same
-files under `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`, alongside its
-preferences, and autoresumes exclusively from that directory. Derived from the Ghidra DB
+files into the `Pilots/` child of the per-user support folder
+(`NovaPaths::SupportDirectory()` = `SDL_GetPrefPath("Ambrosia Software",
+"EV Nova")`), alongside its preferences, and autoresumes exclusively from that
+directory. Derived from the Ghidra DB
 (saver `0x004c7db0`/`0x004c7dd0`, loader `0x004cb260`).
 
 External references archived locally:
