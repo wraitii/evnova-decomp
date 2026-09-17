@@ -5,7 +5,7 @@ C/C++ sources are scanned for // and /* */ comments; consecutive standalone //
 lines are merged into one logical block. Markdown files are scanned
 paragraph-by-paragraph (fenced code blocks are skipped).
 
-Dependencies: pip install mlx tokenizers huggingface_hub
+Dependencies: pip install mlx tokenizers huggingface_hub (see semantic_embed).
 
 The model is cached by huggingface_hub. Embeddings use the system temporary
 directory by default so repeated runs can reuse them.
@@ -14,18 +14,15 @@ directory by default so repeated runs can reuse them.
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib.util
-import json
-import math
 import re
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+import semantic_embed
 
-MODEL_ID = "jinaai/jina-code-embeddings-0.5b-mlx"
+
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
 TEXT_SUFFIXES = SOURCE_SUFFIXES | MARKDOWN_SUFFIXES
@@ -166,33 +163,6 @@ def _is_generated(relative: Path) -> bool:
     return bool(parts) and parts[0] in {"assets"}
 
 
-def load_model(model_dir: str | None):
-    try:
-        import mlx.core as mx
-        from huggingface_hub import snapshot_download
-        from tokenizers import Tokenizer
-        from tqdm import tqdm
-    except ImportError as error:
-        raise SystemExit(
-            "Missing dependency. Run: pip install mlx tokenizers huggingface_hub"
-        ) from error
-
-    directory = Path(model_dir or snapshot_download(MODEL_ID))
-    spec = importlib.util.spec_from_file_location("jina_code_embeddings_mlx", directory / "model.py")
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"Could not load {directory / 'model.py'}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-
-    config = json.loads((directory / "config.json").read_text())
-    model = module.JinaCodeEmbeddingModel(config)
-    model.load_weights(list(mx.load(str(directory / "model.safetensors")).items()))
-    mx.eval(model.parameters())
-    tokenizer = Tokenizer.from_file(str(directory / "tokenizer.json"))
-    return mx, model, tokenizer, tqdm
-
-
 def rank_comments(
     comments: list[Comment],
     queries: list[str],
@@ -200,56 +170,25 @@ def rank_comments(
     batch_size: int,
     cache_dir: Path | None,
 ) -> list[tuple[float, int, Comment]]:
-    mx, model, tokenizer, tqdm = load_model(model_dir)
-    query_vectors = model.encode(
-        queries, tokenizer, task="qa", prompt_type="query", truncate_dim=256
+    embedder = semantic_embed.Embedder(model_dir, batch_size=batch_size)
+    query_vectors = embedder.embed(
+        queries, task="qa", prompt_type=semantic_embed.PROMPT_QUERY, progress=False
     )
-    mx.eval(query_vectors)
-
-    fingerprint = hashlib.sha256()
-    fingerprint.update(f"v1\0{model_dir or MODEL_ID}\0qa\0{256}\0".encode())
-    for item in comments:
-        fingerprint.update(f"{item.path}\0{item.line}\0{item.text}\0".encode())
-    cache_path = cache_dir / f"{fingerprint.hexdigest()}.npz" if cache_dir else None
-
-    if cache_path and cache_path.exists():
-        print(f"Loading cached embeddings from {cache_path}", file=sys.stderr)
-        vectors = mx.load(str(cache_path))["embeddings"]
-    else:
-        if cache_dir and cache_dir.exists():
-            for old_cache in cache_dir.glob("*.npz"):
-                old_cache.unlink()
-        batches = []
-        offsets = range(0, len(comments), batch_size)
-        for offset in tqdm(
-            offsets,
-            total=math.ceil(len(comments) / batch_size),
-            desc="Embedding comments",
-            unit="batch",
-        ):
-            batch = comments[offset : offset + batch_size]
-            batch_vectors = model.encode(
-                [item.text for item in batch],
-                tokenizer,
-                task="qa",
-                prompt_type="passage",
-                truncate_dim=256,
-            )
-            mx.eval(batch_vectors)
-            batches.append(batch_vectors)
-        vectors = mx.concatenate(batches)
-        mx.eval(vectors)
-        if cache_path:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            mx.savez(str(cache_path), embeddings=vectors)
-            print(f"Cached embeddings in {cache_path}", file=sys.stderr)
-
-    scores = mx.matmul(vectors, query_vectors.T)
-    mx.eval(scores)
-    ranked: list[tuple[float, int, Comment]] = []
-    for item, row in zip(comments, scores.tolist(), strict=True):
-        best_query = max(range(len(row)), key=row.__getitem__)
-        ranked.append((row[best_query], best_query, item))
+    passage_vectors = embedder.embed(
+        [item.text for item in comments],
+        task="qa",
+        prompt_type=semantic_embed.PROMPT_PASSAGE,
+        cache_dir=cache_dir,
+        namespace="bad-comments-",
+        prune=True,
+    )
+    scores = semantic_embed.dot(passage_vectors, query_vectors)
+    ranked = [
+        (score, query_index, comment)
+        for (score, query_index), comment in zip(
+            semantic_embed.rank_by_best_query(scores.tolist()), comments, strict=True
+        )
+    ]
     return sorted(ranked, key=lambda result: result[0], reverse=True)
 
 
@@ -284,8 +223,12 @@ def main() -> int:
     print(f"Embedding {len(comments)} comment/prose units from {len(files)} files...", file=sys.stderr)
     cache_dir = None if args.no_cache else args.cache_dir
     ranked = rank_comments(comments, queries, args.model_dir, args.batch_size, cache_dir)
-    for score, query_index, comment in ranked[: args.limit]:
-        print(f"{score:.4f}\t{comment.path}:{comment.line}\tq{query_index + 1}\t{comment.text}")
+    semantic_embed.write_lines(
+        [
+            f"{score:.4f}\t{comment.path}:{comment.line}\tq{query_index + 1}\t{comment.text}"
+            for score, query_index, comment in ranked[: args.limit]
+        ]
+    )
     return 0
 
 
