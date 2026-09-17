@@ -383,3 +383,41 @@ DAT_005a9bcc 0x100-stride Pascal table, indexed by the châr's ShipType),
 initial text = a random STR# 0x80 row 7-9 ship name ('Ring of Glory', 'Snowy
 Owl', 'Cardinal Virtue'), max 0x40 chars. The result, article-stripped, becomes
 the ship name (g_player_ship_name, the .plt trailer string).
+
+### Scroll-button dimensions and arrow raster
+
+The shipped DITL rectangles distinguish store page buttons (25x25, 0x3ea
+items 9/10 and 0x3ec items 11/12, zero-based) from mission-offer scroll
+buttons (23x23, 0x3f8 items 8/9). Preserve these sizes; video scaling is not a
+reliable way to measure them. The Bible's cölr section identifies the shared
+PICT 7500–7508 bodies, masks 7600–7608, and STR# 150 labels.
+
+`NovaUi_DrawThreeStateButton` (0x004a3340) uses the local integer midpoint,
+`s = height / 10` with integer division, and a 2x2 pen for `^`/`&`. Both
+23px and 25px buttons therefore have the same glyph size. The software
+rasterizer `DrawContext_DrawLineTo` (0x004b97e0, endpoint adjustment at
+0x004b9826–0x004b9862) decrements the larger endpoint on each unequal axis
+before stepping. Each 45-degree arm stamps four 2x2 squares when s=2; their
+union is a centred 9x5 pixel arrow. The up-arrow footprint is:
+
+```text
+...###...
+..#####..
+.###.###.
+###...###
+##.....##
+```
+
+The down arrow reverses those rows. Drawing offset SDL thin lines loses the
+solid pen coverage, especially under HiDPI scaling, and retaining both
+unadjusted endpoints makes the glyph larger and shifts its pixel bounds.
+Store labels and text-view buttons share `DrawThreeStateButtonArrow`; its
+software-renderer test checks this footprint at 1x and 2x, including a
+half-logical-pixel origin. Live GPU appearance remains a separate check.
+
+The mission-offer text rectangle (0x3f8 item 2: x=12..427) also supplies the
+horizontal text margin. `NovaTextView_Create` receives that same rectangle
+for view and content; redraw at 0x004bcf30 calls the wrapped arm of
+`NovaText_DrawText` (0x004bc760), which copies its left/right edges directly.
+There is no additional 6px inset inside the text view. The shared reader uses
+the same full-width convention.

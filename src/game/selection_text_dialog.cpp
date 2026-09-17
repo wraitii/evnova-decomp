@@ -33,7 +33,6 @@ constexpr std::uint16_t kReaderDialogId = 0xbbb;
 constexpr float kTextSize = 9.0F;
 constexpr float kLineHeight = 11.0F;
 constexpr float kFirstLineOffset = 11.0F;
-constexpr float kTextInset = 6.0F;
 
 } // namespace
 
@@ -41,7 +40,9 @@ NovaTextScrollView::NovaTextScrollView(NovaFontCache &fonts,
                                        std::string_view text,
                                        const SDL_FRect &view_rect)
     : view_rect_(view_rect), fonts_(&fonts) {
-  const float text_w = std::max(1.0F, view_rect.w - 2.0F * kTextInset);
+  // 0x004bc760 wraps against the supplied rectangle's left/right edges;
+  // the DITL text rectangle already supplies the dialog's outer margins.
+  const float text_w = std::max(1.0F, view_rect.w);
   lines_ = WrapDescriptionLines(
       text, static_cast<int>(text_w), [&](std::string_view line) {
         return fonts.TextWidth(
@@ -50,13 +51,21 @@ NovaTextScrollView::NovaTextScrollView(NovaFontCache &fonts,
   const float wrapped_height = static_cast<float>(lines_.size()) * kLineHeight;
   text_height_ = wrapped_height;
   content_height_ = kFirstLineOffset + wrapped_height + 6.0F;
-  max_scroll_ = std::max(0.0F, content_height_ - view_rect.h);
+  // NovaTextView_ScrollBy (0x004bce90) clamps the scroll against the content
+  // height reported by NovaTextView_UpdateContentHeight (0x004bce10) =
+  // NovaText_MeasureWrappedTextHeight, i.e. the wrapped text height only.
+  // The first-line/bottom insets in content_height_ are draw-only and must not
+  // inflate the scroll extent, or a fitted view still claims ~17px of scroll
+  // and the arrow buttons light up with nothing to scroll to.
+  max_scroll_ = std::max(0.0F, text_height_ - view_rect.h);
 }
 
 void NovaTextScrollView::ScrollBy(float delta) {
   scroll_offset_ = std::clamp(scroll_offset_ + delta, 0.0F, max_scroll_);
 }
 
+// Ghidra 0x004bcf30 NovaTextView redraw path: the wrapped text is clipped to
+// the view rect and offset by the scroll position.
 void NovaTextScrollView::Draw(SdlPlatform &platform) const {
   SDL_Renderer *renderer = platform.renderer();
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
@@ -78,7 +87,7 @@ void NovaTextScrollView::Draw(SdlPlatform &platform) const {
                     kTextSize,
                     kNovaFontStyleRegular,
                     SDL_Color{255, 255, 255, 255},
-                    view_rect_.x + kTextInset,
+                    view_rect_.x,
                     baseline,
                     line);
     }
@@ -94,43 +103,12 @@ void NovaUi_DrawScrollArrow(SdlPlatform &platform,
                             bool enabled) {
   button_art.Draw(
       platform, rect, enabled ? ButtonState::kNormal : ButtonState::kDisabled);
-  // Vector chevron (0x004a3340): '^' apexes up, '&' apexes down. Integer
-  // geometry off the button rect: s = width/10, apex at the rounded
-  // midpoint ((l+r+1)/2); each arm spans 2s. The 2x2 pen is approximated by
-  // stroking each arm at the four 2x2 offsets. Glyph colours come from the
-  // button-label câlr table (white enabled, 0x262626 disabled).
-  const int l = static_cast<int>(std::lround(rect.x));
-  const int r = static_cast<int>(std::lround(rect.x + rect.w));
-  const int t = static_cast<int>(std::lround(rect.y));
-  const int b = static_cast<int>(std::lround(rect.y + rect.h));
-  const int s = (r - l) / 10;
-  if (s <= 0) {
-    return;
-  }
-  const int cx = (l + r + 1) / 2;
-  const int cy = (t + b + 1) / 2;
-  const int apex_y = up ? cy - s : cy + s;
-  const int base_y = up ? cy + s : cy - s;
-  SDL_Renderer *renderer = platform.renderer();
-  if (enabled) {
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
-  } else {
-    SDL_SetRenderDrawColor(renderer, 0x26, 0x26, 0x26, SDL_ALPHA_OPAQUE);
-  }
-  for (const int ox : {0, 1}) {
-    for (const int oy : {0, 1}) {
-      SDL_RenderLine(renderer,
-                     static_cast<float>(cx + ox),
-                     static_cast<float>(apex_y + oy),
-                     static_cast<float>(cx - 2 * s + ox),
-                     static_cast<float>(base_y + oy));
-      SDL_RenderLine(renderer,
-                     static_cast<float>(cx + ox),
-                     static_cast<float>(apex_y + oy),
-                     static_cast<float>(cx + 2 * s + ox),
-                     static_cast<float>(base_y + oy));
-    }
-  }
+  DrawThreeStateButtonArrow(
+      platform.renderer(),
+      rect,
+      up,
+      enabled ? SDL_Color{255, 255, 255, SDL_ALPHA_OPAQUE}
+              : SDL_Color{0x26, 0x26, 0x26, SDL_ALPHA_OPAQUE});
 }
 
 namespace {

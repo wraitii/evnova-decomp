@@ -22,10 +22,10 @@
 //  stretches that state's 2px middle across the body. Each cap uses its 1-bit
 //  mask PICT (white = transparent), so the outside of the rounded corners
 //  is fully transparent; the middle tile is unmasked/opaque. This module loads
-//  the real strips, draws the body by left cap + stretched middle + right cap,
-//  applies the cap masks, and leaves the label glyph to the caller. Missing
-//  strips fall back to a solid fill matching the window backdrop, as the game
-//  does with its 0xc x 0x18 solid rect.
+//  the real strips, draws the body from the left/right caps plus a stretched
+//  middle tile, applies the cap masks, and leaves the label glyph to the
+//  caller. Missing strips fall back to a solid fill matching the window
+//  backdrop, as the game does with its 0xc x 0x18 solid rect.
 
 #include <SDL3/SDL.h>
 
@@ -50,9 +50,16 @@ inline constexpr float kThreeStateButtonFontSize = 12.0F;
 // integer vertical midpoint of the button rect plus five logical pixels.
 [[nodiscard]] float ThreeStateButtonLabelBaseline(const SDL_FRect &rect);
 
+// Shared '^'/'&' glyph for store buttons and text-view scroll buttons.
+// Uses the original integer geometry and solid 2x2 raster pen.
+void DrawThreeStateButtonArrow(SDL_Renderer *renderer,
+                               const SDL_FRect &rect,
+                               bool up,
+                               const SDL_Color &color);
+
 // Draws a three-state button's caption exactly as NovaUi_DrawThreeStateButton
 // (0x004a3340) does: a leading '^', '&', '+' or '-' selects a 2px vector icon
-// (down chevron, up chevron, plus, minus); anything else draws the whole
+// (up chevron, down chevron, plus, minus); anything else draws the whole
 // string centred on the baseline. The string is the resolved STR# 0x96
 // caption, so callers should not special-case those bytes themselves.
 void DrawThreeStateButtonLabel(SdlPlatform &platform,
