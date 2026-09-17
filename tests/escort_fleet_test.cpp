@@ -7,6 +7,8 @@
 
 #include "game/landed_store.hpp"
 #include "game/scenario_data.hpp"
+#include "game/ship_comm_dialog.hpp"
+#include "game/ship_visual.hpp"
 
 namespace {
 
@@ -49,6 +51,61 @@ MakeEscort(GameState &state, std::size_t slot, std::int16_t ship_class_id) {
 }
 
 } // namespace
+
+TEST_CASE("escort management keeps sale and upgrade marks exclusive",
+          "[escort][management]") {
+  GameState state;
+  state.scenario.ships.assign(2, {});
+  state.scenario.ships[0].upgrade_to_ship_class_id = 1;
+  Ship &escort = MakeEscort(state, 1, 0);
+
+  CHECK_FALSE(game::NovaEscortManagement_ApplyAction(
+      state, escort, game::EscortManagementAction::kToggleUpgrade, 0));
+  CHECK(escort.escort_upgrade_mark == 1);
+  CHECK(escort.escort_pending_sale_mark == 0);
+
+  CHECK_FALSE(game::NovaEscortManagement_ApplyAction(
+      state, escort, game::EscortManagementAction::kToggleSale, 0));
+  CHECK(escort.escort_upgrade_mark == 0);
+  CHECK(escort.escort_pending_sale_mark == 1);
+
+  CHECK_FALSE(game::NovaEscortManagement_ApplyAction(
+      state, escort, game::EscortManagementAction::kToggleSale, 0));
+  CHECK(escort.escort_pending_sale_mark == 0);
+
+  escort.escort_origin_mark = 1;
+  CHECK_FALSE(game::NovaEscortManagement_ApplyAction(
+      state, escort, game::EscortManagementAction::kToggleSale, 0));
+  CHECK(escort.escort_pending_sale_mark == 0);
+}
+
+TEST_CASE("escort management release transfers cargo before detaching",
+          "[escort][management][cargo]") {
+  GameState state;
+  state.scenario.ships.assign(2, {});
+  state.scenario.ships[0].cargo_holds = 100;
+  state.scenario.ships[1].cargo_holds = 100;
+  state.scenario.ships[1].default_ai_behavior = 2;
+  state.player.ship_class_id = 0;
+  state.inventory.cargo_bins[0] = 30;
+
+  Ship &released = MakeEscort(state, 1, 1);
+  Ship &remaining = MakeEscort(state, 2, 1);
+  released.current_system_id = 4;
+  remaining.current_system_id = 4;
+  state.player.current_system_id = 4;
+
+  REQUIRE(game::NovaEscortManagement_ApplyAction(
+      state, released, game::EscortManagementAction::kRelease, 1234));
+  CHECK(released.cargo_bins[0] == 10);
+  CHECK(state.inventory.cargo_bins[0] == 20);
+  CHECK(released.squad_leader_ship_slot == -1);
+  CHECK(released.ai_behavior_code == 2);
+  CHECK(released.ai_state_code == 2);
+  CHECK(released.boarded_target_latch == 1);
+  CHECK(released.post_hit_mode_hint == -1);
+  CHECK_FALSE(state.stat_cache_valid);
+}
 
 TEST_CASE("escort fleet trade sells released and upgrades marked escorts",
           "[scenario][escort]") {
