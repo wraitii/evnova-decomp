@@ -52,9 +52,12 @@ constexpr std::int16_t kShipClassInvalidSentinel = 0x2ff;
 // Only used when the spin set cannot be decoded (e.g. archive-free tests).
 constexpr int kFreeflightScoopCircleRadiusPx = 16;
 // Disable-transition armor pin (Ship_ApplyDamageToShip 0x0041a4b0):
-// _DAT_00575238 = 1/3 and _DAT_00575208 = 0.1 for capability-flags 0x10 hulls,
-// both +1.0 (_DAT_00575230).
-constexpr float kDisableArmorPinFraction = 1.0F / 3.0F;
+// _DAT_00575238 = 0.3333 (NOT 1/3; bytes at 0x00575238) and _DAT_00575208 = 0.1
+// for capability-flags 0x10 hulls, both +1.0 (_DAT_00575230). The disable
+// threshold is max*0.33333, so the 0.3333 pin lands just above it and a pinned
+// hull is no longer armor-disabled (Ship_IsShipDisabled then skips the
+// disable-side arms).
+constexpr float kDisableArmorPinFraction = 0.3333F;
 constexpr float kDisableArmorPinFractionCap0x10 = 0.1F;
 
 // Asteroid debris particle constants from Asteroid_SpawnDestructionPackage
@@ -480,13 +483,43 @@ void RefreshCollisionMasks(GameState &state) {
   }
 }
 
-// Math_AddPolarVelocityWithClamp (0x0043b4e0): add impact/mass in the
-// impact-to-target direction, then clamp each component to the class's
-// base-speed bound. Ship-class Speed is stored in hundredths of px/frame.
-// TODO(decomp) skipped: the original clamps against
-// Ship_ComputeShipEffectiveMaxSpeed (outfit opcode-8 contributions, NPC skill
-// variance, government combat-rating scale) and widens the player clamp 1.8x
-// while the afterburner is active (DAT_00575218) without gravity pull.
+// Ghidra 0x004642e0 Ship_ComputeShipEffectiveMaxSpeed tail: applies the
+// player/direct-escort 1.5x (DAT_005757b8, when Strict Play is off) and the
+// final negative clamp. The main body lives in NovaShip_ComputeEffectiveStats
+// (NPC) and Outfit_ComputePlayerEffectiveStats (player opcode-8 aggregate);
+// the player mission-slot 0x3ff x2 is applied here because the outfit
+// aggregate does not fold it.
+[[nodiscard]] float EffectiveMaxSpeedPxPerTick(const GameState &state,
+                                               const Ship &ship,
+                                               const ShipClass &ship_class) {
+  float max_speed;
+  if (ship.ship_instance_id == 0) {
+    max_speed = Outfit_ComputePlayerEffectiveStats(state).speed_raw / 100.0F;
+    if (ship.pers_def_slot == 0x3ff) {
+      max_speed *= 2.0F; // DAT_005757a8
+    }
+  } else {
+    max_speed = NovaShip_ComputeEffectiveStats(state, ship, ship_class)
+                    .max_speed_px_per_tick;
+  }
+  if ((ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0) &&
+      !state.pilot.strict_play) {
+    max_speed *= 1.5F; // DAT_005757b8
+  }
+  return max_speed < 0.0F ? 0.0F : max_speed;
+}
+
+// Ghidra Math_AddPolarVelocityWithClamp (0x0043b4e0): add impact/mass in the
+// impact-to-target direction, per-axis clamped to the class base speed, then
+// hard-clamp the components against the effective max speed (widened 1.8x for
+// the afterburning player outside a stellar gravity pull). Ship-class Speed is
+// stored in hundredths of px/frame. The bearing is quantized to whole game
+// degrees as the original's short argument does; the sine/cosine uses libm
+// rather than the original's integer lookup table, matching the established
+// Math_AddPolarVelocityWithClamp port used by the movement integrators.
+// impact_pos NULL: the only original NULL caller passes impact_impulse 0
+// (Ship_HandlePlayerShipCore's self-targeted 32000/32000 kill), so the block is
+// inert; the port always has coordinates.
 void ApplyImpactImpulse(GameState &state,
                         Ship &target,
                         float impact_x,
@@ -501,22 +534,57 @@ void ApplyImpactImpulse(GameState &state,
     return;
   }
 
+  // Math_BearingFromPointToPoint(impact_pos, target): push runs impact->target.
+  // Math_AngleFromVector2D returns 0 for an exactly-zero vector, so a
+  // coincident impact point pushes along bearing 0 rather than skipping.
   const float dx = target.pos_x - impact_x;
   const float dy = target.pos_y - impact_y;
-  const float distance = std::hypot(dx, dy);
-  if (distance <= 0.0F) {
-    return;
-  }
+  const int bearing_deg =
+      (dx == 0.0F && dy == 0.0F)
+          ? 0
+          : static_cast<int>(
+                BearingDeg(impact_x, impact_y, target.pos_x, target.pos_y));
+  constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+  const float step = static_cast<float>(impact_impulse) /
+                     static_cast<float>(target_class->mass_tons);
+  Math_AddPolarVelocityWithClamp(static_cast<float>(bearing_deg) * kDegToRad,
+                                 step,
+                                 target_class->speed / 100.0F,
+                                 target.vel_x,
+                                 target.vel_y);
 
-  const float impulse = static_cast<float>(impact_impulse) /
-                        static_cast<float>(target_class->mass_tons);
-  target.vel_x += dx / distance * impulse;
-  target.vel_y += dy / distance * impulse;
-  const float max_axis_speed = target_class->speed / 100.0F;
-  if (max_axis_speed > 0.0F) {
-    target.vel_x = std::clamp(target.vel_x, -max_axis_speed, max_axis_speed);
-    target.vel_y = std::clamp(target.vel_y, -max_axis_speed, max_axis_speed);
+  float max_speed = EffectiveMaxSpeedPxPerTick(state, target, *target_class);
+  if (target.ship_instance_id == 0 && state.player_afterburner_active &&
+      !state.gravity_pull_active) {
+    max_speed *= 1.8F; // DAT_00575218
   }
+  target.vel_x = std::clamp(target.vel_x, -max_speed, max_speed);
+  target.vel_y = std::clamp(target.vel_y, -max_speed, max_speed);
+}
+
+// Ghidra 0x004637a0 Ship_ComputeShipMaxArmor: player via the cached outfit
+// aggregate, NPC = class base * positive personality shield_armor_scale *
+// behavior-5 difficulty.
+[[nodiscard]] float MaxArmorPoints(const GameState &state, const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return Outfit_ComputePlayerEffectiveStats(state).max_armor_points;
+  }
+  const ShipClass *ship_class = ShipClassFor(state, ship);
+  double max_armor =
+      ship_class != nullptr ? static_cast<double>(ship_class->base_armor) : 0.0;
+  if (ship.pers_def_slot >= 0 && static_cast<std::size_t>(ship.pers_def_slot) <
+                                     state.scenario.pers_defs.size()) {
+    const double scale = static_cast<double>(
+        state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)]
+            .shield_armor_scale);
+    if (scale > 0.0) {
+      max_armor *= scale;
+    }
+  }
+  if (ship.ai_behavior_code == 5) {
+    max_armor = static_cast<double>(static_cast<float>(max_armor * 1.333));
+  }
+  return static_cast<float>(max_armor);
 }
 
 // Ship_ApplyDamageToShip's leave-one-armor rule: a disable-variant hit
@@ -639,12 +707,14 @@ void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
 // clamping, and the aggro/hostility response (eligibility chain, retaliation,
 // cloak re-entry/deactivation, and the defense-fleet stellar redirect).
 //
-// TODO(decomp(0x004192d0)) skipped: the pers-attacker damage multiplier block
-// - DECODED as Shareware Enforcer escalation: attackers with pers_def_slot
-// 0x3ff (enforcer-template ships) deal x3 (days 0-40) / x2 (41-60) / x5
-// (61-90) armor+shield damage by the shareware trial day counter
-// g_shareware_day_counter (0x0059799e, FUN_004d4480); 91+ days means no boost.
-// Deliberately not reproduced in the clean-room (no shareware trial state).
+// TODO(decomp(0x004192d0)) deliberately skipped: the pers-attacker damage
+// multiplier block. Attackers with pers_def_slot 0x3ff (Shareware Enforcer
+// template ships) multiply armor+shield damage by the shareware trial day
+// counter g_shareware_day_counter (0x0059799e, NovaTime_GetSharewareDayCounter
+// 0x004d4480): no boost for days 0-40, x2 for 41-60, x3 for 61-90, and x5 for
+// 91+. The clean-room models a registered game and does not run the trial-day
+// counter, so the block is out of scope. (This is a trial-system divergence,
+// not an unported branch of normal combat.)
 // check_fire_restriction_transition is 0 from the shot paths and 1 from the
 // hull-destruction blast (Ship_UpdateVisualState 0x00428340), which arms the
 // disable-transition armor pin (33%/10% + 1 armor) and the mission DISABLE
@@ -666,7 +736,11 @@ void Ship_ApplyDamageToShip(GameState &state,
                             std::int16_t player_aggro_delta,
                             bool check_fire_restriction_transition) {
   if (!ValidShipSlot(target_slot) || !target.is_active ||
-      target.ship_class_id < 0) {
+      target.ship_class_id < 0 ||
+      target.ship_class_id > 0x2fe || // Ghidra 0x2ff sentinel bound
+      target.ship_instance_id < 0 ||
+      target.ship_instance_id >=
+          static_cast<std::int16_t>(GameState::kMaxShips)) {
     return;
   }
   const bool attacker_valid = ValidShipSlot(attacker_ship_slot);
@@ -728,14 +802,14 @@ void Ship_ApplyDamageToShip(GameState &state,
     if (target.shield_points <= 0.0F) {
       ApplyArmorDamage(target, armor_damage, force_armor_only);
       // The floor is -10% of the effective max shield (Ship_ComputeShipMax-
-      // ShieldPoints): the cached player snapshot includes outfit bonuses, the
-      // NPC fallback is the class base value.
+      // ShieldPoints): the cached player snapshot includes outfit bonuses and
+      // the NPC fallback folds in the personality shield_armor_scale and the
+      // behavior-5 difficulty scale.
       const float max_shield =
           target_slot == 0 && state.stat_cache_valid
               ? state.cached_stats.max_shield_points
-              : static_cast<float>(std::max(
-                    0,
-                    target_class != nullptr ? target_class->base_shield : 0));
+              : static_cast<float>(
+                    NovaAi_ComputeMaxShieldPoints(state, target));
       const float shield_floor = -kShieldDepletionFloorFraction * max_shield;
       if (target.shield_points < shield_floor) {
         target.shield_points = shield_floor;
@@ -743,6 +817,39 @@ void Ship_ApplyDamageToShip(GameState &state,
     }
   } else {
     ApplyArmorDamage(target, armor_damage, force_armor_only);
+  }
+
+  // ---- Disable-transition armor pin (Ghidra 0x0041a4b0) -------------------
+  // Runs BEFORE the kill-side faction/comparison arms below. A
+  // hull-destruction blast (check_fire_restriction_transition) that drops armor
+  // to zero/destroyed gets pinned back to 0.3333*max+1 (10%+1 for
+  // capability-flags 0x10 hulls), so the blast registers no kill and no combat
+  // rating. The pin fraction sits just below the max*0.33333 armor-disable
+  // threshold, so the +1 lands above it and the hull is no longer
+  // armor-disabled either, skipping the disable-side arms (quirk preserved).
+  if (check_fire_restriction_transition && !was_fire_restricted &&
+      NovaAiShip_IsDisabled(state, target) && target_class != nullptr) {
+    const float max_armor = target_slot == 0 && state.stat_cache_valid
+                                ? state.cached_stats.max_armor_points
+                                : MaxArmorPoints(state, target);
+    target.armor_points =
+        (target_class->capability_flags & 0x10) != 0U
+            ? max_armor * kDisableArmorPinFractionCap0x10 + 1.0F
+            : max_armor * kDisableArmorPinFraction + 1.0F;
+  }
+
+  // Disable-side faction event (Ghidra 0x00419721): event 1 pulses on the
+  // transition into the disabled state and runs BEFORE the kill-side event 3 /
+  // combat rating below (the original runs both in one player-involved block,
+  // disable first). Same pers_def_slot < 0x3ff gate.
+  if (player_involved && target.defense_fleet_home_stellar_id == -1 &&
+      !was_fire_restricted && NovaAiShip_IsDisabled(state, target) &&
+      target.pers_def_slot < 0x3ff) {
+    NovaGovernment_ProcessFactionCombatEvent(state,
+                                             state.player.current_system_id,
+                                             target.faction_or_government_id,
+                                             1,
+                                             target.mission_fleet_slot);
   }
 
   // Ship_ApplyDamageToShip leaves destruction as an armor-state: the
@@ -779,33 +886,7 @@ void Ship_ApplyDamageToShip(GameState &state,
   // ---- Fire-restriction (disable) transition arms (0x0041a4b0..) ---------
   const bool now_fire_restricted = NovaAiShip_IsDisabled(state, target);
   if (now_fire_restricted) {
-    // Disable-side faction event (Ghidra 0x00419721): the transition into the
-    // disabled state pulses event 1; the same pers_def_slot >= 0x3ff gate
-    // applies.
-    if (player_involved && target.defense_fleet_home_stellar_id == -1 &&
-        !was_fire_restricted && target.pers_def_slot < 0x3ff) {
-      NovaGovernment_ProcessFactionCombatEvent(state,
-                                               state.player.current_system_id,
-                                               target.faction_or_government_id,
-                                               1,
-                                               target.mission_fleet_slot);
-    }
-    // Disable-transition armor pin: armor locks at 33% of max (+1 armor;
-    // 10% for capability-flags 0x10 hulls), keeping the hull disabled
-    // (Ship_HandleShip suppresses regeneration while restricted). Only the
-    // destruction-blast caller passes the transition flag, exactly like the
-    // original's check_fire_restriction_transition argument.
-    if (check_fire_restriction_transition && !was_fire_restricted &&
-        target_class != nullptr) {
-      const float max_armor =
-          target_slot == 0 && state.stat_cache_valid
-              ? state.cached_stats.max_armor_points
-              : static_cast<float>(target_class->base_armor);
-      target.armor_points =
-          (target_class->capability_flags & 0x10) != 0U
-              ? max_armor * kDisableArmorPinFractionCap0x10 + 1.0F
-              : max_armor * kDisableArmorPinFraction + 1.0F;
-    }
+    // Disable-side faction event fired above, before the kill-side arms.
     // Mission DISABLE bookkeeping: counts one disable per mission ship on the
     // transition into disable restriction; an escort goal (Bible ShipGoal 3)
     // mission quick-fails on the first disable unless flags 0x0400 (invisible)
@@ -838,8 +919,7 @@ void Ship_ApplyDamageToShip(GameState &state,
     }
     // Post-hit behavior hint for surrendered escorts (squad_leader_ship_slot 0,
     // not a mission ship): stores how the boarding/escort-conversion flow
-    // treats this hull. Cargo transfer for behavior-6 escorts is TODO(decomp)
-    // (Player_TransferCargoAndJunkToEscortByRatio 0x00469810).
+    // treats this hull (the behavior-6 escort arms a cargo transfer below).
     if (target.squad_leader_ship_slot == 0 && fleet_slot == -1) {
       target.post_hit_mode_hint =
           target.ai_behavior_code == 5
@@ -1179,7 +1259,7 @@ void Ship_ApplyDamageToShip(GameState &state,
             NovaAiShip_IsShipInAiState4(target) &&
             ValidShipSlot(target.primary_target_ship_slot)) {
           const int heading_deg = static_cast<int>(
-              std::lround(WrapDeg(target.heading * 57.29577951308232F)));
+              WrapDeg(target.heading * (180.0F / 3.14159265358979323846F)));
           if (ShortestAngleDeltaDeg(heading_deg,
                                     target.ai_desired_heading_deg) <
               kHeadingLockSuppressDeg) {
@@ -1205,16 +1285,14 @@ void Ship_ApplyDamageToShip(GameState &state,
         }
         if (retargeted && target.ship_instance_id != 0) {
           if (armor_damage > 0) {
+            // The original adds straight into the int16 field with no
+            // saturating clamp (16-bit wrap on overflow); keep that quirk.
             target.ai_hostility_accumulator = static_cast<std::int16_t>(
-                std::min(0x7fff,
-                         static_cast<int>(target.ai_hostility_accumulator) +
-                             armor_damage));
+                target.ai_hostility_accumulator + armor_damage);
           }
           if (shield_damage > 0) {
             target.ai_hostility_accumulator = static_cast<std::int16_t>(
-                std::min(0x7fff,
-                         static_cast<int>(target.ai_hostility_accumulator) +
-                             shield_damage));
+                target.ai_hostility_accumulator + shield_damage);
           }
           if (attacker_valid) {
             target.primary_target_ship_slot = attacker_ship_slot;
@@ -1226,18 +1304,12 @@ void Ship_ApplyDamageToShip(GameState &state,
                       .defense_fleet_home_stellar_id == -1) {
             Ship &leader_ship = state.ShipAt(static_cast<std::size_t>(leader));
             if (armor_damage > 0) {
-              leader_ship.ai_hostility_accumulator =
-                  static_cast<std::int16_t>(std::min(
-                      0x7fff,
-                      static_cast<int>(leader_ship.ai_hostility_accumulator) +
-                          armor_damage));
+              leader_ship.ai_hostility_accumulator = static_cast<std::int16_t>(
+                  leader_ship.ai_hostility_accumulator + armor_damage);
             }
             if (shield_damage > 0) {
-              leader_ship.ai_hostility_accumulator =
-                  static_cast<std::int16_t>(std::min(
-                      0x7fff,
-                      static_cast<int>(leader_ship.ai_hostility_accumulator) +
-                          shield_damage));
+              leader_ship.ai_hostility_accumulator = static_cast<std::int16_t>(
+                  leader_ship.ai_hostility_accumulator + shield_damage);
             }
             if (attacker_valid) {
               leader_ship.primary_target_ship_slot = attacker_ship_slot;
@@ -1267,18 +1339,14 @@ void Ship_ApplyDamageToShip(GameState &state,
           if (attacker_distance_sq < stellar_distance_sq) {
             if (target.ship_instance_id != 0) {
               if (armor_damage > 0) {
-                target.ai_hostility_accumulator =
-                    static_cast<std::int16_t>(std::min(
-                        0x7fff,
-                        static_cast<int>(target.ai_hostility_accumulator) +
-                            armor_damage * kStellarRedirectHostilityScale));
+                target.ai_hostility_accumulator = static_cast<std::int16_t>(
+                    target.ai_hostility_accumulator +
+                    armor_damage * kStellarRedirectHostilityScale);
               }
               if (shield_damage > 0) {
-                target.ai_hostility_accumulator =
-                    static_cast<std::int16_t>(std::min(
-                        0x7fff,
-                        static_cast<int>(target.ai_hostility_accumulator) +
-                            shield_damage * kStellarRedirectHostilityScale));
+                target.ai_hostility_accumulator = static_cast<std::int16_t>(
+                    target.ai_hostility_accumulator +
+                    shield_damage * kStellarRedirectHostilityScale);
               }
               target.primary_target_ship_slot = attacker_ship_slot;
             }

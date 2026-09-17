@@ -1372,6 +1372,10 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   // branch but does not prevent normal thrust.
   const bool gravity_present =
       Ship_AccelerateShipTowardPoint(state, elapsed_ticks);
+  // Expose the two latches the impact-impulse clamp reads (Ghidra
+  // g_player_afterburner_active / g_gravity_pull_active).
+  state.player_afterburner_active = afterburner_active;
+  state.gravity_pull_active = gravity_present;
 
   ShipClass effective_class;
   effective_class.accel = eff.thrust_raw;

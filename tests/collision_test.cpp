@@ -264,6 +264,264 @@ TEST_CASE(
   CHECK(target.ai_state_code == 4);
 }
 
+TEST_CASE("impact impulse follows the impact-to-target bearing and caps",
+          "[collision][impulse]") {
+  auto hit = [](GameState &state,
+                float impact_x,
+                float impact_y,
+                std::int16_t impulse) {
+    Ship &target = state.ShipAt(1);
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           impact_x,
+                           impact_y,
+                           impulse,
+                           /*armor_damage=*/0,
+                           /*shield_damage=*/0,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/false,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/true,
+                           /*player_aggro_delta=*/0);
+  };
+
+  SECTION("impact left of the target pushes +x") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].mass_tons = 100;
+    state.scenario.ships[0].speed = 1000.0F; // 10 px/tick
+    Ship &target = state.ShipAt(1);
+    target.ai_behavior_code = 3;
+    target.pos_x = 10.0F;
+    target.pos_y = 0.0F;
+    hit(state, 0.0F, 0.0F, /*impact_impulse=*/5);
+    // step = 5/100 = 0.05 px/tick along the impact->target (+x) bearing.
+    CHECK(target.vel_x == Catch::Approx(0.05F));
+    CHECK(target.vel_y == Catch::Approx(0.0F).margin(1e-3F));
+  }
+
+  SECTION("impact right of the target pushes -x") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].mass_tons = 100;
+    state.scenario.ships[0].speed = 1000.0F;
+    Ship &target = state.ShipAt(1);
+    target.ai_behavior_code = 3;
+    target.pos_x = 0.0F;
+    target.pos_y = 0.0F;
+    hit(state, 10.0F, 0.0F, /*impact_impulse=*/5);
+    CHECK(target.vel_x == Catch::Approx(-0.05F));
+    CHECK(target.vel_y == Catch::Approx(0.0F).margin(1e-3F));
+  }
+
+  SECTION("vertical bearing then hard cap at the effective max speed") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].mass_tons = 1;
+    state.scenario.ships[0].speed = 100.0F; // 1 px/tick
+    Ship &target = state.ShipAt(1);
+    target.ai_behavior_code = 3; // avoid the behavior-5 x1.333 scaling
+    target.pos_x = 0.0F;
+    target.pos_y = -10.0F; // impact below -> push up (bearing 0)
+    hit(state, 0.0F, 0.0F, /*impact_impulse=*/50);
+    CHECK(target.vel_x == Catch::Approx(0.0F));
+    CHECK(target.vel_y == Catch::Approx(-1.0F));
+  }
+  SECTION("skill variance raises the cap above the class base speed") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].mass_tons = 1;
+    state.scenario.ships[0].speed = 100.0F; // class base 1 px/tick
+    Ship &target = state.ShipAt(1);
+    target.ai_behavior_code = 3;        // avoid the behavior-5 x1.333 scaling
+    target.skill_variance_scale = 2.0F; // effective 2 px/tick
+    target.pos_x = 10.0F;
+    target.pos_y = 0.0F;
+    hit(state, 0.0F, 0.0F, /*impact_impulse=*/50);
+    CHECK(target.vel_x == Catch::Approx(2.0F));
+    CHECK(target.vel_y == Catch::Approx(0.0F).margin(1e-3F));
+  }
+
+  SECTION("mission personality doubles the cap") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].mass_tons = 1;
+    state.scenario.ships[0].speed = 100.0F;
+    Ship &target = state.ShipAt(1);
+    target.ai_behavior_code = 3;
+    target.pers_def_slot = 0x3ff; // DAT_005757a8 x2
+    target.pos_x = 10.0F;
+    target.pos_y = 0.0F;
+    hit(state, 0.0F, 0.0F, /*impact_impulse=*/50);
+    CHECK(target.vel_x == Catch::Approx(2.0F));
+  }
+}
+
+TEST_CASE("hostility accumulator wraps at int16 instead of saturating",
+          "[collision][aggro]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Ship &target = state.ShipAt(1);
+  // Weapon 0 is 25 mass / 10 energy; the retargeting hit adds both.
+  target.ai_hostility_accumulator = 32767;
+  SpawnTestShot(state);
+  state.active_shots[0].target_ship_slot = 1;
+  REQUIRE(NovaWeapon_CanProjectileHitShip(state, state.active_shots[0], 1));
+  NovaWeapon_ResolveDirectShotCollisions(state);
+  // 32767 + 25 (armor) wraps to -32744, then + 10 (shield) to -32734.
+  CHECK(target.ai_hostility_accumulator == -32734);
+}
+
+TEST_CASE("player impact cap widens 1.8x only afterburning out of gravity",
+          "[collision][impulse]") {
+  auto hit_player = [](GameState &state, std::int16_t impulse) {
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/0,
+                           state.player,
+                           /*impact_x=*/0.0F,
+                           /*impact_y=*/0.0F,
+                           impulse,
+                           /*armor_damage=*/0,
+                           /*shield_damage=*/0,
+                           /*attacker_ship_slot=*/0xffff,
+                           /*allow_aggro_updates=*/false,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/true,
+                           /*player_aggro_delta=*/0);
+  };
+
+  auto seed_player = [](GameState &state) {
+    SeedCollisionScenario(state);
+    state.pilot.strict_play = true; // keep eff. max at 1 px/tick
+    state.scenario.ships[0].mass_tons = 1;
+    state.scenario.ships[0].speed = 100.0F;
+    state.player.pos_x = 10.0F;
+    state.player.pos_y = 0.0F;
+  };
+
+  SECTION("no afterburner clamps to the effective max speed") {
+    GameState state;
+    seed_player(state);
+    hit_player(state, /*impact_impulse=*/50);
+    CHECK(state.player.vel_x == Catch::Approx(1.0F));
+    CHECK(state.player.vel_y == Catch::Approx(0.0F).margin(1e-3F));
+  }
+
+  SECTION("afterburner widens the cap 1.8x") {
+    GameState state;
+    seed_player(state);
+    state.player_afterburner_active = true;
+    hit_player(state, /*impact_impulse=*/50);
+    CHECK(state.player.vel_x == Catch::Approx(1.8F));
+  }
+
+  SECTION("gravity pull suppresses the widening") {
+    GameState state;
+    seed_player(state);
+    state.player_afterburner_active = true;
+    state.gravity_pull_active = true;
+    hit_player(state, /*impact_impulse=*/50);
+    CHECK(state.player.vel_x == Catch::Approx(1.0F));
+  }
+}
+
+TEST_CASE("lethal blast pins a destroyed hull and withholds kill credit",
+          "[collision][disable]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.ships[0].base_armor = 90;
+  state.scenario.ships[0].strength = 50;
+  Ship &target = state.ShipAt(1);
+  target.ai_behavior_code = 3;
+  target.armor_points = 40.0F;
+
+  Ship_ApplyDamageToShip(state,
+                         /*target_slot=*/1,
+                         target,
+                         target.pos_x,
+                         target.pos_y,
+                         /*impact_impulse=*/0,
+                         /*armor_damage=*/50,
+                         /*shield_damage=*/0,
+                         /*attacker_ship_slot=*/0,
+                         /*allow_aggro_updates=*/true,
+                         /*suppress_retarget_logic=*/true,
+                         /*force_armor_only=*/false,
+                         /*bypass_shields=*/true,
+                         /*player_aggro_delta=*/0,
+                         /*check_fire_restriction_transition=*/true);
+
+  // The pin runs before the kill arm: armor drops to -10 (destroyed +
+  // disabled), then 90*0.3333 + 1 = 30.997, so no kill event/combat rating
+  // and no destruction latch. The pin lands just above the max*0.33333 disable
+  // threshold, so the hull is not armor-disabled afterwards either (quirk).
+  CHECK(target.armor_points == Catch::Approx(30.997F));
+  CHECK_FALSE(target.destruction_visual_triggered);
+  CHECK(state.player_combat_rating_points == 0);
+  CHECK_FALSE(NovaAiShip_IsDisabled(state, target));
+}
+
+TEST_CASE("NPC personality and behavior-5 scale the shield floor and armor pin",
+          "[collision][disable]") {
+  SECTION("positive personality shield_armor_scale raises the shield floor") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].base_shield = 100;
+    state.scenario.pers_defs.resize(1);
+    state.scenario.pers_defs[0].shield_armor_scale = 2.0F;
+    Ship &target = state.ShipAt(1);
+    target.ai_behavior_code = 3;
+    target.pers_def_slot = 0;
+    target.shield_points = 10.0F;
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/0,
+                           /*shield_damage=*/300,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/false,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0);
+    // max shield = 100 * 2 = 200 -> floor -20 (base-only would be -10).
+    CHECK(target.shield_points == Catch::Approx(-20.0F));
+  }
+
+  SECTION("behavior-5 difficulty scale raises the armor pin") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].base_armor = 90;
+    Ship &target = state.ShipAt(1);
+    target.ai_behavior_code = 5; // x1.333 difficulty
+    target.armor_points = 40.0F;
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/50,
+                           /*shield_damage=*/0,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/false,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/true,
+                           /*player_aggro_delta=*/0,
+                           /*check_fire_restriction_transition=*/true);
+    // max armor = 90 * 1.333 = 119.97 -> pin = 119.97*0.3333 + 1 = 40.986
+    // (behavior-3 would pin to 30.997).
+    CHECK(target.armor_points == Catch::Approx(40.986F).margin(0.01F));
+  }
+}
+
 TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
   GameState state;
   SeedCollisionScenario(state);
