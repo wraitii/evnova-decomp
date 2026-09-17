@@ -1,5 +1,10 @@
 # Mission reimplementation overview
 
+Source organization: `mission.cpp` owns offers, outcomes, and mission-ship
+interactions; `mission_text.cpp` owns placeholder, wildcard, and date formatting;
+`mission_world.cpp` owns calendar advancement and daily world updates.
+`mission_script.cpp` remains the control-expression implementation.
+
 Status update (after the 2025 mission-loop passes): the core loop is
 implemented end to end for non-special-ship missions. `src/game/mission.cpp`,
 `mission_script.cpp`, and the landing path in `spaceflight.cpp` now cover the
