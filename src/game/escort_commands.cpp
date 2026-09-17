@@ -9,10 +9,11 @@
 namespace game {
 namespace {
 
-// The panel opens for 0x20 ticks (Ui_ShowTargetCategoryPanel 0x0049e8d0) and
-// auto-hides while the toggle key is held past 0x1e0 ticks (0x00450c13).
+// Ui_ShowTargetCategoryPanel 0x0049e8d0 sets the panel fade level to 0x20.
+// It remains fully visible until 0x1e0 ticks after the last interaction, then
+// the level counts down once per tick (0x00450c13 / 0x00452990).
 constexpr std::int16_t kPanelShowTicks = 0x20;
-constexpr std::int64_t kPanelHoldHideTicks = 0x1e0;
+constexpr std::int64_t kPanelInactivityTicks = 0x1e0;
 
 // Ghidra ShipState +0x88 ai_behavior_code value for a carried ship deployed
 // by Weapon_SpawnShipFromCarrierBayWeapon 0x0041e640.
@@ -76,9 +77,9 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
 // forms otherwise; Attack splits on whether the player has a valid target.
 [[nodiscard]] std::string OrderPhrase(const GameState &state,
                                       std::int16_t command) {
-  const bool holding = state.player.ai_station_hold_timer > 0.0F;
+  const bool ready = state.player.ai_station_hold_timer <= 0.0F;
   std::uint16_t entry = 0;
-  if (holding) {
+  if (ready) {
     switch (command) {
     case 3:
       entry = 0x9b;
@@ -117,10 +118,10 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
   }
   if (command == 2) {
     // Original split: with a valid primary target that is not itself an
-    // attached ship, the holding form reads "attacking target." (0x9f);
+    // attached ship, the immediate form reads "attacking target." (0x9f);
     // otherwise the plain "will attack." (0x9a).
     const std::int16_t player_target = state.player.primary_target_ship_slot;
-    if (holding && player_target != -1 && player_target != 0 &&
+    if (ready && player_target != -1 &&
         state.SlotInRange(static_cast<std::size_t>(player_target)) &&
         state.ShipAt(static_cast<std::size_t>(player_target))
                 .squad_leader_ship_slot != 0) {
@@ -170,11 +171,11 @@ void PlayerTick_EscortCommands(GameState &state,
     escort.panel_timer = 0;
   }
 
-  // ---- Attached-count cache + held-key auto-hide (0x00450b95..0x00450c19,
+  // ---- Attached-count cache + inactivity auto-hide (0x00450b95..0x00450c19,
   // arms 0x00452960 / 0x00452990). While the panel is open the filtered
   // attached count is re-derived every frame; when it changes the cache
   // refreshes (and an empty cohort deselects). Holding the toggle key past
-  // 0x1e0 ticks decays the panel timer to 0.
+  // 0x1e0 ticks after the last interaction decays the panel timer to 0.
   if (escort.panel_timer > 0) {
     const int count = CountAttached(state, AttachFilter::kJumpCapable, -1);
     if (count != escort.attached_count_cache) {
@@ -183,8 +184,7 @@ void PlayerTick_EscortCommands(GameState &state,
         escort.key_time_60hz = 0;
         escort.selected_category = -1;
       }
-    } else if (input.panel_toggle_held &&
-               now_60hz > escort.key_time_60hz + kPanelHoldHideTicks &&
+    } else if (now_60hz > escort.key_time_60hz + kPanelInactivityTicks &&
                escort.panel_timer > 0) {
       --escort.panel_timer;
     }
@@ -246,9 +246,11 @@ void PlayerTick_EscortCommands(GameState &state,
       command = input.arm_modifier_held ? 3 : 0;
       break;
     }
-    if (escort.selected_category == -1) {
-      // 0x00452aa2: with no group selected the order arms every group slot.
-      escort.group_command.fill(command);
+    if (escort.selected_category == -1 || escort.panel_timer <= 0) {
+      // 0x00452aa2: All Ships or a closed panel arms every category.
+      state.target_category_command.fill(command);
+    } else {
+      state.target_category_command[escort.selected_category] = command;
     }
     if (escort.panel_timer > 0) {
       if (Ship_CommandPlayerEscortGroup(
@@ -266,9 +268,9 @@ void PlayerTick_EscortCommands(GameState &state,
   // Hangar with no deployed fighter of that category out, or any order on an
   // empty group, reverts to Formation and refreshes the panel.
   for (std::int16_t category = 0; category < 4; ++category) {
-    if (escort.group_command[category] == 3 &&
+    if (state.target_category_command[category] == 3 &&
         CountAttached(state, AttachFilter::kRecoverable, category) == 0) {
-      escort.group_command[category] = 0;
+      state.target_category_command[category] = 0;
       if (escort.panel_timer > 0) {
         ShowEscortPanel(escort);
       }
@@ -276,8 +278,8 @@ void PlayerTick_EscortCommands(GameState &state,
   }
   for (std::int16_t category = 0; category < 4; ++category) {
     if (CountAttached(state, AttachFilter::kAny, category) == 0 &&
-        escort.group_command[category] != 0) {
-      escort.group_command[category] = 0;
+        state.target_category_command[category] != 0) {
+      state.target_category_command[category] = 0;
       if (escort.panel_timer > 0) {
         ShowEscortPanel(escort);
       }
@@ -290,11 +292,11 @@ void PlayerTick_EscortCommands(GameState &state,
   return GroupPresent(state, category);
 }
 
+// Ghidra 0x0045c880 Ship_CommandPlayerEscortGroup.
 bool Ship_CommandPlayerEscortGroup(GameState &state,
                                    std::int16_t category,
                                    std::int16_t command,
                                    bool suppress_message) {
-  // Ghidra 0x0045c880 Ship_CommandPlayerEscortGroup.
   bool accepted = false;
   std::int16_t message_command = command;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
@@ -340,10 +342,12 @@ bool Ship_CommandPlayerEscortGroup(GameState &state,
         accepted = true;
       }
     }
-    // TODO(decomp): the original also clears pursuit targets for behavior-5
-    // ships in AI state 5 (Ship_IsShipInAiBehavior5State5) and rolls escort
-    // comm-chatter voices from the ship class inherent_attributes_govt pick at
-    // 0x0045cbxx; the chatter path is not reconstructed.
+    if (command != 3 && NovaAiShip_IsShipInAiBehavior5State5(ship)) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_secondary_target_slot = -1;
+      accepted = true;
+    }
+    // TODO(decomp): acknowledgement sound and combat-chatter voice selection.
   }
   if (!accepted) {
     return false;

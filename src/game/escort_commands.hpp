@@ -3,10 +3,10 @@
 // In-flight Escort Commands overlay + order dispatch (Ghidra
 // PlayerTick_AuxiliaryCommands blocks 0x00450ae7/0x00450b4e/0x00450cf4 and
 // Ship_CommandPlayerEscortGroup 0x0045c880). The E key (binding slot 0x2a)
-// toggles the overlay; the number keys 1..5 (slots 0x2b..0x2f, the original's
-// "panel-suppressed command" list) select the group -- 1 All Ships, then one
-// row per ShipClassDef.class_category (0 Fighters / 1 Medium Ships /
-// 2 Warships / 3 Freighters, the Bible EscortType classes); the order keys
+// toggles the overlay; the fixed number keys 1..5 (DIK codes 2..6, the
+// original's panel-suppressed key list) select the group -- 1 All Ships, then
+// one row per ShipClassDef.class_category (0 Fighters / 1 Medium Ships / 2
+// Warships / 3 Freighters, the Bible EscortType classes); the order keys
 // F/D/V/C (slots 0x30..0x33) issue Attack / Defend / Hold Position /
 // Formation, with the arm-modifier pair turning Formation into Return to
 // Hangar. Orders dispatch to attached ships (squad_leader_ship_slot == 0);
@@ -19,7 +19,10 @@
 
 namespace game {
 
-// Order codes stored in EscortCommandState.group_command (STR# 0x7d2
+inline constexpr std::array<std::uint16_t, 5> kEscortGroupSelectionKeyCodes{
+    0x02, 0x03, 0x04, 0x05, 0x06};
+
+// Order codes stored in GameState.target_category_command (STR# 0x7d2
 // 0x91..0x95 wording). 0 = Formation (the neutral default).
 enum class EscortOrder : std::int16_t {
   kFormation = 0,
@@ -30,8 +33,8 @@ enum class EscortOrder : std::int16_t {
 };
 
 // Edge/level state of the escort-command keys, resolved by the caller from
-// the binding table (slots 0x2a, 0x2b..0x2f, 0x30..0x33 and the 0x38/0x6f
-// arm-modifier pair) against the live keyboard state.
+// the binding table (slots 0x2a and 0x30..0x33), the fixed selection keys, and
+// the 0x38/0x6f arm-modifier pair against the live keyboard state.
 struct EscortCommandInput {
   bool panel_toggle_held = false;
   // Number keys 1..5, in panel-row order (row 0 = All Ships).

@@ -66,6 +66,13 @@ handler `FUN_004d7330` and `Platform_WindowMessageInit` (0x004d7a80).
 `NovaInput_CommandHasKeyBinding(cmd)` (0x00469cf0) is the same probe minus the
 panel-suppression guard (also gated on `DAT_00596d3c`).
 
+The Escort Commands group selector is the notable fixed-key exception. Its
+five-entry `g_panel_suppressed_commands` table contains physical key codes
+`{2,3,4,5,6}` (number row 1..5), and the player core passes those directly to
+`NovaInput_CommandHasKeyBinding`. They are not command-binding slots
+`0x2b..0x2f`; those nonexistent bindings previously made subtype selection
+inert in the port.
+
 `NovaInput_PeekActiveCommand()` (0x00466810) returns the first pressed command
 in 0..0x7f that is NOT a modifier range ({3..5}? the gate skips `uVar-2<=3`
 {0..3,4}, `uVar-0x3a<=5` {0x38..0x40 mods}, `uVar-0x70<=1` {0x70..0x72 mods})
@@ -222,7 +229,8 @@ modifier code ranges so any bound key can be captured.
 ## Persistence
 
 `.prf` file (the recovered CE build constructs `@:EV Nova Prefs.prf`: `@:` is
-its current-volume-relative prefix and `EV Nova Prefs` comes from STR# 0x82/1;
+its current-volume-relative prefix and `EV Nova Prefs` comes from EVNova.ini
+[130] S1 via `IniConfig_GetSectionString` (not an STR# resource);
 full field map is documented on the `NovaPrefs_LoadOrInit` plate comment).
 Version `0x69`. Reserved slots 0x7e..0x88 are zeroed on save
 (CE keybinding-extension space). The CE `Settings_LoadIniAndPrefs` reads
