@@ -1,0 +1,38 @@
+---
+# Shared clang-tidy configuration for EVNova. This is the single source of
+# truth for both the optional in-build integration (EVNOVA_ENABLE_CLANG_TIDY)
+# and manual runs, e.g.
+#   SDKROOT="$(xcrun --show-sdk-path)" \
+#     /opt/homebrew/opt/llvm/bin/clang-tidy -p build/release src/game/foo.cpp
+#
+# The compiler already enforces the -Wall/-Wextra unused diagnostics as errors.
+# These checks add the dead-code cases it deliberately does not report:
+#   * misc-unused-parameters/-using-decls/-alias-decls
+#   * bugprone-unused-local-non-trivial-variable: non-trivially-destructible
+#     locals, which -Wunused-variable skips because the constructor may have
+#     side effects. This is the common "leftover std::string/vector" case.
+#   * bugprone-unused-raii: a temporary whose destructor runs immediately
+#     (e.g. `std::lock_guard{mutex};`).
+#   * clang-diagnostic-unused-*: -Wunused reach that is off by default,
+#     notably unused macros (-Wunused-macros) and namespace-scope
+#     -Wunused-const-variable.
+#
+# misc-include-cleaner is intentionally not enabled. It reports both unused and
+# transitively-missing direct includes and fires ~1200 times on the current
+# tree, which is not actionable under WarningsAsErrors. Unused includes are
+# therefore not enforced.
+#
+# Diagnostics are limited to the translation unit (no HeaderFilterRegex), which
+# matches the previous behaviour; enabling it surfaces analyzer findings in
+# headers (e.g. struct padding) that are not part of this gate.
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-unused-local-non-trivial-variable,
+  bugprone-unused-raii,
+  misc-unused-alias-decls,
+  misc-unused-parameters,
+  misc-unused-using-decls,
+  clang-diagnostic-unused-*
+
+WarningsAsErrors: '*'
