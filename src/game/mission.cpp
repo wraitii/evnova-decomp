@@ -82,8 +82,7 @@ MissionControlExpressionState(const GameState &state) {
     return Outfit_PlayerHasOutfitForControlExpression(state, id);
   };
   expression.has_explored = [&state](std::int16_t id) {
-    return id >= 0 && id < 0x800 &&
-           state.control.explored_systems.test(static_cast<std::size_t>(id));
+    return NovaSystem_HasExploredToken(state, id);
   };
   return expression;
 }

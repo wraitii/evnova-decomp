@@ -469,12 +469,8 @@ void Mission_ExecuteScript(GameState &state,
       case 'X':
         action = "reveal system";
         if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
-          state.control.explored_systems.set(
-              static_cast<std::size_t>(operand - kResourceIdBase));
-          // Reveal on the galaxy map too: the starmap draws from the per-
-          // system discovery state, so a script-revealed system needs its
-          // discovery_state bumped (level 1 = visited). TODO(decomp): the
-          // original opcode's exact discovery write is not yet traced.
+          // Ghidra 0x00449370 'X': the original only writes discovery_state
+          // (min 1); the galaxy-map reveal is that same write.
           NovaSystem_MarkSystemVisited(
               state, static_cast<std::int16_t>(operand - kResourceIdBase), 1);
           applied = true;

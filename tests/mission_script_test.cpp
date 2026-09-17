@@ -39,6 +39,7 @@ TEST_CASE("mission script executor implements mission lifecycle operators") {
 TEST_CASE("mission script executor mutates ranks, exploration, and stellars") {
   GameState state;
   state.scenario.stellars.resize(1);
+  state.scenario.systems.resize(1);
   state.scenario.ranks.resize(0x80);
   for (std::size_t i = 0; i < state.scenario.ranks.size(); ++i) {
     state.scenario.ranks[i].id = static_cast<std::int16_t>(i);
@@ -48,7 +49,7 @@ TEST_CASE("mission script executor mutates ranks, exploration, and stellars") {
 
   CHECK(state.scenario.ranks[3].active);
   CHECK(state.recently_activated_rank_id == 3);
-  CHECK(state.control.explored_systems.test(0));
+  CHECK(state.scenario.systems[0].discovery_state > 0);
   CHECK_FALSE(state.scenario.stellars[0].is_destroyed);
 
   Mission_ExecuteScript(state, "Y128");

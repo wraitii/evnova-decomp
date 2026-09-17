@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -36,9 +37,7 @@ bool IsVisited(const GameState &state, std::int16_t zero_based_id) {
   }
   const std::size_t idx = static_cast<std::size_t>(zero_based_id);
   const auto &sys = state.scenario.systems[idx];
-  return sys.discovery_state > 0 &&
-         idx < state.control.explored_systems.size() &&
-         state.control.explored_systems.test(idx);
+  return sys.discovery_state > 0;
 }
 
 // Returns whether `id` appears on the map view without being visited (the
@@ -280,7 +279,6 @@ TEST_CASE(
     sys.discovery_state = 0;
     sys.discovered_this_rebuild = false;
   }
-  state.control.explored_systems.reset();
 
   const std::int16_t start = 0;
   const auto *const sys =
@@ -330,11 +328,30 @@ TEST_CASE(
 TEST_CASE("jump discovery guards out-of-range systems") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
-  const std::size_t before = state.control.explored_systems.count();
+  const auto visited_count = [&state] {
+    return static_cast<std::size_t>(std::count_if(
+        state.scenario.systems.begin(),
+        state.scenario.systems.end(),
+        [](const game::System &sys) { return sys.discovery_state > 0; }));
+  };
+  const std::size_t before = visited_count();
   NovaSystem_OnSystemEntered(state, -5, 1);
   NovaSystem_OnSystemEntered(
       state, static_cast<std::int16_t>(state.scenario.systems.size() + 10), 1);
-  CHECK(state.control.explored_systems.count() == before);
+  CHECK(visited_count() == before);
+}
+
+// Ghidra 0x00448be0 'E' token: the operand is a system RESOURCE id (0x80 +
+// zero-based index), so E128 tests system 0, not system 128.
+TEST_CASE("has-explored NCB token rebases the system resource id") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.scenario.systems[0].discovery_state = 1;
+  CHECK(NovaSystem_HasExploredToken(state, 0x80));
+  CHECK_FALSE(NovaSystem_HasExploredToken(state, 0));
+  CHECK_FALSE(NovaSystem_HasExploredToken(state, 0x81));
+  CHECK_FALSE(NovaSystem_HasExploredToken(state, 0x7f));
+  CHECK_FALSE(NovaSystem_HasExploredToken(state, 0x880));
 }
 
 // Plotting a starmap destination arms the travel slot for a directly-linked

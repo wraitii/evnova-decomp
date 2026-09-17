@@ -635,7 +635,6 @@ struct PilotControlState {
   // entry as boolean, but archived Mac pilots contain noncanonical nonzero
   // values and the original copies all 10,000 bytes verbatim.
   std::array<std::uint8_t, kControlBitCount> persisted_bit_bytes{};
-  std::bitset<0x800> explored_systems;
   bool registered = true;
   bool male = true;
 

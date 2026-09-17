@@ -211,14 +211,21 @@ NovaSystem_ResolveVisibleForTravel(const GameState &state,
 NovaSystem_HasUsableTravelDestination(const GameState &state,
                                       std::int16_t system_id);
 
-// Marks one system visited at `level` (>=1): bumps discovery_state to `level`
-// and mirrors into the persistent explored bitset. Ghidra: the discovery_state
-// writes of System_FloodDiscoverAdjacentSystems 0x00467ab0 plus the arrival
-// pre-latches (0x0044aa70 PlayerTick_SystemTransitionAndArrival / 0x00455e10
-// Stellar_RunDockAndLaunchSequence).
+// Marks one system visited at `level` (>=1): bumps discovery_state to `level`.
+// Ghidra: the discovery_state writes of System_FloodDiscoverAdjacentSystems
+// 0x00467ab0 plus the arrival pre-latches (0x0044aa70 PlayerTick_System-
+// TransitionAndArrival / 0x00455e10 Stellar_RunDockAndLaunchSequence).
 void NovaSystem_MarkSystemVisited(GameState &state,
                                   std::int16_t zero_based_system_id,
                                   std::int16_t level);
+
+// Ghidra 0x00448be0 NovaExpression_EvaluateToken, 'E' token: true when the
+// system's discovery_state is > 0 ("has explored system"). `resource_id` is
+// the raw NCB operand (0x80 + zero-based system index), matching the
+// original's `g_system_defs_ptr[resource_id - 0x80].discovery_state` and the
+// O-token convention; there is no separate explored flag.
+[[nodiscard]] bool NovaSystem_HasExploredToken(const GameState &state,
+                                               std::int16_t resource_id);
 
 // Ghidra 0x00467ab0 System_FloodDiscoverAdjacentSystems. Recursive flood over
 // the system link graph up to `max_depth` links out, bumping each reached

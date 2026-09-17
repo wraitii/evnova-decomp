@@ -286,11 +286,12 @@ explored. Clean-room wiring (travel.cpp):
   `scenario_data.cpp`: same-position story clones (Koria;Rebs, the b330
   Vell-os region, the b88 Polaris swaps, ...) group under one root and every
   Con link is rewritten to point at the root, so the invisible clones are
-  unreachable and unrendered until their NCB holds. Every visited system is
-  mirrored into `GameState.control.explored_systems`, the bitset the NCB
-  `has_explored` test and save format read.
-- The pilot save's discovery block (u16[0x800]) is still TODO(decomp) in
-  `pilot_file.cpp`.
+  unreachable and unrendered until their NCB holds. The NCB `has_explored`
+  test (0x00448be0 'E' token) reads a system's `discovery_state` directly, and
+  that same per-system fog record is what the pilot save persists.
+- The pilot save's discovery block (u16[0x800]) round-trips through
+  `PilotFileApply` / `PilotFileCollectFromState` into each system's
+  `discovery_state`.
 
 ## The map outfit (`Outfit_GrantOutfitToPlayer` `0x00427770`)
 

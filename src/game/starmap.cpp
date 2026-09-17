@@ -2140,8 +2140,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
       return Outfit_PlayerHasOutfitForControlExpression(state, id);
     };
     expression.has_explored = [&state](std::int16_t id) {
-      return id >= 0 && id < 0x800 &&
-             state.control.explored_systems.test(static_cast<std::size_t>(id));
+      return NovaSystem_HasExploredToken(state, id);
     };
     for (Nebula &neb : state.scenario.nebulae) {
       neb.active_on =
