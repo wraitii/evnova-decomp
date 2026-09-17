@@ -246,6 +246,57 @@ class ClangdSymbols:
             self._reader.join(timeout=2)
 
 
+def _skip_quoted(text: str, start: int) -> int:
+    """Return the index just past a string/char literal beginning at ``start``."""
+    quote = text[start]
+    i = start + 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == quote:
+            return i + 1
+        i += 1
+    return len(text)
+
+
+def has_definition_body(text: str) -> bool:
+    """Whether ``text`` is a function definition rather than a declaration.
+
+    clangd's document-symbol range also covers declarations, which previously
+    slipped through a naive ``"{" in text`` test when default arguments used
+    brace initializers (e.g. ``const Sink &sink = {}``). A real body brace is
+    the first ``{`` seen after the parameter list closes at paren depth zero,
+    outside comments and literals; declaration braces only occur inside the
+    parameter list.
+    """
+    i = 0
+    paren_depth = 0
+    seen_paren = False
+    while i < len(text):
+        char = text[i]
+        if char == "/" and text.startswith("//", i):
+            newline = text.find("\n", i + 2)
+            i = len(text) if newline == -1 else newline + 1
+            continue
+        if char == "/" and text.startswith("/*", i):
+            close = text.find("*/", i + 2)
+            i = len(text) if close == -1 else close + 2
+            continue
+        if char in "\"'":
+            i = _skip_quoted(text, i)
+            continue
+        if char == "(":
+            paren_depth += 1
+            seen_paren = True
+        elif char == ")" and paren_depth > 0:
+            paren_depth -= 1
+        elif char == "{" and seen_paren and paren_depth == 0:
+            return True
+        i += 1
+    return False
+
+
 def _collect(
     symbols: list[dict],
     path: Path,
@@ -262,7 +313,7 @@ def _collect(
             start = range_["start"]["line"]
             end = range_["end"]["line"]
             text = "\n".join(lines[start : end + 1])
-            if "{" in text:  # skip pure declarations
+            if has_definition_body(text):  # skip pure declarations
                 out.append(CppFunction(path, full_name, start + 1, text))
         if kind in _CONTAINER_KINDS:
             _collect(symbol.get("children") or [], path, lines, f"{full_name}::", out)

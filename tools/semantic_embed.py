@@ -7,6 +7,7 @@ consumers:
 
   * find_bad_comments.py        - rank comment/prose units against query text
   * find_duplicate_functions.py - find near-duplicate decompiled functions
+  * file_similarity.py          - merge/split hints from per-file function vectors
 
 The heavy imports (mlx, tokenizers, huggingface_hub) are deferred until an
 ``Embedder`` is constructed, so the pure scoring helpers stay importable
