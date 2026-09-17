@@ -139,15 +139,20 @@ std::optional<std::filesystem::path> PilotFileSaveDirectory() {
   }
   const std::filesystem::path directory{raw};
   SDL_free(raw);
+  // The original keeps pilot saves in a "Pilots" folder beside Nova.rez
+  // (EVNova.ini [130] S3; Prefs_SetPilotsPathPrefix 0x004bd0c0). Mirror that
+  // layout under SDL's per-user writable preference directory instead of the
+  // install root.
+  const std::filesystem::path pilots_directory = directory / "Pilots";
   std::error_code ec;
-  std::filesystem::create_directories(directory, ec);
+  std::filesystem::create_directories(pilots_directory, ec);
   if (ec) {
     NovaLog::Error("pilot save: could not create '{}': {}",
-                   directory.string(),
+                   pilots_directory.string(),
                    ec.message());
     return std::nullopt;
   }
-  return directory;
+  return pilots_directory;
 }
 
 PilotFile PilotFile::Fresh() {
@@ -1192,18 +1197,17 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
   return repairs ? PilotLoadError::kRepairsApplied : PilotLoadError::kOk;
 }
 
-bool PilotFileSaveGame(const std::filesystem::path &nova_files_dir,
+bool PilotFileSaveGame(const std::filesystem::path &pilots_dir,
                        const GameState &state,
                        std::int16_t jump_dest_stellar) {
   // Ghidra 0x004c7db0 PilotFile_SaveGame -> 0x004c7dd0 PilotFile_SaveGameCore:
-  // builds <nova_files><pilot name>.plt, serializes the state blocks, writes
+  // builds <pilots_dir><pilot name>.plt, serializes the state blocks, writes
   // them, then records the last-pilot marker (PilotFile_RecordLastPilotPath
   // 0x004c7d40 -- not wired, see header).
   PilotFile record = PilotFileCollectFromState(state);
   const std::vector<std::byte> bytes =
       PilotFileSerialize(record, jump_dest_stellar);
-  const std::filesystem::path path =
-      nova_files_dir / (record.pilot_name + ".plt");
+  const std::filesystem::path path = pilots_dir / (record.pilot_name + ".plt");
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   if (!file) {
     NovaLog::Error("pilot save: could not open '{}' for writing",
@@ -1218,7 +1222,7 @@ bool PilotFileSaveGame(const std::filesystem::path &nova_files_dir,
   }
   NovaLog::Debug(
       "pilot save: wrote {} bytes to '{}'", bytes.size(), path.string());
-  return RecordLastPilotPath(nova_files_dir, path);
+  return RecordLastPilotPath(pilots_dir, path);
 }
 
 PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,

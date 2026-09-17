@@ -821,4 +821,16 @@ TEST_CASE("pilot save stores the 0-based stellar index, not a resource id") {
   std::filesystem::remove(dir / "Last Pilot");
 }
 
+TEST_CASE("pilot save directory mirrors the Nova Pilots subfolder",
+          "[pilot_file]") {
+  // Prefs_SetPilotsPathPrefix (0x004bd0c0) resolves EVNova.ini [130] S3
+  // ("Pilots") beside the install. The port mirrors that with a "Pilots"
+  // subdirectory under SDL's per-user writable preference path instead of
+  // writing pilots at its root.
+  const auto directory = game::PilotFileSaveDirectory();
+  REQUIRE(directory.has_value());
+  CHECK(directory->filename() == "Pilots");
+  CHECK(std::filesystem::is_directory(*directory));
+}
+
 } // namespace

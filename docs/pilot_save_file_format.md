@@ -1,7 +1,7 @@
 # Pilot save files (.plt): format and load/save flow
 
 Reverse-engineering notes on how EV Nova persists a pilot's game state to
-`<Nova Files>/<pilot name>.plt` and restores it. The SDL port writes the same
+`<Pilots>/<pilot name>.plt` and restores it. The SDL port writes the same
 files under `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`, alongside its
 preferences, and autoresumes exclusively from that directory. Derived from the Ghidra DB
 (saver `0x004c7db0`/`0x004c7dd0`, loader `0x004cb260`).
@@ -27,7 +27,8 @@ External references archived locally:
    `ResourceData_AccessByKey(0x63688a72, name)`; created/updated by
    `PilotData_InitializePlayerState`. **Open question:** where the registry
    entries are (re)populated from at startup so the new-game dialog can list
-   existing pilots — not yet found; may be a scan of `*.plt` in Nova Files.
+   existing pilots — not yet found; may be a scan of `*.plt` in the Pilots
+   directory.
    See `docs/char_resource_format.md` for the full `chär` template layout
    (start date, `DatePrefix`/`DateSuffix`, `IntroTextID`) and the gaps in this
    reimplementation.
@@ -162,11 +163,11 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 | Addr | Name | Role |
 |---|---|---|
 | 0x004c7db0 | `PilotFile_SaveGame` (was `Stellar_SetTravelDestination`) | Trampoline: guards on `DAT_00863f09`, then calls the saver with the current jump/travel destination as a 0-based `g_stellar_defs` index. This IS the pilot save entry point. Callers: `Menu_RunNewGameFlow` (initial save, index from `Stellar_FindNearestAvailableTravelStellar`), `Stellar_RunDockAndLaunchSequence` (`ship->ai_secondary_target_slot`), `Ship_HandlePlayerShipCore`. |
-| 0x004c7dd0 | `PilotFile_SaveGameCore` | Saver core: builds `<nova_files><pilot name>.plt`, allocates block1 (0xe952) + block2 (0x66fe), fills all fields, writes `[u32 sz][data]` twice + ship-name trailer, closes. Guards on `DAT_00863f0a`. |
+| 0x004c7dd0 | `PilotFile_SaveGameCore` | Saver core: builds `Pilots:<pilot name>.plt` (prefix from `Prefs_SetPilotsPathPrefix` 0x004bd0c0), allocates block1 (0xe952) + block2 (0x66fe), fills all fields, writes `[u32 sz][data]` twice + ship-name trailer, closes. Guards on `DAT_00863f0a`. |
 | 0x004cb260 | `PilotFile_LoadSave` | Loader (Open Pilot + startup auto-resume): reads `[u32 sz1][data1]` → restores PilotState; `[u32 sz2][data2]` → restores FleetState/world; then ship-name trailer. Derives the pilot name from the file path (after last ':', before '.'). Returns 0 ok; -0x2b missing/empty; -0x2a/-0x2d invalid block2; -0x2e repairs applied. |
 | 0x008725b0 | `PilotSave_DecodeBlock` | Leaves plaintext blocks whose first u16 is below 0x800 alone; otherwise tail-calls the symmetric XOR transform at 0x0046f960 with `(data, size, 0xb36a210f)`. Both save blocks in the archived retail pilots use this encoding. |
-| 0x004c7d40 | `PilotFile_RecordLastPilotPath` | Writes `<nova_files><string-table 0x82/4>` with the pilot file path (the *last-pilot marker file*, consumed by `PilotData_AutoresumeLastPilot` at startup; string id unresolved). Called at end of both save and load. |
-| 0x004ca120 | `PilotData_AutoresumeLastPilot` (was `GameScenario_LoadStoryData`) | Startup auto-resume: reads the last-pilot marker file (same string 0x82/4), probes the named .plt, and if present resets player state and calls `PilotFile_LoadSave`. Called from `NovaGameSession_Run` immediately before `NovaMainLoop_Run`. |
+| 0x004c7d40 | `PilotFile_RecordLastPilotPath` | Writes `Pilots:Last Pilot` (`g_pilots_path_prefix` + EVNova.ini [130] S4) with the pilot file path (the *last-pilot marker file*, consumed by `PilotData_AutoresumeLastPilot` at startup). Called at end of both save and load. |
+| 0x004ca120 | `PilotData_AutoresumeLastPilot` (was `GameScenario_LoadStoryData`) | Startup auto-resume: reads the last-pilot marker file (`Pilots:Last Pilot`), probes the named .plt, and if present resets player state and calls `PilotFile_LoadSave`. Called from `NovaGameSession_Run` immediately before `NovaMainLoop_Run`. |
 | 0x004ca2c0 | `PilotDebug_WritePilotLog` | Debug-only: dumps `pilotlog.txt` ("EV Nova pilot data dump") when licensed runtime. Called at end of load. |
 | 0x004cd030 | `PilotFile_ProbeExists` | Existence probe of a resolved .plt path (used for overwrite prompt / delete guard). |
 | 0x004cd040 | `PilotFile_Delete` | Deletes `<name>.plt` (permadeath path from `Ship_RunSpaceflightMode`). |
@@ -206,11 +207,11 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 1. **Startup auto-resume** — `NovaGameSession_Run` (boot) calls
    `PilotData_AutoresumeLastPilot` (0x004ca120) immediately before
    `NovaMainLoop_Run`. It reads the last-pilot marker file
-   (`<nova_files><string 0x82/4>`, written by `PilotFile_RecordLastPilotPath`),
+   (`Pilots:Last Pilot`, written by `PilotFile_RecordLastPilotPath`),
    and if that names an existing .plt, resets player state + reputation and
    calls `PilotFile_LoadSave`. So the game resumes the most recent pilot
-   automatically at boot. **This also confirms the `0x82/4` string is the
-   marker-file name shared by the record-writer and this reader.**
+   automatically at boot. **This also confirms the EVNova.ini [130] S4 marker
+   name is shared by the record-writer and this reader.**
 2. **Main-menu Open Pilot** — `NovaGameMode_DispatchAction` action 1
    (`Menu_OpenPilotFileDialog`), via a GetOpenFileNameA dialog.
 
@@ -267,8 +268,9 @@ dialog remains a `TODO(decomp)`.
   `PilotFileProbeExists` (0x004cd030), `PilotFileDelete` (0x004cd040),
   `PilotSave_DecodeBlock` transform (0x008725b0).
 - The last-pilot marker (0x004c7d40 / 0x004ca120) is reconstructed as the
-  NUL-terminated pilot path in `<Nova Files>/Last Pilot` (STR# 0x82 entry 4),
-  written after save/load and consumed once after staged startup loading.
+  NUL-terminated pilot path in `Pilots:Last Pilot` (`g_pilots_path_prefix` +
+  EVNova.ini [130] S4), written after save/load and consumed once after staged
+  startup loading.
   `PilotDebug_WritePilotLog` (0x004ca2c0) remains unported. The block2 përs
   alive/grudge flags at +0x1006/+0x1806 are decoded, applied with the
   original definition/AI gates, and saved. The block1 escort/fleet tables at
