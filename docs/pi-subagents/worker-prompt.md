@@ -8,8 +8,11 @@ than embedding large dumps. Repository rules are already loaded from `AGENTS.md`
 
 - Task: <one concrete behavior and completion condition>
 - Mode: <implement | map; include any user-requested approval gate>
+- Checkpoints: <only decisions worth reviewing before proceeding; omit for a
+  straightforward task that can go directly to implementation>
 - Workspace: <absolute checkout path>
 - Git baseline: <starting commit; existing changes to preserve, or clean>
+- Concurrent work: <other active writers and exact owned paths, if any>
 - Out of scope: <adjacent behaviors not included in this task>
 - Validation focus: <task-specific cases beyond the standard AGENTS.md checks>
 - Commit: <leave changes uncommitted, unless committing is already authorized>
@@ -42,8 +45,10 @@ types or names are misleading. Tests should exercise known behavior and importan
 edge cases, not merely confirm the chosen implementation.
 
 Use Git to review your changes against the supplied baseline, including staged
-and untracked files. This session has exclusive use of the checkout; preserve
-pre-existing changes and keep edits relevant to the task. Work in this session
+and untracked files. Preserve pre-existing changes and keep edits relevant to
+the task. Respect the assigned file ownership if other work is active; do not
+assume every new diff belongs to this session or restore from an older snapshot
+over another writer's changes. Work in this session
 without launching additional agents. For visual work, start with screenshots in
 `docs/reference/` and actually inspect the relevant images. Prefer existing
 references to operating the probe. If live validation is necessary, explain the
@@ -63,7 +68,12 @@ Mark unfinished checks as pending. If blocked, explain the evidence and smallest
 missing decision; continue useful in-scope work that does not depend on it.
 
 Keep progress messages brief: an important finding, a decision needing input, or
-the current milestone. Store long decompiles and diagnostics in files and read
+the current milestone. Surface changed assumptions and scope/dependency growth
+while they are actionable, rather than saving them for the final result. At an
+explicit proposal checkpoint, return the concrete proposal and wait for the
+follow-up. Otherwise continue within the assigned scope. Answer status requests
+with completed work, the current step, and any blocker; then resume.
+Store long decompiles and diagnostics in files and read
 targeted portions. Preserve complete build logs and exit statuses without piping
 builds through `head`/`tail`. Patch only affected tracker rows. Ensure newly
 documented Ghidra behavior, tracker claims, and actual code agree before wrapping up.

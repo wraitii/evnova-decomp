@@ -8,7 +8,7 @@ is a starting point for the next iteration.
 Use the [runbook](runbook.md) to operate a session and the
 [task template](worker-prompt.md) to brief it.
 
-## Brief, delegate, review, continue
+## Drive the work through checkpoints
 
 1. **Identify a feature.** Look around just enough to describe the desired
    behavior, likely entry point, and completion condition. Supply a few known
@@ -18,14 +18,40 @@ Use the [runbook](runbook.md) to operate a session and the
    sections, Ghidra evidence, dependencies, and tests. Give it room to make a
    coherent improvement. Use a mapping-only task when that is the desired output
    or the user explicitly requested a mapping/approval stage.
-3. **Review the result.** Read its short result, the relevant Git diff, and enough
+3. **Stay involved at useful boundaries.** Read compact status and milestone
+   updates while Pi works. Answer questions, challenge assumptions, narrow an
+   overlarge plan, and redirect investigation that is not helping the task.
+   Inspect a small draft diff when it can catch a structural mistake early.
+   Use `steer` for an active session; use `prompt` for an idle session. Do not
+   wait for the final summary when a decision or correction is already useful.
+4. **Review the result.** Read its short result, the relevant Git diff, and enough
    original evidence to assess important decisions. Check actual validation
    results. Read narrow transcript excerpts only to resolve a specific question;
    do not replay its entire investigation into the main context.
-4. **Use the next steps.** Combine Pi's suggested continuation with review findings
+5. **Use the next steps.** Combine Pi's suggested continuation with review findings
    to choose a meaningful follow-up. Reuse an idle session when there is room;
    otherwise send a concise brief to a fresh one. Corrections are a normal part
    of the workflow, not a reason to take all the work back into the main agent.
+
+The main agent drives the task: it owns scope, consequential decisions, review,
+and the completion claim. Pi owns the detailed investigation and execution.
+Preserving context means reading the evidence needed for decisions, not being
+absent until the worker finishes. Avoid both extremes: silently accepting a
+summary and replaying every tool call or doing the same investigation twice.
+
+Choose checkpoints for the task rather than imposing an approval ceremony on
+every edit. A file split benefits from a proposal before changes: function
+groups, resulting file sizes, helper ownership, and new cross-file dependencies.
+Review that boundary, then let Pi implement it. During implementation, a shared
+header growing into a grab bag is a reason to steer. At completion, check that
+the moved bodies, citations, tracker paths, and validation support the result.
+A small, well-defined fix can proceed directly to implementation and review.
+
+Ask Pi to report a changed assumption, a blocker, a decision needing input, or
+a completed milestone. If progress is unclear, request a short status before
+assigning more work. If an active session does not respond to steering, inspect
+its compact status and any running tool before deciding to abort. An abort can
+leave partial edits or unfinished validation; inspect them before resuming.
 
 ## Operating defaults
 
