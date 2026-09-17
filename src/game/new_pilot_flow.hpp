@@ -34,6 +34,7 @@ void NovaShip_ResetPlayerShipState(GameState &state);
 // rendering behind the modal windows (see ui_dialog.hpp).
 bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                           GameState &state,
+                          bool ship_animations = true,
                           const std::function<void()> &render_background = {});
 
 // Test seam for the Game_ResetNewGameState (0x004b4690) stellar Strength/hazard
