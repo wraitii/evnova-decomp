@@ -2,6 +2,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../nova_paths.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "new_pilot_flow.hpp"
@@ -17,9 +18,6 @@
 #include <fstream>
 #include <numbers>
 #include <random>
-
-#include <SDL3/SDL_filesystem.h>
-#include <SDL3/SDL_stdinc.h>
 
 namespace game {
 namespace {
@@ -132,27 +130,11 @@ void DecodePilotBlock(std::span<std::byte> block, bool force = false) {
 } // namespace
 
 std::optional<std::filesystem::path> PilotFileSaveDirectory() {
-  char *raw = SDL_GetPrefPath("Ambrosia Software", "EV Nova");
-  if (raw == nullptr) {
-    NovaLog::Error("pilot save: SDL_GetPrefPath failed: {}", SDL_GetError());
-    return std::nullopt;
-  }
-  const std::filesystem::path directory{raw};
-  SDL_free(raw);
   // The original keeps pilot saves in a "Pilots" folder beside Nova.rez
-  // (EVNova.ini [130] S3; Prefs_SetPilotsPathPrefix 0x004bd0c0). Mirror that
-  // layout under SDL's per-user writable preference directory instead of the
-  // install root.
-  const std::filesystem::path pilots_directory = directory / "Pilots";
-  std::error_code ec;
-  std::filesystem::create_directories(pilots_directory, ec);
-  if (ec) {
-    NovaLog::Error("pilot save: could not create '{}': {}",
-                   pilots_directory.string(),
-                   ec.message());
-    return std::nullopt;
-  }
-  return pilots_directory;
+  // (EVNova.ini [130] S3; Prefs_SetPilotsPathPrefix 0x004bd0c0). The port
+  // mirrors that layout under the per-user support folder instead of the
+  // (read-only) install root.
+  return NovaPaths::SupportSubdirectory("Pilots");
 }
 
 PilotFile PilotFile::Fresh() {

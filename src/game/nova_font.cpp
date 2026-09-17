@@ -1,6 +1,7 @@
 #include "nova_font.hpp"
 
 #include "../log.hpp"
+#include "../nova_paths.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -106,14 +107,6 @@ void AppendUtf8(std::string &out, std::uint32_t code_point) {
 constexpr const char *kBundledCharcoal = "Charcoal.ttf";
 constexpr const char *kBundledGeneva = "Geneva.ttf";
 
-// Candidate root directories (same convention as NovaResourceDb in
-// brgr_archive.cpp, which searches "EV Nova/" relative to the CWD and build
-// tree). The fonts sit one level up from "Nova Files".
-constexpr std::array<const char *, 2> kAssetRoots{
-    "EV Nova/",
-    "../../../EV Nova/",
-};
-
 // Well-known per-OS path candidates for the three non-bundled families. Each
 // family is tried in order; the first existing file wins. Empty paths are
 // skipped.
@@ -141,20 +134,16 @@ const char *GeorgiaFaceCandidates[] = {
     nullptr,
 };
 
-std::string JoinPath(std::string dir, const char *leaf) {
-  if (!dir.empty() && dir.back() == '/') {
-    dir.pop_back();
-  }
-  return dir + '/' + leaf;
-}
-
 std::string FindBundled(const char *leaf) {
-  for (const char *root : kAssetRoots) {
-    const std::string path = JoinPath(root, leaf);
-    std::error_code ec;
-    if (std::filesystem::exists(path, ec) && !ec) {
-      return path;
-    }
+  // The bundled fonts sit in the install root beside Nova.rez / Nova Files.
+  const auto install_root = NovaPaths::InstallRoot();
+  if (!install_root) {
+    return {};
+  }
+  const auto path = *install_root / leaf;
+  std::error_code ec;
+  if (std::filesystem::exists(path, ec) && !ec) {
+    return path.string();
   }
   return {};
 }

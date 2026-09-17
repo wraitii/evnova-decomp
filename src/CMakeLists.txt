@@ -68,6 +68,7 @@ add_library(evnova_runtime
     game/weapon.cpp
     log.cpp
     nova_app.cpp
+    nova_paths.cpp
     pict_image.cpp
     pixpat_image.cpp
     probe_server.cpp

@@ -2,6 +2,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../nova_paths.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_audio.hpp"
 #include "../sdl_music.hpp"
@@ -10,9 +11,7 @@
 #include "nova_font.hpp"
 #include "ui_dialog.hpp"
 
-#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_render.h>
-#include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
 #include <array>
@@ -80,14 +79,11 @@ ReadLe16(const std::array<std::uint8_t, kPrefsFileSize> &bytes,
 }
 
 [[nodiscard]] std::optional<std::filesystem::path> SystemPrefsPath() {
-  char *raw = SDL_GetPrefPath("Ambrosia Software", "EV Nova");
-  if (raw == nullptr) {
-    NovaLog::Error("preferences: SDL_GetPrefPath failed: {}", SDL_GetError());
+  const auto directory = NovaPaths::SupportDirectory();
+  if (!directory) {
     return std::nullopt;
   }
-  const std::filesystem::path directory{raw};
-  SDL_free(raw);
-  return directory / kPrefsFileName;
+  return *directory / kPrefsFileName;
 }
 
 // The preferences DLOG has no full-window PICT:

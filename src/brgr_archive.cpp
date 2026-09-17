@@ -1,5 +1,6 @@
 #include "brgr_archive.hpp"
 #include "log.hpp"
+#include "nova_paths.hpp"
 #include "util/byte_reader.hpp"
 
 #include <algorithm>
@@ -233,36 +234,26 @@ ParseArchive(const std::filesystem::path &path) {
 // path list, enumerates every "*.rez" with a case-insensitive extension match,
 // and opens each. The port works directly from std::filesystem:
 //
-//   load order   Nova.rez, then Nova Files/*.rez, then Nova Plug-ins/*.rez
+//   load order   Nova.rez, Nova Files/*.rez, bundled Nova Plug-ins/*.rez,
+//                then the support folder's Nova Plug-ins/*.rez (strongest)
 //   within dirs  case-insensitive filename order (deterministic on macOS and
 //                matching the Windows FindFirstFileA order the original saw)
 //   precedence   ResourceDb_RegisterArchive (0x004ff900) prepends each opened
 //                archive, so later archives shadow earlier ones. archives_ is
 //                kept in load order and every accessor walks it in reverse.
 //
-// The install root is the folder holding Nova.rez, "Nova Files" and
-// "Nova Plug-ins". The second candidate covers running from build/release/src;
-// tests run from the repository root (see tests/CMakeLists.txt).
-constexpr std::array<const char *, 2> kInstallRoots{
-    "EV Nova",
-    "../../../EV Nova",
-};
-
-[[nodiscard]] std::optional<std::filesystem::path> FindInstallRoot() {
-  for (const char *root : kInstallRoots) {
-    std::error_code ec;
-    const std::filesystem::path path{root};
-    if (!std::filesystem::is_directory(path, ec) || ec) {
-      continue;
-    }
-    // Require a plausible install so an unrelated empty "EV Nova" folder does
-    // not mask the real root deeper in the tree.
-    if (std::filesystem::exists(path / "Nova.rez", ec) ||
-        std::filesystem::is_directory(path / "Nova Files", ec)) {
-      return path;
-    }
+// The install root (shipped data) and the per-user support folder are resolved
+// by NovaPaths (nova_paths.hpp). Bundled plug-ins live in "Nova Plug-ins"; the
+// CE build falls back to the Mac-era bare "Plug-ins" name when the former is
+// absent. The support folder's own "Nova Plug-ins" loads on top of those.
+[[nodiscard]] std::filesystem::path
+BundledPluginDirectory(const std::filesystem::path &install_root) {
+  std::error_code ec;
+  const auto nova_plug_ins = install_root / "Nova Plug-ins";
+  if (std::filesystem::is_directory(nova_plug_ins, ec)) {
+    return nova_plug_ins;
   }
-  return std::nullopt;
+  return install_root / "Plug-ins";
 }
 
 [[nodiscard]] std::string AsciiLower(std::string value) {
@@ -419,11 +410,9 @@ private:
       return;
     }
     loaded_ = true;
-    const auto install_root = FindInstallRoot();
+    const auto install_root = NovaPaths::InstallRoot();
     if (!install_root) {
-      NovaLog::Todo("no EV Nova install folder was found relative to the "
-                    "working directory");
-      return;
+      return; // NovaPaths already logged the miss.
     }
     // NovaApp_Run (0x004d2a80) opens 9:Nova.rez before the folder scans, so it
     // is always the oldest (weakest) archive in the DB.
@@ -438,8 +427,21 @@ private:
     }
     const std::size_t files_count = archives_.size() - core_count;
     for (const auto &path :
-         EnumerateRezArchives(*install_root / "Nova Plug-ins")) {
+         EnumerateRezArchives(BundledPluginDirectory(*install_root))) {
       OpenArchive(path);
+    }
+    const std::size_t bundled_plugin_count =
+        archives_.size() - core_count - files_count;
+    // User-installed plug-ins live under the writable support folder and load
+    // last, so they shadow both the bundled plug-ins and the shipped data.
+    std::size_t support_plugin_count = 0;
+    if (const auto support_plugins =
+            NovaPaths::SupportSubdirectory("Nova Plug-ins")) {
+      for (const auto &path : EnumerateRezArchives(*support_plugins)) {
+        OpenArchive(path);
+      }
+      support_plugin_count =
+          archives_.size() - core_count - files_count - bundled_plugin_count;
     }
     if (archives_.empty()) {
       NovaLog::Todo("no Nova .rez archives were found under '{}'",
@@ -447,11 +449,12 @@ private:
       return;
     }
     NovaLog::Info("resource DB: {} archive(s) ({} core, {} Nova Files, {} "
-                  "plugin) under {}",
+                  "bundled plugin, {} support plugin) under {}",
                   archives_.size(),
                   core_count,
                   files_count,
-                  archives_.size() - core_count - files_count,
+                  bundled_plugin_count,
+                  support_plugin_count,
                   install_root->string());
   }
 
@@ -494,16 +497,23 @@ std::vector<std::pair<std::uint32_t, std::uint16_t>> NovaResource_AllKeys() {
 std::optional<std::filesystem::path>
 NovaResource_LocateFile(const std::string &file_name) {
   // Ui_PlayMovieFileModal (0x0049db00): a named on-disk asset is resolved in
-  // the Plug-ins folder before Nova Files, so a plugin can override shipped
-  // media (movies, music).
-  const auto install_root = FindInstallRoot();
-  if (install_root) {
-    for (const char *subdir : {"Nova Plug-ins", "Nova Files"}) {
-      const auto path = *install_root / subdir / file_name;
-      std::error_code ec;
-      if (std::filesystem::exists(path, ec) && !ec) {
-        return path;
-      }
+  // the Plug-ins folders before Nova Files, so a plugin can override shipped
+  // media (movies, music). Support plug-ins win over bundled ones, mirroring
+  // the archive precedence in EnsureLoaded.
+  std::vector<std::filesystem::path> directories;
+  if (const auto support_plugins =
+          NovaPaths::SupportSubdirectory("Nova Plug-ins")) {
+    directories.push_back(*support_plugins);
+  }
+  if (const auto install_root = NovaPaths::InstallRoot()) {
+    directories.push_back(BundledPluginDirectory(*install_root));
+    directories.push_back(*install_root / "Nova Files");
+  }
+  for (const auto &directory : directories) {
+    const auto path = directory / file_name;
+    std::error_code ec;
+    if (std::filesystem::exists(path, ec) && !ec) {
+      return path;
     }
   }
   NovaLog::Todo("Nova media file '{}' was not found", file_name);
