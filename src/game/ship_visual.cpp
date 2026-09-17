@@ -160,7 +160,8 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
                          static_cast<float>(extent);
   const float offset_y = static_cast<float>(RollRandom(state, extent * 2)) -
                          static_cast<float>(extent);
-  // The original discards one draw for long, early-band presentations.
+  // Preserve the original RNG sequence: long destruction animations consume
+  // one otherwise-unused draw when roll_bound is in its first three bands.
   if (roll_bound < 3 && cls->death_delay_frames > 0x3b) {
     (void)RollRandom(state, 2);
   }
@@ -555,7 +556,8 @@ void NovaShip_TickCloakFadeState(GameState &state,
       ship.cloak_transition_latch = 0;
     }
   }
-  // A wreck whose fade is still running clears through the lower threshold.
+  // Destroyed ships cannot remain partially cloaked; force the transition
+  // negative so the remaining fade returns to zero.
   if (ship.cloak_fade_progress > 0.0F && NovaAiShip_IsDestroyed(ship)) {
     ship.cloak_transition_latch = -2;
   }

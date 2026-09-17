@@ -166,8 +166,8 @@ namespace {
   mission.require_mask_hi = ReadBe32(bytes, 0x65a);
   mission.list_priority = ReadBeI16(bytes, 0x7a0);
   // NovaResources_LoadMisnResourceDefs (0x0043bbb0) canonicalizes these
-  // sentinels before the BBS eligibility pass: negative link filters mean
-  // "any source", while a negative return stellar falls back to stellar 0.
+  // before the BBS eligibility pass: link filters below -1 become the
+  // "any source" sentinel, and negative availability locations become 0.
   if (mission.link_system_filter < -1) {
     mission.link_system_filter = -1;
   }
@@ -965,8 +965,8 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   def.duration_days = ReadBeI16(bytes, 0x06);
   def.start_chance_percent = ReadBeI16(bytes, 0x08);
   def.activation_expression = ReadCStringBounded(bytes, 0x0a, 0xff);
-  // Loader initialises the runtime trio to the idle sentinels (+0x02/+0x0c =
-  // -1, +0x20d = 0) before adding a live record.
+  // New disasters start with no active stellar or remaining-day count and
+  // have not fired before (+0x02/+0x0c = -1, +0x20d = 0).
   def.active_stellar = -1;
   def.days_remaining = -1;
   def.started_once = false;

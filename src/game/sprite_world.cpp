@@ -177,7 +177,8 @@ int Sprite_AssignAsset(Sprite &sprite,
 // Ghidra 0x00474ab0 Sprite_CreateFromSpriteSheetResources.
 std::unique_ptr<SpriteAsset> SpriteAsset::LoadSpin(SDL_Renderer *renderer,
                                                    std::uint16_t spin_id) {
-  // sp\x9an descriptor -> named rl\x91D sheet of square tiles.
+  // The sp\x9an descriptor supplies the tile dimensions and names the rl\x91D
+  // image containing the square sprite frames.
   const auto spin_data = NovaResource_Load(kResourceTypeSprites, spin_id);
   if (!spin_data) {
     NovaLog::Warn("spin sprite: no sp.x9an descriptor resource {}", spin_id);
