@@ -46,6 +46,41 @@ class DedupePairsTest(unittest.TestCase):
         )
 
 
+class HasDefinitionBodyTest(unittest.TestCase):
+    def test_plain_definition(self) -> None:
+        self.assertTrue(cpp_symbols.has_definition_body("void f() { g(); }"))
+
+    def test_definition_with_brace_initializer_list(self) -> None:
+        text = "Foo::Foo() : values{1, 2, 3} {\n  run();\n}"
+        self.assertTrue(cpp_symbols.has_definition_body(text))
+
+    def test_multiline_signature_definition(self) -> None:
+        text = "[[nodiscard]] int Compute(\n    int a,\n    int b) {\n  return a + b;\n}"
+        self.assertTrue(cpp_symbols.has_definition_body(text))
+
+    def test_declaration_with_braced_default_argument(self) -> None:
+        text = (
+            "void Run(SdlPlatform &platform,\n"
+            "         const std::function<void()> &render_background = {});"
+        )
+        self.assertFalse(cpp_symbols.has_definition_body(text))
+
+    def test_declaration_with_trailing_qualifier(self) -> None:
+        self.assertFalse(cpp_symbols.has_definition_body("int value() const noexcept;"))
+
+    def test_declaration_with_defaulted_and_deleted_bodies(self) -> None:
+        self.assertFalse(cpp_symbols.has_definition_body("Foo() = default;"))
+        self.assertFalse(cpp_symbols.has_definition_body("Foo(const Foo &) = delete;"))
+        self.assertFalse(cpp_symbols.has_definition_body("virtual void f() = 0;"))
+
+    def test_braces_in_comments_do_not_count(self) -> None:
+        text = "// { not a body\nvoid f();"
+        self.assertFalse(cpp_symbols.has_definition_body(text))
+
+    def test_braces_in_default_string_argument_do_not_count(self) -> None:
+        self.assertFalse(cpp_symbols.has_definition_body('void f(const char *s = "{");'))
+
+
 class CppSymbolsTest(unittest.TestCase):
     def test_qualified_collect_skips_declarations(self) -> None:
         lines = [
@@ -79,6 +114,32 @@ class CppSymbolsTest(unittest.TestCase):
         out: list[cpp_symbols.CppFunction] = []
         cpp_symbols._collect(symbols, Path("x.hpp"), lines, "", out)
         self.assertEqual([f.name for f in out], ["Foo::bar"])
+        self.assertEqual(out[0].line, 3)
+
+    def test_collect_skips_declaration_with_braced_default(self) -> None:
+        lines = [
+            "void Run(int value,",
+            "         const Sink &sink = {});",
+            "void Run(int value,",
+            "         const Sink &sink) {",
+            "  handle(value, sink);",
+            "}",
+        ]
+        symbols = [
+            {
+                "name": "Run",
+                "kind": 12,
+                "range": {"start": {"line": 0}, "end": {"line": 1}},
+            },
+            {
+                "name": "Run",
+                "kind": 12,
+                "range": {"start": {"line": 2}, "end": {"line": 5}},
+            },
+        ]
+        out: list[cpp_symbols.CppFunction] = []
+        cpp_symbols._collect(symbols, Path("x.hpp"), lines, "", out)
+        self.assertEqual(len(out), 1)
         self.assertEqual(out[0].line, 3)
 
 
