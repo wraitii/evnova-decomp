@@ -806,7 +806,7 @@ TEST_CASE("tutorial 001 reveals Sol on accept and completes on landing") {
   // On-accept payload: bit 8339 set, Sol (system resource 130, def 2)
   // explored.
   CHECK(state.control.ControlBit(8339));
-  CHECK(state.control.explored_systems.test(2));
+  CHECK(state.scenario.systems[2].discovery_state > 0);
 
   // Tutorial 002's AvailBits (b9200 & !(b9201 | b9215)) must still fail
   // before completion.

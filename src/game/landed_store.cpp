@@ -8,6 +8,7 @@
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
+#include "travel.hpp"
 #include "weapon.hpp"
 
 #include <algorithm>
@@ -204,11 +205,7 @@ NovaLanded_ControlExpressionState(const GameState &state) {
           },
       .has_explored =
           [&state](std::int16_t id) {
-            return id >= 0 &&
-                   static_cast<std::size_t>(id) <
-                       state.control.explored_systems.size() &&
-                   state.control.explored_systems.test(
-                       static_cast<std::size_t>(id));
+            return NovaSystem_HasExploredToken(state, id);
           }};
 }
 

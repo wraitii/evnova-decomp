@@ -873,13 +873,22 @@ void NovaSystem_MarkSystemVisited(GameState &state,
   if (sys.discovery_state < level) {
     sys.discovery_state = level;
   }
-  // Mirror into the persistent explored bitset (the NCB `has_explored` test
-  // and the pilot-save discovery block read it). SystemDef.is_visible /
-  // has_explored_flag are load-time flags set by the scenario decoder and are
-  // NOT fog (see scenario_data.hpp); the fog record is discovery_state.
-  if (idx < state.control.explored_systems.size()) {
-    state.control.explored_systems.set(idx);
+}
+
+// Ghidra 0x00448be0 NovaExpression_EvaluateToken, 'E' token. The original tests
+// `0 < g_system_defs_ptr[resource_id - 0x80].discovery_state`; is_visible /
+// has_explored_flag are loader-set availability flags, not fog (see
+// scenario_data.hpp).
+bool NovaSystem_HasExploredToken(const GameState &state,
+                                 std::int16_t resource_id) {
+  if (resource_id < 0x80 || resource_id >= 0x880) {
+    return false;
   }
+  const std::size_t idx = static_cast<std::size_t>(resource_id - 0x80);
+  if (idx >= state.scenario.systems.size()) {
+    return false;
+  }
+  return state.scenario.systems[idx].discovery_state > 0;
 }
 
 void NovaSystem_FloodDiscoverAdjacentSystems(
@@ -1026,8 +1035,7 @@ void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
     return Outfit_PlayerHasOutfitForControlExpression(state, id);
   };
   expression.has_explored = [&state](std::int16_t id) {
-    return id >= 0 && id < 0x800 &&
-           state.control.explored_systems.test(static_cast<std::size_t>(id));
+    return NovaSystem_HasExploredToken(state, id);
   };
   for (Nebula &neb : state.scenario.nebulae) {
     // No rect (absent resource): skip, like the original's zero-filled slot.

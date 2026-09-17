@@ -125,7 +125,8 @@ struct ControlExpressionState {
   std::function<bool()> is_male;
   // Oxxx: true if the player owns (has in cargo) at least one outfit id.
   std::function<bool(std::int16_t outfit_id)> owns_outfit;
-  // Exxx: true if the player has explored system id.
+  // Exxx: true if the player has explored system resource id x (0x80 +
+  // zero-based index), matching the original 'E' token rebase.
   std::function<bool(std::int16_t system_id)> has_explored;
 };
 
@@ -1442,9 +1443,10 @@ struct System {
   // clears them during startup, before the loader runs).
   // EvaluateAvailability re-filters is_visible through the system's
   // Visibility NCB. The per-system FOG state is discovery_state below.
-  // Fog consumers read discovery_state / discovered_this_rebuild /
-  // control.explored_systems instead; treating these loader flags as fog
-  // state makes far-system stellars unavailable after a map reveal.
+  // Fog consumers read discovery_state / discovered_this_rebuild (and the
+  // 0x00448be0 'E' NCB test reads discovery_state directly); treating the
+  // loader flags as fog state makes far-system stellars unavailable after a
+  // map reveal.
   bool is_visible = false;
   bool has_explored_flag = false;
 
