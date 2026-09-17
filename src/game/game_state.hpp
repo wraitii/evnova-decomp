@@ -764,6 +764,9 @@ struct TravelState {
   // re-spawn the starfield once). Set at the fire moment (the system change),
   // cleared each tick.
   bool just_completed = false;
+  // Player-core BP travel-day count, charged after arrival fleet restoration
+  // (0x0044fef8). Zero outside an ordinary hyperspace arrival.
+  std::int16_t pending_payroll_periods = 0;
   // Brake to a near stop, then the stationary warp-up hold (whose tail is the
   // tunnel: the ship accelerates along the jump bearing while the Warp up cue
   // finishes), then the fire/arrival. The fire hurls the ship 1350 px past

@@ -3,6 +3,7 @@
 #include "../log.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
+#include "landed_store.hpp"
 #include "mission.hpp"
 #include "mission_trace.hpp"
 #include "outfit.hpp"
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <numbers>
 #include <random>
+#include <utility>
 
 namespace game {
 namespace {
@@ -314,13 +316,13 @@ void FireJump(GameState &state) {
   // the escort-adoption slice of System_RebuildInitialNpcAndMission-
   // Population (0x0041af90) runs at arrival (NovaSystem_RestorePlayerEscorts,
   // called from the spaceflight loop's just_completed block).
-  // TODO(decomp): mission-fleet attached ships (mission_fleet_slot != -1) are
-  // left to NovaSystem_RestoreMissionFleets, and the launch/landing escort
-  // lifecycle (deactivate + re-summon from the persistent fleet) is not
-  // reconstructed.
+  // Mission-fleet attached ships are handled by
+  // NovaSystem_RestoreMissionFleets.
   for (int day = 0; day < travel_days; ++day) {
     Mission_TickDailyWorldUpdate(state);
   }
+  // The original charges at 0x0044fef8, after rebuilding the arrival fleet.
+  t.pending_payroll_periods = static_cast<std::int16_t>(travel_days);
 
   // Arrive 1350 px from the destination system's center on the near side
   // along the jump heading's reverse (Math_BearingFromPointToPoint(cur,dest)
@@ -633,11 +635,22 @@ bool NovaTravel_CompleteRestrictedTravel(GameState &state,
   state.travel.hyperspace_mode = false;
   state.travel.engaging = false;
   state.travel.just_completed = true;
+  state.travel.pending_payroll_periods = 0;
   player.travel_transfer_mode = -1;
   player.ai_secondary_target_slot = -1;
   player.primary_target_ship_slot = -1;
   state.arrival_command_grace_frames = 15;
   return true;
+}
+
+// Ghidra 0x0044aa70 Ship_HandlePlayerShipCore, payroll tail at 0x0044fef8.
+void NovaTravel_ProcessArrivalPayroll(
+    GameState &state,
+    const std::function<void(const std::string &)> &show_text) {
+  const auto periods = std::exchange(state.travel.pending_payroll_periods, 0);
+  if (periods > 0) {
+    Player_ProcessEscortPayroll(state, periods, show_text);
+  }
 }
 
 bool NovaTravel_PlayerInJumpRange(const GameState &state) {

@@ -24,6 +24,7 @@
 #include "player_info_window.hpp"
 #include "radar_panel.hpp"
 #include "route_map.hpp"
+#include "selection_text_dialog.hpp"
 #include "ship_ai.hpp"
 #include "ship_comm_dialog.hpp"
 #include "ship_spawn.hpp"
@@ -834,6 +835,7 @@ void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
 // TODO(decomp) inside.
 void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
                                  SpaceflightView &view,
+                                 HudRenderer &hud,
                                  GameState &state,
                                  std::uint64_t now_ms) {
   // When a jump completed this frame, re-spawn the starfield for the new
@@ -911,6 +913,11 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   state.travel.selected_stellar_is_manual = false;
   // Arrival reset (0x0044f803): the landing/docking approach timer is wiped.
   state.travel.engage_timer = -1;
+  NovaTravel_ProcessArrivalPayroll(state, [&](const std::string &text) {
+    NovaUi_RunTextReaderDialog(platform, state, text, false, [&] {
+      view.DrawGameFrame(platform, state, hud);
+    });
+  });
 }
 
 // Loop-exit result of PlayerTick_LandCommandDispatch: the Spaceport modal can
@@ -1102,7 +1109,7 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
       return LandCommandResult::kContinue;
     }
     PlayerTick_JumpArrivalBlock(
-        platform, view, state, platform.gameplay_ticks_ms());
+        platform, view, hud, state, platform.gameplay_ticks_ms());
     return LandCommandResult::kBlockedFrame;
   }
   LandedContext ctx;
@@ -2048,7 +2055,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // targeting commands below must see the rebuilt population and
       // selections.
       if (!player_tick_consumed) {
-        PlayerTick_JumpArrivalBlock(platform, view, state, now_ms);
+        PlayerTick_JumpArrivalBlock(platform, view, hud, state, now_ms);
       }
 
       // Galaxy-map command ('m', edge-triggered): open the starmap modal over
