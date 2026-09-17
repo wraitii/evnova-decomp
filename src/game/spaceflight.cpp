@@ -574,7 +574,8 @@ void NovaFrame_TickSystems(GameState &state,
   Stub_Collisions(state);
 
   if (run_full_tick) {
-    Stub_DrawStatus(state);                                      // scope 0xc
+    Stub_DrawStatus(
+        state); // Full-tick proximity-scan roll (original scope 0xc).
     Stub_TickReactionsAndNpcSpawns(state, audio, elapsed_ticks); // scope 0xb
     // The first original scope-6 pass only refreshes target
     // flags/reacquisition; the full clean-room AI update belongs here, once,

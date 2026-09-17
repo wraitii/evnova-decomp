@@ -371,7 +371,6 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
     ship.timed_action_counter = 0;
   }
 
-  // Mission/misc slots cleared and derived flags.
   ship.pers_def_slot = -1;
   ship.mission_fleet_slot = -1;
   ship.ai_hostility_accumulator = 0;

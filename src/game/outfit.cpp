@@ -894,7 +894,6 @@ bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
   if (consumed) {
     return true;
   }
-  // Plain outfit: just add it to the owned inventory.
   (void)Outfit_AddInstalledOutfit(state, outfit_zero_based_id, 1);
   return false;
 }

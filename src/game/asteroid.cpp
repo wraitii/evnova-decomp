@@ -66,7 +66,6 @@ int NovaAsteroid_SpawnRecord(GameState &state,
                              float pos_x,
                              float pos_y,
                              std::int16_t type) {
-  // Find the first inactive pool slot; give up when all 16 are busy.
   std::size_t slot = AsteroidState::kPoolSize;
   for (std::size_t i = 0; i < AsteroidState::kPoolSize; ++i) {
     if (!state.asteroid_pool[i].active) {
@@ -83,28 +82,25 @@ int NovaAsteroid_SpawnRecord(GameState &state,
   m.wander_type = type;
   m.target_pos_x = pos_x;
   m.target_pos_y = pos_y;
-  // Scatter velocity: [-100,100) * 0.01 -> [-1,1) px/frame.
+  // Each velocity component is seeded in the range [-1.0, 1.0).
   m.target_vel_x = static_cast<float>(RandomBelow(state, 200) - 100) *
                    static_cast<float>(kAsteroidScale);
   m.target_vel_y = static_cast<float>(RandomBelow(state, 200) - 100) *
                    static_cast<float>(kAsteroidScale);
 
-  // Wander frame seed. The original draws this from the per-type sprite
-  // descriptor's frame count (g_asteroid_sprite_sets[type]->num_frames). Until
-  // the drift-sprite system lands (Step 3/4) the decoded AsteroidDef.mass field
-  // stands in; this is a known divergence (mass is 150..1200, not a frame
-  // count). TODO(decomp)
+  // TODO(decomp): the original seeds the animation frame from
+  // g_asteroid_sprite_sets[type]->num_frames; AsteroidDef.mass is a temporary
+  // stand-in and has a different range.
   const AsteroidDef *row =
       state.scenario.AsteroidType(static_cast<std::int16_t>(type + 0x80));
   const std::int32_t frame_seed = row != nullptr ? row->mass : 0;
   m.wander_frame_accumulator =
       static_cast<float>(RandomBelow(state, frame_seed));
   const float speed_mult = row != nullptr ? row->spin_rate : 1.0F;
-  // wander_speed = (rand(0x29)+0x50) * speed_mult * 0.01 -> 0.8..1.2 scaled.
   m.wander_speed = static_cast<float>(RandomBelow(state, 0x29) + 0x50) *
                    speed_mult * static_cast<float>(kAsteroidScale);
-  // Flip the wander direction sign half of the time (Ghidra _DAT_005752e0 =
-  // -1.0): the sprite drifts toward or away from its spawn.
+  // The original chooses either animation direction evenly; the unsigned rate
+  // is 0.8..1.2 times the asteroid type's spin-rate multiplier.
   if (RandomBelow(state, 2) == 0) {
     m.wander_speed = -m.wander_speed;
   }
@@ -231,7 +227,9 @@ int NovaAsteroid_Spawn(GameState &state, bool place_in_ring) {
 
   const AsteroidDef *row =
       state.scenario.AsteroidType(static_cast<std::int16_t>(dir + 0x80));
-  // Same frame-seed stand-in divergence as NovaAsteroid_SpawnRecord above.
+  // TODO(decomp): the original seeds the frame from
+  // g_asteroid_sprite_sets[dir]->num_frames; AsteroidDef.mass is a temporary
+  // deterministic stand-in with a different range.
   const std::int32_t frame_seed = row != nullptr ? row->mass : 0;
   m.wander_frame_accumulator =
       static_cast<float>(RandomBelow(state, frame_seed));

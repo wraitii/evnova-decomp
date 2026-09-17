@@ -786,14 +786,9 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   ship_ = std::move(*base);
   ship_frames_per_rotation_ = visual->frames_per_rotation;
   ship_sprite_behavior_flags_ = visual->sprite_behavior_flags;
-  // NOTE(decomp): the basic sprite sets all live in the SAME rl\x91D sheet
-  // (Bible BaseSetCount: "the graphics for all of a ship's basic sprite sets
-  // are stored in the same PICT/rleD/rle8 resource"). Verified: the shuttle
-  // sheet (rl\x91D 1000) holds 108 frames = 3 rows of 36 (level / bank left /
-  // bank right, Bible Flags 0x0001). The sh\x8an AltImageID pair (+0x0c) is a
-  // separate alternate sheet only used by the special Flags 0x0002 cycler
-  // (Ghidra ShipClass_LoadShipClassVisualAndLaunchData gates it on
-  // AltImageID > 0 && AltSetCount > 0) and is not appended to the base rows.
+  // Basic sprite sets are rows in one rl\x91D sheet (Bible BaseSetCount); the
+  // shuttle's 108 frames are three rows of 36. sh\x8an AltImageID names a
+  // separate sheet used only by the Flags 0x0002 cycler, not another base row.
   ship_row_count_ = std::max(1, ship_.frame_count / ship_frames_per_rotation_);
 
   // Engine-glow layer (GlowImageID). The original loads it into the per-class
@@ -1545,7 +1540,7 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
     const int cx = (st->pos_x - static_cast<int>(camera_x)) + vp.w / 2;
     const int cy = (st->pos_y - static_cast<int>(camera_y)) + vp.h / 2;
     if (cx < -160 || cx > vp.w + 160 || cy < -160 || cy > vp.h + 160) {
-      continue; // off-screen
+      continue;
     }
     // Pick an 8-bit tint: the stellar's government (decoded) if present,
     // else the system government.
@@ -1913,7 +1908,6 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
                  vp.h,
                  opts);
     } else if (glow_last_drawn_) {
-      // Won't draw this frame (intensity leaked below the gate / layer empty).
       NovaLog::Info("[glow] draw OFF has_glow={} intensity={:.2f} frames={}",
                     has_glow_,
                     state.player.engine_glow_intensity,
@@ -2038,7 +2032,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   const float cy = (wy - state.player.pos_y) + static_cast<float>(vp.h) / 2.0F;
 
   // Bracket frame base by target state (mirrors the reticle's sVar4 branch).
-  int frame_base = 4; // other
+  int frame_base = 4; // neutral or other target
   if (NovaAiShip_IsDisabled(state, target)) {
     frame_base = 0xc;
   } else {
