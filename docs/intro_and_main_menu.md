@@ -159,12 +159,17 @@ boot-phase splash above; it is a timed scripted sequence tied to a starting a ru
   in 1/60s ticks → ms = ticks*60). **Frame ids below 0x80 are rewritten to -1 with duration 0**
   and valid frames' durations clamp to `[0, 300]` (both in `IntroCinematic_SetupFrames`).
 - Input split (verified against the key-state polling in `Input_PumpAndTestCommand` →
-  `FUN_004f1900`, a *level* table, and the delay-free wait loop): Enter (0x1c) and Space (0x39)
-  advance only the current frame; the **primary command** (`g_player_key_bindings[0x17]`, default
-  0x01 = the mouse) latches `bVar9`, which skips **all** remaining frames and suppresses the
-  intro-text dialog. A separate in-rect click latch (`local_19`) advances one frame, but is only
-  reachable when a full press+release lands inside one poll interval, so in practice a click
-  skips the whole intro.
+  `FUN_004f1900`, a *level* table, and the delay-free wait loop): Enter (0x1c), Space (0x39)
+  and an in-rect left click advance only the current frame. The in-rect path is the original's
+  `local_19` latch, driven by the platform mouse-ready flag (`DAT_008701a0`, set on
+  button-down and held until button-up in `FUN_004d7330`) while the cursor sits inside the
+  render-owner rect — so a single click advances exactly one frame. The separate **skip
+  command** (`g_player_key_bindings[0x17]`, default `0x01` = PC scancode 1 = **Escape**, not the
+  mouse: `g_key_state_snapshot` is only fed by keyboard scancodes at the WM_KEYDOWN arm) latches
+  `bVar9`, which skips **all** remaining frames and suppresses the intro-text dialog. The
+  Ghidra `NovaPrefs_ResetKeyBindings` comment labels slot 0x17 "mouse-btn", but that is a
+  mislabel — VK_LBUTTON is 1 yet the value is compared against the scancode-keyed
+  `g_key_state_snapshot`, where 1 is Escape.
 - Each arted frame also plays **snd 0x7533** (loaded via `NovaSound_LoadDecodedById`
   0x004bc2a0; `NovaAudio_QueueCenteredSound` →
   `Audio_AllocateVoiceSlot` queues it centered). Stock Nova ships no snd 0x7533, so the intro
