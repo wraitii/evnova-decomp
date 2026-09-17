@@ -61,6 +61,10 @@ add_library(evnova_runtime
     game/ship_visual.cpp
     game/ship_spawn.cpp
     game/ship_ai.cpp
+    game/ship_ai_behaviors.cpp
+    game/ship_ai_controls.cpp
+    game/ship_ai_state.cpp
+    game/ship_ai_weapons.cpp
     game/starmap.cpp
     game/trade_center.cpp
     game/sprite_world.cpp
