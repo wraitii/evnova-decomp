@@ -1792,8 +1792,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         // Escort Commands overlay + order dispatch (PlayerTick_Auxiliary-
         // Commands escort blocks 0x00450ae7..0x00450f67, Ship_CommandPlayer-
         // EscortGroup 0x0045c880): the keys resolve through the binding table
-        // (slots 0x2a / 0x2b..0x2f / 0x30..0x33) against the live keyboard
-        // state, matching the original's command-active reads.
+        // (rebindable slots 0x2a / 0x30..0x33 plus fixed number-key codes
+        // 2..6 for group selection) against the live keyboard state.
         const auto &escort_key = prefs.bindings.cmd_to_key;
         const auto escort_held = [&platform](std::uint16_t code) {
           return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
@@ -1801,16 +1801,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         PlayerTick_EscortCommands(
             state,
             {.panel_toggle_held = escort_held(escort_key[0x2a]),
-             .select_group_held = {escort_held(escort_key[0x2b]),
-                                   escort_held(escort_key[0x2c]),
-                                   escort_held(escort_key[0x2d]),
-                                   escort_held(escort_key[0x2e]),
-                                   escort_held(escort_key[0x2f])},
+             // g_panel_suppressed_commands is the fixed physical-key list
+             // {1,2,3,4,5} in DIK numbering ({2,3,4,5,6}), not five entries
+             // in g_player_key_bindings. These category selectors therefore
+             // remain the number row even when ordinary commands are rebound.
+             .select_group_held =
+                 {escort_held(kEscortGroupSelectionKeyCodes[0]),
+                  escort_held(kEscortGroupSelectionKeyCodes[1]),
+                  escort_held(kEscortGroupSelectionKeyCodes[2]),
+                  escort_held(kEscortGroupSelectionKeyCodes[3]),
+                  escort_held(kEscortGroupSelectionKeyCodes[4])},
              .order_attack_held = escort_held(escort_key[0x30]),
              .order_defend_held = escort_held(escort_key[0x31]),
              .order_hold_held = escort_held(escort_key[0x32]),
              .order_formation_held = escort_held(escort_key[0x33]),
-             .arm_modifier_held = escort_held(0x38)},
+             .arm_modifier_held = escort_held(0x38) || escort_held(0x6f)},
             state.gameplay_now_ms * 60 / 1000);
       }
       // Face-target command (Ghidra 0x0044aa70 block 0x0044c0b1 -> 0x0044c18a,

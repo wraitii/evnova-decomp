@@ -105,6 +105,10 @@ private:
   // The screen-font cache used for the HUD readouts, kept for this renderer's
   // lifetime so font handles are decoded once (not reloaded every frame).
   std::unique_ptr<NovaFontCache> font_cache_;
+  // c\x9alr palette colours used by Ui_DrawTargetCategoryPanel: floating-map
+  // frame and escort selection highlight, packed as 0x00RRGGBB.
+  std::uint32_t escort_panel_frame_rgb_ = 0xffffff;
+  std::uint32_t escort_panel_highlight_rgb_ = 0x404040;
 
   // Ship-class portraits for the target panel (PICT 3000 + zero-based clone
   // source class id, per the Bible "PICT resource ID 3000 + shipID - 128",
@@ -133,12 +137,10 @@ private:
   // picks one from the shared NovaRandom stream and tiles it
   // (DrawContext_TileImageInRect 0x004bbdc0); the port keeps its own stream
   // (divergence).
-  // Divergence: the original searches the archive list newest-first
-  // (FUN_004ff900 prepends on open), so ppat 128 resolves to Nova Graphics 1's
-  // 8-bit pattern; the port's NovaResource_Load scans first-match, so ppat 128
-  // resolves to Nova.rez's 4-bit grayscale pattern. ppat 128 is the only
-  // duplicated resource key in the shipped archives, so this is confined to
-  // radar static.
+  // ppat 128 is duplicated across Nova.rez (4-bit) and Nova Graphics 1
+  // (8-bit); ResourceDb_RegisterArchive (0x004ff900) prepends each archive, so
+  // the newest-first lookup the port now uses resolves 128 to the Nova
+  // Graphics 1 pattern, matching the original.
   bool radar_static_loaded_ = false;
   std::mt19937 radar_rng_{1337};
   std::array<std::unique_ptr<SdlTexture>, 10> radar_static_{};
@@ -170,10 +172,7 @@ private:
   // bodies and local ships as colour/size-tiered blips, the blinking primary
   // target blip, the far-from-origin direction arrow, and sensor static while
   // a proximity scan is detected.
-  void DrawEscortCommandsPanel(SdlPlatform &platform,
-                               const GameState &state,
-                               const SDL_Color &value_color,
-                               const SDL_Color &label_color);
+  void DrawEscortCommandsPanel(SdlPlatform &platform, const GameState &state);
   void DrawRadarPanel(SdlPlatform &platform,
                       const GameState &state,
                       bool force_empty);

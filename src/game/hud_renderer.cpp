@@ -46,6 +46,19 @@ constexpr std::int16_t kDefaultInterfaceId = 0x80;
   return SDL_Color{r, g, b, SDL_ALPHA_OPAQUE};
 }
 
+[[nodiscard]] std::uint32_t PackRgb(const NovaRgbColor &color) {
+  return static_cast<std::uint32_t>(color.red) << 16U |
+         static_cast<std::uint32_t>(color.green) << 8U |
+         static_cast<std::uint32_t>(color.blue);
+}
+
+[[nodiscard]] SDL_Color PackedColor(std::uint32_t rgb) {
+  return SDL_Color{static_cast<std::uint8_t>((rgb >> 16U) & 0xffU),
+                   static_cast<std::uint8_t>((rgb >> 8U) & 0xffU),
+                   static_cast<std::uint8_t>(rgb & 0xffU),
+                   SDL_ALPHA_OPAQUE};
+}
+
 // Resolves the HUD interface id exactly as Ui_InstallGameplayInterfaceLayout
 // (0x004cda50): the player ship class's inherited government (attributes, then
 // combat), whose Government.interface_id (>= 0x80) selects the .ntf layout.
@@ -103,6 +116,10 @@ bool HudRenderer::Install(SdlPlatform &platform, const GameState &state) {
 
   interface_id_ = interface_id;
   layout_ = layout;
+  if (const auto style = NovaResource_LoadMainMenuStyle()) {
+    escort_panel_frame_rgb_ = PackRgb(style->floating_map);
+    escort_panel_highlight_rgb_ = PackRgb(style->escort_hilite);
+  }
 
   // Upload the cockpit PICT (the "status bar" strip) at its native size. A
   // failed decode leaves cockpit_ null and Draw() supplies flat bar frames.
@@ -498,7 +515,7 @@ void HudRenderer::Draw(SdlPlatform &platform,
   DrawWeaponPanel(platform, state, value_color, label_color);
   DrawTargetPanel(platform, state, value_color, label_color);
   DrawCargoPanel(platform, state, value_color, label_color);
-  DrawEscortCommandsPanel(platform, state, value_color, label_color);
+  DrawEscortCommandsPanel(platform, state);
   // Transient HUD overlay message (NovaHud_ShowOverlayMessage / the landing &
   // negotiation feedback text). Mirrors the original's shared message rect
   // (Ghidra 0x004AF020 FUN_004af020 tail runs inline here): left =
@@ -1268,34 +1285,41 @@ void RadarPolarOffset(float bearing_deg, float distance, float &x, float &y) {
 // 0x8c..0x8f); rows whose group has no attached ships draw dimmed, the
 // selected row draws highlighted, and present groups show their current
 // order word (0x91 Defend / 0x92 Attack / 0x93 Hold Position / 0x94 Return
-// to Hangar). The original draws this as an opaque boxed strip over the
-// gameplay view; the clean-room centers a boxed panel in the viewport.
+// to Hangar). SpriteWorld_InitializeFlightViewSpritePools creates its 160x120
+// frame and offsets the screen copy to (15,150). After the separate 480-tick
+// inactivity period, the viewport compositor fades the prepared frame over the
+// timer's final 32 ticks.
 void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
-                                          const GameState &state,
-                                          const SDL_Color &value_color,
-                                          const SDL_Color &label_color) {
+                                          const GameState &state) {
   const auto &escort = state.escort;
   if (escort.panel_timer <= 0) {
     return;
   }
   SDL_Renderer *renderer = platform.renderer();
   NovaFontCache &font = *font_cache_;
-  const float font_size = static_cast<float>(layout_.font_size);
-  constexpr int kRowHeight = 18;
-  constexpr int kRowBaseline = 12;
-  constexpr float kBoxWidth = 220.0F;
-  constexpr float kBoxHeight = 34.0F + 5.0F * kRowHeight;
+  constexpr float font_size = 9.0F;
+  constexpr float kRowHeight = 18.0F;
+  constexpr float kBoxWidth = 160.0F;
+  constexpr float kBoxHeight = 120.0F;
+  constexpr float left = 15.0F;
+  constexpr float top = 150.0F;
+  const auto faded =
+      [alpha = static_cast<std::uint8_t>(
+           std::clamp(escort.panel_timer, std::int16_t{0}, std::int16_t{32}) *
+           255 / 32)](SDL_Color color) {
+        color.a = alpha;
+        return color;
+      };
+  const SDL_Color kWhite = faded({255, 255, 255, SDL_ALPHA_OPAQUE});
+  const SDL_Color kDimmed = faded({64, 64, 64, SDL_ALPHA_OPAQUE});
 
-  const auto logical = platform.logical_playfield_size();
-  const float left = (logical.x - kBoxWidth) / 2.0F;
-  const float top = 40.0F;
-
-  // Opaque backing + frame (the original's FillRect16/FrameRect16 pair).
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
   const SDL_FRect box{left, top, kBoxWidth, kBoxHeight};
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, kWhite.a);
   SDL_RenderFillRect(renderer, &box);
+  const SDL_Color frame_color = faded(PackedColor(escort_panel_frame_rgb_));
   SDL_SetRenderDrawColor(
-      renderer, label_color.r, label_color.g, label_color.b, SDL_ALPHA_OPAQUE);
+      renderer, frame_color.r, frame_color.g, frame_color.b, frame_color.a);
   SDL_RenderRect(renderer, &box);
 
   if (auto title = NovaHud_LoadStringEntry(0x7d2, 0x85)) {
@@ -1304,10 +1328,10 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
                           NovaFontFamily::kGeneva,
                           font_size,
                           kNovaFontStyleRegular,
-                          value_color,
+                          kWhite,
                           left,
                           left + kBoxWidth,
-                          top + 8.0F,
+                          top + 15.0F,
                           *title);
   }
 
@@ -1323,55 +1347,61 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
       0x95, 0x91, 0x92, 0x94, 0x93};
 
   for (int row = 0; row < 5; ++row) {
-    const float row_top = top + 26.0F + row * kRowHeight;
+    const float row_offset = static_cast<float>(row) * kRowHeight;
+    const float baseline = top + 40.0F + row_offset;
     const auto &def = kRows[row];
     const bool selected = escort.selected_category == def.category;
     const bool present =
         def.category < 0 || Player_HasEscortGroup(state, def.category);
 
     if (selected) {
-      const SDL_FRect highlight{left + 3.0F,
-                                row_top,
-                                kBoxWidth - 6.0F,
-                                static_cast<float>(kRowHeight)};
-      SDL_SetRenderDrawColor(
-          renderer, label_color.r, label_color.g, label_color.b, 48);
+      const SDL_FRect highlight{
+          left + 4.0F, top + 30.0F + row_offset, kBoxWidth - 8.0F, 13.0F};
+      const SDL_Color highlight_color =
+          faded(PackedColor(escort_panel_highlight_rgb_));
+      SDL_SetRenderDrawColor(renderer,
+                             highlight_color.r,
+                             highlight_color.g,
+                             highlight_color.b,
+                             highlight_color.a);
       SDL_RenderFillRect(renderer, &highlight);
     }
 
-    const SDL_Color &color = present ? value_color : label_color;
-    const float baseline = row_top + static_cast<float>(kRowBaseline);
+    const SDL_Color &color = present ? kWhite : kDimmed;
     float pen = DrawPanelTextAt(platform,
                                 font,
                                 font_size,
-                                left + 10.0F,
+                                left + 7.0F,
                                 baseline,
-                                std::to_string(row + 1),
+                                std::to_string(row + 1) + ") ",
                                 color);
-    pen = DrawPanelTextAt(platform,
-                          font,
-                          font_size,
-                          pen + 4.0F,
-                          baseline,
-                          MiscString({def.name_entry, ""}),
-                          color);
+    DrawPanelTextAt(platform,
+                    font,
+                    font_size,
+                    pen,
+                    baseline,
+                    MiscString({def.name_entry, ""}),
+                    color);
     if (def.category >= 0 && present) {
       const std::int16_t order =
-          escort.group_command[static_cast<std::size_t>(def.category)];
+          state.target_category_command[static_cast<std::size_t>(def.category)];
       if (order > 0 && order <= 4) {
         if (auto word = NovaHud_LoadStringEntry(
                 0x7d2, kOrderEntries[static_cast<std::size_t>(order)])) {
+          const float order_width = font.TextWidth(
+              NovaFontFamily::kGeneva, font_size, kNovaFontStyleRegular, *word);
           DrawPanelTextAt(platform,
                           font,
                           font_size,
-                          pen + 10.0F,
+                          left + kBoxWidth - order_width - 7.0F,
                           baseline,
                           *word,
-                          label_color);
+                          kWhite);
         }
       }
     }
   }
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
 void HudRenderer::DrawRadarPanel(SdlPlatform &platform,

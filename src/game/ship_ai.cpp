@@ -5247,6 +5247,12 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
       }
       queue_attack_chatter();
     }
+    if (ship.primary_target_ship_slot == -1) {
+      ship.ai_state_code = 10;
+      ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
+    } else {
+      ship.ai_state_code = 4;
+    }
     break;
   }
   case 4: // cease fire

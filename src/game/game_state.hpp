@@ -669,22 +669,19 @@ struct PilotControlState {
   }
 };
 
-// In-flight Escort Commands overlay + group-order state (Ghidra g_target_
-// category_panel_timer, g_selected_target_category, g_target_category_
-// command[4], g_target_category_key_latch[5], g_escort_command_key_latch[4],
+// In-flight Escort Commands overlay/input state (Ghidra g_target_
+// category_panel_timer, g_selected_target_category,
+// g_target_category_key_latch[5], g_escort_command_key_latch[4],
 // DAT_007cab49 toggle latch, DAT_007cab56 attached-count cache,
 // g_target_category_key_time_ms). Reconstructed in escort_commands.cpp.
 struct EscortCommandState {
   static constexpr std::size_t kGroupCount = 4;
   // > 0 while the overlay is shown (Ui_ShowTargetCategoryPanel 0x0049e8d0
-  // writes 0x20; decayed only while the toggle key is held past 0x1e0 ticks,
-  // and cleared by the toggle or on system arrival).
+  // writes 0x20; after 0x1e0 ticks without an interaction it decays once per
+  // tick, and is cleared immediately by the toggle or on system arrival).
   std::int16_t panel_timer = 0;
   // Selected group: -1 = All Ships, 0..3 = class_category group.
   std::int16_t selected_category = -1;
-  // Current order per group: 0 Formation, 1 Defend, 2 Attack, 3 Return to
-  // Hangar, 4 Hold Position (STR# 0x7d2 0x91..0x95).
-  std::array<std::int16_t, kGroupCount> group_command{};
   std::array<std::uint8_t, 5> select_key_latch{};
   std::array<std::uint8_t, kGroupCount> order_key_latch{};
   std::uint8_t panel_toggle_latch = 0;
@@ -1479,9 +1476,8 @@ struct GameState {
   // Ghidra g_target_category_command (0x007354c4, short[4]): the escort-group
   // command the player issued per ship-class category. Initialized to -1 by
   // Ship_InitGameplayDataTables (0x004b0c20); the player-core command dispatch
-  // (0x00450d88, unported) writes the dialog selection and resets idle
-  // categories to 0. Until that slice is ported the table stays -1, which the
-  // escort AI supervisor (0x004048a0) coerces to command 0 (formation).
+  // (0x00450d88) and auto-cancel arms update this shared input/HUD/AI/save
+  // table. The escort supervisor coerces -1 to command 0 (formation).
   std::array<std::int16_t, 4> target_category_command{{-1, -1, -1, -1}};
 
   // --- PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240) ------
