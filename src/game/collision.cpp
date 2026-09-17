@@ -6,6 +6,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "impact_effects.hpp"
+#include "landed_store.hpp"
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "nova_math.hpp"
@@ -36,6 +37,13 @@ constexpr float kShieldDepletionFloorFraction =
 constexpr float kPlayerAggroPerHitScale = 1.75F;       // DAT_00575240
 constexpr float kPlayerAggroRetargetThreshold = 50.0F; // DAT_0057522c
 constexpr float kEscortDefenseRadiusPx = 320.0F;       // DAT_00575248
+// Shot_ResolveShipHitFromWeapon aggro extras.
+constexpr int kHeadingLockSuppressDeg = 0x2d; // < 45 deg to desired heading
+constexpr float kHeadingLockDistanceDivisor = 4.0F; // DAT_00575220: 4.0
+constexpr float kStellarRedirectDistanceDivisor = 2.0F;
+constexpr std::int16_t kStellarRedirectHostilityScale = 0x1e; // x30
+constexpr float kCloakFadeFull =
+    32.0F; // DAT_00575228 (also shield-bubble flash)
 constexpr float kProximitySpanFraction =
     0.333005F; // DAT_00575338: blast + ship half-span * ~1/3
 constexpr std::int16_t kShipClassInvalidSentinel = 0x2ff;
@@ -606,26 +614,6 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
   }
 }
 
-// Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0). Core ship-hit
-// resolution: impulse, shield-first/armor damage, disable-variant armor
-// clamping, and the aggro/hostility response.
-//
-// TODO(decomp) skipped: the pers-attacker damage multiplier block - DECODED
-// as Shareware Enforcer escalation: attackers with pers_def_slot 0x3ff
-// (enforcer-template ships) deal x3 (days 0-40) / x2 (41-60) / x5 (61-90)
-// armor+shield damage by the shareware trial day counter
-// g_shareware_day_counter (0x0059799e, FUN_004d4480); 91+ days means no
-// boost. Deliberately not reproduced in the clean-room (no shareware trial
-// state). check_fire_restriction_transition is 0 from the shot paths and 1
-// from the hull-destruction blast (Ship_UpdateVisualState 0x00428340), which
-// arms the disable-transition armor pin (33%/10% + 1 armor) and the mission
-// DISABLE bookkeeping (escort-goal quick-fail + goal_counter_c++, STR# 0x7d2
-// 0x11c) and the player "disabled" overlay (STR# 0x7d2 0x11f). Cloak re-entry
-// and a few mission/personality exclusions remain partial. The player-aggro
-// threshold, government shoot-penalty roll, player-squad policy,
-// escort-defense and squad-root gates are ported below. The stellar-target
-// redirect branch (damage x30 toward attackers closer than the stellar under
-// attack) is also deferred.
 } // namespace
 
 // Ghidra 0x0046f1e0 Frame_AddCombatRatingPoints.
@@ -646,6 +634,22 @@ void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
   state.player_combat_rating_points = static_cast<std::int32_t>(scaled);
 }
 
+// Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0). Core ship-hit
+// resolution: impulse, shield-first/armor damage, disable-variant armor
+// clamping, and the aggro/hostility response (eligibility chain, retaliation,
+// cloak re-entry/deactivation, and the defense-fleet stellar redirect).
+//
+// TODO(decomp(0x004192d0)) skipped: the pers-attacker damage multiplier block
+// - DECODED as Shareware Enforcer escalation: attackers with pers_def_slot
+// 0x3ff (enforcer-template ships) deal x3 (days 0-40) / x2 (41-60) / x5
+// (61-90) armor+shield damage by the shareware trial day counter
+// g_shareware_day_counter (0x0059799e, FUN_004d4480); 91+ days means no boost.
+// Deliberately not reproduced in the clean-room (no shareware trial state).
+// check_fire_restriction_transition is 0 from the shot paths and 1 from the
+// hull-destruction blast (Ship_UpdateVisualState 0x00428340), which arms the
+// disable-transition armor pin (33%/10% + 1 armor) and the mission DISABLE
+// bookkeeping (escort-goal quick-fail + goal_counter_c++, STR# 0x7d2 0x11c)
+// and the player "disabled" overlay (STR# 0x7d2 0x11f).
 void ResolveShipHitFromWeapon(GameState &state,
                               std::int16_t target_slot,
                               Ship &target,
@@ -723,14 +727,18 @@ void ResolveShipHitFromWeapon(GameState &state,
     }
     if (target.shield_points <= 0.0F) {
       ApplyArmorDamage(target, armor_damage, force_armor_only);
-      if (target_class != nullptr) {
-        const float shield_floor =
-            -kShieldDepletionFloorFraction *
-            static_cast<float>(
-                std::max(0, static_cast<int>(target_class->base_shield)));
-        if (target.shield_points < shield_floor) {
-          target.shield_points = shield_floor;
-        }
+      // The floor is -10% of the effective max shield (Ship_ComputeShipMax-
+      // ShieldPoints): the cached player snapshot includes outfit bonuses, the
+      // NPC fallback is the class base value.
+      const float max_shield =
+          target_slot == 0 && state.stat_cache_valid
+              ? state.cached_stats.max_shield_points
+              : static_cast<float>(std::max(
+                    0,
+                    target_class != nullptr ? target_class->base_shield : 0));
+      const float shield_floor = -kShieldDepletionFloorFraction * max_shield;
+      if (target.shield_points < shield_floor) {
+        target.shield_points = shield_floor;
       }
     }
   } else {
@@ -838,6 +846,15 @@ void ResolveShipHitFromWeapon(GameState &state,
               ? 0
               : (target.escort_origin_mark == 0 ? 2 : 1);
       target.squad_leader_ship_slot = -1;
+      if (target.ai_behavior_code == 6 && target_class != nullptr &&
+          target_class->default_ai_behavior < 3) {
+        // A surrendering behavior-6 escort converts to a cargo hauler and takes
+        // its share of the fleet cargo. The original also marks the inventory
+        // dirty and redraws the cargo panel; the transfer calls
+        // NovaOutfit_RecomputeOutfitDerivedState and the HUD redraws live.
+        Player_TransferCargoAndJunkToEscortByRatio(state,
+                                                   target.ship_instance_id);
+      }
       target.ai_behavior_code = target_class != nullptr
                                     ? target_class->default_ai_behavior
                                     : target.ai_behavior_code;
@@ -863,164 +880,445 @@ void ResolveShipHitFromWeapon(GameState &state,
   // plus the same flags-0x0004 mission quick-fail sweep.
   if (target_slot == 0 && IsShipDestroyed(target) && !was_destroyed) {
     state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
-    bool taunt_shown = false;
     if (allow_aggro_updates && ValidShipSlot(attacker_ship_slot) &&
         attacker_ship_slot > 0 &&
         state.ShipAt(static_cast<std::size_t>(attacker_ship_slot))
                 .pers_def_slot == 0x3ff) {
-      // STR# 30000 entries 8..13: Shareware Enforcer taunts.
+      // STR# 30000 entries 8..13: Shareware Enforcer taunts. Taking this branch
+      // latches the disable/destroy overlay so the generic 0x120 message is
+      // suppressed even if the taunt resource cannot be loaded.
       std::uniform_int_distribution<std::int32_t> taunt_roll{0, 5};
       if (auto text = NovaHud_LoadStringEntry(
               30000, static_cast<std::uint16_t>(8 + taunt_roll(state.rng)))) {
         NovaHud_ShowOverlayMessage(
             state, *text, /*duration_frames=*/std::uint64_t{5000});
-        taunt_shown = true;
       }
+      state.player_disable_message_shown = true;
     }
-    if (!taunt_shown && !state.player_disable_message_shown) {
+    if (!state.player_disable_message_shown) {
       if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x120)) {
         NovaHud_ShowOverlayMessage(
             state, *text, /*duration_frames=*/std::uint64_t{0xf0});
       }
     }
-    state.player_disable_message_shown = true;
     QuickFailPlayerDependencyMissions(state);
   }
 
   if (allow_aggro_updates && target.ai_behavior_code > 0 &&
       target.ai_station_hold_timer <= 0.0F) {
-    // The original starts the ordinary NPC-hit path eligible. Suppression
-    // bypasses validation gates that apply only to incidental fire, but an
-    // aimed shot still lets the victim retarget its NPC/escort attacker.
-    bool should_retarget = true;
-    if (attacker_valid && attacker_ship_slot == 0) {
-      // Targeted shots skip the accumulator gates. Incidental hits test the
-      // OLD accumulator; the increment from this hit is applied below.
-      should_retarget =
-          suppress_retarget_logic ||
-          target.player_aggro_accumulator >= kPlayerAggroRetargetThreshold;
-      if (!suppress_retarget_logic && target.faction_or_government_id >= 0 &&
-          target.faction_or_government_id < 0x100) {
-        if (const Government *government = state.scenario.GovernmentByIndex(
-                target.faction_or_government_id);
-            government != nullptr && government->shoot_penalty <= 0) {
-          std::uniform_int_distribution<std::int32_t> roll{0, 3};
-          if (roll(state.rng) != 0) {
+    const auto squared_distance = [](float x1, float y1, float x2, float y2) {
+      const float dx = x2 - x1;
+      const float dy = y2 - y1;
+      return dx * dx + dy * dy;
+    };
+
+    // Faithful port of the original `bVar4` eligibility computation. The
+    // low-byte flag `local_1c._0_1_` is set only for a self-hit where the
+    // target (or attacker) belongs to a defense fleet; that case takes the
+    // short secondary branch instead of the full government/squad logic.
+    bool should_retarget = false;
+    bool self_hit_defense_fleet = false;
+    if (attacker_ship_slot == target_slot) {
+      if (target.defense_fleet_home_stellar_id != -1 ||
+          (attacker_valid &&
+           state.ShipAt(static_cast<std::size_t>(attacker_ship_slot))
+                   .defense_fleet_home_stellar_id != -1)) {
+        should_retarget = true;
+        self_hit_defense_fleet = true;
+      }
+    } else {
+      should_retarget = true;
+    }
+
+    if (should_retarget && allow_aggro_updates && target.ai_behavior_code > 0 &&
+        target.ai_station_hold_timer <= 0.0F) {
+      should_retarget = false;
+      const Ship *attacker =
+          attacker_valid
+              ? &state.ShipAt(static_cast<std::size_t>(attacker_ship_slot))
+              : nullptr;
+      if (!self_hit_defense_fleet) {
+        // (A) different governments are potential enemies.
+        if (attacker != nullptr && target.faction_or_government_id !=
+                                       attacker->faction_or_government_id) {
+          should_retarget = true;
+        }
+        // (B) squad-leader relations.
+        const std::int16_t target_leader = target.squad_leader_ship_slot;
+        if (target_leader >= 0 &&
+            target_leader < static_cast<std::int16_t>(GameState::kMaxShips)) {
+          if (attacker_ship_slot != target_leader) {
+            should_retarget = true;
+          }
+          if (attacker != nullptr && attacker->squad_leader_ship_slot != -1 &&
+              target_leader != attacker->squad_leader_ship_slot) {
+            should_retarget = true;
+          }
+        }
+        // (C) government/crime-tolerance and same-government rules.
+        const std::int16_t target_nation = target.faction_or_government_id;
+        const Government *target_govt =
+            target_nation >= 0 && target_nation < 0x100
+                ? state.scenario.GovernmentByIndex(target_nation)
+                : nullptr;
+        if (target_nation < 0 || target_nation > 0xff) {
+          if (attacker != nullptr && (attacker_ship_slot == 0 ||
+                                      attacker->squad_leader_ship_slot == 0)) {
+            should_retarget = true;
+          }
+        } else {
+          const System *system = state.scenario.System(
+              static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+          const std::int16_t system_govt =
+              system != nullptr ? system->government_id : -1;
+          const std::int16_t reputation =
+              state.player.current_system_id >= 0 &&
+                      static_cast<std::size_t>(state.player.current_system_id) <
+                          state.system_reputation.size()
+                  ? state.system_reputation[static_cast<std::size_t>(
+                        state.player.current_system_id)]
+                  : 0;
+          const int crime_tol =
+              target_govt != nullptr ? target_govt->crime_tol : 0;
+          // A player (or direct escort) hit in a system where the player's
+          // reputation is already criminal does not start a fight.
+          if (system_govt >= 0 && system_govt < 0x100 &&
+              state.player.primary_target_ship_slot != target_slot &&
+              static_cast<int>(reputation) - 2 * crime_tol < 0 &&
+              (attacker_ship_slot == 0 ||
+               (attacker != nullptr &&
+                attacker->squad_leader_ship_slot == 0))) {
+            should_retarget = false;
+          }
+          if (attacker != nullptr &&
+              target_nation == attacker->faction_or_government_id) {
             should_retarget = false;
           }
         }
-      }
-    } else if (attacker_valid) {
-      const Ship &attacker =
-          state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
-      if (attacker_ship_slot == target_slot ||
-          (!suppress_retarget_logic && attacker_ship_slot > 0 &&
-           attacker.primary_target_ship_slot != target_slot) ||
-          SharesSquadRoot(state, target_slot, attacker_ship_slot)) {
-        should_retarget = false;
-      }
-    }
-
-    if (attacker_valid) {
-      const Ship &attacker =
-          state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
-      if (attacker.squad_leader_ship_slot == 0 &&
-          attacker.ai_behavior_code == 5 &&
-          target.primary_target_ship_slot == 0 &&
-          std::abs(target.pos_x - state.player.pos_x) <=
-              kEscortDefenseRadiusPx &&
-          std::abs(target.pos_y - state.player.pos_y) <=
-              kEscortDefenseRadiusPx) {
-        should_retarget = false;
-      }
-      if (!suppress_retarget_logic &&
-          NovaShip_IsInPlayerSquad(state, attacker) &&
-          attacker.faction_or_government_id >= 0 &&
-          NovaGovernment_GetPolicyFlag(
-              state.scenario, attacker.faction_or_government_id, 0)) {
-        should_retarget = false;
-      }
-    }
-
-    // Accumulation follows the eligibility test in the executable. This hit
-    // may cross 50, but cannot trigger the retarget until a later hit.
-    if (attacker_ship_slot == 0 && !suppress_retarget_logic) {
-      target.player_aggro_accumulator +=
-          static_cast<float>(player_aggro_delta) * kPlayerAggroPerHitScale;
-    }
-
-    if (should_retarget && target_slot != 0) {
-      // Hostility accumulates from positive damage only, and the escort
-      // leader (when it has no stellar assignment) shares the hit.
-      if (armor_damage > 0) {
-        target.ai_hostility_accumulator = static_cast<std::int16_t>(std::min(
-            0x7fff,
-            static_cast<int>(target.ai_hostility_accumulator) + armor_damage));
-      }
-      if (shield_damage > 0) {
-        target.ai_hostility_accumulator = static_cast<std::int16_t>(std::min(
-            0x7fff,
-            static_cast<int>(target.ai_hostility_accumulator) + shield_damage));
-      }
-      if (attacker_valid) {
-        target.primary_target_ship_slot = attacker_ship_slot;
-      }
-      target.player_aggro_accumulator = 0.0F;
-      const std::int16_t leader = target.squad_leader_ship_slot;
-      if (leader > 0 &&
-          leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
-          state.ShipAt(static_cast<std::size_t>(leader))
-                  .defense_fleet_home_stellar_id == -1) {
-        Ship &leader_ship = state.ShipAt(static_cast<std::size_t>(leader));
-        if (armor_damage > 0) {
-          leader_ship.ai_hostility_accumulator = static_cast<std::int16_t>(
-              std::min(0x7fff,
-                       static_cast<int>(leader_ship.ai_hostility_accumulator) +
-                           armor_damage));
+        // (D) target and attacker share the same defense-fleet leader.
+        if (attacker != nullptr && target_leader >= 0 &&
+            target_leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
+            target_leader == attacker->squad_leader_ship_slot &&
+            attacker->defense_fleet_home_stellar_id != -1) {
+          should_retarget = false;
         }
-        if (shield_damage > 0) {
-          leader_ship.ai_hostility_accumulator = static_cast<std::int16_t>(
-              std::min(0x7fff,
-                       static_cast<int>(leader_ship.ai_hostility_accumulator) +
-                           shield_damage));
+        // (E) the hit must carry positive damage. The original's -32000
+        // overflow guard is preserved verbatim.
+        if (should_retarget && shield_damage < 1 && armor_damage < 1 &&
+            shield_damage > -32000 && armor_damage > -32000) {
+          should_retarget = false;
         }
-        if (attacker_valid) {
-          leader_ship.primary_target_ship_slot = attacker_ship_slot;
-        }
-      }
-    }
-    // TODO(decomp) skipped: the stellar-target redirect branch, which awards
-    // 30x hostility and retargets ships that are attacking a stellar when the
-    // attacker is closer than half the squared distance to that stellar.
-
-    if (should_retarget && attacker_ship_slot == 0) {
-      // Ship_SetShipHostileToPlayer (0x00410700) deliberately changes the
-      // primary target/state only. squad_leader_ship_slot is the squad-leader
-      // attachment link (not a combat target); overwriting it here makes the
-      // next player shot look like friendly fire through
-      // Ship_ShipsShareSquadRoot.
-      NovaAi_SetShipHostileToPlayer(state, target);
-      if (target.ai_maneuver_timer_ms > kMaxManeuverTimerOnHit) {
-        target.ai_maneuver_timer_ms = kMaxManeuverTimerOnHit;
-      }
-      if (target_slot != 0 && target.defense_fleet_home_stellar_id == -1) {
-        if (target.pers_def_slot >= 0 &&
-            static_cast<std::size_t>(target.pers_def_slot) <
-                state.scenario.pers_defs.size()) {
-          PersDef &pers =
-              state.scenario
-                  .pers_defs[static_cast<std::size_t>(target.pers_def_slot)];
-          if ((static_cast<std::uint16_t>(pers.flags_primary) & 0x0001U) !=
-              0U) {
-            pers.grudge = true;
+        // (F) incidental-fire gates, all skipped when the shot was targeted.
+        if (!suppress_retarget_logic && should_retarget) {
+          if (attacker_ship_slot == 0) {
+            const std::int16_t player_target =
+                state.player.primary_target_ship_slot;
+            if (player_target >= 0 &&
+                player_target <
+                    static_cast<std::int16_t>(GameState::kMaxShips)) {
+              if (target_slot == player_target) {
+                should_retarget = true;
+              } else if (NovaAiShip_IsEnemyOfShip(
+                             state,
+                             target,
+                             state.ShipAt(
+                                 static_cast<std::size_t>(player_target)))) {
+                should_retarget = false;
+              }
+            }
+          } else if (attacker != nullptr &&
+                     target_slot != attacker->primary_target_ship_slot) {
+            should_retarget = false;
+          }
+          if (should_retarget && target_nation >= 0 && target_nation < 0x100 &&
+              attacker_ship_slot == 0 && target_govt != nullptr &&
+              target_govt->shoot_penalty < 1) {
+            std::uniform_int_distribution<std::int32_t> roll{0, 3};
+            if (roll(state.rng) != 0) {
+              should_retarget = false;
+            }
+          }
+          // Incidental player fire must cross the aggro threshold; a targeted
+          // shot (suppress_retarget_logic) bypasses this.
+          if (attacker_ship_slot == 0 &&
+              target.player_aggro_accumulator < kPlayerAggroRetargetThreshold) {
+            should_retarget = false;
           }
         }
-        ClearState9OrFToIdle(target);
-        target.primary_target_ship_slot = 0;
+        // (G) accumulate the player-aggro pressure after the eligibility test,
+        // so this hit cannot trigger its own retarget.
+        if (attacker_ship_slot == 0 && !suppress_retarget_logic) {
+          target.player_aggro_accumulator +=
+              static_cast<float>(player_aggro_delta) * kPlayerAggroPerHitScale;
+        }
+        // (H) escort-defense and same-leader exclusions.
+        if (attacker != nullptr) {
+          if (attacker->squad_leader_ship_slot == 0 &&
+              attacker->ai_behavior_code == 5 &&
+              target.primary_target_ship_slot == 0 &&
+              std::abs(target.pos_x - state.player.pos_x) <=
+                  kEscortDefenseRadiusPx &&
+              std::abs(target.pos_y - state.player.pos_y) <=
+                  kEscortDefenseRadiusPx) {
+            should_retarget = false;
+          }
+          if (target.squad_leader_ship_slot ==
+                  attacker->squad_leader_ship_slot &&
+              target.squad_leader_ship_slot != -1) {
+            should_retarget = false;
+          }
+        }
+        if (target.ai_station_hold_timer > 0.0F) {
+          should_retarget = false;
+        }
+        if (!suppress_retarget_logic && should_retarget &&
+            attacker != nullptr) {
+          if (attacker->faction_or_government_id >= 0 &&
+              attacker->faction_or_government_id < 0x100 &&
+              NovaShip_IsInPlayerSquad(state, *attacker) &&
+              NovaGovernment_GetPolicyFlag(
+                  state.scenario, attacker->faction_or_government_id, 0)) {
+            should_retarget = false;
+          }
+        }
+        // Grandparent-of-leader equality is a further friendly-fire exclusion.
+        std::int16_t target_grandparent = -1;
+        std::int16_t attacker_grandparent = -1;
+        if (target_leader >= 0 &&
+            target_leader < static_cast<std::int16_t>(GameState::kMaxShips)) {
+          const std::int16_t grandparent =
+              state.ShipAt(static_cast<std::size_t>(target_leader))
+                  .squad_leader_ship_slot;
+          if (grandparent >= 0 &&
+              grandparent < static_cast<std::int16_t>(GameState::kMaxShips)) {
+            target_grandparent = grandparent;
+          }
+        }
+        if (attacker_ship_slot > 0 &&
+            attacker_ship_slot <
+                static_cast<std::int16_t>(GameState::kMaxShips)) {
+          const std::int16_t leader =
+              state.ShipAt(static_cast<std::size_t>(attacker_ship_slot))
+                  .squad_leader_ship_slot;
+          if (leader > 0 &&
+              leader < static_cast<std::int16_t>(GameState::kMaxShips)) {
+            attacker_grandparent =
+                state.ShipAt(static_cast<std::size_t>(leader))
+                    .squad_leader_ship_slot;
+          }
+        }
+        if (target_grandparent == attacker_grandparent &&
+            target_grandparent >= 0 &&
+            target_grandparent <
+                static_cast<std::int16_t>(GameState::kMaxShips) &&
+            attacker_grandparent >= 0 &&
+            attacker_grandparent <
+                static_cast<std::int16_t>(GameState::kMaxShips)) {
+          should_retarget = false;
+        }
+      } else if (attacker == nullptr) {
+        should_retarget = true;
+      } else if (target.defense_fleet_home_stellar_id == -1 ||
+                 attacker->defense_fleet_home_stellar_id == -1) {
+        should_retarget = true;
+      } else {
+        should_retarget = false;
+      }
+      // Shared post-gates: target and leader hold timers, the 0x0F control
+      // mode, and the class-category mismatch.
+      if (target.ai_station_hold_timer > 0.0F) {
+        should_retarget = false;
+      } else {
+        const std::int16_t leader = target.squad_leader_ship_slot;
+        if (leader > 0 &&
+            leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
+            state.ShipAt(static_cast<std::size_t>(leader))
+                    .ai_station_hold_timer > 0.0F) {
+          should_retarget = false;
+        }
+      }
+      if (should_retarget && target.ship_instance_id > 0 &&
+          attacker_ship_slot > 0 && attacker_valid &&
+          target.ai_control_mode == 0x0F) {
+        should_retarget = false;
+      }
+      if (should_retarget && attacker != nullptr && target_class != nullptr) {
+        const ShipClass *attacker_class = state.scenario.Ship(
+            static_cast<std::int16_t>(attacker->ship_class_id + 0x80));
+        if (attacker_class != nullptr && attacker_class->class_category == 0 &&
+            target_class->class_category != 0 &&
+            target.primary_target_ship_slot != -1 &&
+            NovaAiShip_IsShipInAiState4(target)) {
+          should_retarget = false;
+        }
       }
     }
-    if (suppress_retarget_logic && attacker_ship_slot == 0) {
-      PropagateHostilityFromPlayerAttack(state, target, attacker_ship_slot);
+
+    if (should_retarget) {
+      // The original clears the accumulated player-aggro pressure whenever the
+      // victim decides to fight back.
+      target.player_aggro_accumulator = 0.0F;
+      // Cloak re-entry reset: a cloaked target that was not already locked on
+      // its attacker re-arms its burst weapons and starts the cloak.
+      if (target_class != nullptr &&
+          (target_class->flags_secondary & 0x4000U) != 0U && attacker_valid &&
+          NovaAiShip_CanMaintainCloakState(state, target) &&
+          !NovaAiShip_IsShipLockedOnAttackerInState4(
+              target,
+              state.ShipAt(static_cast<std::size_t>(attacker_ship_slot)))) {
+        NovaWeapon_InitShipWeaponBursts(state, target);
+        NovaAi_OnShipCloakStateEntered(state, target);
+      }
+
+      bool retargeted = false;
+      if (target.defense_fleet_home_stellar_id == -1) {
+        retargeted = true;
+        // Hold fire when the target is already lined up on a closer primary
+        // target than the attacker.
+        if (target.primary_target_ship_slot != -1 && attacker_valid &&
+            NovaAiShip_IsShipInAiState4(target) &&
+            ValidShipSlot(target.primary_target_ship_slot)) {
+          const int heading_deg = static_cast<int>(
+              std::lround(WrapDeg(target.heading * 57.29577951308232F)));
+          if (ShortestAngleDeltaDeg(heading_deg,
+                                    target.ai_desired_heading_deg) <
+              kHeadingLockSuppressDeg) {
+            const auto primary =
+                static_cast<std::size_t>(target.primary_target_ship_slot);
+            const Ship &attacker_ship =
+                state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
+            const float primary_distance_sq =
+                squared_distance(target.pos_x,
+                                 target.pos_y,
+                                 state.ShipAt(primary).pos_x,
+                                 state.ShipAt(primary).pos_y);
+            const float attacker_distance_sq =
+                squared_distance(target.pos_x,
+                                 target.pos_y,
+                                 attacker_ship.pos_x,
+                                 attacker_ship.pos_y);
+            if (primary_distance_sq / kHeadingLockDistanceDivisor <
+                attacker_distance_sq) {
+              retargeted = false;
+            }
+          }
+        }
+        if (retargeted && target.ship_instance_id != 0) {
+          if (armor_damage > 0) {
+            target.ai_hostility_accumulator = static_cast<std::int16_t>(
+                std::min(0x7fff,
+                         static_cast<int>(target.ai_hostility_accumulator) +
+                             armor_damage));
+          }
+          if (shield_damage > 0) {
+            target.ai_hostility_accumulator = static_cast<std::int16_t>(
+                std::min(0x7fff,
+                         static_cast<int>(target.ai_hostility_accumulator) +
+                             shield_damage));
+          }
+          if (attacker_valid) {
+            target.primary_target_ship_slot = attacker_ship_slot;
+          }
+          const std::int16_t leader = target.squad_leader_ship_slot;
+          if (leader > 0 &&
+              leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
+              state.ShipAt(static_cast<std::size_t>(leader))
+                      .defense_fleet_home_stellar_id == -1) {
+            Ship &leader_ship = state.ShipAt(static_cast<std::size_t>(leader));
+            if (armor_damage > 0) {
+              leader_ship.ai_hostility_accumulator =
+                  static_cast<std::int16_t>(std::min(
+                      0x7fff,
+                      static_cast<int>(leader_ship.ai_hostility_accumulator) +
+                          armor_damage));
+            }
+            if (shield_damage > 0) {
+              leader_ship.ai_hostility_accumulator =
+                  static_cast<std::int16_t>(std::min(
+                      0x7fff,
+                      static_cast<int>(leader_ship.ai_hostility_accumulator) +
+                          shield_damage));
+            }
+            if (attacker_valid) {
+              leader_ship.primary_target_ship_slot = attacker_ship_slot;
+            }
+          }
+        }
+      } else if (attacker_valid) {
+        // Defense-fleet ship away from home: an attacker closer than half the
+        // squared distance to the defended stellar is treated as the threat,
+        // with 30x hostility.
+        Stellar *home =
+            state.scenario.StellarMutable(target.defense_fleet_home_stellar_id);
+        if (home != nullptr) {
+          const Ship &attacker_ship =
+              state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
+          const float stellar_distance_sq =
+              squared_distance(target.pos_x,
+                               target.pos_y,
+                               static_cast<float>(home->pos_x),
+                               static_cast<float>(home->pos_y)) /
+              kStellarRedirectDistanceDivisor;
+          const float attacker_distance_sq =
+              squared_distance(target.pos_x,
+                               target.pos_y,
+                               attacker_ship.pos_x,
+                               attacker_ship.pos_y);
+          if (attacker_distance_sq < stellar_distance_sq) {
+            if (target.ship_instance_id != 0) {
+              if (armor_damage > 0) {
+                target.ai_hostility_accumulator =
+                    static_cast<std::int16_t>(std::min(
+                        0x7fff,
+                        static_cast<int>(target.ai_hostility_accumulator) +
+                            armor_damage * kStellarRedirectHostilityScale));
+              }
+              if (shield_damage > 0) {
+                target.ai_hostility_accumulator =
+                    static_cast<std::int16_t>(std::min(
+                        0x7fff,
+                        static_cast<int>(target.ai_hostility_accumulator) +
+                            shield_damage * kStellarRedirectHostilityScale));
+              }
+              target.primary_target_ship_slot = attacker_ship_slot;
+            }
+            retargeted = true;
+          }
+        }
+      }
+
+      if (retargeted) {
+        if (attacker_ship_slot == 0) {
+          // Ship_SetShipHostileToPlayer (0x00410700) deliberately changes the
+          // primary target/state only. squad_leader_ship_slot is the
+          // squad-leader attachment link (not a combat target).
+          NovaAi_SetShipHostileToPlayer(state, target);
+        }
+        if (target.ai_maneuver_timer_ms > kMaxManeuverTimerOnHit) {
+          target.ai_maneuver_timer_ms = kMaxManeuverTimerOnHit;
+        }
+        if (attacker_ship_slot == 0 &&
+            target.defense_fleet_home_stellar_id == -1) {
+          if (target.pers_def_slot >= 0 &&
+              static_cast<std::size_t>(target.pers_def_slot) <
+                  state.scenario.pers_defs.size()) {
+            PersDef &pers =
+                state.scenario
+                    .pers_defs[static_cast<std::size_t>(target.pers_def_slot)];
+            if ((static_cast<std::uint16_t>(pers.flags_primary) & 0x0001U) !=
+                0U) {
+              pers.grudge = true;
+            }
+          }
+          if (target.ship_instance_id != 0) {
+            ClearState9OrFToIdle(target);
+            target.primary_target_ship_slot = 0;
+          }
+        }
+      }
+      if (suppress_retarget_logic && attacker_ship_slot == 0) {
+        PropagateHostilityFromPlayerAttack(state, target, attacker_ship_slot);
+      }
     }
   }
 
@@ -1029,8 +1327,15 @@ void ResolveShipHitFromWeapon(GameState &state,
   if (!bypass_shields) {
     target.shield_bubble_flash_intensity = 32.0F;
   }
-  // TODO(decomp) skipped: cloak_damage_deactivate_latch handling
-  // (Ship_OnShipCloakStateCleared) and g_player_status_panel_dirty.
+  // g_player_status_panel_dirty is a render-cadence latch; the clean-room HUD
+  // redraws the status panels from live state each frame, so it has no port.
+  // A landed hit knocks the target out of cloak once the fade has completed (or
+  // a fade transition is already running).
+  if (allow_aggro_updates && target.cloak_damage_deactivate_latch == 1 &&
+      (target.cloak_fade_progress == kCloakFadeFull ||
+       target.cloak_transition_latch > 0)) {
+    NovaAi_OnShipCloakStateCleared(target);
+  }
 }
 
 // Ghidra Shot_ResolveShotCollisionHit (0x00437780). Applies the primary area

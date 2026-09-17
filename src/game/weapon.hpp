@@ -75,6 +75,13 @@ void NovaWeapon_ClearTransientCombatState(GameState &state);
 // the player ship and when the cached loadout already matches the class.
 void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
 
+// Ghidra Weapon_InitShipWeaponBursts (0x00413810). For every mounted bank whose
+// weapon has both a burst cycle and a reset cooldown, zeroes the burst counter
+// and preloads the bank cooldown to the reset cooldown. Called when a loadout
+// is (re)built and from the shot-hit cloak re-entry reset. No-op for the player
+// ship (no NPC bank state).
+void NovaWeapon_InitShipWeaponBursts(GameState &state, Ship &ship);
+
 // Ghidra 0x004138a0 Weapon_ClassifyShipWeaponAmmoReadiness. Classifies the
 // NPC ship's armed weapon banks into three readiness buckets:
 //   2 = no armed banks, or every armed bank is depleted;

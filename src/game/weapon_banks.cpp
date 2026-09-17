@@ -27,8 +27,29 @@ using weapon_detail::kBankStride;
 using weapon_detail::RoundRangeEnvelope;
 using weapon_detail::WeaponAt;
 
-// Ghidra 0x00413810 Weapon_InitShipWeaponBursts (burst-counter preload slice)
-// plus the ship-class stock-loadout copy shared by the NPC spawn/AI paths
+// Ghidra 0x00413810 Weapon_InitShipWeaponBursts. For every mounted bank whose
+// weapon has both a burst cycle and a reset cooldown, zeroes the burst counter
+// and preloads the bank cooldown to the reset cooldown. The original tests the
+// ship class's default_weapon_ammo table; the clean-room uses the live mounted
+// count, which EnsureNpcWeaponBanks seeds from the same class data.
+void NovaWeapon_InitShipWeaponBursts(GameState &state, Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return; // player hull carries no NPC bank state
+  }
+  for (std::size_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *w =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (w != nullptr && ship.npc_weapon_count_by_class[bank] > 0 &&
+        w->burst_cycle_ticks > 0 && w->burst_reset_cooldown > 0) {
+      ship.npc_weapon_bank_burst_counter[bank] = 0;
+      ship.npc_weapon_bank_cooldown[bank] =
+          static_cast<float>(w->burst_reset_cooldown);
+    }
+  }
+}
+
+// Ghidra Weapon_InitShipWeaponBanksFromShipClass-side initializer plus the
+// ship-class stock-loadout copy shared by the NPC spawn/AI paths
 // (ship_ai.cpp EnsureNpcWeaponBanks). The original's per-class default
 // weapon_ammo/secondary 0x100-entry tables collapse here to the flat
 // bank = weapon id - 0x80 model used by the fire path.
@@ -53,19 +74,7 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
       // -1 is the original unlimited-secondary sentinel.
       ship.npc_weapon_secondary_count_by_class[bank] = stock.ammo_load;
     }
-    // Weapon_InitShipWeaponBursts (0x00413810): a configured burst weapon
-    // (burst_cycle AND burst_reset_cooldown) starts with a zeroed burst
-    // counter and its cooldown preloaded to the reset cooldown.
-    for (std::size_t bank = 0; bank < 0x100; ++bank) {
-      const Weapon *w =
-          state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
-      if (w != nullptr && ship.npc_weapon_count_by_class[bank] > 0 &&
-          w->burst_cycle_ticks > 0 && w->burst_reset_cooldown > 0) {
-        ship.npc_weapon_bank_burst_counter[bank] = 0;
-        ship.npc_weapon_bank_cooldown[bank] =
-            static_cast<float>(w->burst_reset_cooldown);
-      }
-    }
+    NovaWeapon_InitShipWeaponBursts(state, ship);
   }
   ship.npc_weapon_banks_ship_class = ship.ship_class_id;
 }
