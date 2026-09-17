@@ -92,7 +92,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00415B00	Ship_IsShipDockedWithTargetInControlMode0x0F	src/game/spaceflight.cpp	100%	Inline in PlayerTick_SelfDestructCommand detonation sweep: control mode 0xf + target-is-player (primary/secondary) + |dx|,|dy| <= 16.0 (DAT_00575090) => armor -1.
 0x00415B80	Stellar_CanShipInitiateJumpSequence	src/game/travel.cpp	95%	jump fuel gating via NovaTravel_CanShipInitiateJumpSequence (ship-aware
 0x00415C10	Weapon_HasAnyFireableNonSecondaryWeapon	src/game/weapon_banks.cpp	100%	NovaWeapon_HasAnyFireableNonSecondaryWeapon: mounted ammo > 0 + MassDmg > 0 + Flags2 0x1000 clear + straight-flight mode set (-1/0/3/4/6/7/8) + Weapon_CanFireWeaponBank gate.
-0x00415CB0	Boarding_ResetShipAndAttackersAfterBoarding	src/game/boarding_plunder.cpp	90%	Ports the attacker-clearing loop and the captured hull's combat/mission reset. TODO(decomp): voice_type_mode roll + government voice override.
+0x00415CB0	Boarding_ResetShipAndAttackersAfterBoarding	src/game/boarding_plunder.cpp	100%	Faithful: attacker-clearing loop, captured hull's combat/mission reset, voice_type_mode random roll and inherent_attributes_govt override.
 0x00415DC0	Ship_ClearOtherShipsTargetingShip		0%	
 0x00415E60	Ship_IsShipInAiState0x10	src/game/collision.cpp	100%	Projectile eligibility rejects a scripted-state owner; the beam queue rejects state-0x10 non-player targets before resolving its direct impact.
 0x00415E80	Ship_IsShipInAiState0x0D	src/game/collision.cpp	100%	Inline in ResolveShipHitFromWeapon: state-0x0D capture/boarding attacker or squad leader forces nonlethal armor handling.
