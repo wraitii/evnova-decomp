@@ -54,6 +54,8 @@ add_library(evnova_runtime
     game/rank.cpp
     game/route_map.cpp
     game/spaceflight.cpp
+    game/spaceflight_movement.cpp
+    game/spaceflight_player_state.cpp
     game/spaceflight_view.cpp
     game/scenario_data.cpp
     game/services_buttons.cpp
