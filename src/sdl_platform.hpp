@@ -27,10 +27,10 @@ enum class TextKey {
   escape,
   backspace,
   // Left mouse button-press. Delivered through the same raw channel as the
-  // keyboard so modal loops (e.g. the intro cinematic) that only read
-  // PollTextEvent can also honor the game's primary-click command, mirroring
-  // Ghidra IntroCinematic_Run polling _DAT_00591514. The menu's
-  // PollCommandEvent channel reports the same press as 'm'.
+  // keyboard so modal loops that only read PollTextEvent can also act on a
+  // click (the intro cinematic's in-rect local_19 frame advance, dialogs'
+  // OK/default handling). The menu's PollCommandEvent channel reports the same
+  // press as 'm'.
   primary,
 };
 
@@ -370,7 +370,13 @@ private:
   // Pushes fresh window geometry to the probe, then services the harness.
   void PumpProbe();
 
+  // DIVERGENCE(original): temporary test hook that maps the original x2 mode
+  // toggle key (Caps Lock by default; EVNova.ini key_x2mode, default 0x14 =
+  // VK_CAPITAL) onto the probe speed multiplier. See the definition.
+  void ServiceX2SpeedDivergence();
+
   bool accelerated_ = false;
+  bool x2_speed_divergence_active_ = false;
   std::uint32_t speed_multiplier_ = 1;
   std::uint64_t gameplay_clock_anchor_ms_ = 0;
   std::uint64_t wall_clock_anchor_ms_ = 0;
