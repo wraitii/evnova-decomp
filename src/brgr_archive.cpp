@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +11,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -64,7 +66,8 @@ namespace {
 
 // ---------------------------------------------------------------------------
 // BRGR container + resource.map parsing (clean-room reconstruction of
-// ResourceArchive_OpenRez / BrgrResource_CloneAndRelocateTable).
+// Ghidra 0x004ce4d0 ResourceArchive_OpenRez /
+// BrgrResource_CloneAndRelocateTable).
 //
 // Container layout (little-endian):
 //   [0x00] 'BRGR'
@@ -248,66 +251,82 @@ ParseArchive(const std::filesystem::path &path) {
   return std::nullopt;
 }
 
-// Archives needed by the recompiled path. Graphics 3 holds the sp\x95n,
-// c\x9alr and rl\x91D menu assets; Nova Titles 1 holds the splash PICTs
-// (0x1fa4 loading, 0x83 startup); Nova Sounds holds the "snd " audio family
-// used for menu feedback and the intro/travel/loading sounds (ids 600..603).
+// ---------------------------------------------------------------------------
+// Archive discovery (Resource_ValidateInstallFolders 0x004bd160,
+// ResourceArchive_OpenAllRezInNovaFiles 0x00872640,
+// ResourceArchive_OpenAllRezInNovaPlugins 0x0087265d,
+// ResourceArchive_OpenNamedSearchingPaths 0x0046f500).
 //
-// The scenario data archives hold the runtime resource tables that
-// NovaData_LoadScenarioResourceTables (0x004bd3c0) rebuilds: ships (sh\x95p)
-// and the default character (ch\x9ar) live in Nova Data 1; stellars (sp\x9ab)
-// and systems (s\xd8st) in Nova Data 2; descriptions (d\x91sc) span several;
-// outfits (o\x9ftf) and weapons (w\x91ap) are in Nova Data 4. The remaining
-// Data archives are loaded so plugins/overrides resolve the same way the
-// original scans them; more are added as graphics/ships subsystems as they are
-// reconstructed.
+// The original resolves "9:Nova Files" / "Nova Plug-Ins" through a Mac-style
+// path list, enumerates every "*.rez" with a case-insensitive extension match,
+// and opens each. The port works directly from std::filesystem:
 //
-// The ship ship-animation descriptor (sh\x8an) and its 16-bit sprite sheets
-// (rl\x91D) live in the Nova Ships archives; they are needed so the flight
-// rendering path can draw a ship by heading (ShipClass_LoadShipClassVisual-
-// AndLaunchData reads sh\x8an BaseImageID -> rl\x91D).
-//  0x1F8 space color). The ship ship-animation descriptor (sh\x8an) and its
-//  16-bit sprite sheets (rl\x91D) live in the Nova Ships archives; the stellar
-//  (planet) spin sprites (sp\x9an ids 1000-1255 + their rl\x91D sheets) are in
-//  Nova Graphics 2; both are needed for the flight rendering path.
-constexpr std::array kArchiveFileNames{
-    // The core UI archive lives directly in EV Nova/ (not under Nova Files/):
-    // it carries the DLOG/DITL/MENU/ALRT/CNTL dialog-window resources that the
-    // engine's dialog system (UiWindow_CreateFromDialogResource -> DLOG
-    // 0x444c4f47
-    // / DITL 0x4449544c) builds every in-game window from, plus a handful of
-    // PICT/STR#. Without it the .rez set is incomplete and dialog data is
-    // missing (this is what the landed/services window rects come from).
-    "Nova.rez",
-    "Nova Graphics 3.rez",
-    "Nova Titles 1.rez",
-    "Nova Titles 2.rez",
-    "Nova Titles 3.rez",
-    "Nova Titles 4.rez",
-    "Nova Sounds.rez",
-    "Nova Ships 1.rez",
-    "Nova Ships 2.rez",
-    "Nova Ships 3.rez",
-    "Nova Ships 4.rez",
-    "Nova Ships 5.rez",
-    "Nova Ships 6.rez",
-    "Nova Ships 7.rez",
-    "Nova Graphics 1.rez",
-    "Nova Graphics 2.rez",
-    "Nova Data 1.rez",
-    "Nova Data 2.rez",
-    "Nova Data 3.rez",
-    "Nova Data 4.rez",
-    "Nova Data 5.rez",
-    "Nova Data 6.rez",
+//   load order   Nova.rez, then Nova Files/*.rez, then Nova Plug-ins/*.rez
+//   within dirs  case-insensitive filename order (deterministic on macOS and
+//                matching the Windows FindFirstFileA order the original saw)
+//   precedence   ResourceDb_RegisterArchive (0x004ff900) prepends each opened
+//                archive, so later archives shadow earlier ones. archives_ is
+//                kept in load order and every accessor walks it in reverse.
+//
+// The install root is the folder holding Nova.rez, "Nova Files" and
+// "Nova Plug-ins". The second candidate covers running from build/release/src;
+// tests run from the repository root (see tests/CMakeLists.txt).
+constexpr std::array<const char *, 2> kInstallRoots{
+    "EV Nova",
+    "../../../EV Nova",
 };
-constexpr std::array kNovaFilesRoots{
-    // Nova.rez sits one level above the Nova Files/ subfolder, so search both.
-    "EV Nova/",
-    "EV Nova/Nova Files/",
-    "../../../EV Nova/",
-    "../../../EV Nova/Nova Files/",
-};
+
+[[nodiscard]] std::optional<std::filesystem::path> FindInstallRoot() {
+  for (const char *root : kInstallRoots) {
+    std::error_code ec;
+    const std::filesystem::path path{root};
+    if (!std::filesystem::is_directory(path, ec) || ec) {
+      continue;
+    }
+    // Require a plausible install so an unrelated empty "EV Nova" folder does
+    // not mask the real root deeper in the tree.
+    if (std::filesystem::exists(path / "Nova.rez", ec) ||
+        std::filesystem::is_directory(path / "Nova Files", ec)) {
+      return path;
+    }
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::string AsciiLower(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](char c) {
+    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  });
+  return value;
+}
+
+// FileEnumerator_NextMatchingExt (0x004f1d70): non-recursive scan keeping only
+// regular files whose extension is ".rez", compared case-insensitively.
+[[nodiscard]] std::vector<std::filesystem::path>
+EnumerateRezArchives(const std::filesystem::path &directory) {
+  std::vector<std::filesystem::path> archives;
+  std::error_code ec;
+  std::filesystem::directory_iterator it{directory, ec};
+  if (ec) {
+    return archives;
+  }
+  for (const auto &entry : it) {
+    std::error_code type_ec;
+    if (!entry.is_regular_file(type_ec) || type_ec ||
+        AsciiLower(entry.path().extension().string()) != ".rez") {
+      continue;
+    }
+    archives.push_back(entry.path());
+  }
+  std::sort(
+      archives.begin(),
+      archives.end(),
+      [](const std::filesystem::path &lhs, const std::filesystem::path &rhs) {
+        return AsciiLower(lhs.filename().string()) <
+               AsciiLower(rhs.filename().string());
+      });
+  return archives;
+}
 
 class NovaResourceDb {
 public:
@@ -319,13 +338,17 @@ public:
   [[nodiscard]] std::optional<std::vector<std::byte>>
   Load(std::uint32_t type_code, std::uint16_t resource_id) {
     EnsureLoaded();
-    for (const auto &archive : archives_) {
-      for (const auto &record : archive.records) {
+    // Newest archive first: ResourceDb_FindRecord (0x004cdfa0) walks the
+    // prepended DB list from the head, so the last-loaded archive shadows
+    // earlier ones.
+    for (auto archive = archives_.rbegin(); archive != archives_.rend();
+         ++archive) {
+      for (const auto &record : archive->records) {
         if (record.type_code != type_code ||
             record.resource_id != resource_id) {
           continue;
         }
-        return Region(archive, record);
+        return Region(*archive, record);
       }
     }
     return std::nullopt;
@@ -335,13 +358,33 @@ public:
   [[nodiscard]] std::optional<NovaResource>
   LoadNamed(std::uint32_t type_code, std::uint16_t resource_id) {
     EnsureLoaded();
-    for (const auto &archive : archives_) {
-      for (const auto &record : archive.records) {
+    for (auto archive = archives_.rbegin(); archive != archives_.rend();
+         ++archive) {
+      for (const auto &record : archive->records) {
         if (record.type_code != type_code ||
             record.resource_id != resource_id) {
           continue;
         }
-        return NovaResource{.bytes = Region(archive, record),
+        return NovaResource{.bytes = Region(*archive, record),
+                            .name = record.name};
+      }
+    }
+    return std::nullopt;
+  }
+
+  // ResourceData_FindByKey (0x004ce110): newest-first match on the registry
+  // record name. Unlike the (type,id) accessors this compares names directly,
+  // so an older archive can still satisfy a key the newest archive lacks.
+  [[nodiscard]] std::optional<NovaResource> LoadByKey(std::uint32_t type_code,
+                                                      std::string_view key) {
+    EnsureLoaded();
+    for (auto archive = archives_.rbegin(); archive != archives_.rend();
+         ++archive) {
+      for (const auto &record : archive->records) {
+        if (record.type_code != type_code || record.name != key) {
+          continue;
+        }
+        return NovaResource{.bytes = Region(*archive, record),
                             .name = record.name};
       }
     }
@@ -349,7 +392,9 @@ public:
   }
 
   // n-th record of a type across all archives (1-based), mirroring the game's
-  // FUN_004ce2a0/FUN_004ce030 walk.
+  // FUN_004ce2a0/FUN_004ce030 walk. ResourceData_GetSlotByIndex
+  // (0x004ce030) deducts each archive's count from the head of the DB, so the
+  // newest archive supplies slot 1.
   [[nodiscard]] std::optional<std::vector<std::byte>>
   LoadNthOfType(std::uint32_t type_code, std::size_t ordinal) {
     EnsureLoaded();
@@ -357,13 +402,14 @@ public:
       return std::nullopt;
     }
     std::size_t remaining = ordinal - 1;
-    for (const auto &archive : archives_) {
-      for (const auto &record : archive.records) {
+    for (auto archive = archives_.rbegin(); archive != archives_.rend();
+         ++archive) {
+      for (const auto &record : archive->records) {
         if (record.type_code != type_code) {
           continue;
         }
         if (remaining == 0) {
-          return Region(archive, record);
+          return Region(*archive, record);
         }
         --remaining;
       }
@@ -372,12 +418,14 @@ public:
   }
 
   // Diagnostics: every distinct (type_code, resource_id) pair across all
-  // archives, used to confirm which resource families the BRGR maps carry.
+  // archives in registry order (newest archive first), used to confirm which
+  // resource families the BRGR maps carry.
   [[nodiscard]] std::vector<std::pair<std::uint32_t, std::uint16_t>> AllKeys() {
     EnsureLoaded();
     std::vector<std::pair<std::uint32_t, std::uint16_t>> keys;
-    for (const auto &archive : archives_) {
-      for (const auto &record : archive.records) {
+    for (auto archive = archives_.rbegin(); archive != archives_.rend();
+         ++archive) {
+      for (const auto &record : archive->records) {
         keys.emplace_back(record.type_code, record.resource_id);
       }
     }
@@ -399,21 +447,50 @@ private:
       return;
     }
     loaded_ = true;
-    for (const auto root : kNovaFilesRoots) {
-      for (const auto file_name : kArchiveFileNames) {
-        const auto path = std::filesystem::path{root} / file_name;
-        if (!std::filesystem::exists(path)) {
-          continue;
-        }
-        if (auto archive = ParseArchive(path)) {
-          archives_.push_back(std::move(*archive));
-          NovaLog::Info("opened BRGR archive {}", path.string());
-        }
-      }
+    const auto install_root = FindInstallRoot();
+    if (!install_root) {
+      NovaLog::Todo("no EV Nova install folder was found relative to the "
+                    "working directory");
+      return;
+    }
+    // NovaApp_Run (0x004d2a80) opens 9:Nova.rez before the folder scans, so it
+    // is always the oldest (weakest) archive in the DB.
+    OpenArchive(*install_root / "Nova.rez");
+    // Resource_ValidateInstallFolders (0x004bd160): Nova Files first, then
+    // Nova Plug-ins for a registered install. The port has no licensing, so
+    // plugins always load (matching a registered install).
+    const std::size_t core_count = archives_.size();
+    for (const auto &path :
+         EnumerateRezArchives(*install_root / "Nova Files")) {
+      OpenArchive(path);
+    }
+    const std::size_t files_count = archives_.size() - core_count;
+    for (const auto &path :
+         EnumerateRezArchives(*install_root / "Nova Plug-ins")) {
+      OpenArchive(path);
     }
     if (archives_.empty()) {
-      NovaLog::Todo("no Nova .rez archives were found relative to the working "
-                    "directory");
+      NovaLog::Todo("no Nova .rez archives were found under '{}'",
+                    install_root->string());
+      return;
+    }
+    NovaLog::Info("resource DB: {} archive(s) ({} core, {} Nova Files, {} "
+                  "plugin) under {}",
+                  archives_.size(),
+                  core_count,
+                  files_count,
+                  archives_.size() - core_count - files_count,
+                  install_root->string());
+  }
+
+  void OpenArchive(const std::filesystem::path &path) {
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
+      return;
+    }
+    if (auto archive = ParseArchive(path)) {
+      archives_.push_back(std::move(*archive));
+      NovaLog::Info("opened BRGR archive {}", path.string());
     }
   }
 
@@ -444,13 +521,20 @@ std::vector<std::pair<std::uint32_t, std::uint16_t>> NovaResource_AllKeys() {
 
 std::optional<std::filesystem::path>
 NovaResource_LocateFile(const std::string &file_name) {
-  for (const auto root : kNovaFilesRoots) {
-    const auto path = std::filesystem::path{root} / file_name;
-    if (std::filesystem::exists(path)) {
-      return path;
+  // Ui_PlayMovieFileModal (0x0049db00): a named on-disk asset is resolved in
+  // the Plug-ins folder before Nova Files, so a plugin can override shipped
+  // media (movies, music).
+  const auto install_root = FindInstallRoot();
+  if (install_root) {
+    for (const char *subdir : {"Nova Plug-ins", "Nova Files"}) {
+      const auto path = *install_root / subdir / file_name;
+      std::error_code ec;
+      if (std::filesystem::exists(path, ec) && !ec) {
+        return path;
+      }
     }
   }
-  NovaLog::Todo("Nova Files asset '{}' was not found", file_name);
+  NovaLog::Todo("Nova media file '{}' was not found", file_name);
   return std::nullopt;
 }
 
@@ -975,21 +1059,13 @@ NovaResource_LoadDialogDefinition(std::uint16_t dialog_id) {
 
 std::optional<NovaResource>
 NovaResource_AccessCharacterBlockByKey(std::string_view key) {
-  // Ghidra 0x004ce300 ResourceData_AccessByKey -> ResourceData_FindByKey:
-  // linear scan of the family's registered entries, matching the metadata
-  // name (block+0xe). The archive world enumerates the ch\x9ar resources
-  // loaded from the .rez files; the in-memory registry slice is not
-  // reconstructed (see header TODO).
-  for (const auto &[type_code, id] : NovaResource_AllKeys()) {
-    if (type_code != kResourceTypeCharacter) {
-      continue;
-    }
-    auto entry = NovaResource_LoadNamed(kResourceTypeCharacter, id);
-    if (entry && entry->name == key) {
-      return entry;
-    }
-  }
-  return std::nullopt;
+  // Ghidra 0x004ce300 ResourceData_AccessByKey -> ResourceData_FindByKey
+  // (0x004ce110): newest-first scan comparing the registry record name
+  // (block+0xe) directly, rather than resolving an id and then looking it up.
+  // The archive world enumerates the ch\x9ar resources loaded from the .rez
+  // files; the in-memory registry slice is not reconstructed (see header
+  // TODO).
+  return NovaResourceDb::Instance().LoadByKey(kResourceTypeCharacter, key);
 }
 
 std::optional<NovaMenuDefinition>

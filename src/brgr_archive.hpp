@@ -87,9 +87,10 @@ NovaResource_LoadMenuDefinition(std::uint16_t menu_id);
 // (ch\x9ar, here the default .Trader id 0x0080) that defines a new pilot's
 // intro cinematic. Returns nullopt when the archive/field set is absent.
 
-// Ghidra: FUN_004ce250 + FUN_004cdfa0 (resource lookup by type + id). Returns
-// the raw resource payload; the first archive holding a matching record wins,
-// mirroring the game's archive search order.
+// Ghidra: FUN_004ce250 + ResourceDb_FindRecord (0x004cdfa0, resource lookup by
+// type + id). Returns the raw resource payload. Archives are searched
+// newest-first, matching ResourceDb_RegisterArchive (0x004ff900) prepending
+// each opened archive, so a plugin shadows Nova Files which shadows Nova.rez.
 [[nodiscard]] std::optional<std::vector<std::byte>>
 NovaResource_Load(std::uint32_t type_code, std::uint16_t resource_id);
 
@@ -125,13 +126,15 @@ NovaResource_AccessCharacterBlockByKey(std::string_view key);
 NovaResource_LoadNthOfType(std::uint32_t type_code, std::size_t ordinal);
 
 // Diagnostics: every distinct (type_code, resource_id) pair carried by the
-// loaded BRGR resource maps, in archive order. Used to confirm which resource
-// families the .rez containers expose (dialog/DLOG-DITL, PICT, sprites, ...).
+// loaded BRGR resource maps, in registry order (newest archive first). Used to
+// confirm which resource families the .rez containers expose (dialog/DLOG-DITL,
+// PICT, sprites, ...).
 std::vector<std::pair<std::uint32_t, std::uint16_t>> NovaResource_AllKeys();
 
-// Resolves a file name inside the Nova Files data folder to an absolute path
-// on disk (used for streaming assets such as background music), searching the
-// known candidates for the game install. Returns nullopt if not found.
+// Resolves a file name inside the Nova data folders to a path on disk (used for
+// streaming assets such as background music): the Plug-ins folder is searched
+// before Nova Files, so a plugin overrides shipped media. Returns nullopt if
+// not found.
 [[nodiscard]] std::optional<std::filesystem::path>
 NovaResource_LocateFile(const std::string &file_name);
 
