@@ -14,6 +14,22 @@ namespace game {
   return d < 0.0F ? d + kFullCircleDeg : d;
 }
 
+// Ghidra Math_ShortestAngleDeltaDeg (0x0046b210): absolute shortest angular
+// distance between two game-degree bearings, in [0,180]. The original loses the
+// rotation sign; direction is recovered by comparing the raw wrapped delta
+// against the 181-degree split. Shared by the weapon/guidance and AI code that
+// previously kept file-local copies.
+[[nodiscard]] inline int ShortestAngleDeltaDeg(int from, int to) {
+  int delta = std::abs(from - to);
+  if ((from > 179) != (to > 179)) {
+    delta = 360 - delta;
+  }
+  if (delta > 180) {
+    delta = 360 - delta;
+  }
+  return delta;
+}
+
 // Ghidra Math_BearingFromPointToPoint (0x0043b670): heading in degrees from
 // (x1,y1) to (x2,y2). The codebase's heading convention is atan2(dx, -dy).
 [[nodiscard]] inline float BearingDeg(float x1, float y1, float x2, float y2) {

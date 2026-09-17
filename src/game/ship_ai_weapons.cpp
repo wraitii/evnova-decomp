@@ -97,17 +97,19 @@ namespace {
 constexpr float kGuidedTrackMinTurnRate = 2.0F;
 
 // Ghidra 0x00463dc0 Weapon_WeaponCanTrackTarget. `turn_rate_deg_per_tick` is
-// the firing ship's Ship_ComputeShipMaxTurnRateDeg result (passed in so the
-// bank walks can hoist it; the original recomputes it per call with no side
-// effects). Once the ship turns harder than 3 deg/tick, a flags_primary 0x0008
-// weapon is rejected outright, and any weapon whose guided_turn_rate is at or
-// below 2.0 deg/tick (DAT_00575780) is rejected. Slower ships pass the gate
-// without consulting either field. The original int-converts the rate with C
-// truncation toward zero; an unordered (NaN) guided_turn_rate counts as
+// the TARGET ship's Ship_ComputeShipMaxTurnRateDeg result: the original is
+// called as Weapon_WeaponCanTrackTarget(weapon_bank, target_ship) from both
+// 0x00410f20 and 0x0040d220 (disasm 0x00411122-0x00411137 / 0x0040d369-
+// 0x0040d37e), i.e. the gate depends on how hard the target can turn. Once the
+// target turns harder than 3 deg/tick, a flags_primary 0x0008 weapon is
+// rejected outright, and any weapon whose guided_turn_rate is at or below 2.0
+// deg/tick (DAT_00575780) is rejected. Targets at or below 3 deg/tick pass the
+// gate without consulting either field. The original int-converts the rate
+// with C truncation toward zero; an unordered (NaN) guided_turn_rate counts as
 // trackable (the FCOMP unordered path returns true).
-[[nodiscard]] bool WeaponCanTrackTarget(float turn_rate_deg_per_tick,
+[[nodiscard]] bool WeaponCanTrackTarget(float target_turn_rate_deg_per_tick,
                                         const Weapon &weapon) {
-  if (static_cast<int>(turn_rate_deg_per_tick) <= 3) {
+  if (static_cast<int>(target_turn_rate_deg_per_tick) <= 3) {
     return true;
   }
   if ((weapon.flags & 0x0008U) != 0U) {
@@ -118,9 +120,9 @@ constexpr float kGuidedTrackMinTurnRate = 2.0F;
 
 [[nodiscard]] bool IsWeaponInTargetRange(const Weapon &weapon,
                                          float distance_sq) {
-  if (!(weapon.range_scalar > 0.0F)) {
-    return false;
-  }
+  // Ghidra 0x00411162/0x00411168: distance^2 * 0.8 <= range_scalar^2. The
+  // original has no positive-range guard, so a zero range still passes when
+  // the squared distance is zero (same position).
   return distance_sq * kInterceptDistanceScale <=
          weapon.range_scalar * weapon.range_scalar;
 }
@@ -377,34 +379,46 @@ bool NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
   const float relative_bearing = BearingDeg(0.0F, 0.0F, relative_x, relative_y);
   const float target_to_ship_bearing =
       BearingDeg(target.pos_x, target.pos_y, ship.pos_x, ship.pos_y);
-  if (std::abs(std::remainder(relative_bearing - target_to_ship_bearing,
-                              kFullCircleDeg)) < 90.0F) {
+  // Ghidra 0x0041117d: the original subtracts the two integer bearings and
+  // takes the absolute difference WITHOUT wrapping into [-180, 180], so a
+  // pair straddling the 0/360 seam (e.g. 5 vs 355) yields 350 and passes this
+  // bail-out gate. Deliberately not wrapped to preserve the original quirk.
+  if (std::abs(static_cast<int>(relative_bearing) -
+               static_cast<int>(target_to_ship_bearing)) < 90) {
     return false;
   }
 
-  // Keep the original bank walk observable in the clean-room model. NPC bank
-  // counters are seeded by the auto-selection path; an unseeded NPC simply has
-  // no available guided bank yet, which does not change this helper's final
-  // strict speed comparison.
+  // Original bank walk (0x004110f0-0x0041117d). Both of its exit paths return
+  // the identical strict base_speed comparison (disasm 0x00411183 vs
+  // 0x004111e0), so the walk is dead with respect to the result; it is
+  // reproduced for fidelity and `has_intercept_bank` is intentionally unused.
   const float distance_sq =
       SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-  // Ship_ComputeShipMaxTurnRateDeg (0x00463e70), hoisted out of the bank walk.
-  const float turn_rate_deg_per_tick =
-      NovaShip_ComputeEffectiveStats(state, ship, *ship_class)
+  // Ghidra 0x00411122-0x00411137 passes the TARGET ship to
+  // Weapon_WeaponCanTrackTarget, so this gate uses the target's max turn rate
+  // (Ship_ComputeShipMaxTurnRateDeg 0x00463e70), not the shooter's.
+  const float target_turn_rate_deg_per_tick =
+      NovaShip_ComputeEffectiveStats(state, target, *target_class)
           .turn_rate_deg_per_tick;
   bool has_intercept_bank = false;
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
+    // Ghidra 0x004110f0/0x00411107: ammo counter > 0 and secondary counter
+    // > 0 or the -1 infinite-ammo marker.
+    if (bs.ammo <= 0 || (bs.secondary <= 0 && bs.secondary != -1)) {
+      continue;
+    }
     const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
     if (weapon == nullptr || weapon->weapon_mode_code != 1 ||
-        !WeaponBankCanFire(state, ship, bank) ||
-        !WeaponCanTrackTarget(turn_rate_deg_per_tick, *weapon) ||
+        !WeaponCanTrackTarget(target_turn_rate_deg_per_tick, *weapon) ||
+        !NovaWeapon_CanFireWeaponBank(state, ship, bank) ||
         !IsWeaponInTargetRange(*weapon, distance_sq)) {
       continue;
     }
     has_intercept_bank = true;
     break;
   }
-  (void)has_intercept_bank;
+  (void)has_intercept_bank; // result discarded by the original in both paths
   return ship_class->speed < target_class->speed;
 }
 
@@ -608,24 +622,9 @@ void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship) {
 
 namespace {
 
-// Ghidra 0x0046B210 Math_ShortestAngleDeltaDeg runs inline in this AI helper.
-// The [0,180] magnitude of the
-// shortest angular separation between two game bearings.
-std::int16_t ShortestAngleDeltaDeg(std::int16_t a, std::int16_t b) {
-  int diff = static_cast<int>(a) - static_cast<int>(b);
-  int mag = (diff ^ (diff >> 31)) - (diff >> 31); // abs
-  if ((a > 0xb3) != (b > 0xb3)) {
-    mag = 0x168 - mag;
-  }
-  if (mag > 0xb4) {
-    mag = 0x168 - mag;
-  }
-  return static_cast<std::int16_t>(mag);
-}
-
-// Ghidra 0x0046b360 Math_ShortestAngleDeltaDeg helper stays file-local below;
-// the blind-spot sector test is exported (see NovaAi_WeaponIsTargetBearingIn-
-// TurretBlindSpot after this namespace).
+// Math_ShortestAngleDeltaDeg is shared from nova_math.hpp. The blind-spot
+// sector test is exported (see NovaAi_WeaponIsTargetBearingInTurretBlindSpot
+// after this namespace).
 
 // Ghidra 0x0046c930 / 0x0046ca60 (shared scan). True when `ship` owns any
 // cloak-scanner outfit (modType 0x1E) whose effect ModVal carries `flag`
@@ -876,15 +875,14 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
   if (NovaAi_IsInboundThreatExceedingDefenses(target)) {
     return;
   }
-  const ShipClass *ship_class = ShipClassFor(state, ship);
   const float distance_sq =
       SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-  // Ship_ComputeShipMaxTurnRateDeg (0x00463e70), hoisted out of the bank walk.
-  const float turn_rate_deg_per_tick =
-      ship_class != nullptr
-          ? NovaShip_ComputeEffectiveStats(state, ship, *ship_class)
-                .turn_rate_deg_per_tick
-          : 0.0F;
+  // Ghidra 0x0040d369-0x0040d37e passes the TARGET ship to
+  // Weapon_WeaponCanTrackTarget, so the gate uses the target's max turn rate
+  // (Ship_ComputeShipMaxTurnRateDeg 0x00463e70), not the shooter's.
+  const float target_turn_rate_deg_per_tick =
+      NovaShip_ComputeEffectiveStats(state, target, *target_class)
+          .turn_rate_deg_per_tick;
 
   std::int16_t chosen = -1;
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
@@ -894,8 +892,8 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
     if (weapon == nullptr || bs.ammo <= 0) {
       continue;
     }
-    const bool track_ok = ship_class != nullptr &&
-                          WeaponCanTrackTarget(turn_rate_deg_per_tick, *weapon);
+    const bool track_ok =
+        WeaponCanTrackTarget(target_turn_rate_deg_per_tick, *weapon);
     if (weapon->weapon_mode_code != 1 || !track_ok) {
       continue;
     }

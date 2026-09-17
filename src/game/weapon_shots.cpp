@@ -85,20 +85,8 @@ namespace {
 
 // ---- Guidance math (Math_* helpers cited from Shot_UpdateShotGuidance) ----
 
-// Ghidra 0x0046b210 Math_ShortestAngleDeltaDeg: absolute shortest angular
-// distance between two game-degree bearings, in [0,180]. The original loses
-// the rotation sign; direction is recovered by comparing the raw wrapped
-// delta against the 181-degree split (see NovaWeapon_TurnShotToward).
-int ShortestAngleDeltaDeg(int from, int to) {
-  int delta = std::abs(from - to);
-  if ((from > 179) != (to > 179)) {
-    delta = 360 - delta;
-  }
-  if (delta > 180) {
-    delta = 360 - delta;
-  }
-  return delta;
-}
+// Math_ShortestAngleDeltaDeg is shared from nova_math.hpp (see
+// NovaWeapon_TurnShotToward for the direction-recovery use).
 
 // Ghidra 0x0043b6a0 Math_ClampVelocityComponents: componentwise box clamp to
 // +/- max_speed.
