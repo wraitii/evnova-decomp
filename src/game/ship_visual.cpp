@@ -1,11 +1,14 @@
 #include "ship_visual.hpp"
 
+#include "../util/byte_reader.hpp"
 #include "collision.hpp"
+#include "frame_timing.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "impact_effects.hpp"
 #include "landed_store.hpp"
 #include "mission.hpp"
+#include "nova_random.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
 #include "weapon.hpp"
@@ -18,42 +21,10 @@
 namespace game {
 namespace {
 
-[[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return static_cast<std::uint16_t>(
-      std::to_integer<std::uint8_t>(bytes[offset]) << 8U |
-      std::to_integer<std::uint8_t>(bytes[offset + 1]));
-}
-
-[[nodiscard]] std::int16_t ReadBeI16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  if (offset + 1 >= bytes.size()) {
-    return 0; // descriptor too short for this field; treat as zero
-  }
-  return static_cast<std::int16_t>(ReadBe16(bytes, offset));
-}
+using evnova::util::ReadBe16;
+using evnova::util::ReadBeI16;
 
 constexpr std::size_t kMinDescriptorSize = 0x36;
-
-// Frame_MeasureFrameTiming (0x00432ea0) floors ordinary spaceflight calls at
-// 21 ms and publishes elapsed_ms * 0.03 as g_avg_frame_tick_scale. Unscaled
-// per-call visual mutations therefore advance once per 0.63 normalized ticks.
-constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
-
-constexpr float RawSpaceflightCallTicks(float elapsed_ticks) {
-  return elapsed_ticks / kOriginalMaxRateFrameTicks;
-}
-
-// Mirrors the original's NovaRandom_Range(n) -> integer in [0, n). The
-// destruction visuals roll from the same GameState.rng as every other
-// clean-room roll site.
-[[nodiscard]] std::int16_t RollRandom(GameState &state, std::int32_t n) {
-  if (n <= 0) {
-    return 0;
-  }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<std::int32_t>{0, n - 1}(state.rng));
-}
 
 } // namespace
 
@@ -142,7 +113,7 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
   } else if (ship.death_timer_active < 60.0F) {
     roll_bound = 4;
   }
-  if (RollRandom(state, roll_bound) != 0) {
+  if (RandomBelow(state, roll_bound) != 0) {
     return;
   }
   // Original: round(Sprite_GetFrameFullHeight(ship) *
@@ -158,16 +129,16 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
   if (extent < 1) {
     extent = 1;
   }
-  const float offset_x = static_cast<float>(RollRandom(state, extent * 2)) -
+  const float offset_x = static_cast<float>(RandomBelow(state, extent * 2)) -
                          static_cast<float>(extent);
-  const float offset_y = static_cast<float>(RollRandom(state, extent * 2)) -
+  const float offset_y = static_cast<float>(RandomBelow(state, extent * 2)) -
                          static_cast<float>(extent);
   // Preserve the original RNG sequence: long destruction animations consume
   // one otherwise-unused draw when roll_bound is in its first three bands.
   if (roll_bound < 3 && cls->death_delay_frames > 0x3b) {
-    (void)RollRandom(state, 2);
+    (void)RandomBelow(state, 2);
   }
-  const bool play_sound = RollRandom(state, 4) == 0;
+  const bool play_sound = RandomBelow(state, 4) == 0;
   NovaEffects_SpawnAreaImpact(state,
                               ship.pos_x + offset_x,
                               ship.pos_y + offset_y,
@@ -437,7 +408,7 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
   // is not applied (TODO(decomp)).
   if (cls->engine_glow_image_id > 0) {
     const std::int16_t flicker =
-        static_cast<std::int16_t>(RollRandom(state, 6));
+        static_cast<std::int16_t>(RandomBelow(state, 6));
     std::int16_t level =
         static_cast<std::int16_t>(ship.engine_glow_level + flicker - 4);
     if (level < 2) {
@@ -521,7 +492,7 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
       const std::int32_t span =
           static_cast<std::int32_t>(cls->blink_val_b) + 1 - cls->blink_val_a;
       ship.light_intensity =
-          static_cast<float>(RollRandom(state, span) + cls->blink_val_a);
+          static_cast<float>(RandomBelow(state, span) + cls->blink_val_a);
       ship.light_blink_timer = static_cast<float>(cls->blink_val_c);
     }
   } else {

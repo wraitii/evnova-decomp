@@ -9,6 +9,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../util/math.hpp"
 #include "landed_store.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
@@ -17,6 +18,8 @@
 #include "weapon.hpp"
 
 namespace game {
+
+using evnova::util::AddPolar;
 
 namespace {
 
@@ -37,14 +40,6 @@ constexpr float kScatterDistanceStart = 45.0F;      // FLOAT_0057524c
 constexpr float kScatterDistanceStep = 1.165F;      // DOUBLE_00575250
 constexpr float kScatterLaunchSpeed = 50.0F;        // FLOAT_0057522c
 constexpr float kJumpArrivalHoldSentinel = -999.0F; // 0xc479c000
-
-// Game-bearing polar step (Math_AddPolarVelocity 0x0043b4a0): 0 deg = up,
-// clockwise; speeds are px/tick.
-void AddPolar(float &x, float &y, float bearing_deg, float speed) {
-  const float rad = bearing_deg * kDegToRad;
-  x += std::sin(rad) * speed;
-  y -= std::cos(rad) * speed;
-}
 
 float HeadingDeg(const Ship &ship) { return ship.heading / kDegToRad; }
 
@@ -159,14 +154,14 @@ void SetEscortLaunchOffsetVelocity(GameState &state,
   escort.formation_offset_x = 0.0F;
   escort.formation_offset_y = 0.0F;
   const int heading_deg = RoundHeadingDeg(target);
-  AddPolar(escort.formation_offset_x,
-           escort.formation_offset_y,
-           static_cast<float>(heading_deg),
-           forward);
-  AddPolar(escort.formation_offset_x,
-           escort.formation_offset_y,
-           static_cast<float>(heading_deg + 90),
-           lateral);
+  AddPolar(static_cast<float>(heading_deg) * kDegToRad,
+           forward,
+           escort.formation_offset_x,
+           escort.formation_offset_y);
+  AddPolar(static_cast<float>(heading_deg + 90) * kDegToRad,
+           lateral,
+           escort.formation_offset_x,
+           escort.formation_offset_y);
   escort.formation_offset_x += target.pos_x;
   escort.formation_offset_y += target.pos_y;
   (void)state;
@@ -523,10 +518,12 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
         continue;
       }
       const float heading_deg = static_cast<float>(RoundHeadingDeg(ship));
-      AddPolar(ship.pos_x, ship.pos_y, heading_deg + 180.0F, distance);
+      AddPolar(
+          (heading_deg + 180.0F) * kDegToRad, distance, ship.pos_x, ship.pos_y);
       ship.ai_station_hold_timer = kJumpArrivalHoldSentinel;
       ship.ai_mode_start_time_ms = 0;
-      AddPolar(ship.vel_x, ship.vel_y, heading_deg, kScatterLaunchSpeed);
+      AddPolar(
+          heading_deg * kDegToRad, kScatterLaunchSpeed, ship.vel_x, ship.vel_y);
       // Arm the arrival-slowdown ladder (state 8 -> dispatcher arms control
       // mode 0x0a, whose -50 override decays 1.165/tick): the sentinel pair
       // written above is exactly Ship_EnterShipAiState0x08_Slowdown

@@ -31,10 +31,13 @@
 
 #include "boarding_plunder.hpp"
 #include "escort_formation.hpp"
+#include "frame_timing.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "log.hpp"
 #include "mission.hpp"
+#include "nova_math.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "ship_spawn.hpp"
@@ -100,7 +103,6 @@ constexpr float kNpcJumpSpinupDurationMs = 350.0F;
 // 21 ms and publishes elapsed_ms * 0.03 as normalized ticks. Control mode
 // 0x0d's formation-release counter advances by one per raw call in the
 // original (0x00408d67), hence one unit per 0.63 normalized ticks here.
-constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
 // Inertialess approach multipliers (state 0xd/0xf).
 constexpr float kInertialessKeepMult = 4.0F;
 // Combat turn-radius constants from DAT_005750a0/a4/a8/ac. The class turn
@@ -167,25 +169,11 @@ constexpr float kFullCircleDeg = 360.0F;
 // publishing _g_avg_frame_time_ms, so the AI consumes normalized simulation
 // ticks (about 1.0 at 30 Hz), not literal milliseconds.
 
-// Game-convention angle winding helper (0..360, 0 = up / -y).
-float WrapDeg(float d) {
-  d = std::fmod(d, kFullCircleDeg);
-  return d < 0.0F ? d + kFullCircleDeg : d;
-}
-
 // Mirrors Math_SquaredDistance (0x0043b710) for two float points.
 float SquaredDistance(float x1, float y1, float x2, float y2) {
   const float dx = x2 - x1;
   const float dy = y2 - y1;
   return dx * dx + dy * dy;
-}
-
-// Mirrors Math_BearingFromPointToPoint: heading (degrees, 0 = up, clockwise)
-// from (x1,y1) to (x2,y2). The codebase's heading = atan2(dx, -dy).
-float BearingDeg(float x1, float y1, float x2, float y2) {
-  const float dx = x2 - x1;
-  const float dy = y2 - y1;
-  return WrapDeg(std::atan2(dx, -dy) / kDegToRad);
 }
 
 // The current system's resource id (nav/stellar tables are indexed by resource
@@ -204,13 +192,9 @@ const Stellar *StellarByResourceId(const GameState &state, int resource_id) {
 
 } // namespace
 
-// Ghidra 0x004688e0 Ship_IsShipDestroyed.
-bool NovaAiShip_IsDestroyed(const Ship &ship) {
-  if (ship.death_timer_active > 0.0F) {
-    return true;
-  }
-  return ship.armor_points <= 0.0F;
-}
+// Ghidra 0x004688e0 Ship_IsShipDestroyed (see game_state.hpp); named AI entry
+// point for its existing callers.
+bool NovaAiShip_IsDestroyed(const Ship &ship) { return IsShipDestroyed(ship); }
 
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget.
 void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms) {
@@ -542,12 +526,6 @@ namespace {
 
 constexpr float kInterceptSlowVelocity = 0.35F; // DAT_00575080
 constexpr float kInterceptDistanceScale = 0.8F; // DAT_00575190
-
-[[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
-                                            const Ship &ship) {
-  return state.scenario.Ship(
-      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-}
 
 // Squared distance between two points, truncated toward zero. Used by
 // Ship_ScoreAssistTargetForShip (0x00412090), whose x87 FIST + residual/sign
@@ -1338,10 +1316,6 @@ NovaAi_FindNearestAdjacentTravelStellar(const GameState &state,
 
 namespace {
 
-// Defined after the AI controllers (see NovaAiRandomRange); declared here so
-// Ship_AcquirePrimaryTargetForShip can use the session PRNG.
-[[nodiscard]] std::int16_t NovaAiRandomRange(GameState &state, int bound);
-
 // Squared-distance metric used by Ship_AcquirePrimaryTargetForShip
 // (0x0040e020, x sequence 0x0040f4a7, y sequence 0x0040f50e). The original
 // takes FABS of each axis, stores it with FIST, then runs a residual/sign
@@ -1710,7 +1684,7 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
           player_class != nullptr && player_class->inherent_combat_govt != -1 &&
           NovaGovernment_AreGovtsHostileOrXenophobic(
               state.scenario, faction, player_class->inherent_combat_govt) &&
-          NovaAiRandomRange(state, 0x32) == 0 &&
+          RandomBelow(state, 0x32) == 0 &&
           !NovaAiShip_IsDestroyed(state.player) &&
           NovaAiShip_CanEngageTargetUnderCloakRules(
               state, state.player, ship)) {
@@ -4994,16 +4968,6 @@ namespace {
   }
 }
 
-// Uniform integer in [0, bound) from the GameState PRNG (the dialog and AI
-// entries share the session PRNG like the original's NovaRandom_Range).
-[[nodiscard]] std::int16_t NovaAiRandomRange(GameState &state, int bound) {
-  if (bound <= 1) {
-    return 0;
-  }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<int>{0, bound - 1}(state.rng));
-}
-
 } // namespace
 
 // Ghidra 0x004048a0 Ship_UpdateEscortAI. Per-frame supervisor
@@ -5065,7 +5029,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
       ship.faction_or_government_id = -1;
     }
     if (ship.voice_type_mode != 0 && ship.voice_type_mode != 1) {
-      ship.voice_type_mode = NovaAiRandomRange(state, 2);
+      ship.voice_type_mode = RandomBelow(state, 2);
     }
   }
 
@@ -5179,8 +5143,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
         ship.primary_target_ship_slot == -1 ||
         state.pending_combat_chatter_kind != -1 ||
         state.pending_combat_chatter_variant != 0 || cls->class_category >= 2 ||
-        (cls->flags_secondary & 0x10U) != 0U ||
-        NovaAiRandomRange(state, 3) != 0) {
+        (cls->flags_secondary & 0x10U) != 0U || RandomBelow(state, 3) != 0) {
       return;
     }
     NovaFrame_QueueCombatChatter(
@@ -5750,7 +5713,7 @@ void NovaAi_EnterState4TargetRandomUnengagedShip(GameState &state, Ship &ship) {
   for (;;) {
     std::int16_t pick;
     do {
-      pick = static_cast<std::int16_t>(NovaAiRandomRange(state, 0x3f) + 1);
+      pick = static_cast<std::int16_t>(RandomBelow(state, 0x3f) + 1);
     } while (pick == ship.ship_instance_id || pick == 0);
     if (IsState4Candidate(state,
                           state.ShipAt(static_cast<std::size_t>(pick)),
@@ -5785,7 +5748,7 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
   for (;;) {
     std::int16_t pick;
     do {
-      pick = static_cast<std::int16_t>(NovaAiRandomRange(state, 0x3f) + 1);
+      pick = static_cast<std::int16_t>(RandomBelow(state, 0x3f) + 1);
     } while (pick == ship.ship_instance_id || pick == 0);
     if (IsState4Candidate(state,
                           state.ShipAt(static_cast<std::size_t>(pick)),
@@ -5906,7 +5869,7 @@ void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
   // an admittable pick) until a valid candidate is found; the count pass
   // guarantees at least one exists. The pick pass adds the is_active gate.
   for (;;) {
-    const auto pick = static_cast<std::int16_t>(NovaAiRandomRange(state, 0x40));
+    const auto pick = static_cast<std::int16_t>(RandomBelow(state, 0x40));
     if (pick == ship.ship_instance_id || pick == leader_slot) {
       continue;
     }

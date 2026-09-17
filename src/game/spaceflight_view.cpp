@@ -10,6 +10,8 @@
 #include "gameplay_interface.hpp"
 #include "hud_renderer.hpp"
 #include "impact_effects.hpp"
+#include "nova_math.hpp"
+#include "nova_random.hpp"
 #include "ship_ai.hpp"
 #include "ship_visual.hpp"
 #include "targeting.hpp"
@@ -26,7 +28,6 @@
 namespace game {
 namespace {
 
-constexpr float kTwoPi = 6.283185307179586F;
 // Base logical play area. The live flight viewport is the window minus the
 // top-right cockpit/HUD strip (kGameplayHudStripWidth, the original's
 // DAT_0088c020), full height; these floors just keep it sane before the window
@@ -111,23 +112,6 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
   return {w, h};
 }
 
-// Frame index for a heading. EV Nova ships point 'up' at frame 0 with heading
-// increasing clockwise; frames progress one per sector of the rotation.
-// TODO(decomp): verify phase/clockwise orientation against a real rendered
-// ship -- this is the conventional mapping and should be re-checked once the
-// ship is on screen.
-[[nodiscard]] int FrameForHeading(float heading_radians,
-                                  int frames_per_rotation) {
-  const float normalized = std::fmod(heading_radians + kTwoPi, kTwoPi);
-  const float sector =
-      (normalized / kTwoPi) * static_cast<float>(frames_per_rotation);
-  int frame = static_cast<int>(std::lround(sector)) % frames_per_rotation;
-  if (frame < 0) {
-    frame += frames_per_rotation;
-  }
-  return frame;
-}
-
 // Ghidra Ship_UpdateVisualState (0x00428340) frame composition: the displayed
 // index is row * frames_per_rotation + heading_frame. Row 0 is the straight-
 // flight rotation grid; for banking classes (sh\x8an Flags & 1) the sprite's
@@ -149,16 +133,6 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
   row = std::clamp(row, 0, std::max(1, row_count) - 1);
   return row * frames_per_rotation +
          FrameForHeading(ship.heading, frames_per_rotation);
-}
-
-// Uniform integer in [0, bound). Mirrors the game's NovaRandom_Range seeded
-// from the GameState PRNG so the spawn layout is reproducible per session.
-[[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
-  if (bound <= 1) {
-    return 0;
-  }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<int>{0, bound - 1}(rng));
 }
 
 // ---- beam rendering (Ghidra SWBeams.c family) -----------------------------
@@ -1086,17 +1060,17 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
     // uniformly over the star sheet's 16 tiles (Ghida DAT_00593efc +0x54).
     // When the sheet is unavailable we keep frame 0 (fallback point draw).
     const int frame_count = star_frame_count > 0 ? star_frame_count : 1;
-    s.frame = NovaRandomRange(state.rng, frame_count);
+    s.frame = RandomBelow(state.rng, frame_count);
     // Random world offset within the (player-centred) viewport.
-    const auto rx = static_cast<float>(NovaRandomRange(state.rng, vp.w));
-    const auto ry = static_cast<float>(NovaRandomRange(state.rng, vp.h));
+    const auto rx = static_cast<float>(RandomBelow(state.rng, vp.w));
+    const auto ry = static_cast<float>(RandomBelow(state.rng, vp.h));
     s.pos_x = rx + state.player.pos_x - static_cast<float>(vp.w) / 2.0F;
     s.pos_y = ry + state.player.pos_y - static_cast<float>(vp.h) / 2.0F;
     // Ghidra: speed = NovaRandom_Range(0x23) * 0.01 when the motion toggle is
     // on, else forced to 0 (stationary field).
     s.speed =
         kStarfieldMotionEnabled
-            ? static_cast<float>(NovaRandomRange(state.rng, 0x23)) * kSpeedScale
+            ? static_cast<float>(RandomBelow(state.rng, 0x23)) * kSpeedScale
             : 0.0F;
   }
 }

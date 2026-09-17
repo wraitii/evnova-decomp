@@ -6,7 +6,9 @@
 #include "../sdl_audio.hpp"
 #include "../sdl_music.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/geometry.hpp"
 #include "nova_font.hpp"
+#include "ui_dialog.hpp"
 
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_render.h>
@@ -24,6 +26,9 @@
 #include <vector>
 
 namespace game {
+
+using evnova::util::Contains;
+
 namespace {
 
 // ---------------------------------------------------------------------------
@@ -158,21 +163,6 @@ CenterWindowOnPanel(const SDL_FRect &panel, float win_w, float win_h) {
   const float x = panel.x + std::truncf((panel.w - win_w) / 2.0F);
   const float y = panel.y + std::truncf((panel.h - win_h) / 2.0F);
   return SDL_FRect{x, y, win_w, win_h};
-}
-
-// Maps one DITL item rect (top,left,bottom,right in the window's own space)
-// to an SDL_FRect in playfield coordinates by adding the window origin.
-[[nodiscard]] SDL_FRect ItemRect(const NovaDialogItem &item,
-                                 const SDL_FRect &win) {
-  const SDL_FRect r{win.x + static_cast<float>(item.left),
-                    win.y + static_cast<float>(item.top),
-                    static_cast<float>(item.right - item.left),
-                    static_cast<float>(item.bottom - item.top)};
-  return r;
-}
-
-[[nodiscard]] bool Contains(const SDL_FRect &r, float x, float y) {
-  return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
 // Draws the 17x17 checkbox and label used by UiWindow_Draw. The original uses

@@ -1,5 +1,6 @@
 #include "brgr_archive.hpp"
 #include "log.hpp"
+#include "util/byte_reader.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,39 +16,10 @@
 
 namespace {
 
-[[nodiscard]] std::uint32_t ReadLe32(const std::vector<std::byte> &bytes,
-                                     std::size_t offset) {
-  if (offset + 4 > bytes.size()) {
-    return 0;
-  }
-  return std::to_integer<std::uint32_t>(bytes[offset]) |
-         std::to_integer<std::uint32_t>(bytes[offset + 1]) << 8U |
-         std::to_integer<std::uint32_t>(bytes[offset + 2]) << 16U |
-         std::to_integer<std::uint32_t>(bytes[offset + 3]) << 24U;
-}
-
-[[nodiscard]] std::uint32_t ReadBe32(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  if (offset + 4 > bytes.size()) {
-    return 0;
-  }
-  return std::to_integer<std::uint32_t>(bytes[offset]) << 24U |
-         std::to_integer<std::uint32_t>(bytes[offset + 1]) << 16U |
-         std::to_integer<std::uint32_t>(bytes[offset + 2]) << 8U |
-         std::to_integer<std::uint32_t>(bytes[offset + 3]);
-}
-
-[[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return static_cast<std::uint16_t>(
-      std::to_integer<std::uint8_t>(bytes[offset]) << 8U |
-      std::to_integer<std::uint8_t>(bytes[offset + 1]));
-}
-
-[[nodiscard]] std::int16_t ReadBeI16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return static_cast<std::int16_t>(ReadBe16(bytes, offset));
-}
+using evnova::util::ReadBe16;
+using evnova::util::ReadBe32;
+using evnova::util::ReadBeI16;
+using evnova::util::ReadLe32;
 
 // c\x9alr (and the other color-table resources) store each color as a
 // big-endian 32-bit 0x00RRGGBB long, so the leading byte at `offset` is the

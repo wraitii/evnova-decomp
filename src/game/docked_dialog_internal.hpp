@@ -14,7 +14,9 @@
 #include <string>
 #include <string_view>
 
+#include "../util/geometry.hpp"
 #include "docked_dialog.hpp"
+#include "pict_texture.hpp"
 
 namespace game {
 
@@ -31,21 +33,10 @@ inline constexpr std::int16_t kResourceIdBase = 0x80;
 // rows.
 inline constexpr SDL_Color kDim{192, 192, 192, 255};
 
-[[nodiscard]] inline bool Contains(const SDL_FRect &rect, SDL_FPoint point) {
-  return point.x >= rect.x && point.x < rect.x + rect.w && point.y >= rect.y &&
-         point.y < rect.y + rect.h;
-}
-
-[[nodiscard]] inline SDL_FRect OffsetRect(SDL_FRect rect, SDL_FPoint origin) {
-  rect.x += origin.x;
-  rect.y += origin.y;
-  return rect;
-}
-
-// Loads one PICT resource into a texture (null on failure to locate or decode).
-// Defined in docked_dialog.cpp.
-[[nodiscard]] std::unique_ptr<SdlTexture>
-LoadPictTexture(SdlPlatform &platform, std::uint16_t pict_id);
+// Shared rect helpers (evnova::util); every docked sub-window uses these
+// unqualified.
+using evnova::util::Contains;
+using evnova::util::OffsetRect;
 
 // Label/unit text from the game-strings pool STR# 0x7d2 (see the definition in
 // docked_store_dialog.cpp for the 0-based pool index convention).

@@ -214,20 +214,6 @@ struct MappedSystem {
   float sy = 0.0F;
 };
 
-// Ghidra 0x0046b9b0 System_ResolveSystemDiscoverySlot: a system's fog record
-// lives on its visibility-group root (the loader's twin grouping, 0x004bd3c0).
-[[nodiscard]] std::int16_t DiscoverySlot(const GameState &state,
-                                         std::int16_t system_id) {
-  if (system_id < 0 ||
-      static_cast<std::size_t>(system_id) >= state.scenario.systems.size()) {
-    return -1;
-  }
-  const std::int16_t root =
-      state.scenario.systems[static_cast<std::size_t>(system_id)]
-          .visibility_root_system_id;
-  return root != -1 ? root : system_id;
-}
-
 // Whether the pilot has VISITED `zero_based_id` (SystemDef.discovery_state,
 // the persisted fog record). Matches the original's map gates, which also
 // require the system to pass its Visibility NCB (is_visible) -- an invisible
@@ -1228,15 +1214,18 @@ void DrawGalaxy(SdlPlatform &platform,
     // both ends with System_ResolveSystemDiscoverySlot), so a twin group
     // matches whichever member holds the mission locator. Selection compares
     // through the discovery slots the same way (0x004a8f0a).
-    const std::int16_t slot = DiscoverySlot(state, m.zero_based_id);
-    const bool is_mission_target = std::any_of(
-        mission_targets.begin(),
-        mission_targets.end(),
-        [&](std::int16_t target) {
-          return target != -1 && DiscoverySlot(state, target) == slot;
-        });
+    const std::int16_t slot =
+        NovaSystem_ResolveDiscoverySlot(state, m.zero_based_id);
+    const bool is_mission_target =
+        std::any_of(mission_targets.begin(),
+                    mission_targets.end(),
+                    [&](std::int16_t target) {
+                      return target != -1 && NovaSystem_ResolveDiscoverySlot(
+                                                 state, target) == slot;
+                    });
     const bool is_selected =
-        selected_id >= 0 && slot == DiscoverySlot(state, selected_id);
+        selected_id >= 0 &&
+        slot == NovaSystem_ResolveDiscoverySlot(state, selected_id);
     if (!SystemOnMap(state, m.zero_based_id) && !is_selected &&
         !is_mission_target) {
       continue;

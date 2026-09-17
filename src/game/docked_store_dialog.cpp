@@ -8,6 +8,8 @@
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/format.hpp"
+#include "button_label.hpp"
 #include "compatibility.hpp"
 #include "hud_overlay.hpp"
 #include "landed_store.hpp"
@@ -39,6 +41,8 @@
 
 namespace game {
 
+using evnova::util::GroupThousands;
+
 // Label/unit text for the store and ship-info panels, from the game-strings
 // pool STR# 0x7d2 (Nova Data 5). The original's Resource_DrawStringEntry
 // (0x004cd1f0) / Resource_LoadStringEntry (0x004b8ca0) take the 1-based entry
@@ -62,10 +66,6 @@ namespace {
 // Outfitter indices are DAT_007d82d0 = {4,1,2,0x12,0x13} (Done/Buy/Sell/^/&);
 // the Shipyard's are DAT_007d82c6 = {4, buy, 0x2f, 0x12, 0x13} with buy 3
 // (Buy Ship) or 0xc (Hire Escort) and 0x2f = Info.
-[[nodiscard]] std::string StoreButtonLabel(std::uint16_t entry,
-                                           std::string_view fallback) {
-  return NovaHud_LoadStringEntry(0x96, entry).value_or(std::string{fallback});
-}
 
 // DLOG 0x3ea/0x3ec are 765 pixels wide and their frame PICTs are 321/323
 // pixels high. The original centres those native-size windows on its 1024x768
@@ -268,22 +268,6 @@ struct StoreTextureCache {
   return result;
 }
 
-// Ghidra DrawContext_DrawGroupedUInt (see boarding_plunder.cpp): decimal
-// digits grouped in threes with commas.
-
-[[nodiscard]] std::string GroupedUInt(std::int32_t value) {
-  const std::string digits = std::to_string(value);
-  std::string out;
-  out.reserve(digits.size() + digits.size() / 3);
-  for (std::size_t i = 0; i < digits.size(); ++i) {
-    if (i > 0 && (digits.size() - i) % 3 == 0) {
-      out.push_back(',');
-    }
-    out.push_back(digits[i]);
-  }
-  return out;
-}
-
 void DrawStoreContents(SdlPlatform &platform,
                        NovaFontCache &font_cache,
                        const ServicesButtonArt &button_art,
@@ -425,18 +409,18 @@ void DrawStoreContents(SdlPlatform &platform,
   const std::uint16_t buy_label_entry =
       outfit_store ? 2 : (session.hire_mode ? 13 : 4);
   const std::array<std::tuple<SDL_FRect, std::string, bool>, 5> controls{
-      {{layout.leave, StoreButtonLabel(5, "Done"), true},
+      {{layout.leave, LoadButtonLabel(5, "Done"), true},
        {layout.buy,
-        StoreButtonLabel(
-            buy_label_entry,
-            outfit_store ? "Buy"
-                         : (session.hire_mode ? "Hire Escort" : "Buy Ship")),
+        LoadButtonLabel(buy_label_entry,
+                        outfit_store
+                            ? "Buy"
+                            : (session.hire_mode ? "Hire Escort" : "Buy Ship")),
         buy_allowed},
        {layout.sell_or_info,
-        StoreButtonLabel(outfit_store ? 3 : 48, outfit_store ? "Sell" : "Info"),
+        LoadButtonLabel(outfit_store ? 3 : 48, outfit_store ? "Sell" : "Info"),
         outfit_store ? sell_allowed : session.selected_id >= 0},
-       {layout.previous, StoreButtonLabel(19, "^"), session.CanPagePrevious()},
-       {layout.next, StoreButtonLabel(20, "&"), session.CanPageNext()}}};
+       {layout.previous, LoadButtonLabel(19, "^"), session.CanPagePrevious()},
+       {layout.next, LoadButtonLabel(20, "&"), session.CanPageNext()}}};
   for (const auto &[rect, label, enabled] : controls) {
     button_art.Draw(platform,
                     rect,
@@ -551,19 +535,19 @@ void DrawStoreContents(SdlPlatform &platform,
                           layout.details.y + dy,
                           value);
           };
-      detail_row(12.0F, 0xd6, GroupedUInt(price) + " " + InfoString(0x21));
+      detail_row(12.0F, 0xd6, GroupThousands(price) + " " + InfoString(0x21));
       detail_row(24.0F,
                  0xd8,
-                 GroupedUInt(state.player.credits) + " " + InfoString(0x21));
+                 GroupThousands(state.player.credits) + " " + InfoString(0x21));
       if (outfit->mass_tons > 0) {
         detail_row(48.0F,
                    0xd7,
-                   GroupedUInt(item_mass) + " " +
+                   GroupThousands(item_mass) + " " +
                        (item_mass == 1 ? InfoString(0) : InfoString(1)));
         const std::int32_t available = std::max(0, free_mass);
         detail_row(60.0F,
                    0xd9,
-                   GroupedUInt(available) + " " +
+                   GroupThousands(available) + " " +
                        (available == 1 ? InfoString(0) : InfoString(1)));
       }
       // Outfit_ClampOutfitOwnedCountToCurrentLimits (0x004656a0) returning an
@@ -625,7 +609,7 @@ void DrawStoreContents(SdlPlatform &platform,
                           kText,
                           layout.details.x + 70.0F,
                           layout.details.y + dy,
-                          GroupedUInt(value) + " " + InfoString(0x21));
+                          GroupThousands(value) + " " + InfoString(0x21));
           };
       if (session.hire_mode) {
         // Ghidra NovaUi_DrawShipyardShipList 0x004948b0 hire-mode arm: the
@@ -1115,7 +1099,7 @@ void DrawShipyardInfoPanel(SdlPlatform &platform,
 
   button_art.Draw(platform, layout.button, ButtonState::kNormal);
   DrawThreeStateButtonLabel(
-      platform, font_cache, layout.button, StoreButtonLabel(5, "Done"), kValue);
+      platform, font_cache, layout.button, LoadButtonLabel(5, "Done"), kValue);
 }
 
 // One full frame of the store screen, shared by the store loop and the Info

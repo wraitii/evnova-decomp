@@ -2,6 +2,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../util/byte_reader.hpp"
 #include "ship_visual.hpp"
 
 #include <algorithm>
@@ -16,54 +17,11 @@
 namespace game {
 namespace {
 
-[[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  if (offset + 2 > bytes.size()) {
-    return 0;
-  }
-  return static_cast<std::uint16_t>(
-      std::to_integer<std::uint8_t>(bytes[offset]) << 8U |
-      std::to_integer<std::uint8_t>(bytes[offset + 1]));
-}
-
-[[nodiscard]] std::int16_t ReadBeI16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return static_cast<std::int16_t>(ReadBe16(bytes, offset));
-}
-
-[[nodiscard]] std::uint32_t ReadBe32(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  if (offset + 4 > bytes.size()) {
-    return 0;
-  }
-  return static_cast<std::uint32_t>(
-      std::to_integer<std::uint8_t>(bytes[offset]) << 24U |
-      std::to_integer<std::uint8_t>(bytes[offset + 1]) << 16U |
-      std::to_integer<std::uint8_t>(bytes[offset + 2]) << 8U |
-      std::to_integer<std::uint8_t>(bytes[offset + 3]));
-}
-
-[[nodiscard]] std::int32_t ReadBeI32(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return static_cast<std::int32_t>(ReadBe32(bytes, offset));
-}
-
-// NUL-terminated C string at `offset` (bounded by the payload). Returns an
-// empty string when missing.
-[[nodiscard]] std::string ReadCString(std::span<const std::byte> bytes,
-                                      std::size_t offset) {
-  if (offset >= bytes.size()) {
-    return {};
-  }
-  const auto *begin = reinterpret_cast<const char *>(bytes.data() + offset);
-  const auto max_len = bytes.size() - offset;
-  const void *nul = std::memchr(begin, '\0', max_len);
-  const std::size_t len =
-      nul == nullptr
-          ? max_len
-          : static_cast<std::size_t>(static_cast<const char *>(nul) - begin);
-  return std::string{begin, len};
-}
+using evnova::util::ReadBe16;
+using evnova::util::ReadBe32;
+using evnova::util::ReadBeI16;
+using evnova::util::ReadBeI32;
+using evnova::util::ReadCString;
 
 // NUL-terminated C string at `offset`, additionally bounded to `max_len`
 // bytes (fixed-width string fields).

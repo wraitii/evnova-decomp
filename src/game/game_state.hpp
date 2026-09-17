@@ -1706,4 +1706,18 @@ struct GameState {
   std::optional<NovaSoundData> warp_out_sound;
 };
 
+// Ghidra 0x004688e0 Ship_IsShipDestroyed: death timer running or armor gone.
+[[nodiscard]] inline bool IsShipDestroyed(const Ship &ship) {
+  return ship.death_timer_active > 0.0F || ship.armor_points <= 0.0F;
+}
+
+// Resolves a Ship's runtime class through the scenario table. The runtime
+// stores ship_class_id as a 0-based index; the scenario tables are keyed by
+// resource id (>= 0x80). Shared by collision, weapon and AI code.
+[[nodiscard]] inline const ShipClass *ShipClassFor(const GameState &state,
+                                                   const Ship &ship) {
+  return state.scenario.Ship(
+      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+}
+
 } // namespace game

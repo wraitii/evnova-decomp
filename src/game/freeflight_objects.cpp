@@ -6,10 +6,15 @@
 #include <random>
 
 #include "../brgr_archive.hpp"
+#include "../util/math.hpp"
 #include "game_state.hpp"
+#include "nova_random.hpp"
 #include "ship_visual.hpp"
 
 namespace game {
+
+using evnova::util::AddPolar;
+
 namespace {
 
 constexpr float kPi = 3.14159265358979323846F;
@@ -32,23 +37,6 @@ constexpr float kInterferenceScale = 100.0F;
 constexpr float kAtPositionScaleA = 0.2F;
 constexpr float kAtPositionScaleB = 0.01F;
 
-std::int16_t RandomRange(GameState &state, int bound) {
-  if (bound <= 1) {
-    return 0;
-  }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<int>{0, bound - 1}(state.rng));
-}
-
-// Math_AddPolarVelocity (0x0043b4a0): add a polar vector to an XY pair using
-// the game's 0 = up, clockwise angle convention (x += sin*speed,
-// y -= cos*speed). Here the pair is either a velocity or (for the jettison
-// position offset) a position, matching the original's two call sites.
-void AddPolar(float angle_rad, float speed, float &x, float &y) {
-  x += std::sin(angle_rad) * speed;
-  y -= std::cos(angle_rad) * speed;
-}
-
 // Sprite_GetFrameFullHeight (0x00462390) for a ship: its current frame's full
 // width, defaulting to 0x20 when no descriptor is decoded. Mirrors
 // TargetFrameSpan (boarding_plunder.cpp), reading the sh\x8an base size at the
@@ -68,7 +56,7 @@ float ShipFrameWidthSpan(const Ship &ship) {
 
 // Shared tail of both spawn variants: pick a random spin animation rate.
 std::int16_t RandomSpinRate(GameState &state) {
-  const std::int16_t roll = RandomRange(state, 4);
+  const std::int16_t roll = RandomBelow(state, 4);
   if (roll == 0) {
     return -1;
   }
@@ -90,9 +78,9 @@ void NovaFreeflight_SpawnForShip(GameState &state, const Ship &ship) {
     object.pos_y = ship.pos_y;
     object.vel_x = ship.vel_x;
     object.vel_y = ship.vel_y;
-    object.lifetime_ticks = static_cast<float>(RandomRange(state, 0x5a) + 0xb4);
+    object.lifetime_ticks = static_cast<float>(RandomBelow(state, 0x5a) + 0xb4);
     object.system_id = ship.current_system_id;
-    object.frame_counter = static_cast<float>(RandomRange(state, 0x24));
+    object.frame_counter = static_cast<float>(RandomBelow(state, 0x24));
     object.persistent = false;
     object.extra = 0;
     object.sprite_set_index = 0;
@@ -105,10 +93,10 @@ void NovaFreeflight_SpawnForShip(GameState &state, const Ship &ship) {
     AddPolar(
         back, std::trunc(span * kLaunchSpanShare), object.pos_x, object.pos_y);
     const float scatter =
-        (static_cast<float>(RandomRange(state, 0x28)) + 0x1e) /
+        (static_cast<float>(RandomBelow(state, 0x28)) + 0x1e) /
         kInterferenceScale;
-    const float spread = (static_cast<float>(RandomRange(state, 0x1e)) -
-                          static_cast<float>(RandomRange(state, 0xf))) *
+    const float spread = (static_cast<float>(RandomBelow(state, 0x1e)) -
+                          static_cast<float>(RandomBelow(state, 0xf))) *
                          (kPi / 180.0F);
     AddPolar(back + spread, scatter, object.vel_x, object.vel_y);
     return;
@@ -129,18 +117,18 @@ void NovaFreeflight_SpawnAtPosition(GameState &state,
     object.pos_y = pos_y;
     object.vel_x = 0.0F;
     object.vel_y = 0.0F;
-    object.lifetime_ticks = static_cast<float>(RandomRange(state, 200) + 300);
+    object.lifetime_ticks = static_cast<float>(RandomBelow(state, 200) + 300);
     object.system_id = state.player.current_system_id;
-    object.frame_counter = static_cast<float>(RandomRange(state, 0x24));
+    object.frame_counter = static_cast<float>(RandomBelow(state, 0x24));
     object.persistent = true;
     object.extra = extra;
     object.sprite_set_index = sprite_set_index;
     object.spin_rate = RandomSpinRate(state);
 
-    const float speed = (static_cast<float>(RandomRange(state, 0x51)) + 0x3c) *
+    const float speed = (static_cast<float>(RandomBelow(state, 0x51)) + 0x3c) *
                         kAtPositionScaleA * kAtPositionScaleB;
     const float angle =
-        static_cast<float>(RandomRange(state, 0x168)) * (kPi / 180.0F);
+        static_cast<float>(RandomBelow(state, 0x168)) * (kPi / 180.0F);
     AddPolar(angle, speed, object.vel_x, object.vel_y);
     return;
   }

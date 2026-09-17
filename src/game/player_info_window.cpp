@@ -1,6 +1,7 @@
 #include "player_info_window.hpp"
 
 #include "../log.hpp"
+#include "../util/format.hpp"
 #include "boarding_plunder.hpp"
 #include "brgr_archive.hpp"
 #include "game_state.hpp"
@@ -10,6 +11,7 @@
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "pict_image.hpp"
+#include "pict_texture.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
@@ -31,6 +33,8 @@
 #include <vector>
 
 namespace game {
+
+using evnova::util::GroupThousands;
 
 namespace {
 
@@ -304,37 +308,8 @@ std::string TitleString(std::uint16_t pool_index) {
   return "?";
 }
 
-// Ghidra DrawContext_DrawGroupedUInt: decimal digits grouped in threes with
-// commas (same shape as the boarding window's helper).
-std::string GroupedUInt(std::int32_t value) {
-  std::string digits = std::to_string(value);
-  std::string out;
-  out.reserve(digits.size() + digits.size() / 3);
-  for (std::size_t i = 0; i < digits.size(); ++i) {
-    if (i > 0 && (digits.size() - i) % 3 == 0) {
-      out.push_back(',');
-    }
-    out.push_back(digits[i]);
-  }
-  return out;
-}
-
 int RoundToInt(float v) {
   return static_cast<int>(v < 0.0F ? v - 0.5F : v + 0.5F);
-}
-
-std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
-                                            std::uint16_t pict_id) {
-  const auto data = NovaResource_LoadPictData(pict_id);
-  if (!data) {
-    return {};
-  }
-  const auto img = Resource_LoadPictAsImage(*data);
-  if (!img) {
-    return {};
-  }
-  return SdlTexture::Create(
-      platform.renderer(), img->width, img->height, img->rgba_pixels);
 }
 
 // Word-wrap for the page texts, using the same Geneva-9 metrics as the
@@ -641,7 +616,7 @@ void DrawGeneralPage(SdlPlatform &platform,
            kGridRightLabelX,
            kGridRightValueX,
            MiscString(kStrCreditsWord, "credits") + ":",
-           GroupedUInt(state.player.credits));
+           GroupThousands(state.player.credits));
 
   // Shield / armor / energy rows. Labels are the runtime pstrings
   // DAT_0072decc/.4cc/.dacc which NovaData_LoadDisplayNamePstringTables
@@ -856,7 +831,7 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
       if (trade_in > 0) {
         extras += "\r\r" +
                   MiscString(kStrTradeInValue, "Ship trade-in value:") + " " +
-                  GroupedUInt(trade_in) + " " +
+                  GroupThousands(trade_in) + " " +
                   MiscString(kStrCreditsWord, "credits") + "\r";
       }
       texts.extras = MiscString(kStrExtrasHeader, "") + "\r\r" + extras;

@@ -4,10 +4,16 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/format.hpp"
+#include "../util/geometry.hpp"
+#include "../util/math.hpp"
+#include "button_label.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "nova_font.hpp"
+#include "nova_random.hpp"
+#include "pict_texture.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "spaceflight_view.hpp"
@@ -28,6 +34,11 @@
 #include <vector>
 
 namespace game {
+
+using evnova::util::GroupThousands;
+using evnova::util::OffsetRect;
+using evnova::util::TruncateToInt32;
+
 namespace {
 
 // ---- Deferred Demand Tribute / Release hooks (TODO(decomp)) ----------------
@@ -73,7 +84,6 @@ constexpr std::uint16_t kStellarClassStr = 0x44c;
 
 // STR# 0x96 button-label entries (1-based; the original indexes the
 // DAT_007d83aa cache by the 0-based pool index, entry = pool + 1):
-constexpr std::uint16_t kButtonLabelStr = 0x96;
 constexpr std::uint16_t kBtnCloseChannel = 0x15;  // pool 0x14 "Close Channel"
 constexpr std::uint16_t kBtnGreetings = 0x16;     // pool 0x15 "Greetings"
 constexpr std::uint16_t kBtnOfferBribe = 0x18;    // pool 0x17 "Offer Bribe"
@@ -205,12 +215,6 @@ struct NegotiationFrame {
   SDL_Color status_word_color = kWhite;
 };
 
-[[nodiscard]] SDL_FRect OffsetRect(SDL_FRect rect, SDL_FPoint origin) {
-  rect.x += origin.x;
-  rect.y += origin.y;
-  return rect;
-}
-
 // Loads DLOG 0x3f1 + DITL, centred on the fixed 640x480 canvas like
 // Dialog_CreateFromDlog; fills `frame`'s geometry from DITL items 0..5.
 // Returns false (leaving the shipped-DITL fallback geometry) when the
@@ -338,61 +342,6 @@ LoadStatusVariant(std::int16_t random_index, std::uint16_t message_index) {
 LoadPromptVariant(std::int16_t random_index, std::uint16_t message_index) {
   return NovaHud_LoadStringEntry(
       kPromptStr, StringVariantIndex(random_index, message_index));
-}
-
-// Loads a STR# 0x96 button label with a literal fallback for missing
-// resources.
-[[nodiscard]] std::string LoadButtonLabel(std::uint16_t entry,
-                                          std::string_view fallback) {
-  return NovaHud_LoadStringEntry(kButtonLabelStr, entry)
-      .value_or(std::string{fallback});
-}
-
-// Loads one PICT resource into a texture (null on failure to locate/decode).
-std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
-                                            std::uint16_t pict_id) {
-  const auto data = NovaResource_LoadPictData(pict_id);
-  if (!data) {
-    return {};
-  }
-  const auto img = Resource_LoadPictAsImage(*data);
-  if (!img) {
-    return {};
-  }
-  return SdlTexture::Create(
-      platform.renderer(), img->width, img->height, img->rgba_pixels);
-}
-
-// Ghidra DrawContext_DrawGroupedUInt (see boarding_plunder.cpp): decimal
-// digits grouped in threes with commas.
-[[nodiscard]] std::string GroupedUInt(std::int32_t value) {
-  const std::string digits = std::to_string(value);
-  std::string out;
-  out.reserve(digits.size() + digits.size() / 3);
-  for (std::size_t i = 0; i < digits.size(); ++i) {
-    if (i > 0 && (digits.size() - i) % 3 == 0) {
-      out.push_back(',');
-    }
-    out.push_back(digits[i]);
-  }
-  return out;
-}
-
-// Uniform integer in [0, bound). Mirrors the game's NovaRandom_Range using the
-// GameState PRNG so negotiation rolls are reproducible per session.
-[[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
-  if (bound <= 1) {
-    return 0;
-  }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<int>{0, bound - 1}(rng));
-}
-
-// Truncate toward zero, matching the original's x87 FIST + residual/sign
-// correction (0x00480030 and the other travel-destination windows), not
-// round-half-up.
-[[nodiscard]] std::int32_t RoundDouble(double v) {
-  return static_cast<std::int32_t>(v);
 }
 
 // ---- Drawing --------------------------------------------------------------
@@ -654,7 +603,7 @@ void DrawPaymentWindow(SdlPlatform &platform,
           .value_or(payment_amount < 2 ? "credit" : "credits");
   const std::string prompt =
       NovaHud_LoadStringEntry(kMiscStr, kMiscPayYou).value_or("I'll pay you") +
-      " " + GroupedUInt(payment_amount) + " " + credit_word + ".";
+      " " + GroupThousands(payment_amount) + " " + credit_word + ".";
   NovaText_Draw(platform,
                 font_cache,
                 NovaFontFamily::kGeneva,
@@ -703,7 +652,7 @@ RunBribePaymentWindow(SdlPlatform &platform,
                       std::int32_t &payment_amount) {
   const PaymentFrame frame = LoadPaymentGeometry();
   // The window-open roll: "Lower Price" is granted when rand(100) <= 0x23.
-  bool lower_granted = NovaRandomRange(state.rng, 100) <= kPaymentChancePercent;
+  bool lower_granted = RandomBelow(state.rng, 100) <= kPaymentChancePercent;
   // The original's sVar4 result latch: once "Lower Price" is granted the
   // window stays open on the discounted figure and any later exit returns
   // "paid"; Esc before any decision returns "closed".
@@ -754,10 +703,10 @@ RunBribePaymentWindow(SdlPlatform &platform,
         if (!lower_granted) {
           return PaymentResult::kRefused;
         }
-        payment_amount = RoundDouble(static_cast<double>(payment_amount) *
-                                     kPaymentBribeScale);
-        payment_amount = RoundDouble(static_cast<double>(payment_amount) *
-                                     kPaymentRoundFactor) *
+        payment_amount = TruncateToInt32(static_cast<double>(payment_amount) *
+                                         kPaymentBribeScale);
+        payment_amount = TruncateToInt32(static_cast<double>(payment_amount) *
+                                         kPaymentRoundFactor) *
                          100;
         lower_granted = false;
         paid = true;
@@ -784,12 +733,12 @@ std::int32_t NovaNegotiation_ComputeBribeCost(std::mt19937 &rng,
   // + 3000` (no +1; NovaRandom_Range is [0, bound) -- cf. boarding panic
   // `rand(0x1a) + 0xf` = 15..40). Drawn from the same GameState PRNG so the
   // price is reproducible per session.
-  std::int32_t upper = RoundDouble(
+  std::int32_t upper = TruncateToInt32(
       std::max(1.0,
                static_cast<double>(std::max(std::int32_t{1}, credits)) *
                    kCreditsBribeFraction));
   std::int64_t cost =
-      static_cast<std::int64_t>(NovaRandomRange(rng, upper)) * kBribeGrouping +
+      static_cast<std::int64_t>(RandomBelow(rng, upper)) * kBribeGrouping +
       kBribeBaseAdd;
 
   // Clamp to 1/3 of credits, round down to /1000, then clamp bounds.
@@ -828,8 +777,8 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   // from the GameState PRNG so they are reproducible per session. The
   // original's latch persists across windows; the port re-rolls per run
   // (TODO(decomp): latch persistence divergence).
-  const std::int16_t random_index = NovaRandomRange(state.rng, 5);
-  const int bribe_random_latch = NovaRandomRange(state.rng, 100);
+  const std::int16_t random_index = RandomBelow(state.rng, 5);
+  const int bribe_random_latch = RandomBelow(state.rng, 100);
 
   // Denied latch (g_travel_interaction_denied_state): the stellar's
   // reputation_threshold gates landing against the CURRENT system's
@@ -881,8 +830,8 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   std::int32_t bribe_cost = NovaNegotiation_ComputeBribeCost(
       state.rng, state.player.credits, stellar->government_id);
   if (gov != nullptr && (gov->flags_primary & kGovtFlagBribeCostly) != 0U) {
-    bribe_cost =
-        RoundDouble(static_cast<double>(bribe_cost) * kGovtBribeCostMultiplier);
+    bribe_cost = TruncateToInt32(static_cast<double>(bribe_cost) *
+                                 kGovtBribeCostMultiplier);
   }
 
   // ---- Window content --------------------------------------------------

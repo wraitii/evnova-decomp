@@ -1,6 +1,7 @@
 #include "pixpat_image.hpp"
 
 #include "log.hpp"
+#include "util/byte_reader.hpp"
 
 #include <array>
 #include <cstddef>
@@ -11,27 +12,8 @@
 
 namespace {
 
-[[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  if (offset + 2 > bytes.size()) {
-    return 0;
-  }
-  return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset])
-                                    << 8U) |
-         static_cast<std::uint16_t>(
-             std::to_integer<std::uint8_t>(bytes[offset + 1]));
-}
-
-[[nodiscard]] std::uint32_t ReadBe32(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  if (offset + 4 > bytes.size()) {
-    return 0;
-  }
-  return std::to_integer<std::uint32_t>(bytes[offset]) << 24U |
-         std::to_integer<std::uint32_t>(bytes[offset + 1]) << 16U |
-         std::to_integer<std::uint32_t>(bytes[offset + 2]) << 8U |
-         std::to_integer<std::uint32_t>(bytes[offset + 3]);
-}
+using evnova::util::ReadBe16;
+using evnova::util::ReadBe32;
 
 // The original byteswaps each 32-bit resource offset and then sign-extends the
 // low half before adding it to the payload base (the `(short)` casts in

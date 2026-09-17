@@ -1,5 +1,7 @@
 #include "impact_effects.hpp"
 
+#include "frame_timing.hpp"
+#include "nova_random.hpp"
 #include "scenario_data.hpp"
 
 #include <algorithm>
@@ -19,14 +21,6 @@ constexpr float kGameDegreesToRadians = 0.017453292519943295F;
 
 [[nodiscard]] std::int32_t ParticleFixed(float pixels) {
   return static_cast<std::int32_t>(std::lround(pixels * kParticleFixedScale));
-}
-
-std::int16_t RandomRange(GameState &state, int bound) {
-  if (bound <= 1) {
-    return 0;
-  }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<int>{0, bound - 1}(state.rng));
 }
 
 bool ValidEffectId(std::int16_t effect_id) {
@@ -69,15 +63,15 @@ void NovaEffects_SpawnShipDestructionDebrisPuff(GameState &state,
       continue;
     }
     // Lifetime fills 150..249 (rand(100) + 0x96).
-    fragment.lifetime_ticks = static_cast<float>(150 + RandomRange(state, 100));
+    fragment.lifetime_ticks = static_cast<float>(150 + RandomBelow(state, 100));
     fragment.pos_x = ship.pos_x;
     fragment.pos_y = ship.pos_y;
     fragment.vel_x = ship.vel_x;
     fragment.vel_y = ship.vel_y;
     const float scatter_angle =
-        static_cast<float>(RandomRange(state, 360)) * kGameDegreesToRadians;
+        static_cast<float>(RandomBelow(state, 360)) * kGameDegreesToRadians;
     const float scatter_speed =
-        static_cast<float>(10 + RandomRange(state, 10)) *
+        static_cast<float>(10 + RandomBelow(state, 10)) *
         kDebrisScatterSpeedScale;
     // Math_AddPolarVelocity: bearing 0 = up, increasing clockwise.
     fragment.vel_x += std::sin(scatter_angle) * scatter_speed;
@@ -136,10 +130,10 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
     for (int i = 0; i < inner_count; ++i) {
       NovaEffects_SpawnImpactEffect(
           state,
-          x + static_cast<float>(RandomRange(state, inner_extent)) - inner_bias,
-          y + static_cast<float>(RandomRange(state, inner_extent)) - inner_bias,
+          x + static_cast<float>(RandomBelow(state, inner_extent)) - inner_bias,
+          y + static_cast<float>(RandomBelow(state, inner_extent)) - inner_bias,
           1,
-          static_cast<std::int16_t>(4 + RandomRange(state, 8)));
+          static_cast<std::int16_t>(4 + RandomBelow(state, 8)));
     }
 
     const int outer_count = static_cast<int>(safe_radius * 0.16F);
@@ -148,10 +142,10 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
     for (int i = 0; i < outer_count; ++i) {
       NovaEffects_SpawnImpactEffect(
           state,
-          x + static_cast<float>(RandomRange(state, outer_extent)) - outer_bias,
-          y + static_cast<float>(RandomRange(state, outer_extent)) - outer_bias,
+          x + static_cast<float>(RandomBelow(state, outer_extent)) - outer_bias,
+          y + static_cast<float>(RandomBelow(state, outer_extent)) - outer_bias,
           0,
-          static_cast<std::int16_t>(8 + RandomRange(state, 16)));
+          static_cast<std::int16_t>(8 + RandomBelow(state, 16)));
     }
   }
 
@@ -196,28 +190,28 @@ void NovaEffects_SpawnWeaponImpactParticleBurst(GameState &state,
     float particle_speed = speed;
     if (scale_speed) {
       particle_speed =
-          static_cast<float>(scatter_floor + RandomRange(state, scatter_span)) *
+          static_cast<float>(scatter_floor + RandomBelow(state, scatter_span)) *
           0.01F * particle_speed;
     }
     // Math_AddPolarVelocity: bearing 0 = up, increasing clockwise.
     const float angle =
-        static_cast<float>(RandomRange(state, 0x168)) * kGameDegreesToRadians;
+        static_cast<float>(RandomBelow(state, 0x168)) * kGameDegreesToRadians;
     const float vel_x = std::sin(angle) * particle_speed;
     const float vel_y = -std::cos(angle) * particle_speed;
 
     std::int16_t life = life_base;
     if (life_base < life_max) {
       life =
-          static_cast<std::int16_t>(life_base + RandomRange(state, life_span));
+          static_cast<std::int16_t>(life_base + RandomBelow(state, life_span));
     }
 
     float pos_x = x;
     float pos_y = y;
     if (position_scatter > 0) {
       const float magnitude =
-          static_cast<float>(RandomRange(state, position_span)) * 0.01F;
+          static_cast<float>(RandomBelow(state, position_span)) * 0.01F;
       const float offset_angle =
-          static_cast<float>(RandomRange(state, 0x168)) * kGameDegreesToRadians;
+          static_cast<float>(RandomBelow(state, 0x168)) * kGameDegreesToRadians;
       pos_x += std::sin(offset_angle) * magnitude;
       pos_y += -std::cos(offset_angle) * magnitude;
     }
@@ -279,9 +273,9 @@ void NovaEffects_SpawnWeaponTrailParticles(GameState &state,
   if (weapon.trail_particle_count <= 0) {
     return;
   }
-  const auto color_index = static_cast<std::size_t>(RandomRange(
+  const auto color_index = static_cast<std::size_t>(RandomBelow(
       state, static_cast<int>(weapon.trail_particle_color_variants.size())));
-  const auto speed_index = static_cast<std::size_t>(RandomRange(
+  const auto speed_index = static_cast<std::size_t>(RandomBelow(
       state, static_cast<int>(weapon.trail_particle_speed_variants.size())));
   const float speed = weapon.trail_particle_speed_variants[speed_index];
   const std::uint32_t color = weapon.trail_particle_color_variants[color_index];
@@ -334,7 +328,6 @@ void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
 // iteration per 21 ms (Frame_MeasureFrameTiming 0x00432ea0). Bank whole
 // logical calls so the discrete lifetime/integration order remains faithful
 // while staying independent of the port's display refresh rate.
-constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
 
 // Ghidra SWParticles_Update (0x0047c800).
 void NovaEffects_TickSwParticles(GameState &state, float elapsed_ticks) {
