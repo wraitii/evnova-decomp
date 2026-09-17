@@ -1461,6 +1461,13 @@ struct GameState {
   // effective max speed, so they are always >= max speed.
   float player_speed_cap_x = 0.0F;
   float player_speed_cap_y = 0.0F;
+  // Ghidra g_player_afterburner_active / g_gravity_pull_active: the
+  // afterburner and stellar-gravity flags the impact-impulse clamp reads
+  // (Ship_ApplyDamageToShip 0x004192d0). Refreshed by the player movement
+  // pass; a ship hit later in the frame sees the last player update, matching
+  // the original's frame-global latches.
+  bool player_afterburner_active = false;
+  bool gravity_pull_active = false;
   // Port stand-in for g_frame_tick_count_60hz (0x00865858, NovaTime_
   // GetTickCount60Hz 0x004d5e10): 1/60 s ticks. The original bumps the global
   // from the input-helper thread once per 16.664 ms; the port re-derives it
