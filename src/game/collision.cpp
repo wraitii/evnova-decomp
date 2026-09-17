@@ -916,7 +916,10 @@ void ResolveShipHitFromWeapon(GameState &state,
 
   if (allow_aggro_updates && target.ai_behavior_code > 0 &&
       target.ai_station_hold_timer <= 0.0F) {
-    bool should_retarget = !suppress_retarget_logic;
+    // The original starts the ordinary NPC-hit path eligible. Suppression
+    // bypasses validation gates that apply only to incidental fire, but an
+    // aimed shot still lets the victim retarget its NPC/escort attacker.
+    bool should_retarget = true;
     if (attacker_valid && attacker_ship_slot == 0) {
       // Targeted shots skip the accumulator gates. Incidental hits test the
       // OLD accumulator; the increment from this hit is applied below.
@@ -938,7 +941,7 @@ void ResolveShipHitFromWeapon(GameState &state,
       const Ship &attacker =
           state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
       if (attacker_ship_slot == target_slot ||
-          (attacker_ship_slot > 0 &&
+          (!suppress_retarget_logic && attacker_ship_slot > 0 &&
            attacker.primary_target_ship_slot != target_slot) ||
           SharesSquadRoot(state, target_slot, attacker_ship_slot)) {
         should_retarget = false;
@@ -957,7 +960,8 @@ void ResolveShipHitFromWeapon(GameState &state,
               kEscortDefenseRadiusPx) {
         should_retarget = false;
       }
-      if (NovaShip_IsInPlayerSquad(state, attacker) &&
+      if (!suppress_retarget_logic &&
+          NovaShip_IsInPlayerSquad(state, attacker) &&
           attacker.faction_or_government_id >= 0 &&
           NovaGovernment_GetPolicyFlag(
               state.scenario, attacker.faction_or_government_id, 0)) {

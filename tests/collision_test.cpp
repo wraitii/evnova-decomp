@@ -264,6 +264,135 @@ TEST_CASE(
   CHECK(target.ai_state_code == 4);
 }
 
+TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Ship &attacker = state.ShipAt(2);
+  attacker.is_active = true;
+  attacker.ship_instance_id = 2;
+  attacker.ship_class_id = 0;
+  attacker.current_system_id = 0;
+  attacker.ai_behavior_code = 6;
+  attacker.squad_leader_ship_slot = 0;
+  attacker.primary_target_ship_slot = 1;
+
+  Ship &target = state.ShipAt(1);
+  target.ai_behavior_code = 3;
+
+  SECTION("aimed hit retaliates") {
+    ResolveShipHitFromWeapon(state,
+                             /*target_slot=*/1,
+                             target,
+                             target.pos_x,
+                             target.pos_y,
+                             /*impact_impulse=*/0,
+                             /*armor_damage=*/1,
+                             /*shield_damage=*/1,
+                             /*attacker_ship_slot=*/2,
+                             /*allow_aggro_updates=*/true,
+                             /*suppress_retarget_logic=*/true,
+                             /*force_armor_only=*/false,
+                             /*bypass_shields=*/false,
+                             /*player_aggro_delta=*/0);
+
+    CHECK(target.primary_target_ship_slot == 2);
+    CHECK(target.ai_state_code == 0);
+    CHECK(target.ai_hostility_accumulator == 2);
+  }
+
+  SECTION("aimed hit still retaliates after attacker changed targets") {
+    attacker.primary_target_ship_slot = -1;
+
+    ResolveShipHitFromWeapon(state,
+                             /*target_slot=*/1,
+                             target,
+                             target.pos_x,
+                             target.pos_y,
+                             /*impact_impulse=*/0,
+                             /*armor_damage=*/1,
+                             /*shield_damage=*/1,
+                             /*attacker_ship_slot=*/2,
+                             /*allow_aggro_updates=*/true,
+                             /*suppress_retarget_logic=*/true,
+                             /*force_armor_only=*/false,
+                             /*bypass_shields=*/false,
+                             /*player_aggro_delta=*/0);
+
+    CHECK(target.primary_target_ship_slot == 2);
+    CHECK(target.ai_hostility_accumulator == 2);
+  }
+
+  SECTION("incidental hit from an unrelated NPC is ignored") {
+    attacker.primary_target_ship_slot = -1;
+
+    ResolveShipHitFromWeapon(state,
+                             /*target_slot=*/1,
+                             target,
+                             target.pos_x,
+                             target.pos_y,
+                             /*impact_impulse=*/0,
+                             /*armor_damage=*/1,
+                             /*shield_damage=*/1,
+                             /*attacker_ship_slot=*/2,
+                             /*allow_aggro_updates=*/true,
+                             /*suppress_retarget_logic=*/false,
+                             /*force_armor_only=*/false,
+                             /*bypass_shields=*/false,
+                             /*player_aggro_delta=*/0);
+
+    CHECK(target.primary_target_ship_slot == -1);
+    CHECK(target.ai_hostility_accumulator == 0);
+  }
+
+  SECTION("aimed hit ignores player squad policy suppression") {
+    state.scenario.governments.resize(1);
+    state.scenario.governments[0].policy_flags[0] = 1;
+    attacker.faction_or_government_id = 0;
+
+    ResolveShipHitFromWeapon(state,
+                             /*target_slot=*/1,
+                             target,
+                             target.pos_x,
+                             target.pos_y,
+                             /*impact_impulse=*/0,
+                             /*armor_damage=*/1,
+                             /*shield_damage=*/1,
+                             /*attacker_ship_slot=*/2,
+                             /*allow_aggro_updates=*/true,
+                             /*suppress_retarget_logic=*/true,
+                             /*force_armor_only=*/false,
+                             /*bypass_shields=*/false,
+                             /*player_aggro_delta=*/0);
+
+    CHECK(target.primary_target_ship_slot == 2);
+    CHECK(target.ai_hostility_accumulator == 2);
+  }
+
+  SECTION("incidental hit honors player squad policy suppression") {
+    state.scenario.governments.resize(1);
+    state.scenario.governments[0].policy_flags[0] = 1;
+    attacker.faction_or_government_id = 0;
+
+    ResolveShipHitFromWeapon(state,
+                             /*target_slot=*/1,
+                             target,
+                             target.pos_x,
+                             target.pos_y,
+                             /*impact_impulse=*/0,
+                             /*armor_damage=*/1,
+                             /*shield_damage=*/1,
+                             /*attacker_ship_slot=*/2,
+                             /*allow_aggro_updates=*/true,
+                             /*suppress_retarget_logic=*/false,
+                             /*force_armor_only=*/false,
+                             /*bypass_shields=*/false,
+                             /*player_aggro_delta=*/0);
+
+    CHECK(target.primary_target_ship_slot == -1);
+    CHECK(target.ai_hostility_accumulator == 0);
+  }
+}
+
 TEST_CASE("player hit latches a Flags-1 personality grudge",
           "[collision][aggro][pers]") {
   GameState state;
