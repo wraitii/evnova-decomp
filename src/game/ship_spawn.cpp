@@ -53,6 +53,10 @@ constexpr float kSpinInVelocity = 50.0F;
 // ordinary [-750, 750) allocation scatter.
 [[nodiscard]] float RandomPolarArrivalRadius() {
   float radius = 0.0F;
+  // The float loop counter is deliberate: the original accumulates the same
+  // 1.16 decrement, and reproducing its rounding keeps the 2102.64-unit
+  // offset identical.
+  // NOLINTNEXTLINE(clang-analyzer-security.FloatLoopCounter)
   for (float ramp = 50.0F; ramp > 0.0F; ramp -= 1.16F) {
     radius += ramp;
   }

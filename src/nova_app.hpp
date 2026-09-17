@@ -41,6 +41,10 @@ struct NovaMenuSpriteAsset {
   std::vector<std::unique_ptr<SdlTexture>> textures;
 };
 
+// Accepted padding (clang-analyzer-optin.performance.Padding): NovaRuntime is
+// a single long-lived instance, and its members stay grouped by subsystem and
+// startup order rather than reordered for packing.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct NovaRuntime {
   SdlPlatform platform;
   // SDL audio output shared by menu feedback sounds. Kept as a member (not a

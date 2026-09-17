@@ -722,8 +722,11 @@ bool SdlPlatform::IsOriginalKeyCodeHeld(std::uint16_t key_code) {
   const auto held = [&](SDL_Scancode scancode) {
     return keys[scancode] != 0 || probe_.VirtualKey(scancode);
   };
-  for (int value = SDL_SCANCODE_UNKNOWN + 1; value < SDL_SCANCODE_COUNT;
-       ++value) {
+  // SDL's enum leaves 1..3 unnamed between SDL_SCANCODE_UNKNOWN and
+  // SDL_SCANCODE_A; those gaps have no OriginalKeyCode mapping (the switch
+  // returns 0xffff), so start at the first named scancode and avoid the
+  // out-of-range cast.
+  for (int value = SDL_SCANCODE_A; value < SDL_SCANCODE_COUNT; ++value) {
     const auto scancode = static_cast<SDL_Scancode>(value);
     if (OriginalKeyCode(scancode) == key_code) {
       return held(scancode);

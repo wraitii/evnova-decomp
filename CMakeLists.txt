@@ -17,7 +17,10 @@ if(EVNOVA_ENABLE_CLANG_TIDY)
     find_program(EVNOVA_CLANG_TIDY NAMES clang-tidy
         HINTS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin)
     if(EVNOVA_CLANG_TIDY)
-        set(_evnova_clang_tidy_args --checks=clang-analyzer-* --warnings-as-errors=*)
+        # The check set and WarningsAsErrors live in the repo-root .clang-tidy,
+        # so in-build and manual runs stay in sync. Only the sysroot, which
+        # clang-tidy cannot infer from compile_commands.json, is passed here.
+        set(_evnova_clang_tidy_args)
         if(APPLE)
             # Homebrew LLVM's clang-tidy does not inherit AppleClang's default
             # sysroot, and compile_commands.json has no -isysroot because Apple's
