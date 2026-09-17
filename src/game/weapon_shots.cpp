@@ -364,7 +364,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   shot.life_frames = static_cast<int>(std::ceil(shot.life_ticks_remaining));
   shot.collision_radius_px = 2.0F;
   // Weapon_GetShotImpactVariant (0x0046c2f0): Flags2 bit 0x1000 makes a
-  // weapon disable but not destroy. Shot_ResolveShipHitFromWeapon preserves
+  // weapon disable but not destroy. Ship_ApplyDamageToShip preserves
   // one armor point for that variant.
   shot.impact_variant =
       (w->flags_secondary & 0x1000U) != 0U ? static_cast<std::int8_t>(1) : 0;

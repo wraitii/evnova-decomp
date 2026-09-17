@@ -710,20 +710,20 @@ TEST_CASE("crash deactivates immediately while weapon damage enters death",
     target.ship_class_id = 0;
     target.current_system_id = 0;
     target.armor_points = 5.0F;
-    ResolveShipHitFromWeapon(state,
-                             /*target_slot=*/1,
-                             target,
-                             target.pos_x,
-                             target.pos_y,
-                             /*impact_impulse=*/0,
-                             /*armor_damage=*/100,
-                             /*shield_damage=*/0,
-                             /*attacker_ship_slot=*/0,
-                             /*allow_aggro_updates=*/false,
-                             /*suppress_retarget_logic=*/false,
-                             /*force_armor_only=*/false,
-                             /*bypass_shields=*/true,
-                             /*player_aggro_delta=*/0);
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/100,
+                           /*shield_damage=*/0,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/false,
+                           /*suppress_retarget_logic=*/false,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/true,
+                           /*player_aggro_delta=*/0);
     CHECK(target.is_active);
     // The hit site leaves destruction as an armor state; Ship_UpdateVisualState
     // seeds the class DeathDelay timer.

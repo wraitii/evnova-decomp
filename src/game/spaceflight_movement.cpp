@@ -822,7 +822,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       static_cast<float>(ship.engine_glow_level) / 24.0F, 0.0F, 1.0F);
 
   // Ship_HandleShip 0x00435464..0x004354ae: player-owned hits build this
-  // retarget-pressure accumulator in Shot_ResolveShipHitFromWeapon. Its
+  // retarget-pressure accumulator in Ship_ApplyDamageToShip. Its
   // passive decay is normalized simulation time (g_avg_frame_tick_scale),
   // unlike the nearby per-call engine-glow mutations: subtract 0.5 per tick
   // and clamp a crossing to zero.

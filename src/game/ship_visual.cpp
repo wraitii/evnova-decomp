@@ -263,21 +263,21 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
           std::fabs(victim.pos_y - ship.pos_y) > blast_radius) {
         continue;
       }
-      ResolveShipHitFromWeapon(state,
-                               slot,
-                               victim,
-                               ship.pos_x,
-                               ship.pos_y,
-                               /*impact_impulse=*/0,
-                               blast_damage,
-                               blast_damage,
-                               /*attacker_ship_slot=*/self_slot,
-                               /*allow_aggro_updates=*/false,
-                               /*suppress_retarget_logic=*/false,
-                               /*force_armor_only=*/true,
-                               /*bypass_shields=*/false,
-                               /*player_aggro_delta=*/0,
-                               /*check_fire_restriction_transition=*/true);
+      Ship_ApplyDamageToShip(state,
+                             slot,
+                             victim,
+                             ship.pos_x,
+                             ship.pos_y,
+                             /*impact_impulse=*/0,
+                             blast_damage,
+                             blast_damage,
+                             /*attacker_ship_slot=*/self_slot,
+                             /*allow_aggro_updates=*/false,
+                             /*suppress_retarget_logic=*/false,
+                             /*force_armor_only=*/true,
+                             /*bypass_shields=*/false,
+                             /*player_aggro_delta=*/0,
+                             /*check_fire_restriction_transition=*/true);
     }
   }
 

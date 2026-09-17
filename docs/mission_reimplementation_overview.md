@@ -432,7 +432,7 @@ The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`:
   (debris puffs above 2.0, sprite layering, audio) stay in the SDL view,
   which already spawns destruction visuals at the hit transition — divergence
   logged in `ship_visual.cpp`.
-- **Disable — `Shot_ResolveShipHitFromWeapon` 0x004192d0** (fire-restriction
+- **Disable — `Ship_ApplyDamageToShip` 0x004192d0** (fire-restriction
   arm): PORTED in `collision.cpp` (transition-gated by the caller's
   `check_fire_restriction_transition`, set by the hull blast):
   `goal_counter_c++`; `ship_goal` 3 (escort) quick-fails unless flags

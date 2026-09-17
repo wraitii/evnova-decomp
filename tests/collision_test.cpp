@@ -114,20 +114,20 @@ TEST_CASE("combat rating credits only player-side kills",
           "[collision][rating]") {
   auto kill_target = [](GameState &state, std::int16_t attacker_slot) {
     Ship &target = state.ShipAt(1);
-    ResolveShipHitFromWeapon(state,
-                             /*target_slot=*/1,
-                             target,
-                             target.pos_x,
-                             target.pos_y,
-                             /*impact_impulse=*/0,
-                             /*armor_damage=*/200,
-                             /*shield_damage=*/0,
-                             attacker_slot,
-                             /*allow_aggro_updates=*/true,
-                             /*suppress_retarget_logic=*/true,
-                             /*force_armor_only=*/false,
-                             /*bypass_shields=*/true,
-                             /*player_aggro_delta=*/0);
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/200,
+                           /*shield_damage=*/0,
+                           attacker_slot,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/true,
+                           /*player_aggro_delta=*/0);
   };
 
   SECTION("player kill is credited") {
@@ -197,40 +197,40 @@ TEST_CASE("incidental player hits accumulate before a later retarget",
   target.primary_target_ship_slot = -1;
   target.ai_state_code = 0;
 
-  ResolveShipHitFromWeapon(state,
-                           /*target_slot=*/1,
-                           target,
-                           target.pos_x,
-                           target.pos_y,
-                           /*impact_impulse=*/0,
-                           /*armor_damage=*/1,
-                           /*shield_damage=*/1,
-                           /*attacker_ship_slot=*/0,
-                           /*allow_aggro_updates=*/true,
-                           /*suppress_retarget_logic=*/false,
-                           /*force_armor_only=*/false,
-                           /*bypass_shields=*/false,
-                           /*player_aggro_delta=*/10);
+  Ship_ApplyDamageToShip(state,
+                         /*target_slot=*/1,
+                         target,
+                         target.pos_x,
+                         target.pos_y,
+                         /*impact_impulse=*/0,
+                         /*armor_damage=*/1,
+                         /*shield_damage=*/1,
+                         /*attacker_ship_slot=*/0,
+                         /*allow_aggro_updates=*/true,
+                         /*suppress_retarget_logic=*/false,
+                         /*force_armor_only=*/false,
+                         /*bypass_shields=*/false,
+                         /*player_aggro_delta=*/10);
 
   // The threshold test precedes this hit's +15 increment.
   CHECK(target.player_aggro_accumulator == Catch::Approx(62.5F));
   CHECK(target.primary_target_ship_slot == -1);
   CHECK(target.ai_state_code == 0);
 
-  ResolveShipHitFromWeapon(state,
-                           /*target_slot=*/1,
-                           target,
-                           target.pos_x,
-                           target.pos_y,
-                           /*impact_impulse=*/0,
-                           /*armor_damage=*/1,
-                           /*shield_damage=*/1,
-                           /*attacker_ship_slot=*/0,
-                           /*allow_aggro_updates=*/true,
-                           /*suppress_retarget_logic=*/false,
-                           /*force_armor_only=*/false,
-                           /*bypass_shields=*/false,
-                           /*player_aggro_delta=*/10);
+  Ship_ApplyDamageToShip(state,
+                         /*target_slot=*/1,
+                         target,
+                         target.pos_x,
+                         target.pos_y,
+                         /*impact_impulse=*/0,
+                         /*armor_damage=*/1,
+                         /*shield_damage=*/1,
+                         /*attacker_ship_slot=*/0,
+                         /*allow_aggro_updates=*/true,
+                         /*suppress_retarget_logic=*/false,
+                         /*force_armor_only=*/false,
+                         /*bypass_shields=*/false,
+                         /*player_aggro_delta=*/10);
 
   CHECK(target.player_aggro_accumulator == Catch::Approx(0.0F));
   CHECK(target.primary_target_ship_slot == 0);
@@ -244,20 +244,20 @@ TEST_CASE(
   SeedCollisionScenario(state);
   Ship &target = state.ShipAt(1);
 
-  ResolveShipHitFromWeapon(state,
-                           /*target_slot=*/1,
-                           target,
-                           target.pos_x,
-                           target.pos_y,
-                           /*impact_impulse=*/0,
-                           /*armor_damage=*/1,
-                           /*shield_damage=*/1,
-                           /*attacker_ship_slot=*/0,
-                           /*allow_aggro_updates=*/true,
-                           /*suppress_retarget_logic=*/true,
-                           /*force_armor_only=*/false,
-                           /*bypass_shields=*/false,
-                           /*player_aggro_delta=*/10);
+  Ship_ApplyDamageToShip(state,
+                         /*target_slot=*/1,
+                         target,
+                         target.pos_x,
+                         target.pos_y,
+                         /*impact_impulse=*/0,
+                         /*armor_damage=*/1,
+                         /*shield_damage=*/1,
+                         /*attacker_ship_slot=*/0,
+                         /*allow_aggro_updates=*/true,
+                         /*suppress_retarget_logic=*/true,
+                         /*force_armor_only=*/false,
+                         /*bypass_shields=*/false,
+                         /*player_aggro_delta=*/10);
 
   CHECK(target.player_aggro_accumulator == Catch::Approx(0.0F));
   CHECK(target.primary_target_ship_slot == 0);
@@ -280,20 +280,20 @@ TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
   target.ai_behavior_code = 3;
 
   SECTION("aimed hit retaliates") {
-    ResolveShipHitFromWeapon(state,
-                             /*target_slot=*/1,
-                             target,
-                             target.pos_x,
-                             target.pos_y,
-                             /*impact_impulse=*/0,
-                             /*armor_damage=*/1,
-                             /*shield_damage=*/1,
-                             /*attacker_ship_slot=*/2,
-                             /*allow_aggro_updates=*/true,
-                             /*suppress_retarget_logic=*/true,
-                             /*force_armor_only=*/false,
-                             /*bypass_shields=*/false,
-                             /*player_aggro_delta=*/0);
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/2,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0);
 
     CHECK(target.primary_target_ship_slot == 2);
     CHECK(target.ai_state_code == 0);
@@ -303,20 +303,20 @@ TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
   SECTION("aimed hit still retaliates after attacker changed targets") {
     attacker.primary_target_ship_slot = -1;
 
-    ResolveShipHitFromWeapon(state,
-                             /*target_slot=*/1,
-                             target,
-                             target.pos_x,
-                             target.pos_y,
-                             /*impact_impulse=*/0,
-                             /*armor_damage=*/1,
-                             /*shield_damage=*/1,
-                             /*attacker_ship_slot=*/2,
-                             /*allow_aggro_updates=*/true,
-                             /*suppress_retarget_logic=*/true,
-                             /*force_armor_only=*/false,
-                             /*bypass_shields=*/false,
-                             /*player_aggro_delta=*/0);
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/2,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0);
 
     CHECK(target.primary_target_ship_slot == 2);
     CHECK(target.ai_hostility_accumulator == 2);
@@ -325,20 +325,20 @@ TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
   SECTION("incidental hit from an unrelated NPC is ignored") {
     attacker.primary_target_ship_slot = -1;
 
-    ResolveShipHitFromWeapon(state,
-                             /*target_slot=*/1,
-                             target,
-                             target.pos_x,
-                             target.pos_y,
-                             /*impact_impulse=*/0,
-                             /*armor_damage=*/1,
-                             /*shield_damage=*/1,
-                             /*attacker_ship_slot=*/2,
-                             /*allow_aggro_updates=*/true,
-                             /*suppress_retarget_logic=*/false,
-                             /*force_armor_only=*/false,
-                             /*bypass_shields=*/false,
-                             /*player_aggro_delta=*/0);
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/2,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/false,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0);
 
     CHECK(target.primary_target_ship_slot == -1);
     CHECK(target.ai_hostility_accumulator == 0);
@@ -349,20 +349,20 @@ TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
     state.scenario.governments[0].policy_flags[0] = 1;
     attacker.faction_or_government_id = 0;
 
-    ResolveShipHitFromWeapon(state,
-                             /*target_slot=*/1,
-                             target,
-                             target.pos_x,
-                             target.pos_y,
-                             /*impact_impulse=*/0,
-                             /*armor_damage=*/1,
-                             /*shield_damage=*/1,
-                             /*attacker_ship_slot=*/2,
-                             /*allow_aggro_updates=*/true,
-                             /*suppress_retarget_logic=*/true,
-                             /*force_armor_only=*/false,
-                             /*bypass_shields=*/false,
-                             /*player_aggro_delta=*/0);
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/2,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0);
 
     CHECK(target.primary_target_ship_slot == 2);
     CHECK(target.ai_hostility_accumulator == 2);
@@ -373,20 +373,20 @@ TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
     state.scenario.governments[0].policy_flags[0] = 1;
     attacker.faction_or_government_id = 0;
 
-    ResolveShipHitFromWeapon(state,
-                             /*target_slot=*/1,
-                             target,
-                             target.pos_x,
-                             target.pos_y,
-                             /*impact_impulse=*/0,
-                             /*armor_damage=*/1,
-                             /*shield_damage=*/1,
-                             /*attacker_ship_slot=*/2,
-                             /*allow_aggro_updates=*/true,
-                             /*suppress_retarget_logic=*/false,
-                             /*force_armor_only=*/false,
-                             /*bypass_shields=*/false,
-                             /*player_aggro_delta=*/0);
+    Ship_ApplyDamageToShip(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/2,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/false,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0);
 
     CHECK(target.primary_target_ship_slot == -1);
     CHECK(target.ai_hostility_accumulator == 0);
@@ -403,20 +403,20 @@ TEST_CASE("player hit latches a Flags-1 personality grudge",
   Ship &target = state.ShipAt(1);
   target.pers_def_slot = 0;
 
-  ResolveShipHitFromWeapon(state,
-                           /*target_slot=*/1,
-                           target,
-                           target.pos_x,
-                           target.pos_y,
-                           /*impact_impulse=*/0,
-                           /*armor_damage=*/1,
-                           /*shield_damage=*/1,
-                           /*attacker_ship_slot=*/0,
-                           /*allow_aggro_updates=*/true,
-                           /*suppress_retarget_logic=*/true,
-                           /*force_armor_only=*/false,
-                           /*bypass_shields=*/false,
-                           /*player_aggro_delta=*/0);
+  Ship_ApplyDamageToShip(state,
+                         /*target_slot=*/1,
+                         target,
+                         target.pos_x,
+                         target.pos_y,
+                         /*impact_impulse=*/0,
+                         /*armor_damage=*/1,
+                         /*shield_damage=*/1,
+                         /*attacker_ship_slot=*/0,
+                         /*allow_aggro_updates=*/true,
+                         /*suppress_retarget_logic=*/true,
+                         /*force_armor_only=*/false,
+                         /*bypass_shields=*/false,
+                         /*player_aggro_delta=*/0);
 
   CHECK(state.scenario.pers_defs[0].grudge);
 }
@@ -703,7 +703,7 @@ TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
   NovaWeapon_ResolveDirectShotCollisions(state);
 
   CHECK(state.active_shots.empty());
-  // Shot_ResolveShipHitFromWeapon does not arm the death timer itself; the
+  // Ship_ApplyDamageToShip does not arm the death timer itself; the
   // original ship handler consumes armor <= 0 on its later pass.
   CHECK(state.ShipAt(1).armor_points == Catch::Approx(-15.0F));
   CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(-1.0F));
@@ -893,23 +893,23 @@ TEST_CASE("NPC destruction seeds the class DeathDelay timer once",
   state.ShipAt(1).armor_points = 1.0F;
   state.ShipAt(1).shield_points = 0.0F;
 
-  // Shot_ResolveShipHitFromWeapon leaves destruction as an armor state; the
+  // Ship_ApplyDamageToShip leaves destruction as an armor state; the
   // NPC timer (x1) is seeded by Ship_UpdateVisualState, not the hit site.
-  ResolveShipHitFromWeapon(state,
-                           /*target_slot=*/1,
-                           state.ShipAt(1),
-                           state.ShipAt(1).pos_x,
-                           state.ShipAt(1).pos_y,
-                           /*impact_impulse=*/0,
-                           /*armor_damage=*/25,
-                           /*shield_damage=*/0,
-                           /*attacker_ship_slot=*/0,
-                           /*allow_aggro_updates=*/true,
-                           /*suppress_retarget_logic=*/false,
-                           /*force_armor_only=*/false,
-                           /*bypass_shields=*/false,
-                           /*player_aggro_delta=*/0,
-                           /*check_fire_restriction_transition=*/true);
+  Ship_ApplyDamageToShip(state,
+                         /*target_slot=*/1,
+                         state.ShipAt(1),
+                         state.ShipAt(1).pos_x,
+                         state.ShipAt(1).pos_y,
+                         /*impact_impulse=*/0,
+                         /*armor_damage=*/25,
+                         /*shield_damage=*/0,
+                         /*attacker_ship_slot=*/0,
+                         /*allow_aggro_updates=*/true,
+                         /*suppress_retarget_logic=*/false,
+                         /*force_armor_only=*/false,
+                         /*bypass_shields=*/false,
+                         /*player_aggro_delta=*/0,
+                         /*check_fire_restriction_transition=*/true);
   CHECK(NovaAiShip_IsDestroyed(state.ShipAt(1)));
   CHECK(state.ShipAt(1).death_timer_active <= 0.0F);
   NovaShip_TickDestroyedShipVisualState(state, state.ShipAt(1), 0.63F);
@@ -924,21 +924,21 @@ TEST_CASE("player destruction seeds a tripled death presentation timer",
   state.player.armor_points = 1.0F;
   state.player.shield_points = 0.0F;
 
-  ResolveShipHitFromWeapon(state,
-                           /*target_slot=*/0,
-                           state.player,
-                           state.player.pos_x,
-                           state.player.pos_y,
-                           /*impact_impulse=*/0,
-                           /*armor_damage=*/25,
-                           /*shield_damage=*/0,
-                           /*attacker_ship_slot=*/1,
-                           /*allow_aggro_updates=*/true,
-                           /*suppress_retarget_logic=*/false,
-                           /*force_armor_only=*/false,
-                           /*bypass_shields=*/false,
-                           /*player_aggro_delta=*/0,
-                           /*check_fire_restriction_transition=*/true);
+  Ship_ApplyDamageToShip(state,
+                         /*target_slot=*/0,
+                         state.player,
+                         state.player.pos_x,
+                         state.player.pos_y,
+                         /*impact_impulse=*/0,
+                         /*armor_damage=*/25,
+                         /*shield_damage=*/0,
+                         /*attacker_ship_slot=*/1,
+                         /*allow_aggro_updates=*/true,
+                         /*suppress_retarget_logic=*/false,
+                         /*force_armor_only=*/false,
+                         /*bypass_shields=*/false,
+                         /*player_aggro_delta=*/0,
+                         /*check_fire_restriction_transition=*/true);
   REQUIRE(NovaAiShip_IsDestroyed(state.player));
   // The collision path leaves the player's presentation timer alone so
   // Ship_UpdateVisualState (called from Frame_TickSystems scope 10) owns the
