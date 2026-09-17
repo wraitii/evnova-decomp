@@ -6,7 +6,7 @@ MSVC compiles an implicit `(int)` / `(short)` cast of a float as an x87
 `FIST` (round-to-nearest) followed by a residual/sign correction whose
 integer form is `ADD reg,0x7fffffff; SBB out,0` plus a signed branch. The
 net result is **truncation toward zero**, *not* round-to-nearest. The same
-idiom is documented in `src/game/ship_ai.cpp` (`RoundedAxisDistanceSquared`).
+idiom is documented in `src/game/ship_ai_behaviors.cpp` (`RoundedAxisDistanceSquared`).
 
 A genuinely different pattern, `ROUND(f) + (0 < frac)`, nets to ceil and
 must not be confused with this one. `ROUND(f)` alone (no correction) is
@@ -67,14 +67,16 @@ truncation idiom:
 
 ### Sites using the idiom
 
-- `ship_ai.cpp` `Ship_UpdateShipAiState` 0x00405590 (scripted-asteroid
-  threshold); `Ship_ApplyShipAiControls` 0x00408150 (entry desired-heading
-  sync, leader copy/delta, evasive +/-135, velocity-match mode 0xc, mode-0xf
-  copy); `Weapon_SelectWeaponBankForCurrentTarget` 0x0040ce00 (mode-7/8 arc);
+- `ship_ai_state.cpp` `Ship_UpdateShipAiState` 0x00405590 (scripted-asteroid
+  threshold); `ship_ai_controls.cpp` `Ship_ApplyShipAiControls` 0x00408150
+  (entry desired-heading sync, leader copy/delta, evasive +/-135,
+  velocity-match mode 0xc, mode-0xf
+  copy); `ship_ai_weapons.cpp` `Weapon_SelectWeaponBankForCurrentTarget`
+  0x0040ce00 (mode-7/8 arc);
   `Ship_ScoreAssistTargetForShip` 0x00412090 (helper renamed
   `RoundedDistanceSquared` -> `TruncatedDistanceSquared`, score sum truncates).
-- `weapon.cpp` `Shot_SpawnShotFromWeapon` 0x0041fd30 (interference roll);
-  `Weapon_FirePlayerWeaponBank` 0x00455150 (mode-0 heading, blind-spot
+- `weapon_shots.cpp` `Shot_SpawnShotFromWeapon` 0x0041fd30 (interference roll);
+  `weapon.cpp` `Weapon_FirePlayerWeaponBank` 0x00455150 (mode-0 heading, blind-spot
   heading); `Weapon_FireShipWeapons` 0x00414550 (mode-0 heading); the shared
   `RoundHeadingDeg` helper (`Shot_HandleShot` 0x00435830 /
   `Shot_UpdateShotGuidance` 0x00431530); `TurnShotToward`'s turn-rate floor.
@@ -101,13 +103,13 @@ truncation idiom:
 - `lround(BearingDeg(...))` in `weapon.cpp` (0x00455150, 0x00414550): the
   original returns a short from `Math_BearingFromPointToPoint`; the conversion
   lives inside that helper, not at the call site.
-- `spaceflight.cpp` face-target bearing inlines `Math_BearingFromPointToPoint`
+- `spaceflight_player_state.cpp` face-target bearing inlines `Math_BearingFromPointToPoint`
   likewise; `weapon.cpp` `RotationFrameForShip` and `spaceflight_view.cpp`
   `FrameForHeading` derive a sprite frame the original reads from the sprite's
   integer rotation counter.
 - `std::lround(reload_ticks)` in `collision.cpp` (and the `weapon.cpp` /
   `collision.cpp` equivalents) is an identity no-op on an integer field.
-- `spaceflight.cpp` `NovaPlayer_IntegrateMovement`'s turn-rate floor and the
+- `spaceflight_movement.cpp` `NovaPlayer_IntegrateMovement`'s turn-rate floor and the
   `spaceflight_view.cpp` world-to-screen / starfield helpers are port-local
   render approximations, not call-site FIST conversions.
 

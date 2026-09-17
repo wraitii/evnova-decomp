@@ -2,6 +2,22 @@
 
 This note is intentionally short, factual, and focused on in-flight gameplay systems and where they currently appear in the decompile.
 
+## Port source boundaries
+
+- `spaceflight.cpp`: frame coordination, input/UI command dispatch, and scope handlers.
+- `spaceflight_movement.cpp`: player/NPC movement and effective physics stats.
+- `spaceflight_player_state.cpp`: status, outfits, eject/respawn, and regeneration.
+- `ship_ai.cpp`: AI dispatch, lifecycle, escort supervision, and relationship helpers.
+- `ship_ai_behaviors.cpp`, `ship_ai_state.cpp`, `ship_ai_controls.cpp`, and
+  `ship_ai_weapons.cpp`: behavior selection, state transitions, steering controls,
+  and weapon-selection policy respectively.
+- `mission.cpp`, `mission_text.cpp`, and `mission_world.cpp`: mission lifecycle,
+  text expansion, and daily world updates respectively.
+- `weapon.cpp`, `weapon_banks.cpp`, and `weapon_shots.cpp`: firing coordination,
+  bank/ammo management, and projectile lifecycle respectively.
+- `starmap.cpp` owns the window, panels, and asset loading;
+  `starmap_render.cpp` owns the galaxy graph and political overlay rendering.
+
 ## External mechanics baseline (for naming/orientation)
 
 - Weapon behavior modes are data-driven (`wëap` guidance), including beam, homing, turret variants, point-defense, bomb/rocket, and carried-ship launch behavior.
@@ -54,7 +70,8 @@ Primary chain inside `NovaGameplay_TickSystems`:
 
 - `0x00401000` `NovaGameplay_UpdateShipAI(int * ship, char skip_heavy_ai)`
 - `0x00405590` `NovaGameplay_UpdateShipAiState(int ship)`
-- `0x00408150` `NovaGameplay_ApplyShipAiControls(int * ship)`
+- `0x00408150` `NovaGameplay_ApplyShipAiControls(int * ship)` (port in
+  `src/game/ship_ai_controls.cpp`)
 - `0x00414550` `NovaGameplay_FireShipWeapons(int ship)`
 
 Observed responsibilities:
