@@ -409,6 +409,23 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   state.travel.selected_stellar_id = 0x80;
   state.travel.engage_timer = 0x2ee; // approach armed
 
+  // A healthy attached escort must survive the launch rebuild and be adopted
+  // into the destination system before mission/ambient population is added.
+  game::Ship &escort = state.ShipAt(1);
+  escort.is_active = true;
+  escort.ship_instance_id = 1;
+  escort.ship_class_id = 0;
+  escort.ai_behavior_code = 6;
+  escort.squad_leader_ship_slot = 0;
+  escort.mission_fleet_slot = -1;
+  escort.defense_fleet_home_stellar_id = -1;
+  escort.armor_points = 200.0F;
+  escort.shield_points = 2.0F;
+  game::Ship &disabled = state.ShipAt(2);
+  disabled = escort;
+  disabled.ship_instance_id = 2;
+  disabled.armor_points = 1.0F;
+
   game::LandedContext ctx;
   REQUIRE(game::Stellar_Dock(state, ctx, 96));
   CHECK(ctx.landed);
@@ -433,6 +450,12 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   CHECK(state.player.speed == 0.0F);
   CHECK(state.player.shield_points == 300.0F);
   CHECK(state.player.armor_points == 250.0F);
+  CHECK(escort.is_active);
+  CHECK(escort.current_system_id == state.player.current_system_id);
+  CHECK(escort.heading == state.player.heading);
+  CHECK(escort.shield_points == 300.0F);
+  CHECK(escort.armor_points == 250.0F);
+  CHECK_FALSE(disabled.is_active);
   // 0x00456109: the launch heading is a fresh rand(0x168) roll.
   CHECK(state.player.heading >= 0.0F);
   CHECK(state.player.heading < 6.2831855F);

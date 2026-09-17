@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "game/escort_formation.hpp"
 #include "game/game_state.hpp"
 #include "game/outfit.hpp"
 #include "game/scenario_data.hpp"
@@ -650,6 +651,77 @@ TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
   }
   CHECK(state.travel.just_completed);
   CHECK(state.player.current_system_id == 1);
+}
+
+TEST_CASE("jump payroll uses fleet travel days after escort restoration",
+          "[travel][escort]") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.ship_class_id = 0;
+  state.scenario.ships[0].mass_tons = 50;
+  auto &escort_class = state.scenario.ships[1];
+  escort_class.mass_tons = 250;
+  escort_class.cost = 10000;
+  escort_class.default_ai_behavior = 1;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    state.ShipAt(slot).is_active = false;
+  }
+  auto &escort = state.ShipAt(1);
+  escort.is_active = true;
+  escort.ship_instance_id = 1;
+  escort.ship_class_id = 1;
+  escort.current_system_id = 0;
+  escort.ai_behavior_code = 6;
+  escort.squad_leader_ship_slot = 0;
+  escort.mission_fleet_slot = -1;
+  escort.escort_origin_mark = 1;
+  escort.armor_points = static_cast<float>(escort_class.base_armor);
+  escort.shield_points = static_cast<float>(escort_class.base_shield);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_y = -3000;
+  state.player.credits = 1000;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+
+  int expected_credits = 700;
+  bool released = false;
+  SECTION("three days charged once") {}
+  SECTION("shortfall in the second period releases the escort") {
+    state.player.credits = 150;
+    expected_credits = 50;
+    released = true;
+  }
+  SECTION("captured escort adds travel days without upkeep") {
+    escort.escort_origin_mark = 0;
+    expected_credits = 1000;
+  }
+
+  const auto before_jump = state.player.credits;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+  for (int frame = 0; frame < 1200 && !state.travel.just_completed; ++frame) {
+    NovaTravel_Tick(state, frame == 0, 16.67F);
+  }
+  REQUIRE(state.travel.just_completed);
+  CHECK(state.travel.pending_payroll_periods == 3);
+  CHECK(state.player.credits == before_jump);
+  CHECK(escort.current_system_id == 0);
+  game::NovaSystem_RestorePlayerEscorts(state, false, 0);
+  REQUIRE(escort.current_system_id == 1);
+  int messages = 0;
+  const auto show_text = [&](const std::string &text) {
+    CHECK_FALSE(text.empty());
+    ++messages;
+  };
+  game::NovaTravel_ProcessArrivalPayroll(state, show_text);
+  CHECK(state.player.credits == expected_credits);
+  CHECK(escort.is_active == !released);
+  CHECK(messages == (released ? 1 : 0));
+  CHECK(state.travel.pending_payroll_periods == 0);
+  game::NovaTravel_ProcessArrivalPayroll(state, show_text);
+  CHECK(state.player.credits == expected_credits);
+  CHECK(messages == (released ? 1 : 0));
 }
 
 TEST_CASE("jump heading uses the linked systems' map vector") {

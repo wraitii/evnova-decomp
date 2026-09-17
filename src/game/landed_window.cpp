@@ -7,6 +7,7 @@
 #include "../sdl_platform.hpp"
 #include "asteroid.hpp"
 #include "docked_dialog.hpp"
+#include "escort_formation.hpp"
 #include "hud_renderer.hpp"
 #include "landed_store.hpp"
 #include "nova_font.hpp"
@@ -332,6 +333,13 @@ void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
   // after Stellar_RunDockAndLaunchSequence returns. Missions accepted in the
   // Spaceport loop must therefore participate in this rebuild.
   NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
+  // Ghidra 0x0041af90: the normal launch caller passes flag=1. Adopt attached
+  // escorts before mission fleets and ambient ships; this also refills their
+  // hull meters/weapon stock and snaps the player formation.
+  NovaSystem_RestorePlayerEscorts(
+      state,
+      /*refill=*/true,
+      static_cast<std::uint32_t>(state.gameplay_now_ms));
   NovaSystem_RestoreMissionFleets(
       state,
       state.player.current_system_id,

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <functional>
+#include <string>
+
 // Clean-room cross-system travel: plain hyperspace between adjacent systems,
 // plus the shared state-only portion of hypergate/wormhole transfer. It
 // reconstructs the faithful,
@@ -361,6 +364,12 @@ void NovaTravel_Tick(GameState &state,
                      bool travel_input,
                      float frame_time_ms,
                      bool warp_up_sound_active = false);
+
+// Consume the jump's saved travel-day count after rebuilding the arrival
+// fleet. The callback presents the original unpaid-escort dismissal dialog.
+void NovaTravel_ProcessArrivalPayroll(
+    GameState &state,
+    const std::function<void(const std::string &)> &show_text);
 
 // Access predicate from Stellar_HandleStellarEntryAndExit (0x00457580):
 // reputation/hazard/current engagement, government ScanMask requirements,
