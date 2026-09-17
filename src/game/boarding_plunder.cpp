@@ -472,9 +472,8 @@ struct BoardRangeSpan {
 
 // Ghidra 0x00415cb0 Boarding_ResetShipAndAttackersAfterBoarding. Ships
 // targeting the captured hull drop their combat state; the captured hull itself
-// gets a combat/mission reset. TODO(decomp): the original also rolls a random
-// voice type (ShipState.voice_type_mode) overridden by the class's
-// inherent_attributes_govt voice mode; the port has no voice model.
+// gets a combat/mission reset and a fresh voice type (random, then overridden
+// by the class's inherent_attributes_govt voice mode).
 void Boarding_ResetShipAndAttackersAfterBoarding(GameState &state, Ship &ship) {
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &other = state.ShipAt(slot);
@@ -498,6 +497,16 @@ void Boarding_ResetShipAndAttackersAfterBoarding(GameState &state, Ship &ship) {
   ship.ai_hostility_accumulator = 0;
   ship.defense_fleet_home_stellar_id = -1;
   ship.pers_def_slot = -1;
+  ship.voice_type_mode = RandomBelow(state, 2);
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class != nullptr && ship_class->inherent_attributes_govt != -1) {
+    if (const Government *govt = state.scenario.GovernmentByIndex(
+            ship_class->inherent_attributes_govt);
+        govt != nullptr && govt->voice_type_mode != -1) {
+      ship.voice_type_mode = govt->voice_type_mode;
+    }
+  }
 }
 
 // Ghidra 0x0045a3d0 Player_HandleBoardTargetCommand.
