@@ -435,6 +435,9 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     // Ship_UpdateVisualState's weapon-flash fade + running-lights blink run
     // for every active hull each frame (the same per-ship pass).
     NovaShip_TickWeaponSpriteAndRunningLights(state, ship, elapsed_ticks);
+    // Ship_UpdateVisualState's sprite-frame composition (base row-select state
+    // machines + the AltImageID overlay cycle).
+    NovaShip_TickSpriteAnimation(state, ship, elapsed_ticks);
     // Destroyed NPCs run their visual slice inline with Ship_HandleShip above
     // so each ship preserves the original handler -> visual ordering.
   }
@@ -495,6 +498,7 @@ void NovaFrame_TickSystems(GameState &state,
   if (state.player.is_active) {
     NovaShip_TickWeaponSpriteAndRunningLights(
         state, state.player, elapsed_ticks);
+    NovaShip_TickSpriteAnimation(state, state.player, elapsed_ticks);
   }
   // scope 9 "collisions": always runs.
   Stub_Collisions(state);

@@ -45,11 +45,13 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
   d.base_x_size = ReadBe16(resource_data, 0x06);        // BaseXSize
   d.base_y_size = ReadBe16(resource_data, 0x08);        // BaseYSize
   d.base_transparency = ReadBeI16(resource_data, 0x0a); // BaseTransp
-  // Alternate (bank/unfold) sprite sheet. Ghidra Ship_UpdateVisualState
-  // (0x00428340) assigns g_ship_sprite_alt[class] to the ship sprite and
-  // composes the displayed frame as row * FramesPer + heading_frame, with the
-  // alternate rows living after the base rows in frame order.
-  d.alt_image_id = ReadBe16(resource_data, 0x0c);          // AltImageID
+  // Alternate overlay sprite sheet. Ship_UpdateVisualState (0x00428340)
+  // assigns g_ship_sprite_alt[class] to a separate per-ship sprite drawn over
+  // the hull, composing its frame as
+  // AltSetCount-cycled-index * FramesPer + heading_frame. It is NOT appended to
+  // the base sheet's rows (Ghidra ShipClass_LoadShipClassVisualAndLaunchData
+  // 0x004b4ee0 builds it only when AltImageID > 0 && AltSetCount > 0).
+  d.alt_image_id = ReadBeI16(resource_data, 0x0c);         // AltImageID
   d.alt_mask_id = ReadBe16(resource_data, 0x0e);           // AltMaskID
   d.alt_set_count = ReadBeI16(resource_data, 0x10);        // AltSetCount
   d.sprite_behavior_flags = ReadBe16(resource_data, 0x2e); // Flags
@@ -72,6 +74,11 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
   d.weapon_mask_id = ReadBeI16(resource_data, 0x28);  // WeapMaskID
   d.weapon_x_size = ReadBe16(resource_data, 0x2a);    // WeapXSize
   d.weapon_y_size = ReadBe16(resource_data, 0x2c);    // WeapYSize
+  // Shield-bubble layer (+0x40 image / +0x42 mask / +0x44 x / +0x46 y).
+  d.shield_image_id = ReadBeI16(resource_data, 0x40); // ShieldImageID
+  d.shield_mask_id = ReadBeI16(resource_data, 0x42);  // ShieldMaskID
+  d.shield_x_size = ReadBe16(resource_data, 0x44);    // ShieldXSize
+  d.shield_y_size = ReadBe16(resource_data, 0x46);    // ShieldYSize
   // Running-lights blink program (Bible BlinkMode + BlinkValA..D). The Ghidra
   // loader labels these gun/turret/guided exit positions, but the only
   // consumer is the blink state machine below and the loader clamps BlinkMode
@@ -360,6 +367,170 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
   // Ship_UpdateVisualState tail: the hull deactivates with its target cleared.
   ship.is_active = false;
   ship.squad_leader_ship_slot = -1;
+}
+
+int ComposeShipBaseRow(const GameState &state,
+                       const Ship &ship,
+                       const ShipClass &cls) {
+  // The original guards the whole row-selection block on the base sprite
+  // having more than one rotation set (fpr < sprite.num_frames). With the
+  // ship-animations preference forced ON (TODO(decomp): the pref is not
+  // threaded into the renderer), the loader sizes the base sprite to
+  // base_set_count * fpr, so base_set_count >= 2 is the equivalent guard. A
+  // pref-off run would size the base sheet to one set and skip this block.
+  if (cls.base_set_count < 2) {
+    return 0;
+  }
+  const std::uint16_t flags = cls.sprite_behavior_flags;
+  if ((flags & 0x0001U) != 0U) {
+    if (ship.ai_turn_bias_dir < 0) {
+      return 1;
+    }
+    if (ship.ai_turn_bias_dir > 0) {
+      return 2;
+    }
+    return 0;
+  }
+  if ((flags & 0x0002U) != 0U) {
+    return std::max<std::int16_t>(0, ship.waypoint_arrival_marker_b);
+  }
+  if ((flags & 0x0004U) != 0U) {
+    return NovaWeapon_HasLoadedLaunchBayAmmo(state, ship) ? 1 : 0;
+  }
+  if ((flags & 0x0008U) != 0U) {
+    return std::max<std::int16_t>(0, ship.sprite_animation_cycle_index);
+  }
+  return 0;
+}
+
+// Ghidra 0x00428340 Ship_UpdateVisualState, sprite-frame composition slice.
+// See the header for the flags mapping. The original holds two transient
+// latches across the block: local_15 = the Flags-0x0008 arm owns the shared
+// sprite_animation_timer, and local_42 = an animation stepped this frame
+// (which drives the alt cycle in lockstep).
+void NovaShip_TickSpriteAnimation(GameState &state,
+                                  Ship &ship,
+                                  float elapsed_ticks) {
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return;
+  }
+  const float scale = std::max(0.0F, elapsed_ticks);
+  const std::uint16_t flags = cls->sprite_behavior_flags;
+  const bool disabled = NovaAiShip_IsDisabled(state, ship);
+  const std::int16_t dwell = cls->combat_state_init_range;
+  const auto dwell_f = static_cast<float>(dwell);
+
+  bool base8_active = false; // local_15
+  bool stepped = false;      // local_42 high byte
+
+  // Same pref-forced-on guard as ComposeShipBaseRow (see that comment).
+  if (cls->base_set_count >= 2) {
+    if ((flags & 0x0001U) == 0U) {
+      if ((flags & 0x0002U) == 0U) {
+        if ((flags & 0x0004U) == 0U) {
+          if ((flags & 0x0008U) != 0U) {
+            base8_active = true;
+            if ((flags & 0x0010U) == 0U || !disabled) {
+              ship.sprite_animation_timer += scale;
+            }
+            if (dwell_f < ship.sprite_animation_timer) {
+              stepped = true;
+              if (dwell < 1) {
+                ship.sprite_animation_timer = 0.0F;
+              } else {
+                while (dwell_f < ship.sprite_animation_timer) {
+                  ship.sprite_animation_timer -= dwell_f;
+                }
+              }
+              if (ship.sprite_animation_cycle_index < 0) {
+                ship.sprite_animation_cycle_index = 0;
+              }
+              ship.sprite_animation_cycle_index = static_cast<std::int16_t>(
+                  ship.sprite_animation_cycle_index + 1);
+              if (cls->animation_cycle_count <=
+                  ship.sprite_animation_cycle_index) {
+                ship.sprite_animation_cycle_index = 0;
+              }
+            }
+          }
+          // Flags 0x0004 (carry) needs no per-frame state: the row follows the
+          // launch-bay ammo at draw time (ComposeShipBaseRow).
+        } else {
+          // Flags 0x0002 fold/unfold. waypoint_arrival_marker_a < 0 folds
+          // (marker_b counts down), marker_a >= 1 unfolds (marker_b counts up),
+          // and marker_a == 0 parks at the current row.
+          if (ship.waypoint_arrival_marker_a < 1) {
+            if (ship.waypoint_arrival_marker_a < 0) {
+              ship.turn_bank_animation_phase += scale;
+              if (dwell_f < ship.turn_bank_animation_phase) {
+                ship.turn_bank_animation_phase = 0.0F;
+                ship.waypoint_arrival_marker_b = static_cast<std::int16_t>(
+                    ship.waypoint_arrival_marker_b - 1);
+                if (ship.waypoint_arrival_marker_b < 1) {
+                  ship.waypoint_arrival_marker_b = 0;
+                  ship.waypoint_arrival_marker_a = 0;
+                }
+              }
+            } else {
+              ship.turn_bank_animation_phase = 0.0F;
+            }
+          } else {
+            ship.turn_bank_animation_phase += scale;
+            if (dwell_f < ship.turn_bank_animation_phase) {
+              ship.turn_bank_animation_phase = 0.0F;
+              ship.waypoint_arrival_marker_b =
+                  static_cast<std::int16_t>(ship.waypoint_arrival_marker_b + 1);
+              if (cls->animation_cycle_count <=
+                  ship.waypoint_arrival_marker_b) {
+                ship.waypoint_arrival_marker_b =
+                    static_cast<std::int16_t>(cls->animation_cycle_count - 1);
+                ship.waypoint_arrival_marker_a = 0;
+              }
+            }
+          }
+          // Flags 0x0080: re-trigger the unfold once the ship has gone 45
+          // ticks (0x2d) without firing and is not already fully unfolded.
+          if ((flags & 0x0080U) != 0U && ship.waypoint_arrival_marker_a < 1 &&
+              ship.waypoint_arrival_marker_b <
+                  static_cast<std::int16_t>(cls->animation_cycle_count - 1) &&
+              ship.last_weapon_fire_time_ms + 0x2dU <= state.tick_60hz) {
+            ship.waypoint_arrival_marker_a = 1;
+          }
+        }
+      }
+      // Flags 0x0001 (banking) needs no per-frame state: ai_turn_bias_dir is
+      // set by the movement tick and read at draw time.
+    }
+  }
+
+  // Alt overlay cycle. The original gates the whole alt update on the sheet
+  // existing and (Flags 0x0020 clear or the ship not disabled). When that
+  // gate is false it simply skips the assignment/cycle; it does NOT hide the
+  // sprite, so the sheet keeps its last drawn frame (the renderer therefore
+  // draws alt whenever the sheet exists, matching the original).
+  const bool alt_visible = cls->alt_image_id > 0 &&
+                           cls->alt_sprite_cycle_count > 0 &&
+                           !((flags & 0x0020U) != 0U && disabled);
+  if (alt_visible) {
+    if ((flags & 0x0010U) == 0U || !disabled) {
+      ship.sprite_animation_timer += scale;
+    }
+    // When the Flags-0x0008 arm owns the timer the alt reuses its step latch;
+    // otherwise the alt advances on its own AnimDelay timer.
+    if (!base8_active && dwell_f < ship.sprite_animation_timer) {
+      ship.sprite_animation_timer = 0.0F;
+      stepped = true;
+    }
+    if (stepped) {
+      ship.alternate_sprite_cycle_index =
+          static_cast<std::int16_t>(ship.alternate_sprite_cycle_index + 1);
+      if (cls->alt_sprite_cycle_count <= ship.alternate_sprite_cycle_index) {
+        ship.alternate_sprite_cycle_index = 0;
+      }
+    }
+  }
 }
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, weapon-effects + running-lights

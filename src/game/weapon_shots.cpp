@@ -206,6 +206,17 @@ int NovaWeapon_SpawnProjectile(GameState &state,
       std::max<std::int16_t>(0, w->point_defense_durability);
 
   const int mode = w->weapon_mode_code;
+  // Sprite-container selection, fixed at spawn (Shot_SpawnShotFromWeapon
+  // 0x0041fd30): a mode-4 shot from a ship whose class sets Flags3 0x0040 goes
+  // to the layer-12 mode4_alt container above ships; every other shot uses the
+  // layers-7-9 containers below ships. The owner slot range (-1/0x40+) falls
+  // back to the default container.
+  if (mode == 4 && owner_in_range) {
+    const ShipClass *owner_cls = ShipClassFor(
+        state, state.ShipAt(static_cast<std::size_t>(owner_ship_slot)));
+    shot.draws_above_ships =
+        owner_cls != nullptr && (owner_cls->availability_flags & 0x0040U) != 0U;
+  }
   constexpr float kDegPerRad = 180.0F / 3.14159265358979323846F;
   // Shot heading in game degrees throughout; the muzzle geometry converts back
   // to radians locally (Ship.heading is stored in radians).

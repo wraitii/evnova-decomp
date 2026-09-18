@@ -213,9 +213,20 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
       (w->flags_secondary & 0x4000U) == 0U) {
     return;
   }
-  // Waypoint-arrival marker arm (ship classes with sprite_behavior_flags
-  // 2|0x80 and waypoint_arrival_marker_b > 0): fields not modelled in the
-  // port. TODO(decomp(0x00455150)) skipped: waypoint markers.
+  // NovaTime_GetTickCount60Hz() records the fire time and, for Flags 0x02|0x80
+  // classes with a non-zero unfold marker, folds the ship and returns before
+  // any projectile spawns (Weapon_FirePlayerWeaponBank 0x00455150, before the
+  // cooldown check).
+  player.last_weapon_fire_time_ms = state.tick_60hz;
+  if (const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(player.ship_class_id + 0x80))) {
+    if ((cls->sprite_behavior_flags & 0x0002U) != 0U &&
+        (cls->sprite_behavior_flags & 0x0080U) != 0U &&
+        player.waypoint_arrival_marker_b > 0) {
+      player.waypoint_arrival_marker_a = -1;
+      return;
+    }
+  }
   if (state.weapon_bank_cooldown[weapon_bank] > 0.0F) {
     return; // still cooling down
   }
@@ -743,6 +754,22 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     ship.ai_fire_trigger_latch = 0;
     ship.active_weapon_bank_slot = -1;
   };
+  // Weapon_FireShipWeapons (0x00414550) records the fire time and folds a
+  // Flags-0x02|0x80 ship with a live unfold marker (and a multi-set animation
+  // length) at the very top of the function, before any freeze/eligibility
+  // gate or projectile spawn. The fold return deliberately leaves the latched
+  // fire request in place, matching the original while the unfold marker is
+  // live.
+  ship.last_weapon_fire_time_ms = state.tick_60hz;
+  if (const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80))) {
+    if ((cls->sprite_behavior_flags & 0x0002U) != 0U &&
+        (cls->sprite_behavior_flags & 0x0080U) != 0U &&
+        ship.waypoint_arrival_marker_b > 0 && cls->animation_cycle_count > 1) {
+      ship.waypoint_arrival_marker_a = -1;
+      return;
+    }
+  }
   // Ship_HandleShip (0x00433050) keeps destroyed slots around long enough for
   // their death/debris handling, but Weapon_FireShipWeapons must not launch a
   // bank that was latched before the disabling/lethal hit. The original AI

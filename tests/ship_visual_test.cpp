@@ -242,4 +242,122 @@ TEST_CASE("weapon-effects flash decays at the class rate and latches off",
   CHECK(ship.weapon_sprite_flash_level == -1.0F);
 }
 
+TEST_CASE("banking flags pick the base row from the turn bias",
+          "[ship][visual][sprite]") {
+  GameState state;
+  ShipClass cls;
+  cls.base_set_count = 3;
+  cls.sprite_behavior_flags = 0x0001; // banking
+  SetShipClass(state, cls);
+  Ship ship;
+  ship.ship_class_id = 0;
+
+  CHECK(ComposeShipBaseRow(state, ship, cls) == 0);
+  ship.ai_turn_bias_dir = -1;
+  CHECK(ComposeShipBaseRow(state, ship, cls) == 1);
+  ship.ai_turn_bias_dir = 1;
+  CHECK(ComposeShipBaseRow(state, ship, cls) == 2);
+
+  // A single-set base sheet always uses row 0 regardless of the flags.
+  ShipClass single = cls;
+  single.base_set_count = 1;
+  CHECK(ComposeShipBaseRow(state, ship, single) == 0);
+}
+
+TEST_CASE("sequence flags advance the combat animation at AnimDelay",
+          "[ship][visual][sprite]") {
+  GameState state;
+  ShipClass cls;
+  cls.base_set_count = 6;
+  cls.animation_cycle_count = 6;
+  // Cargo Drone flags: hide lights when disabled | stop when disabled |
+  // sequence.
+  cls.sprite_behavior_flags = 0x0040U | 0x0010U | 0x0008U;
+  cls.combat_state_init_range = 3; // AnimDelay
+  SetShipClass(state, cls);
+  Ship ship;
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1;
+  ship.defense_fleet_home_stellar_id = -1;
+  ship.armor_points = 100.0F;
+
+  // Strict `AnimDelay < timer` means the first advance lands on the 4th tick.
+  for (int i = 0; i < 3; ++i) {
+    NovaShip_TickSpriteAnimation(state, ship, 1.0F);
+  }
+  CHECK(ship.sprite_animation_cycle_index == 0);
+  NovaShip_TickSpriteAnimation(state, ship, 1.0F);
+  CHECK(ship.sprite_animation_cycle_index == 1);
+  CHECK(ComposeShipBaseRow(state, ship, cls) == 1);
+
+  // The subtract-dwell loop leaves the remainder (1 here), so the next step
+  // lands 3 ticks later.
+  CHECK(ship.sprite_animation_timer == 1.0F);
+  for (int i = 0; i < 3; ++i) {
+    NovaShip_TickSpriteAnimation(state, ship, 1.0F);
+  }
+  CHECK(ship.sprite_animation_cycle_index == 2);
+
+  // Wraps at animation_cycle_count.
+  ship.sprite_animation_cycle_index =
+      static_cast<std::int16_t>(cls.animation_cycle_count - 1);
+  ship.sprite_animation_timer = static_cast<float>(cls.combat_state_init_range);
+  NovaShip_TickSpriteAnimation(state, ship, 1.0F);
+  CHECK(ship.sprite_animation_cycle_index == 0);
+}
+
+TEST_CASE("a disabled Flags-0x0010 class freezes its sequence animation",
+          "[ship][visual][sprite]") {
+  GameState state;
+  ShipClass cls;
+  cls.base_set_count = 4;
+  cls.animation_cycle_count = 4;
+  cls.sprite_behavior_flags = 0x0010U | 0x0008U;
+  cls.combat_state_init_range = 1;
+  cls.base_armor = 100; // defeat the critically-damaged disabled gate
+  SetShipClass(state, cls);
+  Ship ship;
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1;
+  ship.defense_fleet_home_stellar_id = -1;
+  ship.armor_points = 1.0F; // below base_armor/3 -> disabled
+
+  for (int i = 0; i < 8; ++i) {
+    NovaShip_TickSpriteAnimation(state, ship, 1.0F);
+  }
+  CHECK(ship.sprite_animation_cycle_index == 0);
+  CHECK(ship.sprite_animation_timer == 0.0F);
+}
+
+TEST_CASE("the alt overlay cycles at AnimDelay", "[ship][visual][sprite]") {
+  GameState state;
+  ShipClass cls;
+  cls.base_set_count = 1;
+  cls.alt_image_id = 1330; // Auroran Thunderforge
+  cls.alt_sprite_cycle_count = 6;
+  cls.sprite_behavior_flags = 0x0040U | 0x0010U | 0x0008U;
+  cls.combat_state_init_range = 3;
+  SetShipClass(state, cls);
+  Ship ship;
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1;
+  ship.defense_fleet_home_stellar_id = -1;
+  ship.armor_points = 100.0F;
+
+  // The base sheet has a single set, so the Flag-0x0008 arm is skipped and the
+  // alt advances on its own timer (strict `AnimDelay < timer`).
+  for (int i = 0; i < 3; ++i) {
+    NovaShip_TickSpriteAnimation(state, ship, 1.0F);
+  }
+  CHECK(ship.alternate_sprite_cycle_index == 0);
+  NovaShip_TickSpriteAnimation(state, ship, 1.0F);
+  CHECK(ship.alternate_sprite_cycle_index == 1);
+
+  // Wraps at alt_sprite_cycle_count.
+  for (int i = 0; i < 5 * 4; ++i) {
+    NovaShip_TickSpriteAnimation(state, ship, 1.0F);
+  }
+  CHECK(ship.alternate_sprite_cycle_index == 0);
+}
+
 } // namespace game

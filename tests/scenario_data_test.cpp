@@ -83,6 +83,14 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   // sh\x8an carries Flags 0x0041: bit 0 = banking (base sheet rows: level /
   // bank left / bank right, Bible Flags 0x0001), bit 6 = 0x40.
   CHECK(ship->sprite_behavior_flags == 0x0041);
+  // Raw BaseSetCount drives the Ship_UpdateVisualState row-selection guard
+  // (>= 2 base sets) and the Flags-0x0008 sequence length; the starter Shuttle
+  // has 3. It has no alternate overlay sheet or shield bubble layer.
+  CHECK(ship->base_set_count == 3);
+  CHECK(ship->animation_cycle_count == 3);
+  CHECK(ship->alt_image_id == 0);
+  CHECK(ship->alt_sprite_cycle_count == 0);
+  CHECK(ship->shield_image_id == -1);
   // Hull frame dimensions are decoded from sh\x8an +0x06/+0x08 (the Shuttle
   // sheet is 24x24) for the death debris-puff scatter.
   CHECK(ship->base_x_size == 24);
@@ -511,6 +519,23 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships",
   CHECK(d->blink_val_d == 20);
   // The shuttle has no weapon-effects layer (WeapImageID <= 0).
   CHECK(d->weapon_image_id == -1);
+  // No alternate overlay sheet (AltImageID = -1) and no shield bubble.
+  CHECK(d->alt_image_id == -1);
+  CHECK(d->alt_set_count == 0);
+  CHECK(d->shield_image_id == -1);
+
+  // The Auroran Thunderforge (sh\x8an 0x17C) is the one shipped class with an
+  // AltImageID overlay sheet: a single base set plus a 6-set alt sheet drawn
+  // on top (its fold/animation frames live entirely in the alt).
+  const auto thunder_payload =
+      NovaResource_Load(kShipVisualResourceType, 0x17c);
+  REQUIRE(thunder_payload.has_value());
+  const auto thunder = DecodeShipVisualDescriptor(*thunder_payload);
+  REQUIRE(thunder.has_value());
+  CHECK(thunder->base_image_id == 1130);
+  CHECK(thunder->base_set_count == 1);
+  CHECK(thunder->alt_image_id == 1330);
+  CHECK(thunder->alt_set_count == 6);
 
   // The referenced 16-bit sheet must be decodable and hold base_set_count *
   // frames_per_rotation frames (3 * 36 = 108) at the descriptor's dimensions.
@@ -542,6 +567,42 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships",
   const auto light_decoded = RleSpriteSheet_Decode16(*light_sheet);
   REQUIRE(light_decoded.has_value());
   CHECK(light_decoded->frames.size() == 108);
+}
+
+// Pins the documented stock users of the Ship_UpdateVisualState row flags
+// (docs/ship_sprite_rendering_path.md) to the shipped sh\x8an payloads: the
+// sequence classes (0x0008), the fold classes (0x0002), the always-absent
+// carry flag (0x0004), and the one alternate overlay sheet.
+TEST_CASE("stock ship classes carry the documented sprite row flags",
+          "[scenario][ships][visual]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  const auto flags_of = [&](std::int16_t resource_id) {
+    const ShipClass *ship = data.Ship(resource_id);
+    REQUIRE(ship != nullptr);
+    return ship->sprite_behavior_flags;
+  };
+  // Sequence (0x0008) classes.
+  CHECK(flags_of(0x82) == 0x0058); // Cargo Drone
+  CHECK(flags_of(0x83) == 0x0058); // Leviathan
+  CHECK(flags_of(0x92) == 0x0018); // Manticore
+  CHECK(flags_of(0x9a) == 0x0078); // Auroran Cruiser
+  CHECK(flags_of(0xab) == 0x0048); // Hyperioid
+  // Fold (0x0002) classes: the Argosy family (plus the Pirate Argosy) and the
+  // Asteroid Miner, which also sets the 0x0080 fire re-trigger.
+  CHECK(flags_of(0x8a) == 0x0002);  // Argosy
+  CHECK(flags_of(0x96) == 0x0002);  // Pirate Argosy
+  CHECK(flags_of(0x17b) == 0x00c2); // Asteroid Miner
+  // No shipped class uses the carry flag (0x0004) on its own; it only appears
+  // combined with the others (asserted above via the exact flag values).
+  // The Auroran Thunderforge: sequence flags + the only AltImageID overlay.
+  const ShipClass *thunder = data.Ship(0x17c);
+  REQUIRE(thunder != nullptr);
+  CHECK(thunder->sprite_behavior_flags == 0x0058);
+  CHECK(thunder->base_set_count == 1);
+  CHECK(thunder->alt_image_id == 1330);
+  CHECK(thunder->alt_sprite_cycle_count == 6);
 }
 
 // A class with the weapon-effects layer: the Fed Destroyer (ship class 0x8d)

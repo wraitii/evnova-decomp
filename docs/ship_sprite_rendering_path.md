@@ -186,15 +186,16 @@ the class -> decode `rl\x91D` BaseImageID -> index frame by heading -> draw.
 
 `SpaceflightView` now renders every active non-player ship in the current system:
 
-- `ShipClassSprite(platform, class_id)` lazily loads and caches a per-class
-  `rl\x91D` heading-rotation sheet (keyed by ship class resource id) so each
-  distinct class in the system is decoded/uploaded once. It mirrors the player's
-  `EnsureShipSprite` base load but skips the engine-glow layer (TODO: per-NPC
-  glow).
-- `DrawNpcShips` iterates the ship slots (1..) and draws each active ship in the
-  current system at its world position with its heading-selected frame
-  (`FrameForHeading`), using the same camera/DrawSprite path as the player.
-  See the layer-order section below for the original's exact compositing.
+- `ShipSprites(platform, class_id)` lazily loads and caches a per-class
+  `rl\x91D` sprite set (base + alt + engine glow + running lights + weapon
+  effects + shield, keyed by ship class resource id) so each distinct class in
+  the system is decoded/uploaded once. The player's `EnsureShipSprite` uses the
+  same cache.
+- `DrawShipsInLayer` iterates the ship slots (player slot 0 included) and draws
+  each active ship in the current system at its world position with its
+  heading/flag-selected frame (`ComposeShipFrameIndex`), using the same
+  camera/DrawSprite path for the player and NPCs. See the layer-order and ship
+  flags sections below for the original's exact compositing.
 - To make the renderer's output visible, `SpawnRoamingFleetsStandIn`
   (spaceflight.cpp) spawns a small set of random-encounter fleet-lead ships on
   system entry via `NovaEncounter_SpawnFleetLeadShip`, capped at the system's
@@ -235,11 +236,54 @@ consequences: impact/explosion effects (layer 13) composite **over ships**
 ships; the freeflight-object and fading-effect pools share one layer.
 
 The SDL port has no runtime layer objects; `SpaceflightView::Draw` reproduces
-the composed precedence as a fixed draw sequence (see the ordering comment in
-`spaceflight_view.cpp`). Remaining divergence: the port draws all ships in one
-pass and all shots in one pass, so the disabled-ship (layer 4), escort-ship
-(layer 10) and per-mode shot-container (layers 7-9/12) sub-ordering is not
-reproduced.
+the layer precedence as a fixed draw sequence (see the ordering comment in
+`spaceflight_view.cpp`). As of 2026 it also reproduces the ship sub-layers
+(`DrawShipsInLayer` Disabled/Escort/Normal, driven by `NovaAiShip_IsDisabled`
+and `squad_leader_ship_slot == 0`) and all four shot containers in their
+original layer order (`DrawShots(ShotDrawLayer)`: mode9 -> mode1 -> default on
+layers 7-9, then mode4_alt on layer 12, the latter fixed at spawn from weapon
+mode 4 + owner Flags3 0x0040). Remaining divergence:
+the layer-6 weapon smoke-puff pool is not ported (no stock weapon enables it),
+and the layer-14 beam pass still lacks the twin-surface branches.
+
+## Ship sprite row flags, alt and shield (ported 2026)
+
+`Ship_UpdateVisualState` (0x00428340) composes the base frame as
+`row * FramesPer + heading_frame`, where the row is selected by the class's
+Bible Flags *only when the base sheet has more than one set* (`BaseSetCount`
+>= 2):
+
+| Flags | row source |
+|-------|------------|
+| 0x0001 | banking: `ai_turn_bias_dir` (-1 -> row 1 left, +1 -> row 2 right) |
+| 0x0002 | fold/unfold: `waypoint_arrival_marker_b` via `turn_bank_animation_phase`, AnimDelay per step; Flags 0x0080 re-triggers the unfold 45 ticks (0x2d) after the last fire and the fire sites fold (`marker_a = -1`) |
+| 0x0004 | carry: row 1 while `Weapon_HasLoadedLaunchBayAmmo` (no stock class) |
+| 0x0008 | combat/part sequence: `sprite_animation_cycle_index` via `sprite_animation_timer`, AnimDelay per step, wrapped at `animation_cycle_count` (BaseSetCount, or 1 with the ship-animations preference off) |
+
+Flags 0x0001-0x0008 are mutually exclusive. `NovaShip_TickSpriteAnimation`
+(src/game/ship_visual.cpp) advances this state for every active hull;
+`ComposeShipBaseRow` derives the row at draw time. The stock users (verified
+against the shipped `sh\x8an` payloads) are Cargo Drone (0x58), Leviathan
+(0x58), Argosy (0x02), Manticore (0x18), Auroran Cruiser (0x78), Hyperioid
+(0x48), Asteroid Miner (0xc2) and the Auroran Thunderforge (0x58 with the alt
+sheet).
+
+Pref handling: the renderer currently forces sprite animation ON. The loader
+pref-gates `animation_cycle_count`/`alt_sprite_cycle_count` (1 when the pref
+is off), but `ShipSprites` always loads the full base sheet and the row guard
+uses `base_set_count`, so a pref-off run would still row-animate. TODO(decomp):
+thread `g_pref_ship_animations` into the renderer / use `animation_cycle_count
+>= 2` as the guard.
+
+The separate `AltImageID` overlay is drawn over the hull in per-ship container
+append order (`base 0x0, glow 0x4, light 0x8, weapon 0xc, alt 0x10, shield
+0x14`) and cycles at AnimDelay; it is the Thunderforge's only animation (the
+only shipped class with an alt sheet). Flags 0x0020 + a disabled ship makes the
+original skip the alt update (assignment and cycle); it does \*not\* hide the
+sheet, which keeps its last drawn frame. The `ShieldImageID` bubble sheet is
+loaded into `SpaceflightView::ShipSpriteSet::shield` but its draw stays
+deferred (the `shield_bubble_flash_intensity` tint/frame arm is not
+reconstructed).
 
 ## Sprite rows / banking (verified 2026, data + Bible)
 
@@ -256,10 +300,15 @@ with `bias_row` from `ai_turn_bias_dir` (+0xc8f8) for classes whose sh\x8an
 Flags have bit 0 (Bible 0x0001: "The first set of sprites is used for level
 flight, the second for banking left, and the third for banking right"). The
 `AltImageID`/`AltSetCount` descriptor fields (+0x0c/+0x10) name a SEPARATE
-alternate sheet used by the Flags 0x0002 set-cycling animation (Ghidra
-0x004b4ee0 gates it on AltImageID > 0 && AltSetCount > 0); it is never
-appended to the base rows. The clean-room renderer mirrors this in
-`ComposeShipFrameIndex` (spaceflight_view.cpp); `ShipClass.sprite_behavior_
+overlay sheet (Ghidra 0x004b4ee0 gates its creation on AltImageID > 0 &&
+AltSetCount > 0); it is never appended to the base rows.
+`Ship_UpdateVisualState` draws it over the hull whenever the sheet exists,
+cycling `alternate_sprite_cycle_index` (ShipState +0xC8F4) through AltSetCount
+sets at the AnimDelay rate, displayed frame
+`index * FramesPer + heading_frame`. Only the Auroran Thunderforge ships an
+alt sheet in the shipped data (a single base set + a 6-set alt). The renderer
+loads/draws it (`SpaceflightView::ShipSpriteSet::alt`);
+`NovaShip_TickSpriteAnimation` advances the cycle. `ShipClass.sprite_behavior_
 flags` is decoded in scenario_data.cpp from sh\x8an +0x2e.
 
 ## Running lights + weapon effects (ported 2026)

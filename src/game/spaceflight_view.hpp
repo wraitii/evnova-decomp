@@ -294,72 +294,66 @@ private:
   // tiles_x * tiles_y.
   [[nodiscard]] const SpriteAsset *StarFieldSheet(SdlPlatform &platform);
 
-  // The player ship's heading-rotation sheet and its engine-glow layer, both
-  // bare rl\x91D sheets (sh\x8an BaseImageID / GlowImageID) sharing the same
-  // rotation grid. Empty when the class has none.
-  SpriteAsset ship_;
-  // Resource id of the class currently held in the player-only sprite cache.
-  // Buying/capturing a different hull invalidates all four cached layers.
-  std::int16_t player_sprite_ship_class_id_ = -1;
-  SpriteAsset glow_;
-  // Running-lights (sh\x8an LightImageID) and weapon-effects (WeapImageID)
-  // layers, sharing the base rotation grid. Empty when the class has none.
-  SpriteAsset light_;
-  SpriteAsset weapon_;
-  // Rotation frames for one full revolution (sh\x8an FramesPer, default 36);
-  // frame count = base_set_count * frames_per_rotation.
-  int ship_frames_per_rotation_ = 36;
-  // Total sprite rows (frame_count / frames_per_rotation) after appending the
-  // sh\x8an alt sheet: row 0 = straight flight, rows 1/2 = bank left/right
-  // selected by ai_turn_bias_dir (Ship_UpdateVisualState 0x00428340).
-  int ship_row_count_ = 1;
-  std::uint16_t ship_sprite_behavior_flags_ = 0;
-  // Whether this class's sh\x8an descriptor named a glow layer at all (so
-  // EnsureShipSprite does not retry a missing sheet every frame).
-  bool has_glow_ = false;
-  // Likewise for the light/weapon-effects layers.
-  bool has_light_ = false;
-  bool has_weapon_ = false;
-  // Last glow-draw gate result, so transitions (on/off) can be logged once per
-  // change rather than per frame (diagnostic for the flight render).
-  bool glow_last_drawn_ = false;
-
-  // One loaded NPC ship's heading-rotation sprite data: the base hull sheet and
-  // (when the class's sh\x8an descriptor names one) the engine-glow layer,
-  // sharing the same rotation grid. The glow is drawn over the base with a
-  // thrust-driven additive intensity read from the ship's engine_glow_level
-  // (driven in NovaShip_IntegrateNpcMovement); a class without a glow sheet
-  // just draws base-only. Cached per ship-class resource id so each distinct
-  // class in the current system is decoded/uploaded once per session.
-  struct NpcShipSprite {
+  // One loaded ship class's sh\x8an sprite layers, cached per class resource
+  // id (0x80-relative). The player's hull shares this cache with the NPCs so
+  // each distinct class is decoded/uploaded once per session. The base, alt,
+  // glow, light, weapon and shield sheets share the class rotation grid; the
+  // engine glow / running lights / weapon effects are additive overlays, the
+  // alt sheet is an ordinary overlay drawn over the hull, and the shield sheet
+  // is loaded but not yet drawn (see DrawShipSprite).
+  struct ShipSpriteSet {
     SpriteAsset base;
-    SpriteAsset glow;      // engine-glow layer (empty when the class has none)
-    SpriteAsset light;     // running-lights layer (empty when absent)
-    SpriteAsset weapon;    // weapon-effects layer (empty when absent)
-    bool has_glow = false; // whether a glow layer is present/loaded
+    SpriteAsset alt;    // sh\x8an AltImageID overlay (empty when absent)
+    SpriteAsset glow;   // engine glow
+    SpriteAsset light;  // running lights
+    SpriteAsset weapon; // weapon effects
+    SpriteAsset shield; // shield bubble (loaded; draw deferred)
+    bool has_alt = false;
+    bool has_glow = false;
     bool has_light = false;
     bool has_weapon = false;
+    bool has_shield = false;
     int frames_per_rotation = 36;
-    // Sprite rows after the alt-sheet append + the class's sh\x8an Flags
-    // (row 1/2 = bank left/right when Flags & 1).
+    // Base rows (base.frame_count / frames_per_rotation): row 0 straight
+    // flight, rows 1/2 bank left/right for Flags 0x0001, or the fold/combat
+    // sequence rows for Flags 0x0002/0x0008.
     int row_count = 1;
-    std::uint16_t sprite_behavior_flags = 0;
+    // AltSetCount rows in the alt sheet (0 when absent).
+    int alt_set_count = 0;
   };
 
-  std::map<std::int16_t, NpcShipSprite> npc_ship_sprites_;
+  std::map<std::int16_t, ShipSpriteSet> ship_sprites_;
 
-  // Loads (and caches) the heading-rotation sheet for a ship class resource
-  // id (0x80-relative convention already applied by callers). Returns a
-  // pointer to the cached entry, or null when the class/sheet cannot be
-  // loaded. Non-const: mutates the cache and logically owns the SDL upload.
-  const NpcShipSprite *ShipClassSprite(SdlPlatform &platform,
-                                       std::int16_t ship_class_id);
+  // Loads (and caches) a ship class's sprite set by class resource id
+  // (0x80-relative convention already applied by callers). Returns a pointer
+  // to the cached entry, or null when the class/sheet cannot be loaded.
+  // Non-const: mutates the cache and logically owns the SDL upload.
+  const ShipSpriteSet *ShipSprites(SdlPlatform &platform,
+                                   std::int16_t ship_class_id);
 
-  // Draws every active non-player ship in the current system at its world
-  // position, frame selected by heading (player's ship is drawn separately at
-  // the viewport centre). Ships whose class sprite failed to load are skipped
-  // (logged once).
-  void DrawNpcShips(SdlPlatform &platform, const GameState &state);
+  // Original sprite-world ship sub-layers (append order = draw order):
+  // disabled ships (layer 4), player escorts (layer 10, squad_leader_ship_slot
+  // == 0), and the player + non-escort NPCs (layer 11).
+  enum class ShipDrawLayer { Disabled, Escort, Normal };
+
+  // Draws every active ship in the current system that belongs to `layer` at
+  // its world position with its heading/flag-selected frame. Ships whose class
+  // sprite failed to load are skipped.
+  void DrawShipsInLayer(SdlPlatform &platform,
+                        const GameState &state,
+                        ShipDrawLayer layer);
+
+  // Draws one ship's full composite (hull -> glow -> lights -> weapon -> alt
+  // -> emergence white) at its world position. Shared by the player (slot 0)
+  // and NPCs.
+  void DrawShipSprite(SdlPlatform &platform,
+                      const GameState &state,
+                      const Ship &ship,
+                      const ShipSpriteSet &sprite,
+                      int viewport_w,
+                      int viewport_h,
+                      float camera_x,
+                      float camera_y);
 
   // One animated stellar's frame-stepping runtime state (the original keeps
   // these on StellarDef sprite_current_frame / sprite_previous_frame /
@@ -380,13 +374,21 @@ private:
   // handles. Called from AdvanceAnimations after the pure drift tick.
   void WrapAsteroids(SdlPlatform &platform, GameState &state);
 
-  // Draws the player's in-flight active shots (GameState.active_shots) at
-  // their world positions relative to the ship, using the same camera
-  // transform as the stars/stellars. Each shot is drawn with its weapon's
-  // shot sprite set (spin resource shot_sprite_set_id + 3000), currently
-  // the first frame at native size; falls back to a small bright dot when the
-  // sprite set is unavailable.
-  void DrawShots(SdlPlatform &platform, const GameState &state);
+  // Original sprite-world shot containers, one layer each (append order = draw
+  // order): mode9 (layer 7), mode1 (layer 8), default (layer 9), and the
+  // mode-4-alt container (layer 12) drawn above the ships. A shot's container
+  // is fixed at spawn by Shot_SpawnShotFromWeapon 0x0041fd30: weapon mode 9 ->
+  // mode9, mode 1 -> mode1, mode 4 with owner Flags3 0x0040 -> mode4_alt,
+  // otherwise default.
+  enum class ShotDrawLayer { Mode9, Mode1, Default, Mode4Alt };
+
+  // Draws the in-flight active shots (GameState.active_shots) that belong to
+  // `layer` at their world positions relative to the camera, using the same
+  // transform as the stars/stellars. Each shot uses its weapon's shot sprite
+  // set (spin resource shot_sprite_set_id + 3000), falling back to a small
+  // bright dot when the set is unavailable.
+  void
+  DrawShots(SdlPlatform &platform, const GameState &state, ShotDrawLayer layer);
   // Ghidra Shot_UpdateImpactEffectSprites (0x0042e160): draws the 32-slot
   // impact animation pool above shots and beams but below ship sprites.
   void DrawImpactEffects(SdlPlatform &platform, const GameState &state);

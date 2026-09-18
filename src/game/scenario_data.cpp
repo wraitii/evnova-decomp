@@ -1720,9 +1720,27 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
         // skill_variance_percent, sh\xefp payload +0x60 -> +0x9F8).
         {
           const std::int16_t base_sets = ReadBeI16(*shan, 0x04);
-          cls.animation_cycle_count =
-              ship_animations ? std::max<std::int16_t>(base_sets, 1) : 1;
+          cls.base_set_count = std::max<std::int16_t>(base_sets, 1);
+          cls.animation_cycle_count = ship_animations ? cls.base_set_count : 1;
         }
+        // Alternate overlay sheet (Bible AltImageID/AltSetCount). The loader
+        // 0x004b4ee0 builds g_ship_sprite_alt only when both are positive and
+        // forces alt_sprite_cycle_count to 1 when the ship-animations
+        // preference is off; 0/0 marks no sheet.
+        {
+          const std::int16_t alt_image = ReadBeI16(*shan, 0x0c);
+          const std::int16_t alt_sets = ReadBeI16(*shan, 0x10);
+          if (alt_image > 0 && alt_sets > 0) {
+            cls.alt_image_id = alt_image;
+            cls.alt_sprite_cycle_count =
+                ship_animations ? std::max<std::int16_t>(alt_sets, 1) : 1;
+          }
+        }
+        // Shield-bubble and weapon-effects overlay sheet ids (the renderer
+        // loads the sheets by id; the scenario loader keeps them for
+        // availability checks).
+        cls.shield_image_id = ReadBeI16(*shan, 0x40);
+        cls.weapon_image_id = ReadBeI16(*shan, 0x26);
         // Rotation frame count (ShipClassDef +0xa06): sh\x8an +0x34 FramesPer,
         // 36 when 0 (ShipClass_LoadShipClassVisualAndLaunchData default).
         {
