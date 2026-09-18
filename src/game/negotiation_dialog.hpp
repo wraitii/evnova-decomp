@@ -1,7 +1,7 @@
 #pragma once
 
 // Clean-room reconstruction of the in-space destination-interaction modal
-// (the "hail a planet/station" window), from the E/target-action pathway that
+// (the "hail a planet/station" window), from the target-action pathway that
 // is distinct from normal arrival docking. In the original the spaceflight
 // loop's Ship_HandlePlayerTargetActionCommand (0x004418d0 stellar branch)
 // calls NovaUi_RunTravelDestinationInteractionWindow (0x00480030), which

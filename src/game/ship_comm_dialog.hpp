@@ -1,7 +1,7 @@
 #pragma once
 
 // Clean-room reconstruction of the in-space ship-comm modal (the "hail a
-// ship" window), from the E/target-action pathway's ship branch -- the
+// ship" window), from the target-action pathway's ship branch -- the
 // counterpart of the stellar-conversation window in negotiation_dialog.cpp.
 // In the original the spaceflight loop's Ship_HandlePlayerTargetActionCommand
 // (0x00454910 ship branch) calls NovaUi_RunTargetShipCommWindow (0x0047e470),

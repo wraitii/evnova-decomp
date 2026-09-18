@@ -589,7 +589,11 @@ void NovaFrame_TickSystems(GameState &state,
 struct PlayerTravelSelectionLatches {
   bool target_cycle_was_held = false;
   bool destination_cycle_was_held = false;
-  bool hyperspace_was_held = false;
+  // Shared clear-target edge latch (Ghidra g_playerClearTargetCommandLatch).
+  // The primary-ship-target arm and the travel-target arm both use it, so a
+  // slot-8+arm press that also holds slot 0xc does not clear the travel
+  // selection (matching 0x0044b7f6 / 0x0044ddb5).
+  bool clear_target_was_held = false;
   std::int16_t prev_travel_stellar = -1;
 };
 
@@ -601,9 +605,11 @@ struct PlayerShipTargetLatches {
 // Ghidra Ship_HandlePlayerShipCore synthetic CFG: travel-selection commands
 // 0x0044B7C4 -> 0x0044BAFE. The wider 0x0044B7C4 -> 0x0044BC1E umbrella
 // absorbs reordered mouse/route-map blocks and is not used. Handles the Tab
-// stellar cycle, Backslash destination-system cycle and H hyperspace-mode arm.
+// stellar cycle, the clear-target command (slot 8 / slot 0xc), the Backslash
+// destination-system cycle and the H hyperspace-mode arm.
 void PlayerTick_TravelSelectionCommands(GameState &state,
                                         const FlightInput &input,
+                                        bool arm_modifier_held,
                                         PlayerTravelSelectionLatches &l) {
   const bool target_cycle =
       input.cycle_target_next || input.cycle_target_previous;
@@ -611,6 +617,61 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
     NovaTargeting_CyclePlayerStellarTarget(state, input.cycle_target_next);
   }
   l.target_cycle_was_held = target_cycle;
+  // Clear-target command (Ghidra 0x0044B7C4 primary-ship arm +
+  // 0x0044DDD5 travel arm, sharing g_playerClearTargetCommandLatch).
+  //   slot 8 + arm modifier -> clear the primary ship target
+  //                            (0x0044b804 transition cue 1, +0x70 = -1)
+  //   slot 8 (no arm)       -> clear the travel/landing selection and reset
+  //                            travel_transfer_mode = -1 / travel slot = -1
+  //   slot 0xc              -> clear the travel selection; when not already in
+  //                            plotted-jump mode 3, latch mode 3 and re-sync
+  //                            the starmap route
+  //                            (NovaUi_SyncTravelSelectionFromStarmapRoute).
+  // The shared latch means slot 8+arm+slot 0xc clears only the ship target.
+  const bool clear_command = input.clear_target;
+  const bool hyperspace_command = input.hyperspace_mode;
+  if (clear_command && arm_modifier_held && !l.clear_target_was_held) {
+    l.clear_target_was_held = true;
+    if (state.player.primary_target_ship_slot != -1) {
+      state.pending_ui_sounds.push_back({1, 1});
+      state.player.primary_target_ship_slot = -1;
+    }
+  }
+  const bool travel_clear =
+      (clear_command && !arm_modifier_held) || hyperspace_command;
+  if (travel_clear && state.player.ai_station_hold_timer <= 0.0F) {
+    if (!l.clear_target_was_held) {
+      l.clear_target_was_held = true;
+      // 0x0044ddce queues transition cue 1.
+      state.pending_ui_sounds.push_back({1, 1});
+      state.travel.selected_stellar_id = -1;
+      state.travel.selected_stellar_is_manual = false;
+      state.travel.engage_timer = -1;
+      if (clear_command) {
+        // Slot-8 variant resets the plotted-jump latch to idle.
+        state.player.travel_transfer_mode = -1;
+        state.travel.travel_slot = -1;
+        state.travel.hyperspace_mode = false;
+      }
+      if (hyperspace_command && state.player.travel_transfer_mode != 3) {
+        // Slot-0xc variant latches plotted-jump mode 3 with no slot and re-
+        // syncs from the plotted starmap route (0x0044de28).
+        state.travel.hyperspace_mode = true;
+        state.player.travel_transfer_mode = 3;
+        state.travel.travel_slot = -1;
+        NovaStarmap_SyncTravelSelectionFromRoute(state);
+      }
+    }
+    if (hyperspace_command) {
+      // Ghidra 0x0044b899: the command tail refreshes the route-map overlay
+      // (NovaUi_UpdateTravelSelectionOverlay).
+      RouteMap_Open(state);
+    }
+  } else {
+    // 0x0044b8b2: the shared latch releases once neither arm is active, and
+    // also when the station-hold gate blocks the travel clear.
+    l.clear_target_was_held = false;
+  }
   // Destination-SYSTEM cycling (Backslash / Shift+Backslash): rotate the
   // next-jump destination through the systems directly linked to the current
   // one. Mirrors the original's key-binding-13 block in PlayerTick_TargetAnd-
@@ -635,19 +696,6 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
     }
   }
   l.destination_cycle_was_held = destination_cycle;
-  // Hyperspace-mode toggle (H): latch the off-map destination-selection
-  // channel (the manual's "press H to set hyperspace mode, then Backslash to
-  // pick the destination system"). The latch is cleared when a jump lands.
-  if (input.hyperspace_mode && !l.hyperspace_was_held) {
-    state.travel.hyperspace_mode = true;
-    // Entering hyperspace mode latches plotted-jump mode 3 with no slot
-    // (0x0044de28: mode=3, ai_secondary_target_slot=-1).
-    state.player.travel_transfer_mode = 3;
-    // Ghidra 0x0044b95f: the hyperspace-mode arm block refreshes the
-    // route-map overlay like the cycle command.
-    RouteMap_Open(state);
-  }
-  l.hyperspace_was_held = input.hyperspace_mode;
 }
 
 // Ghidra Ship_HandlePlayerShipCore disjoint ship-target command blocks. The
@@ -1391,6 +1439,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool starmap_was_held = false;
   bool mission_info_was_held = false;
   bool land_was_held = false;
+  bool dismiss_was_held = false;
   bool target_action_was_held = false;
   bool board_was_held = false;
   // Gameplay time freezes while a blocking modal owns the loop (the original's
@@ -1443,6 +1492,12 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       return key != 0xff && key != 0xffff &&
              platform.IsOriginalKeyCodeHeld(key);
     };
+    // Shared modifier pair (Left/Right Shift, DIK 0x2a/0x36) for the backward
+    // cycling commands and the eject arm-modifier pair (0x38/0x6f = Alt).
+    const bool shift_held = platform.IsOriginalKeyCodeHeld(0x2a) ||
+                            platform.IsOriginalKeyCodeHeld(0x36);
+    const bool arm_modifier_held = platform.IsOriginalKeyCodeHeld(0x38) ||
+                                   platform.IsOriginalKeyCodeHeld(0x6f);
     // Ship_HandlePlayerShipControl reads every action through
     // g_player_key_bindings. PollFlightInput owns the SDL event pump; replace
     // its convenience defaults with the persisted original command table.
@@ -1455,15 +1510,46 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     frame_input.fire_secondary = binding_held(0x03);
     frame_input.cycle_secondary = binding_held(0x00);
     frame_input.cycle_secondary_backwards =
-        frame_input.cycle_secondary && (platform.IsOriginalKeyCodeHeld(0x2a) ||
-                                        platform.IsOriginalKeyCodeHeld(0x36));
+        frame_input.cycle_secondary && shift_held;
     frame_input.clear_secondary = binding_held(0x01);
     frame_input.face_target = binding_held(0x07);
-    frame_input.land = binding_held(0x06);
+    // Target-action command (PlayerTick_InteractionCloakAndStatus hail
+    // dispatch): the original reads g_nova_control_bits[34] -- binding slot
+    // 0x04 -- through NovaInput_IsCommandActiveWithGameplayGuards
+    // (0x00451c4f). NovaPrefs_ResetKeyBindings defaults it to DIK 0x15 = Y.
+    frame_input.target_action = binding_held(0x04);
+    // Clear-target command (binding slot 8, default DIK 0x31 = N): primary
+    // ship target with the arm modifier, otherwise the travel selection.
+    frame_input.clear_target = binding_held(0x08);
+    // Land (binding slot 5, default DIK 0x26 = L): auto-pick the nearest
+    // available travel stellar and run the arrival checks.
+    frame_input.land = binding_held(0x05);
+    // HUD/panel dismiss (binding slot 6, default DIK 0x1c = Return): clears
+    // the transient HUD message, the route-map overlay and the Escort Commands
+    // panel at 0x00450ae7.
+    frame_input.dismiss = binding_held(0x06);
     frame_input.travel = binding_held(0x0e);
     frame_input.starmap = binding_held(0x09);
     frame_input.mission_info = binding_held(0x28);
     frame_input.board = binding_held(0x10);
+    // Destination-system cycle (binding slot 0x0d, default DIK 0x2b =
+    // Backslash), Shift for the backward direction.
+    frame_input.cycle_destination_next = binding_held(0x0d) && !shift_held;
+    frame_input.cycle_destination_previous = binding_held(0x0d) && shift_held;
+    // Hyperspace-mode arm (binding slot 0x0c, default DIK 0x23 = H).
+    frame_input.hyperspace_mode = binding_held(0x0c);
+    // Ship-target cycle (binding slot 0x0a, default DIK 0x29 = backquote),
+    // Shift for the backward direction.
+    frame_input.cycle_ship_target_next = binding_held(0x0a) && !shift_held;
+    frame_input.cycle_ship_target_previous = binding_held(0x0a) && shift_held;
+    // Nearest hostile (binding slot 0x0b, default DIK 0x13 = R) vs. nearest
+    // engaged target under the 0x38/0x6f arm modifier.
+    frame_input.select_nearest_hostile =
+        binding_held(0x0b) && !arm_modifier_held;
+    frame_input.select_nearest_engaged =
+        binding_held(0x0b) && arm_modifier_held;
+    // Eject (binding slot 0x11, default DIK 0x2d = X) plus the arm modifier.
+    frame_input.eject = arm_modifier_held && binding_held(0x11);
     // Probe automation is an optional input producer. It runs after both SDL/
     // probe input and persisted bindings have populated the snapshot, but
     // before any player-command edge latch observes it.
@@ -1653,7 +1739,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       NovaSystem_RebuildDiscoveredLatch(state);
       if (!player_tick_consumed) {
         PlayerTick_TravelSelectionCommands(
-            state, input, travel_selection_latches);
+            state, input, arm_modifier_held, travel_selection_latches);
         PlayerTick_ShipTargetCommands(state, input, ship_target_latches);
       }
       // Route-map overlay zoom + auto-dismiss (Ghidra 0x0045216e /
@@ -1725,6 +1811,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             frame_time_ms / kOriginalTickMs);
         secondary_cycle_was_held = input.cycle_secondary;
         clear_secondary_was_held = input.clear_secondary;
+        // HUD/panel dismiss (Ghidra 0x00450ae7 auxiliary block): the rising
+        // edge of binding slot 6 clears the transient HUD overlay message and
+        // the route-map overlay, and closes the Escort Commands panel (the
+        // original sets local_265, consumed at 0x004529a8). The port routes
+        // the panel close through EscortCommandState::close_pending so the
+        // escort tick below performs the same clear.
+        const bool dismiss_pressed = input.dismiss && !dismiss_was_held;
+        dismiss_was_held = input.dismiss;
+        if (dismiss_pressed) {
+          NovaHud_ClearOverlayMessage(state);
+          state.route_map.overlay_visible = false;
+          if (state.escort.panel_timer > 0) {
+            state.escort.close_pending = true;
+          }
+        }
         // Escort Commands overlay + order dispatch (PlayerTick_Auxiliary-
         // Commands escort blocks 0x00450ae7..0x00450f67, Ship_CommandPlayer-
         // EscortGroup 0x0045c880): the keys resolve through the binding table
@@ -1772,11 +1873,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // escort/category command group (above), the route-map zoom block
       // (0x0045216e, RouteMap_Tick) and the ionization/fuel regeneration arm
       // (0x00450717, PlayerTick_IonizationAndFuelRegeneration).
-      // TODO(decomp(0x00450fd9)) skipped: the cheat/debug-spawn arm
-      // (PlayerTick_CheatAndSpawnCommands, plan score 1.37) -- instant-jump
-      // cheat (command 0xe) and the 0x38/0x6f/0x1d/0x6b/0x2a debug ship-spawn
-      // combos. Also unported: the FPS toggle and the launch-bay command
-      // slices of the same region.
+      // TODO(decomp(0x00450fd9)) skipped: the g_cheat_mode_active arms of this
+      // region are unported. PlayerTick_CheatAndSpawnCommands (0x00450fd9):
+      // instant-jump command 0xe, plus the 0x38/0x6f/0x1d/0x6b/0x2a debug
+      // ship-spawn combos (see the 0x00452b71 TODO in the
+      // InteractionCloakAndStatus block below). Neighbouring unported cheats:
+      // map-wipe 0x00450801; F6 reload / ammo+shield+armor grant, binding slot
+      // 0x23 0x004509aa; cheat target command 0x41 at 0x00450a62; the F12 FPS
+      // overlay toggle, binding slot 0x34, at 0x00450f6d; and the launch-bay
+      // command slice. All gated on g_cheat_mode_active; tracked in
+      // decomp-progress.tsv (PlayerTick_AuxiliaryCommands row).
       // Cooldown decay remains live during an engaged jump, but not after an
       // earlier death/timed-action branch has returned from the player core.
       if (!player_tick_consumed) {
@@ -2245,8 +2351,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         const auto held = [&platform](std::uint16_t code) {
           return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
         };
-        const bool arm_modifier_held = platform.IsOriginalKeyCodeHeld(0x38) ||
-                                       platform.IsOriginalKeyCodeHeld(0x6f);
         PlayerTick_SelfDestructCommand(state,
                                        arm_modifier_held &&
                                            held(binding_key[0x12]),
@@ -2259,8 +2363,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         // while the command is held; the pass is idempotent after the first
         // frame because the cargo is already empty.
         if (arm_modifier_held && held(binding_key[0x0f])) {
-          const bool shift_held = platform.IsOriginalKeyCodeHeld(0x2a) ||
-                                  platform.IsOriginalKeyCodeHeld(0x36);
           Player_RedistributeFleetCargoOverflow(
               state, /*jettison_all=*/!shift_held, now_ms);
         }
@@ -2286,6 +2388,20 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         }
         PlayerTick_InteractionCloakAndStatus(
             state, held(binding_key[0x29]), frame_time_ms / kOriginalTickMs);
+        // TODO(decomp(0x00452b71)) skipped: the g_cheat_mode_active debug/cheat
+        // arms that live in this region are unported. The ship-spawn block
+        // (0x00452b71): while binding slot 0x1e / raw key 0x6a is held
+        // (first-press latch), the 0x38/0x6f/0x1d/0x6b/0x2a modifier combos
+        // spawn an encounter fleet / random dude / përs ship and set it as the
+        // primary target. Adjacent gated arms in 0x00452c60..0x004531xx: kill
+        // primary target (slot 0x1f), disabled/board target (slot 0x21),
+        // armor=1 kill (slot 0x22), debug credits +50000 (slot 0x24), and the
+        // slot 0x26/0x27 cheats. The auxiliary-region cheats (map-wipe
+        // 0x00450801, F6 reload / grant slot 0x23 0x004509aa, cheat target
+        // command 0x00450a62, PlayerTick_CheatAndSpawnCommands 0x00450fd9, F12
+        // FPS overlay toggle slot 0x34 0x00450f6d) are listed at the
+        // PlayerTick_AuxiliaryCommands TODO above. All are gated on
+        // g_cheat_mode_active and tracked in decomp-progress.tsv.
       }
       // Late auxiliary regeneration region: ionization decay and velocity
       // damping, followed by fuel-scoop recharge.

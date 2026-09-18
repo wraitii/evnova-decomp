@@ -77,11 +77,10 @@ struct FlightInput {
   // Deselect the secondary weapon: C (the original's slot 1 default is
   // DIK 0x1f = S, taken by reverse; documented divergence).
   bool clear_secondary = false;
-  // Eject command: Alt+X. The original eject (PlayerTick eject block,
-  // Ship_HandlePlayerShipCore 0x004510b9) requires the 0x38/0x6f arm-modifier
-  // pair (Left Alt) plus binding slot 0x11, whose default is DIK 0x2d = X;
-  // plain/Shift+X are taken by the secondary-cycle bindings here. Only
-  // consumed while the player ship is destroyed and owns an auto-eject outfit.
+  // Eject command: the arm-modifier pair (0x38/0x6f = Alt) plus binding slot
+  // 0x11, whose default is DIK 0x2d = X. Resolved from the persisted binding
+  // table by the spaceflight loop. Only consumed while the player ship is
+  // destroyed and owns an auto-eject outfit.
   bool eject = false;
   // Edge-triggered travel engage: 'j' (hyperspace jump toward the nearest
   // available travel point). The original uses a separate travel command
@@ -103,10 +102,24 @@ struct FlightInput {
   // ticker-text / Spaceport path in Stellar_HandleStellarEntryAndExit instead
   // of opening the target-action interaction dialog.
   bool land = false;
-  // Edge-triggered target-action command: 'e' opens the destination-
-  // interaction window for the currently targeted stellar. It is separate
-  // from both physical stellar collision and the later docked UI path.
+  // Edge-triggered HUD/panel dismiss (binding slot 6, default DIK 0x1c =
+  // Return; Ghidra Ship_HandlePlayerShipCore 0x00450ae7): clears the transient
+  // HUD overlay message, dismisses the route-map overlay, and closes the Escort
+  // Commands panel. Distinct from land (slot 5, default DIK 0x26 = L). Resolved
+  // from the persisted binding table by the spaceflight loop.
+  bool dismiss = false;
+  // Edge-triggered target-action command (binding slot 0x04, default DIK
+  // 0x15 = Y): opens the destination-interaction window for the currently
+  // targeted stellar. Resolved from the persisted binding table by the
+  // spaceflight loop, not from a fixed scancode. It is separate from both
+  // physical stellar collision and the later docked UI path.
   bool target_action = false;
+  // Edge-triggered clear-target command (binding slot 0x08, default DIK 0x31 =
+  // N; Ghidra 0x0044B7C4/0x0044DDD5). With the 0x38/0x6f arm modifier it
+  // clears the primary ship target; without it, it clears the travel/landing
+  // selection and resets travel_transfer_mode. Resolved from the persisted
+  // binding table by the spaceflight loop.
+  bool clear_target = false;
   // Edge-triggered board command: 'b' runs Player_HandleBoardTargetCommand
   // (0x0045a3d0) against the primary ship target — disabled-ship validation
   // (range / relative velocity / heading / crew) and the boarding-plunder
@@ -117,9 +130,10 @@ struct FlightInput {
   // system's eligible stellars and Shift+Tab goes backwards.
   bool cycle_target_next = false;
   bool cycle_target_previous = false;
-  // Cycle the destination SYSTEM for the next jump: Backslash cycles forward
-  // through the systems directly linked to (jumpable from) the current system,
-  // Shift+Backslash backwards. Mirrors the original's command 0x60
+  // Cycle the destination SYSTEM for the next jump: binding slot 0x0d
+  // (default DIK 0x2b = Backslash) cycles forward through the systems directly
+  // linked to (jumpable from) the current system, with the Shift modifier
+  // pair (0x2a/0x36) backwards. Mirrors the original's command 0x60
   // (g_playerCycleTravelTargetCommandLatch) read by Ship_HandlePlayerShip,
   // whose default binding the EV Nova manual describes as "press the
   // Backslash key until the name of your desired destination system appears"
@@ -127,39 +141,37 @@ struct FlightInput {
   // (Tab), which cycles stellars within the system.
   bool cycle_destination_next = false;
   bool cycle_destination_previous = false;
-  // Hyperspace-mode toggle (H): arms the in-flight destination-system
-  // selection channel so leading Backslash cycles choose a jump system
-  // (manual: "press the H key to set your ship's computer to hyperspace
-  // mode. Then, press the Backslash key until the desired destination...").
+  // Hyperspace-mode toggle: binding slot 0x0c (default DIK 0x23 = H). Arms
+  // the in-flight destination-system selection channel so leading Backslash
+  // cycles choose a jump system (manual: "press the H key to set your ship's
+  // computer to hyperspace mode. Then, press the Backslash key until the
+  // desired destination...").
   bool hyperspace_mode = false;
-  // Cycle the ship (primary) target: backquote (`), Shift+backquote backwards
-  // (the original's default binding per the EV Nova manual: "press the ` key
-  // until the desired ship is selected"). When cycle_ship_include_combat is
-  // held (Alt or 'k') the cycle restricts itself to combat-relevant ships
-  // (ships targeting the player or a player-targeting ship), mirroring the
-  // original's modifier commands 0x1d (Left Ctrl) / 0x6b ('k'); the clean-room
-  // binding uses Alt to match the manual's description and stay clear of the
-  // afterburner Ctrl binding.
+  // Cycle the ship (primary) target: binding slot 0x0a (default DIK 0x29 =
+  // backquote), with the Shift modifier pair (0x2a/0x36) backwards. When
+  // cycle_ship_include_combat is held the cycle restricts itself to
+  // combat-relevant ships (ships targeting the player or a player-targeting
+  // ship).
   bool cycle_ship_target_next = false;
   bool cycle_ship_target_previous = false;
   bool cycle_ship_include_combat = false;
-  // Select the nearest hostile combat target ('o'), or the nearest engaged
-  // target (Alt+'o'). Mirrors the original's "target nearest" command whose
-  // default arm selects Ship_SelectNearestHostileCombatTarget and whose
-  // 0x38/0x6f modifiers select Ship_SelectNearestEngagedTarget.
+  // Select the nearest hostile combat target (binding slot 0x0b, default DIK
+  // 0x13 = R), or the nearest engaged target when the 0x38/0x6f arm modifier
+  // is held. Mirrors the original's "target nearest" command whose default arm
+  // selects Ship_SelectNearestHostileCombatTarget and whose 0x38/0x6f modifiers
+  // select Ship_SelectNearestEngagedTarget.
   bool select_nearest_hostile = false;
   bool select_nearest_engaged = false;
-  // Face-target command (held): 'r'. The original's binding slot 7 default is
-  // DIK 0x1e = A, which the port already uses for turn-left; R is the
-  // documented clean-room stand-in. While held (with the ship not disabled)
-  // the ship auto-steers toward the primary ship target, or toward the
-  // selected travel stellar when no ship is targeted or the Alt arm modifier
-  // is held, until aligned.
+  // Face-target command (held): binding slot 0x07 (default DIK 0x1e = A).
+  // While held (with the ship not disabled) the ship auto-steers toward the
+  // primary ship target, or toward the selected travel stellar when no ship is
+  // targeted or the Alt arm modifier is held, until aligned.
   bool face_target = false;
   // Edge latches from drained SDL events the loop otherwise could not see
-  // (PollFlightInput owns the event drain). escape_pressed latches Escape or
-  // 'q' keydown; primary_clicked latches a left mouse press with the current
-  // render-coordinate cursor position, used for click-to-target ship picking.
+  // (PollFlightInput owns the event drain). escape_pressed latches a bare
+  // Escape keydown (the unported pause-menu exit's stand-in); primary_clicked
+  // latches a left mouse press with the current render-coordinate cursor
+  // position, used for click-to-target ship picking.
   bool escape_pressed = false;
   bool primary_clicked = false;
   float mouse_x = 0.0F;
