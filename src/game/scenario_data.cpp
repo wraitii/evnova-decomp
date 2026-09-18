@@ -2066,6 +2066,39 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
             scenario::kMissionResourceType, static_cast<std::uint16_t>(id))) {
       MissionDef mission = DecodeMission(res->bytes);
       mission.present = true;
+      // Loader reference-validation warnings (Ghidra 0x0043bbb0). These fire
+      // only on malformed scenario data; the shipped archives trip none.
+      const auto warn_bad_dude = [&](std::int16_t dude_id, std::int16_t count) {
+        if (dude_id < 0x80 || dude_id > 0x27f) {
+          if (count > 0) {
+            NovaLog::Warn("m\xefsn {}: ship dude {:#x} out of range (count "
+                          "{}) and target_ship_count/max > 0",
+                          id,
+                          dude_id,
+                          count);
+          }
+        } else if (!dudes[static_cast<std::size_t>(dude_id) - 0x80].present) {
+          NovaLog::Warn("m\xefsn {}: ship dude {:#x} names an empty dude def",
+                        id,
+                        dude_id);
+        }
+      };
+      warn_bad_dude(mission.special_ship_dude, mission.target_ship_count);
+      warn_bad_dude(mission.auxiliary_ship_dude,
+                    mission.mission_ship_count_max);
+      const auto warn_bad_stellar = [&](std::int16_t locator) {
+        if (locator <= 0x7f || locator >= 0x880) {
+          return;
+        }
+        const std::size_t index = static_cast<std::size_t>(locator) - 0x80;
+        if (index < stellars.size() && !stellars[index].is_defined) {
+          NovaLog::Warn("m\xefsn {}: locator {:#x} names an undefined stellar",
+                        id,
+                        locator);
+        }
+      };
+      warn_bad_stellar(mission.travel_stellar_locator);
+      warn_bad_stellar(mission.return_stellar_locator);
       // Ghidra 0x0043bbb0 (misn loader) runs the resource name through
       // NameString_StripSubtitleSuffix (0x004cd230) before storing it, so the
       // BBS/computer list rows show "Base Name" for "Base Name;Subtitle".

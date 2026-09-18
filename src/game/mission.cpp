@@ -633,6 +633,10 @@ CollectStellarLocatorCandidates(const GameState &state,
   }
 
   // ---- Gate 4: AvailRandom vs the per-definition warp roll ---------------
+  // TODO(decomp(0x0043bbb0)) skipped: g_offer_random_bypass_flag is seeded
+  // from an unmodelled debug-option word (FUN_004cd0b0 word 0xf, all-zero in
+  // shipped data) and forces the AvailRandom gate to pass (0x00441f2f). The
+  // default-clear path is reproduced here.
   if (def.avail_random < 100) {
     const std::int16_t roll = def_index < state.mission_offering_rolls.size()
                                   ? state.mission_offering_rolls[def_index]
@@ -1982,6 +1986,40 @@ void Mission_RerollOfferingRolls(GameState &state) {
     state.mission_offering_rolls[i] =
         static_cast<std::int16_t>(roll(state.rng));
   }
+}
+
+// Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs, runtime half. The
+// definition table itself is rebuilt by ScenarioData::LoadFromArchives (which
+// mirrors the same 1000-entry, id-0x80-strided decode); this reproduces the
+// cross-cutting state the original clears around it.
+//
+// TODO(decomp(0x0043bbb0)) skipped: the original gates / seeds this reset from
+// FUN_004cd0b0, which reads a 32-word debug-option block (resource type
+// 0x91627567 id 0x80, decoded FourCC "ebug", all-zero in the shipped Nova.rez;
+// likely a leftover Mac developer debug/QA directive of unknown origin). Word 1
+// skips the whole load, word 9 skips this reset (the Ghidra "restoring from
+// save" arm), and word 0xf becomes g_offer_random_bypass_flag. None are ever
+// set by the shipped binary, so the port always takes the load+reset path.
+void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
+  // g_last_system_for_ambient_rolls = -1: the clean-room ambient-roll cache
+  // latch is not modelled (see Mission_ClearMisnSlotAssignments).
+  state.in_travel_scene = false;
+  state.mission_speaker_ship_slot = -1;
+  // g_travel_destination_window = 0 and g_starmap_selected_system_id = -1 have
+  // no clean-room counterpart: the travel window is an SDL modal and the
+  // starmap keeps its selection local to NovaStarmap_* rather than in a global.
+  state.script_mission_context_slot = -1;
+  // Original guard: skip the active-slot/control-bit clear only when the
+  // all-zero debug word 9 is set; the port therefore always clears.
+  for (auto &flags : state.active_mission_runtime_flags) {
+    flags.is_active = false;
+    flags.is_failed = false;
+  }
+  state.control.bits.reset();
+  state.control.persisted_bit_bytes.fill(0);
+  // DAT_00773eed[1000] = 0; DAT_00774ae2 = -1.
+  state.mission_interaction_shown.fill(0);
+  state.mission_interaction_context = -1;
 }
 
 // Ghidra 0x00448670 Mission_TriggerReturnMissionInteractions. See the header
