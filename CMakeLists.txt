@@ -8,6 +8,16 @@ project(EscapeVelocityNova
 option(EVNOVA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(EVNOVA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation when available" ON)
 
+# External probe/control harness (EVN_PROBE=1, docs/probe_harness.md). Its
+# transport is a raw POSIX socket server, so it compiles everywhere except
+# Windows (Winsock backend not written yet); there it defaults off so a plain
+# `cmake --preset release` still builds.
+if(WIN32)
+    option(EVNOVA_ENABLE_PROBE "Build the external probe/control harness" OFF)
+else()
+    option(EVNOVA_ENABLE_PROBE "Build the external probe/control harness" ON)
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
