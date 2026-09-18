@@ -223,6 +223,18 @@ void Mission_TickShipInteractionReactions(GameState &state,
 // pilot starts.
 void Mission_RerollOfferingRolls(GameState &state);
 
+// Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs, runtime half. The
+// m\xefsn definition decode itself runs inline in
+// ScenarioData::LoadFromArchives (which owns the 1000-entry table); this resets
+// the cross-cutting GameState the original clears around that decode: the
+// travel-scene/speaker/script-context latches, the option-gated active-slot and
+// control-bit clear, and the interaction shown/context latches. Call alongside
+// LoadFromArchives at session bootstrap (NovaGameSession_Run 0x00416100) and
+// fresh-world reloads, so a second new game cannot inherit the previous
+// pilot's mission interaction latches. The original's debug-option guards
+// (FUN_004cd0b0) are unmodelled and documented as skipped at the definition.
+void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state);
+
 // Outcome of one mission-offer interaction window (NovaUi_RunMissionShip-
 // InteractionWindow 0x00442510 return values).
 enum class MissionOfferResult {

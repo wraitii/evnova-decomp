@@ -1210,6 +1210,11 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
     NovaLog::Error(
         "game session: scenario resource tables could not be loaded");
   }
+  // Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs (the runtime half of
+  // the mission-definition load). Runs right after the table load, matching
+  // the original's bootstrap order, and clears any mission interaction latches
+  // carried over from a previous session.
+  game::Mission_ResetRuntimeStateOnMissionDefsLoad(runtime.game);
   // Ghidra 0x004B0C20 Ship_InitGameplayDataTables. The original seeds the
   // per-definition mission offering rolls before loading/resuming a pilot;
   // keep that observable RNG/table side effect in the session bootstrap.

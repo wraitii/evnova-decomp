@@ -332,6 +332,10 @@ void Stub_LoadScenarioResourceTables(GameState &state, bool ship_animations) {
     NovaLog::Todo("scenario resource tables could not be loaded; player world "
                   "uses fallback defaults");
   }
+  // Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs (runtime half):
+  // clear the mission interaction latches so a second new game cannot inherit
+  // the previous pilot's state.
+  Mission_ResetRuntimeStateOnMissionDefsLoad(state);
   // Size the per-system reputation table to the systems table (the original
   // keeps g_system_reputation 0x00733bc8 as a fixed system-indexed int16 span
   // alongside g_system_defs; our default is 0 so every system starts neutral).

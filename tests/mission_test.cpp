@@ -1008,3 +1008,33 @@ TEST_CASE("an Any-target disaster picks an available non-travel stellar",
   // samples over the full table.
   CHECK((def.active_stellar == 0 || def.active_stellar == 3));
 }
+
+// Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs runtime half: the
+// loader clears the cross-cutting mission interaction latches at
+// session/reload time. Without this a second new game in one session would
+// inherit the previous pilot's shown/context/speaker state (Game_ResetNewGame-
+// State 0x004b4690 does not touch them).
+TEST_CASE("mission loader reset clears interaction latches") {
+  GameState state;
+  state.mission_interaction_shown[0] = 1;
+  state.mission_interaction_shown[3] = 1;
+  state.mission_interaction_context = 3;
+  state.mission_speaker_ship_slot = 7;
+  state.script_mission_context_slot = 2;
+  state.in_travel_scene = true;
+  state.active_mission_runtime_flags[1].is_active = true;
+  state.active_mission_runtime_flags[1].is_failed = true;
+  state.control.SetControlBit(311, true);
+
+  Mission_ResetRuntimeStateOnMissionDefsLoad(state);
+
+  CHECK(state.mission_interaction_shown[0] == 0);
+  CHECK(state.mission_interaction_shown[3] == 0);
+  CHECK(state.mission_interaction_context == -1);
+  CHECK(state.mission_speaker_ship_slot == -1);
+  CHECK(state.script_mission_context_slot == -1);
+  CHECK_FALSE(state.in_travel_scene);
+  CHECK_FALSE(state.active_mission_runtime_flags[1].is_active);
+  CHECK_FALSE(state.active_mission_runtime_flags[1].is_failed);
+  CHECK_FALSE(state.control.ControlBit(311));
+}
