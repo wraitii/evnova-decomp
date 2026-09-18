@@ -1,4 +1,8 @@
-# Ionization decay: accepted double-vs-x87 precision divergence (0x0046c080)
+# Ionization: accepted double-vs-x87 precision divergences
+
+Covers `Ship_ComputeIonizationDecayRate` (0x0046c080) and
+`Ship_GetIonizationIntensity` (0x0046c160), plus the shared ionized-velocity
+ramp constants.
 
 `PlayerIonizationDecayFromOutfits` (`src/game/outfit.cpp`) accumulates the
 ModType 39 (ion dissipator) bonus in `double`. The original evaluates the same
@@ -39,3 +43,32 @@ or gameplay impact has been established. Software extended-precision emulation
 is deliberately omitted under the accepted scope. Revisit only if bit-exact
 reproduction is later required; that would need software 64-bit-significand
 arithmetic (or an equivalent double-double emulation).
+
+## `Ship_GetIonizationIntensity` capacity and division (0x0046c160)
+
+The player ModType 40 (ion absorber) capacity scan adds each owned outfit's
+`mod_val * owned` as an exact 32-bit integer product to the class
+`ionization_capacity` (sign-extended int16), accumulating in x87 extended
+precision. On the first (uncached) player call the original:
+
+1. stores the **rounded float** total to `DAT_007356a8` (`FST float`), then
+2. divides `ionization_points` by the **unrounded x87 accumulator** for that
+   same call (`FDIV ST0,ST1` on the retained x87 value).
+
+Subsequent calls read the rounded float cache and divide by it. The port
+(`NovaOutfit_ComputeIonizationCapacity` / `NovaOutfit_GetIonizationIntensity`)
+accumulates in `double` and always returns/divides by the rounded float, so its
+first-call division can differ from the original by one rounding step. Accepted
+platform-precision divergence under the same scope as the decay rate above; no
+gameplay impact has been established. The comment on
+`NovaOutfit_GetIonizationIntensity` records this inline.
+
+## Ionized-velocity ramp constants
+
+The post-decay ramp caps intensity with the double 0.7 (`DAT_00575478` NPC,
+`DAT_00575668` player) and steps each axis by the double 0.025 (`DAT_00575480`
+NPC, `DAT_00575670` player) times `g_avg_frame_tick_scale`. The port
+(`NovaShip_UpdateIonizationCharge`) keeps these as `float` literals, the same
+class of accepted precision divergence. The player caller also scales the decay
+rate by a float tick scale rather than the original double
+`g_avg_frame_tick_scale`.

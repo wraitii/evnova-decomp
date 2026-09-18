@@ -274,16 +274,57 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 
 // Ship_GetIonizationIntensity (0x0046c160): the NPC path has no outfit
 // opcode-0x28 additions, so its normalized intensity is simply the status
-// ionization meter divided by the class capacity. The original returns zero for
-// a non-positive capacity and clamps the resulting stat multiplier below.
+// ionization meter divided by the class capacity. Zero is returned only for a
+// non-positive capacity; a crossed (negative) charge yields a negative
+// intensity, which the callers' `intensity > 0` gate then declines to apply.
 [[nodiscard]] float
 spaceflight_detail::NovaShip_IonizationIntensity(const Ship &ship,
                                                  const ShipClass &ship_class) {
-  if (ship.ionization_points <= 0.0F || ship_class.ionization_capacity <= 0) {
-    return 0.0F;
+  return NovaOutfit_NormalizeIonizationIntensity(
+      ship.ionization_points,
+      static_cast<float>(ship_class.ionization_capacity));
+}
+
+// Shared ionization block of Ship_HandleShip (0x0043373f/0x00434394) and
+// PlayerTick_IonizationAndFuelRegeneration (0x0045073f/0x00452304). See the
+// declaration for the exact gate/decay/ramp contract. Both the 0.7 intensity
+// cap (DAT_00575478/DAT_00575668) and the 0.025 ramp constant
+// (DAT_00575480/DAT_00575670) are doubles in the original; this port keeps
+// them as floats, an accepted precision divergence.
+void spaceflight_detail::NovaShip_UpdateIonizationCharge(
+    GameState &state,
+    Ship &ship,
+    float effective_max_speed_px_per_tick,
+    float elapsed_ticks) {
+  if (ship.ionization_points <= 0.0F) {
+    ship.ionization_points = 0.0F;
+    return;
   }
-  return ship.ionization_points /
-         static_cast<float>(ship_class.ionization_capacity);
+  // The original subtracts and stores the raw float result (x87 FSUBR, no
+  // clamp); the next frame's gate re-normalizes a crossed negative value.
+  const float decay_rate = NovaOutfit_ComputeIonizationDecayRate(state, ship);
+  ship.ionization_points -= decay_rate * elapsed_ticks;
+  const float intensity =
+      std::min(0.7F, NovaOutfit_GetIonizationIntensity(state, ship));
+  const float ionized_cap =
+      (1.0F - intensity) * effective_max_speed_px_per_tick;
+  const float damp_step = 0.025F * elapsed_ticks;
+  // Two sequential per-axis tests, not if/else: the original re-tests the
+  // updated component, so a component can be stepped and then stepped back in
+  // the same frame (observable when the cap is exactly zero). No clamp to the
+  // cap is applied -- a step may overshoot past it.
+  if (ship.vel_x > ionized_cap) {
+    ship.vel_x -= damp_step;
+  }
+  if (ship.vel_x < -ionized_cap) {
+    ship.vel_x += damp_step;
+  }
+  if (ship.vel_y > ionized_cap) {
+    ship.vel_y -= damp_step;
+  }
+  if (ship.vel_y < -ionized_cap) {
+    ship.vel_y += damp_step;
+  }
 }
 
 // Ghidra 0x00463e70 Ship_ComputeShipMaxTurnRateDeg (NPC branch; the player
@@ -364,6 +405,33 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
     }
   }
   return stats;
+}
+
+// Ghidra 0x004642e0 Ship_ComputeShipEffectiveMaxSpeed tail applied to the
+// port's split bodies: NovaShip_ComputeEffectiveStats is the NPC main body and
+// Outfit_ComputePlayerEffectiveStats supplies the player opcode-8 aggregate.
+// The common tail then applies the mission-slot 0x3ff x2 (DAT_005757a8), the
+// player/direct-escort 1.5x (DAT_005757b8, when Strict Play is off) and the
+// final negative clamp. The player branch resolves its class through
+// state.player, so `ship_class` is only dereferenced for NPCs.
+float NovaShip_ComputeEffectiveMaxSpeedPxPerTick(const GameState &state,
+                                                 const Ship &ship,
+                                                 const ShipClass &ship_class) {
+  float max_speed;
+  if (ship.ship_instance_id == 0) {
+    max_speed = Outfit_ComputePlayerEffectiveStats(state).speed_raw / 100.0F;
+    if (ship.pers_def_slot == 0x3ff) {
+      max_speed *= 2.0F; // DAT_005757a8
+    }
+  } else {
+    max_speed = NovaShip_ComputeEffectiveStats(state, ship, ship_class)
+                    .max_speed_px_per_tick;
+  }
+  if ((ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0) &&
+      !state.pilot.strict_play) {
+    max_speed *= 1.5F; // DAT_005757b8
+  }
+  return max_speed < 0.0F ? 0.0F : max_speed;
 }
 
 // Ports the movement block of Ghidra Ship_HandleShip (0x00433050) for the

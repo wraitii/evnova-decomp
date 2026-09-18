@@ -408,8 +408,16 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
         ship,
         static_cast<std::uint32_t>(state.gameplay_now_ms * 60 / 1000));
 
-    // The separate ionization speed clamp remains deferred.
-    spaceflight_detail::TickIonizationDecay(state, ship, elapsed_ticks);
+    // Ionization decay tail (0x0043373f/0x00434394) plus the ionized-velocity
+    // ramp. Ship_ComputeShipEffectiveMaxSpeed (0x004642e0) is
+    // ionization-independent (it never calls Ship_GetIonizationIntensity), so
+    // computing it here before the decay is equivalent to the original's
+    // post-decay call at 0x004343d5.
+    spaceflight_detail::NovaShip_UpdateIonizationCharge(
+        state,
+        ship,
+        NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, ship, *cls),
+        elapsed_ticks);
   }
 
   // Ship_UpdateVisualState (0x00428340) destruction pass: runs after every

@@ -1404,12 +1404,21 @@ struct GameState {
   // x87 FCOMP. Reset with the stats snapshot via InvalidateDerivedStatCaches().
   float cached_ionization_decay_rate = -1.0F;
 
+  // Lazily computed player ionization capacity (Ghidra DAT_007356a8, renamed
+  // g_player_cached_ionization_capacity): class capacity plus ModType-40 ion
+  // absorber additions. Valid while >= 0.0 (0.0 is a valid cached total), so a
+  // negative or NaN entry recomputes. Reset to -1.0 by
+  // InvalidateDerivedStatCaches, matching Outfit_RecomputeOutfitDerivedState
+  // (0x0046d507).
+  float cached_ionization_capacity = -1.0F;
+
   // Clear the lazily derived player stat caches (effective stats + ionization
-  // decay). Equivalent to the sentinel writes in
+  // decay/capacity). Equivalent to the sentinel writes in
   // Outfit_RecomputeOutfitDerivedState without its eager arms.
   void InvalidateDerivedStatCaches() {
     stat_cache_valid = false;
     cached_ionization_decay_rate = -1.0F;
+    cached_ionization_capacity = -1.0F;
   }
 
   // The original stores 0x100 weapon banks with a 100-element stride.
