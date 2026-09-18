@@ -4,6 +4,7 @@
 #include "game/outfit.hpp"
 #include "game/ship_ai.hpp"
 #include "game/spaceflight.hpp"
+#include "game/spaceflight_internal.hpp"
 
 #include <numbers>
 
@@ -730,4 +731,194 @@ TEST_CASE("ionization decay uses class rate and player dissipator outfits") {
   npc.ship_instance_id = 1;
   CHECK(game::NovaOutfit_ComputeIonizationDecayRate(state, npc) ==
         Catch::Approx(0.01F));
+}
+
+namespace {
+
+// One player ship class with the given ionization fields, plus a fresh derived
+// cache. Used by the ionization update-loop tests below.
+void SetPlayerIonization(game::GameState &state,
+                         float decay_rate,
+                         std::int16_t capacity) {
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].ionization_decay_rate = decay_rate;
+  state.scenario.ships[0].ionization_capacity = capacity;
+  state.player.ship_class_id = 0;
+  state.player.ship_instance_id = 0;
+  state.InvalidateDerivedStatCaches();
+}
+
+} // namespace
+
+TEST_CASE(
+    "ionization update stores unclamped negative charge, reset next frame") {
+  game::GameState state;
+  SetPlayerIonization(state, 2.0F, 100);
+  state.player.ionization_points = 1.0F;
+
+  game::spaceflight_detail::NovaShip_UpdateIonizationCharge(
+      state, state.player, 4.0F, 1.0F);
+  // 1 - 2*1 = -1 is stored raw; the original only re-normalizes it on the
+  // next frame's pre-decay gate (0x0045073f / 0x0043373f).
+  CHECK(state.player.ionization_points == -1.0F);
+
+  game::spaceflight_detail::NovaShip_UpdateIonizationCharge(
+      state, state.player, 4.0F, 1.0F);
+  CHECK(state.player.ionization_points == 0.0F);
+}
+
+TEST_CASE("ionization update: negative post-decay charge widens the ramp cap") {
+  game::GameState state;
+  SetPlayerIonization(state, 2.0F, 100);
+  state.player.ionization_points = 1.0F;
+  state.player.vel_x = 4.02F;
+
+  game::spaceflight_detail::NovaShip_UpdateIonizationCharge(
+      state, state.player, 4.0F, 1.0F);
+  // intensity = -1/100 = -0.01; cap = 1.01 * 4 = 4.04, so 4.02 is inside the
+  // cap and must be left untouched. Clamping the intensity to zero would give
+  // cap = 4.0 and step the velocity down to 3.995.
+  CHECK(state.player.ionization_points == -1.0F);
+  CHECK(state.player.vel_x == Catch::Approx(4.02F));
+  CHECK(state.player.vel_y == 0.0F);
+}
+
+TEST_CASE("ionization update: ramp steps past the cap without clamping to it") {
+  game::GameState state;
+  SetPlayerIonization(state, 0.0F, 200);
+  state.player.ionization_points = 100.0F; // intensity 0.5
+  state.player.vel_x = 2.01F;
+
+  game::spaceflight_detail::NovaShip_UpdateIonizationCharge(
+      state, state.player, 4.0F, 1.0F);
+  // cap = 0.5 * 4 = 2.0; the original stores 2.01 - 0.025 = 1.985, below the
+  // cap (no std::max clamp).
+  CHECK(state.player.vel_x == Catch::Approx(1.985F));
+}
+
+TEST_CASE("ionization update: a zero cap steps and re-steps the same axis") {
+  game::GameState state;
+  SetPlayerIonization(state, 0.0F, 200);
+  state.player.ionization_points = 100.0F; // intensity 0.5
+  state.player.vel_x = 0.5F;
+
+  // effective max speed 0 -> cap 0, step = 0.025 * 40 = 1.0. The original
+  // re-tests the updated component, so it subtracts then adds back exactly.
+  game::spaceflight_detail::NovaShip_UpdateIonizationCharge(
+      state, state.player, 0.0F, 40.0F);
+  CHECK(state.player.vel_x == 0.5F);
+}
+
+TEST_CASE("player ionization tick: dissipator decay and ModType-40 absorber "
+          "capacity drive the ramp together") {
+  game::GameState state;
+  SetPlayerIonization(state, 0.0F, 100);
+  state.scenario.ships[0].speed = 400.0F;
+  state.scenario.outfits.resize(2);
+  state.scenario.outfits[0].mod_type =
+      static_cast<std::int16_t>(game::OutfitEffect::kIonAbsorber);
+  state.scenario.outfits[0].mod_val = 100;
+  state.scenario.outfits[1].mod_type =
+      static_cast<std::int16_t>(game::OutfitEffect::kIonDissipator);
+  state.scenario.outfits[1].mod_val = 100;
+  state.inventory.outfit_owned_count[0] = 1; // absorber
+  state.inventory.outfit_owned_count[1] = 1; // dissipator
+  state.InvalidateDerivedStatCaches();
+  state.player.ionization_points = 100.0F;
+  state.player.vel_x = 2.5F;
+  state.player.vel_y = -3.01F;
+
+  game::PlayerTick_IonizationAndFuelRegeneration(state, 1000.0F / 30.0F);
+  // decay = 0.01*100 = 1.0 -> points 99. Effective max = 4.0 raw x1.5
+  // non-strict = 6.0; post-decay capacity = 100 + 100 = 200 -> intensity
+  // 0.495, cap = 0.505*6.0 = 3.03.
+  // `vel_x` 2.5 stays inside, which pins the absorber (without it capacity 100
+  // -> intensity 0.99 -> capped 0.7 -> cap 1.8) *and* the x1.5 factor (with it
+  // but no x1.5 the cap would be 2.02); both would step to 2.475.
+  // `vel_y` -3.01 pins the post-decay ordering and negative axis: the pre-decay
+  // charge gives cap 0.5*6.0 = 3.0 and would step it to -2.985.
+  CHECK(state.player.ionization_points == 99.0F);
+  CHECK(state.player.vel_x == Catch::Approx(2.5F));
+  CHECK(state.player.vel_y == Catch::Approx(-3.01F));
+}
+
+TEST_CASE("effective max speed applies mission x2 and non-strict 1.5x") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass(); // speed 400 -> 4.0 px/tick
+  state.scenario.ships.push_back(cls);
+  state.player.ship_class_id = 0;
+
+  game::Ship player;
+  player.ship_instance_id = 0;
+  player.ship_class_id = 0;
+  player.squad_leader_ship_slot = 5; // not 0: no squad-leader arm
+
+  // base 4.0, Strict Play off -> x1.5.
+  CHECK(game::NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, player, cls) ==
+        Catch::Approx(6.0F));
+
+  state.pilot.strict_play = true;
+  CHECK(game::NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, player, cls) ==
+        Catch::Approx(4.0F));
+
+  // Mission ship (pers_def_slot 0x3ff) x2, then non-strict x1.5.
+  state.pilot.strict_play = false;
+  player.pers_def_slot = 0x03ff;
+  CHECK(game::NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, player, cls) ==
+        Catch::Approx(12.0F));
+
+  // A negative opcode-8 aggregate clamps to zero.
+  state.scenario.ships[0].speed = -400.0F;
+  state.player.pers_def_slot = -1;
+  CHECK(game::NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, player, cls) ==
+        0.0F);
+}
+
+TEST_CASE("effective max speed applies the squad-leader 1.5x to NPCs") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass(); // speed 400 -> 4.0 px/tick
+  state.scenario.ships.push_back(cls);
+
+  game::Ship npc;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.squad_leader_ship_slot = 0; // squad leader
+
+  CHECK(game::NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, npc, cls) ==
+        Catch::Approx(6.0F));
+
+  npc.squad_leader_ship_slot = 3; // follower: no x1.5
+  state.pilot.strict_play = false;
+  CHECK(game::NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, npc, cls) ==
+        Catch::Approx(4.0F));
+
+  npc.squad_leader_ship_slot = 0;
+  state.pilot.strict_play = true;
+  CHECK(game::NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, npc, cls) ==
+        Catch::Approx(4.0F));
+}
+
+TEST_CASE("npc ionization ramp runs in the ship pass after decay") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass();
+  cls.ionization_capacity = 100;
+  cls.ionization_decay_rate = 2.0F;
+  state.scenario.ships.push_back(cls);
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.current_system_id = 0;
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1; // NPC
+  ship.armor_points = 10.0F; // alive
+  ship.ionization_points = 100.0F;
+  ship.vel_x = 10.0F;
+  ship.ai_maneuver_timer_ms = 10.0F; // coast: movement holds velocity
+
+  game::NovaShip_TickNpcShips(state, 1.0F);
+
+  // decay 2*1 -> 98; intensity 0.98 -> capped 0.7 -> cap 0.3*4 = 1.2; one
+  // 0.025 step. Before the NPC ramp was ported this stayed at 10.0.
+  CHECK(ship.ionization_points == 98.0F);
+  CHECK(ship.vel_x == Catch::Approx(9.975F));
 }

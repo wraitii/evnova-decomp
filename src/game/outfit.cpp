@@ -176,6 +176,30 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
   return static_cast<float>(rate);
 }
 
+// Player-side ModType-40 (ion absorber) capacity scan, run inline from
+// NovaOutfit_GetIonizationIntensity (0x0046c160; the citation lives there).
+// Each owned absorber adds the integer `mod_val * owned` to the class capacity.
+// The original accumulates in x87 extended and caches the total as a float;
+// this port accumulates in double and returns the rounded float. Accepted
+// precision divergence; see docs/ionization_decay_x87_precision.md.
+[[nodiscard]] float PlayerIonizationCapacityFromOutfits(const GameState &state,
+                                                        float class_capacity) {
+  double capacity = static_cast<double>(class_capacity);
+  for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
+       ++id) {
+    const std::int16_t owned = state.inventory.outfit_owned_count[id];
+    if (owned <= 0 || id >= state.scenario.outfits.size()) {
+      continue;
+    }
+    for (const Effect &e : OutfitEffects(state.scenario.outfits[id])) {
+      if (e.type == static_cast<std::int16_t>(OutfitEffect::kIonAbsorber)) {
+        capacity += static_cast<double>(e.val) * static_cast<double>(owned);
+      }
+    }
+  }
+  return static_cast<float>(capacity);
+}
+
 } // namespace
 
 // Split-out arm of NovaOutfit_RecomputeOutfitDerivedState (0x0046d4b0): the
@@ -606,6 +630,46 @@ float NovaOutfit_ComputeIonizationDecayRate(GameState &state,
   const float rate = PlayerIonizationDecayFromOutfits(state, class_rate);
   state.cached_ionization_decay_rate = rate;
   return rate;
+}
+
+// Capacity arm of NovaOutfit_GetIonizationIntensity (0x0046c160). The class
+// capacity is a sign-extended int16; the NPC path returns it directly. The
+// player path adds ModType-40 ion absorber values and caches the float total
+// (DAT_007356a8) while it is >= 0.0. Like the decay-rate cache, 0.0 is a valid
+// cached total, so a stale zero is only refreshed after a recompute.
+float NovaOutfit_ComputeIonizationCapacity(GameState &state, const Ship &ship) {
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const float class_capacity =
+      cls != nullptr ? static_cast<float>(cls->ionization_capacity) : 0.0F;
+  // NPCs always read the live class capacity; the original never scans outfits
+  // or consults the player-only cache for them.
+  if (ship.ship_instance_id != 0) {
+    return class_capacity;
+  }
+  if (state.cached_ionization_capacity >= 0.0F) {
+    return state.cached_ionization_capacity;
+  }
+  const float capacity =
+      PlayerIonizationCapacityFromOutfits(state, class_capacity);
+  state.cached_ionization_capacity = capacity;
+  return capacity;
+}
+
+// Ghidra 0x0046c160 Ship_GetIonizationIntensity. Returns the raw (possibly
+// negative) charge fraction; callers cap it at 0.7. The player ModType-40
+// capacity scan runs inline in NovaOutfit_ComputeIonizationCapacity below.
+//
+// PRECISION (accepted divergence, docs/ionization_decay_x87_precision.md): on
+// the original's first (uncached) player call the x87 accumulator's unrounded
+// total is used for the division while the rounded float is stored to
+// DAT_007356a8; later calls divide by the rounded cache. This port returns the
+// rounded float immediately, so the first-call division differs by a rounding
+// step.
+float NovaOutfit_GetIonizationIntensity(GameState &state, const Ship &ship) {
+  return NovaOutfit_NormalizeIonizationIntensity(
+      ship.ionization_points,
+      NovaOutfit_ComputeIonizationCapacity(state, ship));
 }
 
 // ---------------------------------------------------------------------------

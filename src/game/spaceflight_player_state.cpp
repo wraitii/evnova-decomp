@@ -102,18 +102,6 @@ constexpr std::int16_t kBombEffectIdBias = 0x80;
 constexpr float kFrameScaleAutoRepairRerollGate = 0.0F;
 constexpr int kAutoRepairFrameRerollRange = 500;
 
-void spaceflight_detail::TickIonizationDecay(GameState &state,
-                                             Ship &ship,
-                                             float elapsed_ticks) {
-  if (ship.ionization_points <= 0.0F) {
-    ship.ionization_points = 0.0F;
-    return;
-  }
-  const float decay_rate = NovaOutfit_ComputeIonizationDecayRate(state, ship);
-  ship.ionization_points =
-      std::max(0.0F, ship.ionization_points - decay_rate * elapsed_ticks);
-}
-
 // Ghidra PlayerTick_StatusAndOutfitEvents (internal label of
 // Ship_HandlePlayerShipCore 0x0044aa70, block 0x0044b240..0x0044b7c4 plus the
 // carried-bomb tails at 0x0044da75/0x0044daa0 and the death-bookkeeping
@@ -1385,15 +1373,13 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   // Ship_ComputeShipMaxTurnRateDeg (0x00463e70). TODO(decomp): the original
   // turn-damping gate uses ShipState +0x28/+0x5c, which is not fully decoded.
   if (p.ionization_points > 0.0F) {
-    const ShipClass *cls =
-        state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
-    if (cls != nullptr) {
-      const float intensity = std::min(
-          0.7F, spaceflight_detail::NovaShip_IonizationIntensity(p, *cls));
-      effective_class.accel *= (1.0F - intensity);
-      if (!input.thrust) {
-        effective_class.turn_rate *= (1.0F - intensity);
-      }
+    // Ship_GetIonizationIntensity (0x0046c160) includes the player ModType-40
+    // ion absorber capacity additions.
+    const float intensity =
+        std::min(0.7F, NovaOutfit_GetIonizationIntensity(state, p));
+    effective_class.accel *= (1.0F - intensity);
+    if (!input.thrust) {
+      effective_class.turn_rate *= (1.0F - intensity);
     }
   }
   if (afterburner_active && !gravity_present) {
@@ -1533,34 +1519,20 @@ void PlayerTick_IonizationAndFuelRegeneration(GameState &state,
   }
   const PlayerEffectiveStats &eff = state.cached_stats;
   const float tick_scale = frame_time_ms / (1000.0F / 30.0F);
-  // Ionization decay, then the ionized-velocity damping: each velocity axis
-  // is pulled toward (1 - intensity) * effective max speed at
-  // DAT_00575670 = 0.025 per frame (a soft ramp, distinct from the hard
-  // per-axis clamp in the movement block).
-  if (p.ionization_points > 0.0F) {
-    spaceflight_detail::TickIonizationDecay(state, p, tick_scale);
-    const ShipClass *cls =
-        state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
-    float intensity =
-        cls != nullptr
-            ? spaceflight_detail::NovaShip_IonizationIntensity(p, *cls)
-            : 0.0F;
-    intensity = std::min(0.7F, intensity); // _DAT_00575668
-    const float ionized_cap = (1.0F - intensity) * (eff.speed_raw / 100.0F);
-    const float damp_step = 0.025F * tick_scale;
-    if (p.vel_x > ionized_cap) {
-      p.vel_x = std::max(ionized_cap, p.vel_x - damp_step);
-    } else if (p.vel_x < -ionized_cap) {
-      p.vel_x = std::min(-ionized_cap, p.vel_x + damp_step);
-    }
-    if (p.vel_y > ionized_cap) {
-      p.vel_y = std::max(ionized_cap, p.vel_y - damp_step);
-    } else if (p.vel_y < -ionized_cap) {
-      p.vel_y = std::min(-ionized_cap, p.vel_y + damp_step);
-    }
-  } else {
-    p.ionization_points = 0.0F;
-  }
+  // Ionization decay then the ionized-velocity ramp. The gate, unclamped
+  // (possibly negative) decay, 0.7 intensity cap and 0.025 per-frame ramp
+  // constant (DAT_00575668/DAT_00575670) match the original block at
+  // 0x0045073f/0x00452304. The cap uses the full Ship_ComputeShipEffectiveMax-
+  // Speed 0x004642e0 including the mission x2 and non-strict-play 1.5x factors.
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+  spaceflight_detail::NovaShip_UpdateIonizationCharge(
+      state,
+      p,
+      cls != nullptr
+          ? NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, p, *cls)
+          : eff.speed_raw / 100.0F,
+      tick_scale);
 
   // Fuel-scoop recharge (Ship_ComputeShipFuelRechargeRate 0x00463b30 via its
   // HandlePlayerShipCore call site): rate cached in the stats snapshot; a

@@ -284,6 +284,37 @@ Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state);
 [[nodiscard]] float NovaOutfit_ComputeIonizationDecayRate(GameState &state,
                                                           const Ship &ship);
 
+// Ghidra 0x0046c160 Ship_GetIonizationIntensity. Returns raw (possibly
+// negative) ionization_points / capacity, or 0 when capacity <= 0; callers cap
+// the result at 0.7. The player ModType-40 (ion absorber) capacity scan runs
+// inline in NovaOutfit_ComputeIonizationCapacity below.
+//
+// PRECISION (accepted divergence, docs/ionization_decay_x87_precision.md): on
+// the first (uncached) player call the original accumulates the capacity in
+// x87 extended precision, stores the ROUNDED float to DAT_007356a8, but keeps
+// dividing by the unrounded x87 accumulator for that same call; later calls
+// divide by the rounded cache. This port's helper returns the rounded float
+// immediately, so its first-call division differs by a rounding step.
+[[nodiscard]] float NovaOutfit_GetIonizationIntensity(GameState &state,
+                                                      const Ship &ship);
+
+// Capacity arm of the 0x0046c160 intensity above (not a separate original
+// function). NPC ships return the class `ionization_capacity` (sign-extended
+// int16) and never touch the cache. The player adds every owned outfit's
+// ModType 40 `mod_val * owned` across all four effect slots and caches the
+// float total in GameState.cached_ionization_capacity while it is >= 0.0 (0.0
+// is valid).
+[[nodiscard]] float NovaOutfit_ComputeIonizationCapacity(GameState &state,
+                                                         const Ship &ship);
+
+// Charge divided by capacity, or 0 when capacity is non-positive. Returned raw
+// (may be negative once the charge has crossed below zero).
+[[nodiscard]] inline float
+NovaOutfit_NormalizeIonizationIntensity(float ionization_points,
+                                        float capacity) {
+  return capacity > 0.0F ? ionization_points / capacity : 0.0F;
+}
+
 // Ghidra 0x0046cb90 Outfit_HasMiningScoopOutfit. Whether the ship carries a
 // mining-scoop outfit (ModType 0x1F in any of the four mod slots): the player
 // branch scans owned outfits, the NPC branch scans the ship class's default

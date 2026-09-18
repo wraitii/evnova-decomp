@@ -195,6 +195,16 @@ struct NpcEffectiveStats {
 [[nodiscard]] NpcEffectiveStats NovaShip_ComputeEffectiveStats(
     const GameState &state, const Ship &ship, const ShipClass &ship_class);
 
+// Ghidra 0x004642e0 Ship_ComputeShipEffectiveMaxSpeed. The port splits the
+// main body between NovaShip_ComputeEffectiveStats (NPC) and
+// Outfit_ComputePlayerEffectiveStats (player opcode-8 aggregate); this applies
+// the shared tail: mission-slot 0x3ff x2 (DAT_005757a8), the player/direct-
+// escort 1.5x (DAT_005757b8, when Strict Play is off), and the final negative
+// clamp. Returns px/tick. Used by the impact-impulse clamp and the ionization
+// ramp; the stepping integrators still read their own raw aggregate.
+[[nodiscard]] float NovaShip_ComputeEffectiveMaxSpeedPxPerTick(
+    const GameState &state, const Ship &ship, const ShipClass &ship_class);
+
 // One per-axis step of Ghidra Math_AddPolarVelocityWithClamp (0x0043b4e0), the
 // original's single forward-thrust pathway. For each velocity axis it combines
 // the polar projection of the class top speed (max_proj) with the polar

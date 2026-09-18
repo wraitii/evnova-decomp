@@ -483,32 +483,6 @@ void RefreshCollisionMasks(GameState &state) {
   }
 }
 
-// Ghidra 0x004642e0 Ship_ComputeShipEffectiveMaxSpeed tail: applies the
-// player/direct-escort 1.5x (DAT_005757b8, when Strict Play is off) and the
-// final negative clamp. The main body lives in NovaShip_ComputeEffectiveStats
-// (NPC) and Outfit_ComputePlayerEffectiveStats (player opcode-8 aggregate);
-// the player mission-slot 0x3ff x2 is applied here because the outfit
-// aggregate does not fold it.
-[[nodiscard]] float EffectiveMaxSpeedPxPerTick(const GameState &state,
-                                               const Ship &ship,
-                                               const ShipClass &ship_class) {
-  float max_speed;
-  if (ship.ship_instance_id == 0) {
-    max_speed = Outfit_ComputePlayerEffectiveStats(state).speed_raw / 100.0F;
-    if (ship.pers_def_slot == 0x3ff) {
-      max_speed *= 2.0F; // DAT_005757a8
-    }
-  } else {
-    max_speed = NovaShip_ComputeEffectiveStats(state, ship, ship_class)
-                    .max_speed_px_per_tick;
-  }
-  if ((ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0) &&
-      !state.pilot.strict_play) {
-    max_speed *= 1.5F; // DAT_005757b8
-  }
-  return max_speed < 0.0F ? 0.0F : max_speed;
-}
-
 // Ghidra Math_AddPolarVelocityWithClamp (0x0043b4e0): add impact/mass in the
 // impact-to-target direction, per-axis clamped to the class base speed, then
 // hard-clamp the components against the effective max speed (widened 1.8x for
@@ -553,7 +527,8 @@ void ApplyImpactImpulse(GameState &state,
                                  target.vel_x,
                                  target.vel_y);
 
-  float max_speed = EffectiveMaxSpeedPxPerTick(state, target, *target_class);
+  float max_speed =
+      NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, target, *target_class);
   if (target.ship_instance_id == 0 && state.player_afterburner_active &&
       !state.gravity_pull_active) {
     max_speed *= 1.8F; // DAT_00575218
