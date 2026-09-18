@@ -213,12 +213,13 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
 }
 
 // Ghidra 0x004687b0 Ship_IsShipDisabled. True when the ship must not
-// fire/act this frame: derelict government (flags_primary 0x800), mission
-// ShipGoal-5 special ships not yet attacking (TODO(decomp):
-// special_ship_attacking runtime flag unmodelled), or critically damaged
-// (armor below 1/3 of max, 1/10 with capability flags 0x10). Non-player ships
-// with a stellar target are exempt -- the original returns not-disabled
-// without reaching the armor check (0x00468856 XOR AL,AL early-out).
+// fire/act this frame: derelict government (flags_primary 0x800); a mission
+// ShipGoal-5 special ship that is still active and unprovoked; or critically
+// damaged (armor below 1/3 of max, 1/10 with capability flags 0x10). The
+// damage threshold uses the outfit/personality-inclusive
+// Ship_ComputeShipMaxArmor (0x004637a0). Non-player ships with a stellar
+// target are exempt -- the original returns not-disabled without reaching the
+// armor check (0x00468856 XOR AL,AL early-out).
 bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship) {
   if (ship.faction_or_government_id >= 0) {
     // faction_or_government_id is a zero-based government id (indexes
@@ -230,22 +231,41 @@ bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship) {
       return true;
     }
   }
+  // Mission-fleet ShipGoal-5 ships sit disabled until provoked: the runtime
+  // ship-objective-complete latch (Ghidra MisnRuntimeFlags.special_ship_
+  // attacking, +0x02 == the port's objective_complete) must still be clear
+  // and the target must not have been boarded.
+  if (ship.ship_instance_id > 0 && ship.mission_fleet_slot >= 0 &&
+      static_cast<std::size_t>(ship.mission_fleet_slot) <
+          state.active_missions.size()) {
+    const std::size_t fleet_slot =
+        static_cast<std::size_t>(ship.mission_fleet_slot);
+    const MissionRuntimeFlags &runtime =
+        state.active_mission_runtime_flags[fleet_slot];
+    if (runtime.is_active && state.active_missions[fleet_slot].ship_goal == 5 &&
+        !runtime.objective_complete && ship.boarded_target_latch == 0) {
+      return true;
+    }
+  }
   // Ships attached to a stellar (landing/jump-out approach) are never
   // disabled, even when crippled; the armor gate below is skipped.
   if (ship.ship_instance_id > 0 && ship.defense_fleet_home_stellar_id != -1) {
     return false;
   }
-  // Critically-damaged gate: armor below a fraction of max armor. The Bible
-  // threshold is one third, reduced to one tenth by Ship Flags 0x0010.
+  // Critically-damaged gate: armor*100.0f below max_armor*33.333 (double
+  // 0x575808) or max_armor*10.0 (double 0x5757f8) with capability flags 0x10.
   // This gate is also what suppresses NPC shield/armor regeneration in
   // Ship_HandleShip, so keep it separate from the destruction predicate.
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-  const float max_armor = cls ? static_cast<float>(cls->base_armor) : 0.0F;
-  if (max_armor > 0.0F) {
-    const float ratio =
-        (cls && (cls->capability_flags & 0x10) != 0) ? 0.1F : (1.0F / 3.0F);
-    if (ship.armor_points < max_armor * ratio) {
+  const double max_armor =
+      static_cast<double>(NovaAi_ComputeMaxArmorPoints(state, ship));
+  if (max_armor > 0.0) {
+    const double threshold =
+        (cls != nullptr && (cls->capability_flags & 0x10) != 0U) ? 10.0
+                                                                 : 33.333;
+    if (static_cast<double>(ship.armor_points * 100.0F) <
+        max_armor * threshold) {
       return true;
     }
   }
@@ -280,6 +300,30 @@ double NovaAi_ComputeMaxShieldPoints(const GameState &state, const Ship &ship) {
     max_shield = static_cast<double>(static_cast<float>(max_shield * 1.333));
   }
   return max_shield;
+}
+
+// Ghidra 0x004637a0 Ship_ComputeShipMaxArmor. Player outfit aggregation runs
+// in Outfit_ComputePlayerEffectiveStats.
+float NovaAi_ComputeMaxArmorPoints(const GameState &state, const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return Outfit_ComputePlayerEffectiveStats(state).max_armor_points;
+  }
+  const ShipClass *ship_class = ShipClassFor(state, ship);
+  double max_armor =
+      ship_class != nullptr ? static_cast<double>(ship_class->base_armor) : 0.0;
+  if (ship.pers_def_slot >= 0 && static_cast<std::size_t>(ship.pers_def_slot) <
+                                     state.scenario.pers_defs.size()) {
+    const double scale = static_cast<double>(
+        state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)]
+            .shield_armor_scale);
+    if (scale > 0.0) {
+      max_armor *= scale;
+    }
+  }
+  if (ship.ai_behavior_code == 5) {
+    max_armor = static_cast<double>(static_cast<float>(max_armor * 1.333));
+  }
+  return static_cast<float>(max_armor);
 }
 
 // Ghidra 0x00463a20 Ship_ComputeShipFuelCapacity. The player's capacity folds

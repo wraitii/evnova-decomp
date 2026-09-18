@@ -537,31 +537,6 @@ void ApplyImpactImpulse(GameState &state,
   target.vel_y = std::clamp(target.vel_y, -max_speed, max_speed);
 }
 
-// Ghidra 0x004637a0 Ship_ComputeShipMaxArmor: player via the cached outfit
-// aggregate, NPC = class base * positive personality shield_armor_scale *
-// behavior-5 difficulty.
-[[nodiscard]] float MaxArmorPoints(const GameState &state, const Ship &ship) {
-  if (ship.ship_instance_id == 0) {
-    return Outfit_ComputePlayerEffectiveStats(state).max_armor_points;
-  }
-  const ShipClass *ship_class = ShipClassFor(state, ship);
-  double max_armor =
-      ship_class != nullptr ? static_cast<double>(ship_class->base_armor) : 0.0;
-  if (ship.pers_def_slot >= 0 && static_cast<std::size_t>(ship.pers_def_slot) <
-                                     state.scenario.pers_defs.size()) {
-    const double scale = static_cast<double>(
-        state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)]
-            .shield_armor_scale);
-    if (scale > 0.0) {
-      max_armor *= scale;
-    }
-  }
-  if (ship.ai_behavior_code == 5) {
-    max_armor = static_cast<double>(static_cast<float>(max_armor * 1.333));
-  }
-  return static_cast<float>(max_armor);
-}
-
 // Ship_ApplyDamageToShip's leave-one-armor rule: a disable-variant hit
 // stops at 1 armor point instead of destroying the hull.
 void ApplyArmorDamage(Ship &target, int armor_damage, bool force_armor_only) {
@@ -806,7 +781,7 @@ void Ship_ApplyDamageToShip(GameState &state,
       NovaAiShip_IsDisabled(state, target) && target_class != nullptr) {
     const float max_armor = target_slot == 0 && state.stat_cache_valid
                                 ? state.cached_stats.max_armor_points
-                                : MaxArmorPoints(state, target);
+                                : NovaAi_ComputeMaxArmorPoints(state, target);
     target.armor_points =
         (target_class->capability_flags & 0x10) != 0U
             ? max_armor * kDisableArmorPinFractionCap0x10 + 1.0F
