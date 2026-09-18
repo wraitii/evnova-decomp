@@ -733,7 +733,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00486880	NovaMainLoop_Run	src/nova_app.cpp	100%	NovaMainLoop_Run
 0x00486EC0	NoSys_NoOp_00486ec0		0%	
 0x00486ED0	NovaGameMode_DispatchAction	src/nova_app.cpp	100%	NovaGameMode_DispatchAction; action 0 confirms discarding an active game through the shared Ui_ShowConfirmDialog (STR# 0x8c row 8) before Menu_RunNewGameFlow; action 1 dispatches the SDL Open Pilot chooser and its successful-load tail (vacancy sweep, mission-fleet restore with flag==1 -> copy_player_heading=true, ambient population, and region triggers for every visible system with discovery_state > 0; predicate byte-verified at 0x004870c4-0x004870e7), with the mission rearm tail applied by PilotFileLoadSave; action 5 opens the About Nova dialog; menu music stops for spaceflight and resumes on return when Intro Music is enabled.
-0x004872A0	NovaCommand_DispatchToMode		0%	
+0x004872A0	NovaCommand_DispatchToMode	src/nova_app.cpp	100%	Ported as NovaCommand_DispatchToMode in nova_app.cpp; maps polled main-menu tokens n/o/e/p/a/q plus the x ACKNOWLEDGEMENTS branch (dësc 0x7ffe reader, GameModeAction::acknowledgements). The port funnels x through requested_action/NovaGameMode_DispatchAction for structural symmetry; the original runs it inline. The menubar key tokens are produced by SdlPlatform::PollCommandEvent (n/o/e/p/a/x/q; Escape deliberately not aliased to q).
 0x004873B0	NovaRender_RedrawAndPresentFrame	src/nova_app.cpp	100%	NovaRender_RedrawAndPresentFrame; bottom text block ported: steady "No Pilot File Loaded" prompt (STR# 0x7d2 0x114) when no pilot; loaded-pilot status panel now draws only g_player_name in the Pilot Name row, matching the original (g_player_nickname has no main-menu row)
 0x00487FCD	NovaRender_RestoreClippedRegion		0%	
 0x00488080	NovaMainLoop_UpdateFrame	src/nova_app.cpp	100%	NovaMainLoop_UpdateFrame
@@ -1187,7 +1187,6 @@ address	name	impl_file	reimpl_pct	comment
 0x004D6150	FUN_004d6150		0%	
 0x004D6200	MWRuntime_FUN_004d6200		0%	
 0x004D6230	MWRuntime_FUN_004d6230		0%	
-0x004D6260	NovaCommand_TranslateByInputMap	src/nova_app.cpp	100%	NovaCommand_TranslateByInputMap input-map to command code
 0x004D6290	NovaAudio_Initialize		0%	
 0x004D6440	FUN_004d6440		0%	
 0x004D64B0	NovaAudio_GetOutputLevelByte		0%	

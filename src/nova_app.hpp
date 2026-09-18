@@ -26,6 +26,13 @@ enum class GameModeAction : std::uint8_t {
   enter_spaceflight = 3,
   preferences = 4,
   about_nova = 5,
+  // Port-only selector for the 'x' main-menu command. The original does not
+  // pass this through NovaGameMode_DispatchAction (codes 0..5); its
+  // NovaCommand_DispatchToMode runs the reader on d\x91sc 0x7ffe inline. The
+  // port funnels it through the same requested_action path as the other menu
+  // actions. Kept above the original range so a hovered lane (0..5) can never
+  // collide with it.
+  acknowledgements = 6,
 };
 
 enum class StartupPhase : std::uint8_t {
@@ -162,6 +169,6 @@ void NovaUi_AddProgressAndRedraw(NovaRuntime &runtime, double delta);
 void NovaUi_RedrawProgressBar(NovaRuntime &runtime);
 
 [[nodiscard]] std::optional<GameModeAction>
-NovaCommand_TranslateByInputMap(char command);
+NovaCommand_DispatchToMode(char command);
 [[nodiscard]] std::optional<GameModeAction>
 NovaHud_TrackFocusHoverIndex(const NovaRuntime &runtime);

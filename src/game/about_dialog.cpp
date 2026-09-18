@@ -4,16 +4,22 @@
 #include "../log.hpp"
 #include "selection_text_dialog.hpp"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 namespace game {
 namespace {
 
-[[nodiscard]] std::string LoadAboutText() {
-  const auto description = NovaResource_LoadDescription(0x7fff);
+// Ghidra 0x004872a0 ('x' branch) and 0x00486120 (Menu_RunAboutNovaDialog)'s
+// shared body: Ui_LoadSelectionDialogResource + Stellar_BuildTravelDestination-
+// Description. The port expands the only wildcard it can source (<REG>); the
+// rest of the description engine is unported.
+[[nodiscard]] std::string LoadReaderText(std::uint16_t resource_id) {
+  const auto description = NovaResource_LoadDescription(resource_id);
   if (!description) {
-    NovaLog::Todo("About Nova description resource 0x7fff unavailable");
+    NovaLog::Todo("selection-dialog description resource {} unavailable",
+                  resource_id);
     return {};
   }
   std::string text = description->text;
@@ -35,7 +41,16 @@ void NovaMenu_RunAboutDialog(SdlPlatform &platform,
                              GameState &state,
                              const std::function<void()> &render_background) {
   NovaUi_RunTextReaderDialog(
-      platform, state, LoadAboutText(), false, render_background);
+      platform, state, LoadReaderText(0x7fff), false, render_background);
+}
+
+// Ghidra 0x004872a0 'x' branch (d\x91sc 0x7ffe ACKNOWLEDGEMENTS).
+void NovaMenu_RunAcknowledgementsDialog(
+    SdlPlatform &platform,
+    GameState &state,
+    const std::function<void()> &render_background) {
+  NovaUi_RunTextReaderDialog(
+      platform, state, LoadReaderText(0x7ffe), false, render_background);
 }
 
 } // namespace game

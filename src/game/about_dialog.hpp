@@ -21,4 +21,13 @@ void NovaMenu_RunAboutDialog(SdlPlatform &platform,
                              GameState &state,
                              const std::function<void()> &render_background);
 
+// Runs the 'x' main-menu ACKNOWLEDGEMENTS reader (Ghidra 0x004872a0's 'x'
+// branch): the same shared reader over d\x91sc 0x7ffe. The original invokes
+// this directly from NovaCommand_DispatchToMode rather than through
+// NovaGameMode_DispatchAction.
+void NovaMenu_RunAcknowledgementsDialog(
+    SdlPlatform &platform,
+    GameState &state,
+    const std::function<void()> &render_background);
+
 } // namespace game
