@@ -653,10 +653,14 @@ FlightInput SdlPlatform::PollFlightInput() {
       input.primary_clicked = true;
       continue;
     }
-    // Escape/'q' exit the flight loop; captured here because this function
-    // drains the queue the old PollTextEvent-based check relied on.
+    // Escape exits the flight loop; captured here because this function
+    // drains the queue the old PollTextEvent-based check relied on. The
+    // original returns to the menu only through the pause menu's primary-mouse
+    // command (see spaceflight.hpp), which is unported, so Escape is the port's
+    // documented stand-in. 'q' is deliberately NOT latched: it is the menu's
+    // quit token only and is unbound in flight.
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-        (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_Q)) {
+        event.key.key == SDLK_ESCAPE) {
       input.escape_pressed = true;
       continue;
     }
@@ -676,11 +680,12 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.starmap = pressed(SDL_SCANCODE_M);
   // Gameplay command 0x28 (default DIK 0x17 = I): the active-missions window.
   input.mission_info = pressed(SDL_SCANCODE_I);
-  // Face-target command (the original's binding 7, DIK 0x1e = A, is taken by
-  // turn-left here; see FlightInput::face_target).
+  // NOTE: the movement/fire/target/land/board fields set below are placeholder
+  // defaults. The spaceflight loop replaces every one of them with its
+  // persisted binding-table lookup (binding_held) before they are consumed, so
+  // these values only matter if PollFlightInput is ever used standalone.
   input.face_target = pressed(SDL_SCANCODE_R);
   input.land = pressed(SDL_SCANCODE_RETURN) || pressed(SDL_SCANCODE_KP_ENTER);
-  input.target_action = pressed(SDL_SCANCODE_E);
   input.board = pressed(SDL_SCANCODE_B);
   input.cycle_target_next = pressed(SDL_SCANCODE_TAB) &&
                             !pressed(SDL_SCANCODE_LSHIFT) &&
@@ -691,25 +696,14 @@ FlightInput SdlPlatform::PollFlightInput() {
   // Shift is the shared direction modifier for the backward cycling commands.
   const bool shift_held =
       pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT);
+  // Destination-system, hyperspace-mode, ship-target and nearest-target
+  // commands are sampled from their persisted binding slots by the
+  // spaceflight loop (see its binding_held block). Only the shared
+  // combat-relevance modifier stays here: Alt (or the original's 'k', 0x6b)
+  // restricts the ship cycle to combat-relevant ships.
   const bool alt_held =
       pressed(SDL_SCANCODE_LALT) || pressed(SDL_SCANCODE_RALT);
-  // Destination-SYSTEM cycling (the next-jump system): Backslash forwards,
-  // Shift+Backslash backwards. This is the command the EV Nova manual binds
-  // to Backslash for choosing the hyperspace destination system, distinct
-  // from Tab's stellar cycle above.
-  const bool backslash = pressed(SDL_SCANCODE_BACKSLASH);
-  input.cycle_destination_next = backslash && !shift_held;
-  input.cycle_destination_previous = backslash && shift_held;
-  input.hyperspace_mode = pressed(SDL_SCANCODE_H);
-  // Ship-target cycling: backquote (`) next, Shift+backquote backwards (the
-  // original's direction modifiers are Left/Right Shift, 0x2a/0x36). Alt (or
-  // the original's 'k', 0x6b) restricts the cycle to combat-relevant ships.
   input.cycle_ship_include_combat = alt_held || pressed(SDL_SCANCODE_K);
-  input.cycle_ship_target_next = pressed(SDL_SCANCODE_GRAVE) && !shift_held;
-  input.cycle_ship_target_previous = pressed(SDL_SCANCODE_GRAVE) && shift_held;
-  // Nearest hostile/engaged target selection.
-  input.select_nearest_hostile = pressed(SDL_SCANCODE_O) && !alt_held;
-  input.select_nearest_engaged = pressed(SDL_SCANCODE_O) && alt_held;
   // Primary fire (held): space. See FlightInput::fire for the mapping note.
   input.fire = pressed(SDL_SCANCODE_SPACE);
   // Secondary fire (held): Left Ctrl (the original's binding slot 3 default).
@@ -719,8 +713,6 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.cycle_secondary_backwards = pressed(SDL_SCANCODE_X) && shift_held;
   // Deselect secondary: C (original default S is reverse here).
   input.clear_secondary = pressed(SDL_SCANCODE_C);
-  // Eject: Alt+X (original 0x38/0x6f arm pair + binding slot 0x11 = X).
-  input.eject = pressed(SDL_SCANCODE_X) && alt_held;
   return input;
 }
 

@@ -206,9 +206,10 @@ slots with `g_key_code_display_name_map` at 0x005776dc gives:
 
 So the default flight keys are **Up = forward, Left/Right = turn, Down =
 reverse**. Indices `[6]`/`[7]` are *not* flight/turn keys: from the
-reset table those are `0x1c`=DIK Return/land and `0x1e`=DIK A, and in the
-player control `[6]` (0x0044e019 line ~2045) toggles `DAT_007cab35` (a HUD
-message/dismiss command), `[7]` (line ~575) triggers target selection.
+reset table those are `0x1c`=DIK Return (HUD/panel dismiss) and `0x1e`=DIK A
+(face-target); **land** is `[5]` = `0x26` = L. In the player control `[6]`
+(0x00450ae7) toggles `DAT_007cab35` (a HUD message/dismiss command) and `[7]`
+(line ~575) arms the face-target auto-turn.
 
 Index mapping recap (table base 0x5914e6, `short[0x52]`, index == command id):
 `[0x13]`=0x63 turn-left, `[0x14]`=0x64 turn-right, `[0x15]`=0x61 forward,
