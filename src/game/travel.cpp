@@ -883,6 +883,48 @@ bool NovaSystem_HasUsableTravelDestination(const GameState &state,
   return false;
 }
 
+// Ghidra 0x0046c250 System_GetEffectiveMurkPercent. See the header for the
+// decoded formula. The original's loop walks all 0x200 outfit slots, tests the
+// signed owned count > 0 and then each of the four (ModType, ModVal) pairs for
+// ModType 0x1c, accumulating owned_count * ModVal; the total is clamped to
+// [0, 100].
+std::int16_t NovaSystem_GetEffectiveMurkPercent(const GameState &state) {
+  int murk = 0;
+  if (state.player.current_system_id >= 0 &&
+      static_cast<std::size_t>(state.player.current_system_id) <
+          state.scenario.systems.size()) {
+    murk = std::max<int>(
+        0,
+        state.scenario
+            .systems[static_cast<std::size_t>(state.player.current_system_id)]
+            .murk);
+  }
+  const auto &owned = state.inventory.outfit_owned_count;
+  for (std::size_t i = 0; i < owned.size() && i < state.scenario.outfits.size();
+       ++i) {
+    const std::int16_t count = owned[i];
+    if (count <= 0) {
+      continue;
+    }
+    const Outfit &outfit = state.scenario.outfits[i];
+    const std::int16_t mod_types[4] = {outfit.mod_type,
+                                       outfit.alt_mod_types[0],
+                                       outfit.alt_mod_types[1],
+                                       outfit.alt_mod_types[2]};
+    const std::int16_t mod_vals[4] = {outfit.mod_val,
+                                      outfit.alt_mod_vals[0],
+                                      outfit.alt_mod_vals[1],
+                                      outfit.alt_mod_vals[2]};
+    for (int slot = 0; slot < 4; ++slot) {
+      // OutfitEffect::kMurkMod == 0x1c (28): +/- current system murkiness.
+      if (mod_types[slot] == 0x1c) {
+        murk += static_cast<int>(count) * mod_vals[slot];
+      }
+    }
+  }
+  return static_cast<std::int16_t>(std::clamp(murk, 0, 100));
+}
+
 void NovaSystem_MarkSystemVisited(GameState &state,
                                   std::int16_t zero_based_system_id,
                                   std::int16_t level) {

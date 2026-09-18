@@ -984,7 +984,7 @@ struct ImpactEffectInstance {
   float delay_timer = 0.0F;
 };
 
-// Ghidra FadingEffectSpriteState (g_fading_effect_pool, 0x00596d00),
+// Ghidra FadingEffectSpriteState (g_fading_effect_pool, 0x005914ac),
 // 32 entries at a 0x18-byte stride. These are the directional fragments
 // emitted while a destroyed ship's death presentation is running. Lifetime
 // and velocity use the original normalized frame-time units.

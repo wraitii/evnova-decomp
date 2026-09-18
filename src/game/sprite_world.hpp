@@ -253,6 +253,26 @@ struct SpriteDrawOptions {
   // tiny 5x5px star tiles upscaled so they read as soft glows rather than
   // chunky squares (matches the original's smooth sprite scaling draw-proc).
   bool linear_scale = false;
+  // Effective system murk percent (System_GetEffectiveMurkPercent, 0-100).
+  // When > 0 the sprite is distance-fogged toward the system space/background
+  // colour, mirroring Frame_UpdateSpriteDistanceIntensity (0x00438db0) and the
+  // fog stage of BlitPixel_TintRgb15Span (0x004736c0): the farther the sprite
+  // is from the camera (the player), the more it fades to the backdrop. 0
+  // disables the fog (a no-op in a clear-cut system).
+  //
+  // The fog is a mix toward a CONSTANT colour, not toward `dst`: the original
+  // computes `src*(1 - d/32) + space_color*(d/32)` and (for an opaque hull)
+  // writes it over the framebuffer, so fogged sprites occlude whatever is
+  // behind them. The SDL path reproduces that with a two-pass draw: a
+  // fog-coloured alpha silhouette (the frame's `white_silhouette`) is drawn
+  // first to occlude `dst`, then the sprite is drawn at `src_factor` of its
+  // own alpha over it. Where no silhouette is available the sprite falls back
+  // to a plain source-alpha fade over `dst` (documented divergence).
+  int fog_murk = 0;
+  // The constant the fog mixes toward, 0xRRGGBB (the current system's
+  // BkgndColor / space colour). Only consulted by non-additive draws with
+  // fog_murk > 0 and an available silhouette.
+  std::uint32_t fog_color = 0;
   // When provided, this per-frame anchor (in frame-local pixels, measured from
   // the frame's top-left) is used instead of the frame's stored anchor. This is
   // how a shot's gun-fire point or a non-centred ship frame positions itself:
@@ -275,6 +295,22 @@ struct SpriteAnchorTransform {
   float screen_x = 0.0F; // top-left screen x after aligning the anchor
   float screen_y = 0.0F; // top-left screen y after aligning the anchor
 };
+
+// Ghidra 0x00438db0 Frame_UpdateSpriteDistanceIntensity: the per-sprite
+// distance-brightness fog amount. distance_brightness = clamp(trunc(
+// effective_murk * distSq * 1.2e-05), 0, 0x1f), where distSq is the sum of the
+// squared x87-truncated absolute axis deltas between the player (camera) and
+// the sprite's integer world position (the original receives shorts and
+// truncates each sprite coordinate). effective_murk is the effective system
+// murk and the 1.2e-05 constant is g_distance_intensity_scale_const2
+// (0x005754d0). The original also clamps to 0x18 at 8-bit colour depth; every
+// SDL texture is 32-bit here, so the 0x1f ceiling applies. A murk of 0 (a
+// clear-cut system) always yields 0.
+[[nodiscard]] int Sprite_DistanceBrightness(int effective_murk,
+                                            float camera_x,
+                                            float camera_y,
+                                            float sprite_x,
+                                            float sprite_y);
 
 [[nodiscard]] SpriteAnchorTransform Sprite_AnchorToScreen(float world_x,
                                                           float world_y,

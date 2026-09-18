@@ -131,11 +131,23 @@ double 1.2e-05) makes brightness only visibly vary for large distances near a
 high-murk system. Clamp is 0..0x1F (0x18 in pixel-depth-8). Then copies
 `SystemDef.space_color` (5-5-5 packed from BkgndColor) into the sprite.
 
-**Consequence for the starting-system demo:** Kania has murk 0, so
-`g_distance_intensity_scale` is 0 and `distance_brightness` stays 0 -- this fog
-is a no-op for the current default system. It only materialises in high-murk
-systems, so it is recorded here for later correctness rather than implemented
-in the SDL renderer yet (TODO).
+**Starting-system no-op / implementation:** Kania has murk 0, so
+`g_distance_intensity_scale` is 0 and `distance_brightness` stays 0. It only
+materialises in high-murk systems. The port implements it:
+`NovaSystem_GetEffectiveMurkPercent` (src/game/travel.cpp, Ghidra 0x0046c250)
+recomputes the effective murk each frame, and `Sprite_DistanceBrightness`
+(src/game/sprite_world.cpp, Ghidra 0x00438db0) feeds
+`SpriteDrawOptions.fog_murk`/`fog_color`, which `DrawSprite` applies with a
+two-pass masked fog (`BlitFrame`): the frame's alpha silhouette is painted in
+the space colour (occluding whatever is behind), then the source is drawn at
+`(1-d/32)` over it. It is wired through ships, stellars, shots, freeflight
+objects, asteroids, impact/fading effects and the NPC engine-glow cap, and the
+starfield gets the separate raw-murk tint. `d >= 0x1f` snaps to fully fogged
+(the original's 5-bit `>>5` truncation zeroes the source there).
+**Divergence:** the exact RGB555 bit-sliced `BlitPixel_TintRgb15Span` math is
+not reproduced (SDL_Renderer has no shader), so mid-range fog is at most one
+5-bit step brighter than the original; sprites without an uploaded silhouette
+fall back to a source-alpha fade over `dst`. See `docs/system_murk_rendering.md`.
 - `SpaceflightView::AdvanceStellarAnimation` (src/game/spaceflight_view.cpp)
   reimplements the ambient frame-stepping part: the ordinary ping-pong/
   alternate/random cycler (availability_flags bit clear) and the hypergate
@@ -182,8 +194,7 @@ the class -> decode `rl\x91D` BaseImageID -> index frame by heading -> draw.
 - `DrawNpcShips` iterates the ship slots (1..) and draws each active ship in the
   current system at its world position with its heading-selected frame
   (`FrameForHeading`), using the same camera/DrawSprite path as the player.
-  NPC ships composite below the player ship (layer order: backdrop -> stellars
-  -> shots -> NPC ships -> player).
+  See the layer-order section below for the original's exact compositing.
 - To make the renderer's output visible, `SpawnRoamingFleetsStandIn`
   (spaceflight.cpp) spawns a small set of random-encounter fleet-lead ships on
   system entry via `NovaEncounter_SpawnFleetLeadShip`, capped at the system's
@@ -191,6 +202,44 @@ the class -> decode `rl\x91D` BaseImageID -> index frame by heading -> draw.
   `System_InitRoamingShips` / Step 5 encounter maintenance (it does not yet
   honour each def's spawn_system_filter, the availability expression, or spawn
   escorts).
+
+## Original sprite-world layer order (verified)
+
+The original never had a single ordered ship list. `NovaUi_InitializeFlightView-
+Surfaces` (0x004ab9d4) creates 14 `SpriteLayer` objects and links them with
+`SpriteWorld_AppendLayerTail`; `SpriteWorld_RenderLayers` (0x00477fa0) walks the
+chain head-to-tail, invoking each sprite's draw proc inline, so **append order
+is draw order** (last appended = on top). The chain:
+
+| # | layer global | contents |
+|---|--------------|----------|
+| 1 | `g_ambient_star_particle_sprite_layer` | ambient star particles |
+| 2 | `g_stellar_sprite_layer` | ambient stellars; also runs `LAB_00438c40` (flags-0x2000 under-ships beams) via `SpriteLayer_SetId` |
+| 3 | `g_asteroid_sprite_layer` | drifting asteroids |
+| 4 | `g_disabled_ship_sprite_layer` | ships with `Ship_IsShipDisabled` true |
+| 5 | `g_freeflight_and_fading_effect_sprite_layer` | freeflight objects + fading destruction effects |
+| 6 | `g_weapon_smoke_puff_sprite_layer` | weapon smoke-trail puffs |
+| 7 | `g_shot_container_mode9` | shots |
+| 8 | `g_shot_container_mode1` | shots |
+| 9 | `g_shot_container_default` | shots |
+| 10 | `g_escort_ship_sprite_layer` | ships with `squad_leader_ship_slot == 0` (player escorts) |
+| 11 | `g_ship_sprite_layer` | player + non-escort NPC ships (all six per-ship sprites) |
+| 12 | `g_shot_container_mode4_alt` | shots |
+| 13 | `g_impact_effect_sprite_layer` | impact / destruction effect sprites |
+| 14 | `g_beam_sprite_layer` | directional weapon effects; also runs `Shot_DrawBeamHitQueueForSurface` (0x00438810), the visible beam pass |
+
+A ship is moved between layers 4/10/11 at runtime by
+`Sprite_SetContainerIfChanged` in `Ship_UpdateVisualState` (0x00428340). Key
+consequences: impact/explosion effects (layer 13) composite **over ships**
+(layer 11), and normal beams (layer 14) over everything. Shots draw below
+ships; the freeflight-object and fading-effect pools share one layer.
+
+The SDL port has no runtime layer objects; `SpaceflightView::Draw` reproduces
+the composed precedence as a fixed draw sequence (see the ordering comment in
+`spaceflight_view.cpp`). Remaining divergence: the port draws all ships in one
+pass and all shots in one pass, so the disabled-ship (layer 4), escort-ship
+(layer 10) and per-mode shot-container (layers 7-9/12) sub-ordering is not
+reproduced.
 
 ## Sprite rows / banking (verified 2026, data + Bible)
 
@@ -275,8 +324,9 @@ RunningLights` (the visual-state tick), storing the fraction in
 `Ship.engine_glow_intensity`; the movement functions' provisional `level/24`
 write is overwritten before the frame is drawn. The same original block folds
 the per-ship fog into NPC glow (`level = min(level, 32 -
-distance_brightness*1.5)`); the port does not track the murk fog yet, so that
-reduction is skipped (TODO(decomp)).
+distance_brightness*1.5)`). The port applies it in
+`NovaShip_TickWeaponSpriteAndRunningLights` (the player is always at distance 0,
+so the cap only bites NPCs).
 
 One original nuance is not reproduced: `BlitPixie_BlitRectRawCopy` (0x004711e0)
 fast-paths the case `tint==0x20 && brightness==0x20 && distance_brightness==0`
@@ -291,7 +341,7 @@ Not yet honored: the class-level load gates `g_pref_running_lights` /
 `g_pref_weapon_effects` / `g_pref_engine_glows` (the preferences are not on
 `GameState`, so all three layers load unconditionally). The per-ship
 distance-brightness/space-color tint the original applies to these layers is
-likewise not modelled (murk fog is a system-level TODO).
+modelled through `SpriteDrawOptions.fog_murk` (a fade toward the backdrop).
 
 Player glow-level drive is a clean-room approximation inside
 `PlayerTick_ManualFlightAndRegeneration`: it steps the level toward 24

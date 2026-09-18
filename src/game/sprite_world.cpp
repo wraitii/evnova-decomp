@@ -206,7 +206,11 @@ std::unique_ptr<SpriteAsset> SpriteAsset::LoadSpin(SDL_Renderer *renderer,
     return nullptr;
   }
   auto asset = std::make_unique<SpriteAsset>();
-  if (!UploadSheetTextures(renderer, *sheet, *asset)) {
+  // Upload the alpha silhouette too: non-additive in-flight sprites (stellars,
+  // asteroids, shots, freeflight) use it as the fog-coloured mask for the
+  // distance fog (SpriteDrawOptions.fog_murk). Ship sheets already do this via
+  // LoadSheet; spin sets need it for the same two-pass fog draw.
+  if (!UploadSheetTextures(renderer, *sheet, *asset, true)) {
     NovaLog::Warn("spin sprite {}: texture upload failed", spin_id);
     return nullptr;
   }
@@ -327,14 +331,42 @@ SpriteAnchorTransform Sprite_AnchorToScreen(float world_x,
   return out;
 }
 
+// Ghidra 0x00438db0 Frame_UpdateSpriteDistanceIntensity. See the header for the
+// decoded formula. The original's ROUND() markers are the x87 FIST +
+// residual/sign truncation idiom (truncation toward zero), so a non-negative
+// magnitude truncates toward the floor.
+int Sprite_DistanceBrightness(int effective_murk,
+                              float camera_x,
+                              float camera_y,
+                              float sprite_x,
+                              float sprite_y) {
+  if (effective_murk <= 0) {
+    return 0;
+  }
+  constexpr double kDistanceIntensityScale = 1.2e-05; // 0x005754d0
+  // The original receives the sprite's world position as shorts and computes
+  // |player - (float)(int)sprite| (sprite position truncated to an integer)
+  // before the x87-truncation round.
+  const float sx = static_cast<float>(static_cast<int>(sprite_x));
+  const float sy = static_cast<float>(static_cast<int>(sprite_y));
+  const int dx = static_cast<int>(std::trunc(std::fabs(camera_x - sx)));
+  const int dy = static_cast<int>(std::trunc(std::fabs(camera_y - sy)));
+  const double fog = static_cast<double>(effective_murk) *
+                     static_cast<double>(dx * dx + dy * dy) *
+                     kDistanceIntensityScale;
+  return std::clamp(static_cast<int>(std::trunc(fog)), 0, 0x1f);
+}
+
 namespace {
 // Renders one frame texture at an anchor-aligned position (shared by the asset-
 // and sprite-based DrawSprite overloads so the placement/alpha logic lives in
-// exactly one place). `texture` is the frame's SDL handle; `width/height` are
-// its native pixel size; `anchor_x/anchor_y` the (already resolved) frame-local
-// anchor.
+// exactly one place). `texture` is the frame's SDL handle; `fog_mask` is the
+// frame's white/alpha silhouette (null when unavailable), used by the distance
+// fog; `width/height` are the frame's native pixel size; `anchor_x/anchor_y`
+// the (already resolved) frame-local anchor.
 void BlitFrame(SDL_Renderer *renderer,
                const SdlTexture &texture,
+               const SdlTexture *fog_mask,
                float width,
                float height,
                float anchor_x,
@@ -363,19 +395,77 @@ void BlitFrame(SDL_Renderer *renderer,
     SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR);
   }
 
-  // Effect layers (glow / lights / weapon flash) composite additively like the
-  // original's BlitPixel_TintRgb15Span (dst + src*intensity); everything else
-  // stays ordinary alpha. Select the mode for this draw only so shared
-  // textures are not left additively blended.
-  const SDL_BlendMode blend =
-      opts.additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND;
-  SDL_SetTextureBlendMode(texture.get(), blend);
-  if (opts.alpha_mod < 1.0F) {
+  const float alpha_mod = std::clamp(opts.alpha_mod, 0.0F, 1.0F);
+  const int distance_brightness =
+      opts.fog_murk > 0
+          ? Sprite_DistanceBrightness(
+                opts.fog_murk, camera_world_x, camera_world_y, world_x, world_y)
+          : 0;
+  // Stage 1 mixes the source toward the system space colour by d/32. The
+  // original's 5-bit `>> 5` truncation (BlitPixel_TintRgb15Span 0x004736c0)
+  // zeroes the source term at the d == 0x1f ceiling, so snap the top step to
+  // fully fogged (the source contributes nothing and the pixel becomes the
+  // space colour).
+  const float fog_a =
+      distance_brightness > 0
+          ? (distance_brightness >= 0x1f
+                 ? 1.0F
+                 : static_cast<float>(distance_brightness) / 32.0F)
+          : 0.0F;
+  const float src_factor = 1.0F - fog_a;
+
+  // Additive layers (engine glow / running lights / weapon effects): the
+  // original draws `dst + f*intensity/32`, so the fog only attenuates the
+  // source contribution.
+  if (opts.additive) {
+    SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_ADD);
+    const float alpha = alpha_mod * src_factor;
+    if (alpha > 0.0F) {
+      if (alpha < 1.0F) {
+        SDL_SetTextureAlphaMod(texture.get(),
+                               static_cast<std::uint8_t>(alpha * 255.0F));
+      }
+      SDL_RenderTexture(renderer, texture.get(), nullptr, &dest);
+      SDL_SetTextureAlphaMod(texture.get(), SDL_ALPHA_OPAQUE);
+    }
+    SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
+    return;
+  }
+
+  // Normal layers: reproduce `f = src*(1-d/32) + space_color*(d/32)`, which
+  // REPLACES the framebuffer for opaque pixels (the original fogs toward a
+  // constant, not toward dst). Pass 1 paints the space colour through the
+  // frame's silhouette -- occluding whatever is behind, unlike a source-alpha
+  // fade -- then pass 2 draws the source at (1-d/32) over that silhouette.
+  //   opaque:  src*(1-a) + space*a  == f
+  // Without a silhouette this degrades to a source-alpha fade over dst (the
+  // divergence the overlap case makes visible).
+  if (fog_a > 0.0F && fog_mask != nullptr && alpha_mod > 0.0F) {
+    const std::uint8_t fr =
+        static_cast<std::uint8_t>((opts.fog_color >> 16) & 0xff);
+    const std::uint8_t fg =
+        static_cast<std::uint8_t>((opts.fog_color >> 8) & 0xff);
+    const std::uint8_t fb = static_cast<std::uint8_t>(opts.fog_color & 0xff);
+    SDL_SetTextureColorMod(fog_mask->get(), fr, fg, fb);
+    SDL_SetTextureAlphaMod(fog_mask->get(),
+                           static_cast<std::uint8_t>(alpha_mod * 255.0F));
+    SDL_SetTextureBlendMode(fog_mask->get(), SDL_BLENDMODE_BLEND);
+    SDL_RenderTexture(renderer, fog_mask->get(), nullptr, &dest);
+    SDL_SetTextureColorMod(fog_mask->get(), 255, 255, 255);
+    SDL_SetTextureAlphaMod(fog_mask->get(), SDL_ALPHA_OPAQUE);
+    SDL_SetTextureBlendMode(fog_mask->get(), SDL_BLENDMODE_BLEND);
+  }
+
+  const float alpha = alpha_mod * src_factor;
+  if (alpha <= 0.0F) {
+    return;
+  }
+  SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
+  if (alpha < 1.0F) {
     // Multiply the source by the requested intensity; restore after (kept
     // per-draw so shared textures are not left alpha-modded).
-    const std::uint8_t alpha = static_cast<std::uint8_t>(
-        std::clamp(opts.alpha_mod, 0.0F, 1.0F) * 255.0F);
-    SDL_SetTextureAlphaMod(texture.get(), alpha);
+    SDL_SetTextureAlphaMod(texture.get(),
+                           static_cast<std::uint8_t>(alpha * 255.0F));
     SDL_RenderTexture(renderer, texture.get(), nullptr, &dest);
     SDL_SetTextureAlphaMod(texture.get(), SDL_ALPHA_OPAQUE);
   } else {
@@ -407,6 +497,19 @@ const SdlTexture *ResolveFrameTexture(const SpriteFrameImage &image,
   }
   return nullptr;
 }
+
+// Resolves a frame image's fog silhouette (white RGB + frame alpha), or null
+// when the image is not asset-backed. Only the asset loader currently uploads
+// silhouettes; standalone owned textures have none.
+const SdlTexture *ResolveFrameMask(const SpriteFrameImage &image) {
+  if (image.source_set && image.source_index >= 0 &&
+      image.source_index < image.source_set->frame_count) {
+    return image.source_set
+        ->frames[static_cast<std::size_t>(image.source_index)]
+        .white_silhouette.get();
+  }
+  return nullptr;
+}
 } // namespace
 
 void DrawSprite(SDL_Renderer *renderer,
@@ -429,6 +532,10 @@ void DrawSprite(SDL_Renderer *renderer,
   if (texture == nullptr) {
     return;
   }
+  // The white-silhouette draw is the emergence flash, which sets fog_murk 0;
+  // never use the silhouette as its own fog mask.
+  const SdlTexture *fog_mask =
+      opts.white_silhouette ? nullptr : sf.white_silhouette.get();
   // Anchor-aware placement: align the frame's anchor (or the opts override) to
   // the world position -- the genuine Sprite_SetPositionFromCurrentFrameAnchor
   // math. For tile/sheet frames the stored anchor is the frame centre, so this
@@ -440,6 +547,7 @@ void DrawSprite(SDL_Renderer *renderer,
           : std::pair<float, float>{sf.anchor_x, sf.anchor_y};
   BlitFrame(renderer,
             *texture,
+            fog_mask,
             static_cast<float>(asset.tile_width) * opts.scale,
             static_cast<float>(asset.tile_height) * opts.scale,
             ax,
@@ -473,12 +581,15 @@ void DrawSprite(SDL_Renderer *renderer,
   if (!texture) {
     return;
   }
+  const SdlTexture *fog_mask =
+      opts.white_silhouette ? nullptr : ResolveFrameMask(*image);
   const auto [ax, ay] =
       (opts.anchor_x && opts.anchor_y)
           ? std::pair<float, float>{*opts.anchor_x, *opts.anchor_y}
           : std::pair<float, float>{image->anchor_x, image->anchor_y};
   BlitFrame(renderer,
             *texture,
+            fog_mask,
             static_cast<float>(width) * opts.scale,
             static_cast<float>(height) * opts.scale,
             ax,

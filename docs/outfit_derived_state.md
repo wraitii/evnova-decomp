@@ -38,7 +38,7 @@ The binary mixes two different patterns, and the port mirrors both:
 | Cloak latches | `cloak_scanner_reveal_screen/radar`, `cloak_damage_deactivate_latch` = -1 | done |
 | Government clear | all 0x100 govts' `policy_flags[0..1] = 0` | done |
 | Rank flags | active rank (flags 0x100/0x200, allied govt) → `policy_flags` | done |
-| Tail | `recently_hit_timer = -1.0` (done); `distance_intensity_scale = System_GetEffectiveMurkPercent()` (port has no field) | partial |
+| Tail | `recently_hit_timer = -1.0` (done); `distance_intensity_scale = System_GetEffectiveMurkPercent()` (port computes on demand in `NovaSystem_GetEffectiveMurkPercent`, see docs/system_murk_rendering.md) | done |
 
 Note: the `policy_flags` writer here is the one `src/game/government.cpp` and
 `src/game/scenario_data.hpp` currently mark as "writer not identified"; this
@@ -113,8 +113,9 @@ deliberate laziness divergence gets a marker and a tracker note.
 1. Cargo-overflow scaling (use `docs/x87_truncation_idiom.md`).
 2. Carried-bomb class + detonation timer (gives `bomb_outfit_class` its writer;
    note the shared-RNG timing change).
-3. Junk flags (`DAT_007356cc/cf/d0`), license clamp, and the murk
-   `distance_intensity_scale` cache — each needs a port field first.
+3. Junk flags (`DAT_007356cc/cf/d0`) and the license clamp (the murk
+   `distance_intensity_scale` cache is instead computed on demand in
+   `NovaSystem_GetEffectiveMurkPercent`; see docs/system_murk_rendering.md).
 4. Unify the bare `stat_cache_valid = false` sites onto the hook, per site
    (only those that map to an original recompute call).
 

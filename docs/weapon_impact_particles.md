@@ -100,6 +100,12 @@ behavior; otherwise the common 8-10-tick weapon particles remain fully bright
 until they disappear. The dirty-pixel save/restore pass (`SWParticles_UpdateDirtyPixels`
 0x0047c3a0 / `SWParticles_RestoreSavedPixels` 0x0047bb30) is not reproduced.
 
+`BUGFIX(original)` (gated on `kApplyOriginalBugFixes`): the original never
+applies the system murkiness distance fog to `SWParticle`s, so these points
+stay full-bright in a murky system. `SpaceflightView::DrawSwParticles`
+additionally scales the life alpha by `(1 - distance_brightness/32)` via
+`Sprite_DistanceBrightness`. See `docs/system_murk_rendering.md`.
+
 Note on apparent size: the particle is one *logical* pixel on the 1024x768
 world. Because spaceflight extends the world 1:1 rather than upscaling the
 1024x768 canvas, a large retina window shows more system and leaves the

@@ -69,4 +69,21 @@ TEST_CASE("sprite frame lifecycle appends, clamps and releases",
   CHECK(shared != nullptr);
 }
 
+// Ghidra 0x00438db0 Frame_UpdateSpriteDistanceIntensity: murk-scaled distance
+// fog. distSq uses the x87-truncated (toward zero) absolute axis deltas, the
+// product is scaled by the 1.2e-05 constant and truncated again, then clamped
+// to 0..0x1f. murk 0 is always clear.
+TEST_CASE("distance brightness matches the murk fog formula",
+          "[sprite][murk]") {
+  CHECK(Sprite_DistanceBrightness(0, 0.0F, 0.0F, 1000.0F, 0.0F) == 0);
+  // dx=100 -> 100 * 100^2 * 1.2e-5 = 12.0 -> 12.
+  CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 100.0F, 0.0F) == 12);
+  // The 0x1f ceiling applies for far/high-murk sprites.
+  CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 1000.0F, 0.0F) == 0x1f);
+  // Axis deltas truncate toward zero before squaring: 1.9 -> 1 -> ~0.
+  CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 1.9F, 0.0F) == 0);
+  // Symmetric in the axis deltas (both axes contribute).
+  CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 0.0F, -100.0F) == 12);
+}
+
 } // namespace game

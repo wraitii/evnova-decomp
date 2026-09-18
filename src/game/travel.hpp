@@ -214,6 +214,17 @@ NovaSystem_ResolveVisibleForTravel(const GameState &state,
 NovaSystem_HasUsableTravelDestination(const GameState &state,
                                       std::int16_t system_id);
 
+// Ghidra 0x0046c250 System_GetEffectiveMurkPercent. The current system's
+// SystemDef.murk (clamped to >= 0) plus the sum of every owned outfit's
+// ModType 0x1c (MurkMod) deltas (owned_count * ModVal across all four mod
+// slots), clamped to [0, 100]. The original caches the result in
+// g_distance_intensity_scale via Outfit_RecomputeOutfitDerivedState; the port
+// recomputes it on demand because its only consumer is the per-frame distance
+// fog (Frame_UpdateSpriteDistanceIntensity) and the value changes with the
+// current system.
+[[nodiscard]] std::int16_t
+NovaSystem_GetEffectiveMurkPercent(const GameState &state);
+
 // Marks one system visited at `level` (>=1): bumps discovery_state to `level`.
 // Ghidra: the discovery_state writes of System_FloodDiscoverAdjacentSystems
 // 0x00467ab0 plus the arrival pre-latches (0x0044aa70 PlayerTick_System-
