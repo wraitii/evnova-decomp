@@ -147,8 +147,26 @@ struct HudBarFill {
   [[nodiscard]] bool empty() const { return width <= 0.0F || height <= 0.0F; }
 };
 
+// A sub-segment of a life bar between two fractions of the panel's fill axis.
+// Reproduces the original's second fill in NovaUi_DrawPlayerFuelLevelBar
+// (0x0045f086): it copies the usable fill rect and moves the anchor edge to
+// the reserve mark. Wide slots move the LEFT edge (reserve = the right
+// segment); tall slots move the BOTTOM edge (the fill is bottom-anchored and
+// the extent is ceil(height*fraction)). Edge coordinates are truncated toward
+// zero, so the wide extent is floor(width*fraction) and the tall extent is
+// ceil(height*fraction).
+[[nodiscard]] HudBarFill
+HudBar_FillRectBetween(const HudPanelRect &panel, double lo, double hi);
+
+// The reserve recolour segment of the fuel bar (0x0045f086). The reserve mark
+// is floor(fuel/100)*100 tons (x87 FIST + residual/sign correction = truncation
+// toward zero at 0x0045f284), the fixed edge is the usable fill's edge, and the
+// segment is drawn only when trunc(fuel - floor(fuel/100)) > 0.
+[[nodiscard]] HudBarFill
+HudBar_FuelReserveFill(const HudPanelRect &panel, float fuel, float capacity);
+
 [[nodiscard]] HudBarFill HudBar_FillRect(const HudPanelRect &panel,
-                                         float fraction);
+                                         double fraction);
 
 // The original uses DAT_0088c020 (0xc2) as the width of the top-right cockpit
 // strip. Each panel rect is translated horizontally by render_right - 0xc2.

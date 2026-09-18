@@ -212,20 +212,27 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
 // filled portion is drawn
 // (opaque on the panel); the surrounding bar trough art lives in the cockpit
 // PICT, which is composited separately.
-void DrawLifeBar(SDL_Renderer *renderer,
-                 const HudPanelRect &panel,
-                 float current,
-                 float maximum,
+void DrawBarFill(SDL_Renderer *renderer,
+                 const HudBarFill &fill,
                  SDL_Color color) {
-  const float fraction =
-      maximum > 0.0F ? std::clamp(current / maximum, 0.0F, 1.0F) : 0.0F;
-  const HudBarFill fill = HudBar_FillRect(panel, fraction);
   if (fill.empty()) {
     return;
   }
   const SDL_FRect rect{fill.left, fill.top, fill.width, fill.height};
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   SDL_RenderFillRect(renderer, &rect);
+}
+
+void DrawLifeBar(SDL_Renderer *renderer,
+                 const HudPanelRect &panel,
+                 float current,
+                 float maximum,
+                 SDL_Color color) {
+  const double fraction =
+      maximum > 0.0F
+          ? std::clamp(static_cast<double>(current) / maximum, 0.0, 1.0)
+          : 0.0;
+  DrawBarFill(renderer, HudBar_FillRect(panel, fraction), color);
 }
 
 // ---------------------------------------------------------------------------
@@ -487,11 +494,22 @@ void HudRenderer::Draw(SdlPlatform &platform,
               state.player.armor_points,
               armor_max,
               ColorOf(layout_.color_word[5]));
-  DrawLifeBar(renderer,
-              anchor_panel(layout_.fuel_panel),
-              state.player.fuel_points,
-              fuel_max,
-              ColorOf(layout_.color_word[6]));
+  // Fuel level bar (NovaUi_DrawPlayerFuelLevelBar 0x0045f086): the whole bar
+  // is suppressed while the player ship is disabled, then a usable fill is
+  // drawn and the reserve segment is overlaid with the .ntf +0x3c colour. The
+  // reserve mark is floor(fuel/100)*100 tons (x87 truncation idiom at
+  // 0x0045f284) and the segment runs from that mark to the usable fill's edge
+  // (the wide slot moves its left edge), so it marks the fraction above the
+  // last full hundred tons.
+  if (!NovaAiShip_IsDisabled(state, state.player)) {
+    const float fuel = state.player.fuel_points;
+    const HudPanelRect fuel_panel = anchor_panel(layout_.fuel_panel);
+    DrawLifeBar(
+        renderer, fuel_panel, fuel, fuel_max, ColorOf(layout_.color_word[6]));
+    DrawBarFill(renderer,
+                HudBar_FuelReserveFill(fuel_panel, fuel, fuel_max),
+                ColorOf(layout_.color_word[7]));
+  }
 
   // The four text panels (Ghidra NovaUi_Draw*StatusPanel 0x0045e400 /
   // 0x00460ec0 / 0x0045f530 / 0x004612c0). The original blits a saved clean
@@ -864,24 +882,31 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
   const float shields = target.shield_points;
   if (fire_restricted) {
     // Special mission ships held for pickup read "Waiting" once their armor
-    // clears the decoded fraction; everything else reads "Disabled".
-    // TODO(decomp): the original also gates on the mission's
-    // special_ship_attacking latch and the target's boarded_target_latch;
-    // neither field is modelled yet.
+    // crosses the disable threshold; everything else reads "Disabled". The
+    // original gate is mission slot != -1, mission active, ShipGoal 5, the
+    // runtime ship-objective-complete latch clear (Ghidra's
+    // MisnRuntimeFlags.special_ship_attacking, +0x02 == port
+    // objective_complete; pilotformat "shipObjComplete"), and the target's
+    // boarded_target_latch clear.
     bool waiting = false;
     if (mission != nullptr && mission->ship_goal == 5 &&
-        state
-            .active_mission_runtime_flags[static_cast<std::size_t>(
-                target.mission_fleet_slot)]
-            .is_active &&
-        ship_class != nullptr) {
-      const float max_armor = static_cast<float>(ship_class->base_armor);
-      const float armor = target.armor_points;
-      // The non-0x10 branch's decompiled threshold is negative (max * -0.241
-      // <= armor * 100), i.e. always satisfied for non-negative armor.
-      waiting = (ship_class->capability_flags & 0x10U) != 0U
-                    ? max_armor * 10.0F <= armor * 100.0F
-                    : max_armor * -0.241F <= armor * 100.0F;
+        ship_class != nullptr && target.boarded_target_latch == 0) {
+      const MissionRuntimeFlags &runtime =
+          state.active_mission_runtime_flags[static_cast<std::size_t>(
+              target.mission_fleet_slot)];
+      if (runtime.is_active && !runtime.objective_complete) {
+        // Ship_ComputeShipMaxArmor (0x004637a0) includes outfit/personality
+        // scaling. The thresholds are the x87 doubles at 0x005756e8 (10.0)
+        // and 0x005756f8 (33.333): flags-0x10 hulls disable at 10% max armor,
+        // others at one third. max_armor is the double product; armor stays a
+        // float multiply by 100.0 (0x005756f0).
+        const double max_armor =
+            static_cast<double>(NovaAi_ComputeMaxArmorPoints(state, target));
+        const double threshold =
+            (ship_class->capability_flags & 0x10U) != 0U ? 10.0 : 33.333;
+        waiting = max_armor * threshold <=
+                  static_cast<double>(target.armor_points * 100.0F);
+      }
     }
     DrawPanelTextAt(platform,
                     font,
@@ -899,11 +924,11 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                                 status_y,
                                 MiscString(kMiscShieldLabel) + " ",
                                 label_color);
-    const float max_shield = ship_class != nullptr
-                                 ? static_cast<float>(ship_class->base_shield)
-                                 : 0.0F;
-    // TODO(decomp): Ship_ComputeShipMaxShieldPoints includes outfit mods;
-    // the port reads the class base until the NPC outfit pipeline exists.
+    const float max_shield =
+        static_cast<float>(NovaAi_ComputeMaxShieldPoints(state, target));
+    // 100% once current reaches the computed maximum; Ship_ComputeShipMax-
+    // ShieldPoints (0x00463550) folds in player outfit mods and NPC
+    // personality/behavior scaling.
     const std::string pct =
         max_shield > 0.0F ? StatusPercentText(shields, max_shield) : "100%";
     DrawPanelTextAt(platform, font, font_size, pen, status_y, pct, value_color);
@@ -917,7 +942,7 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                                 status_y,
                                 MiscString(kMiscArmorLabel) + " ",
                                 label_color);
-    const float max_armor = static_cast<float>(ship_class->base_armor);
+    const float max_armor = NovaAi_ComputeMaxArmorPoints(state, target);
     const std::string pct =
         max_armor > 0.0F ? StatusPercentText(target.armor_points, max_armor)
                          : MiscString(kMiscNotApplicable);
@@ -953,11 +978,16 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                                      PanelTextWidth(font, font_size, text)),
                   status_y,
                   text);
-  } else if ((target.squad_leader_ship_slot == 0 ||
-              target.post_hit_mode_hint >= 0) &&
-             (target.ai_behavior_code == 5 || target.post_hit_mode_hint == 0)) {
-    const bool light_ship =
-        ship_class != nullptr && ship_class->mass_tons < 100;
+  } else if (target.squad_leader_ship_slot == 0 ||
+             target.post_hit_mode_hint >= 0) {
+    // Outer gate is a lone squadron-leader / post-hit test. The inner gate
+    // selects Fighter vs Escort by hull mass when ai_behavior is 5 or the
+    // post-hit hint is zero, and otherwise falls back to "Escort" (the
+    // original's inner else) rather than drawing nothing.
+    bool light_ship = false;
+    if (target.ai_behavior_code == 5 || target.post_hit_mode_hint == 0) {
+      light_ship = ship_class != nullptr && ship_class->mass_tons < 100;
+    }
     const std::string text =
         MiscString(light_ship ? kMiscFighter : kMiscEscort);
     NovaText_Draw(platform,
@@ -1101,10 +1131,13 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
 
   // Credits row: the label is the "credits" pstring (DAT_0072f1cc = STR#
   // 0x7d2 pool 0x20) whose first character the original translates through
-  // the input map, so the leading letter always shows the key bound to the
-  // credits command; the port keeps the literal 'c'.
+  // NovaCommand_TranslateByInputMap (0x004d6260 = a per-thread 256-byte
+  // command-token -> bound-key table, NOT the port's same-named main-menu
+  // mapping in nova_app.cpp), so the leading letter shows the key bound to
+  // the credits command. The default binding is 'c', so the literal matches
+  // normal play; reproducing a rebind needs that table.
   // TODO(decomp(0x004612c0)) skipped: NovaCommand_TranslateByInputMap key
-  // translation (input-map table not reconstructed).
+  // translation (per-thread command->key table not reconstructed).
   std::string credits_label = PoolString(kMiscStringsId, 0x21, "credits");
   if (!credits_label.empty()) {
     credits_label[0] = 'c';
