@@ -261,6 +261,18 @@ public:
   }
 
 private:
+  // Effective system murk (0-100), recomputed once per Draw from
+  // NovaSystem_GetEffectiveMurkPercent and pushed into every world sprite's
+  // SpriteDrawOptions.fog_murk so DrawSprite can apply the distance fog
+  // (Ghidra 0x00438db0). 0 in a clear-cut system (Kania).
+  int fog_murk_ = 0;
+  // The constant the fog mixes toward (0xRRGGBB): the current system's
+  // BkgndColor / space colour, so a fully fogged sprite becomes the backdrop.
+  std::uint32_t fog_color_ = 0;
+
+  // Fills a draw's fog fields from the current frame's fog_murk_/fog_color_.
+  void ApplyFog(SpriteDrawOptions &opts) const;
+
   // The ship-target reticle's 16-frame corner-bracket set (cicn 10008-10023)
   // and the travel reticle's 8-frame set (cicn 10000-10007), loaded on first
   // use. A failed load stays empty so a missing asset is not retried every

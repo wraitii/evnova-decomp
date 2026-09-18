@@ -1027,3 +1027,39 @@ TEST_CASE("jump onset guard scales with the class jump multiplier",
   state.player.ship_class_id = -1; // missing class -> fallback 1.0
   CHECK_FALSE(game::NovaTravel_PlayerPastJumpOnset(state));
 }
+
+// Ghidra 0x0046c250 System_GetEffectiveMurkPercent: raw SystemDef.murk (clamped
+// >= 0) plus every owned ModType 0x1c (MurkMod) outfit's owned_count * ModVal
+// across all four mod slots, clamped to [0, 100].
+TEST_CASE("effective murk sums owned MurkMod outfits and clamps",
+          "[travel][murk]") {
+  GameState state;
+  state.scenario.systems.resize(2);
+  state.player.current_system_id = 0;
+  state.scenario.systems[0].murk = 20;
+  state.scenario.systems[1].murk = 90;
+
+  // One outfit with ModType 0x1c / ModVal +10 in its first alternate slot.
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].alt_mod_types[0] = 0x1c;
+  state.scenario.outfits[0].alt_mod_vals[0] = 10;
+
+  CHECK(game::NovaSystem_GetEffectiveMurkPercent(state) == 20); // none owned
+  state.inventory.outfit_owned_count[0] = 1;
+  CHECK(game::NovaSystem_GetEffectiveMurkPercent(state) == 30); // 20 + 10
+  state.inventory.outfit_owned_count[0] = 30;
+  CHECK(game::NovaSystem_GetEffectiveMurkPercent(state) == 100); // clamp
+
+  // A negative raw murk clamps to 0 before the modifier is added.
+  state.scenario.systems[0].murk = -5;
+  state.inventory.outfit_owned_count[0] = 1;
+  CHECK(game::NovaSystem_GetEffectiveMurkPercent(state) == 10);
+
+  // A negative ModVal reduces murk and the total clamps at 0.
+  state.scenario.outfits[0].alt_mod_vals[0] = -50;
+  CHECK(game::NovaSystem_GetEffectiveMurkPercent(state) == 0);
+
+  // The value follows the current system.
+  state.player.current_system_id = 1;
+  CHECK(game::NovaSystem_GetEffectiveMurkPercent(state) == 40); // 90 - 50
+}

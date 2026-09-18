@@ -5,6 +5,7 @@
 #include "../rle_sprite_sheet.hpp"
 #include "../sdl_platform.hpp"
 #include "asteroid.hpp"
+#include "compatibility.hpp"
 #include "freeflight_objects.hpp"
 #include "game_state.hpp"
 #include "gameplay_interface.hpp"
@@ -15,6 +16,7 @@
 #include "ship_ai.hpp"
 #include "ship_visual.hpp"
 #include "targeting.hpp"
+#include "travel.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -549,12 +551,14 @@ void DrawShipEffectLayer(SDL_Renderer *renderer,
                          int viewport_w,
                          int viewport_h,
                          float intensity,
-                         float visible_threshold) {
+                         float visible_threshold,
+                         int fog_murk) {
   if (layer.frames.empty() || intensity <= visible_threshold) {
     return;
   }
   SpriteDrawOptions opts;
   opts.alpha_mod = std::clamp(intensity / 32.0F, 0.0F, 1.0F);
+  opts.fog_murk = fog_murk;
   // The original's light/weapon layers use the tinted draw proc at brightness
   // 0x20, i.e. dst + src*intensity/0x20 (additive).
   opts.additive = true;
@@ -911,6 +915,7 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                                             sprite->row_count);
     SpriteDrawOptions hull_opts;
     hull_opts.alpha_mod = emergence.hull_alpha * (1.0F - emergence.white_mix);
+    ApplyFog(hull_opts);
     if (hull_opts.alpha_mod > 0.0F) {
       DrawSprite(platform.renderer(),
                  sprite->base,
@@ -934,6 +939,7 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
       opts.alpha_mod =
           ship.engine_glow_intensity * (1.0F - emergence.white_mix);
       opts.additive = true;
+      ApplyFog(opts);
       DrawSprite(platform.renderer(),
                  sprite->glow,
                  frame,
@@ -959,7 +965,8 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                           vp.w,
                           vp.h,
                           ship.light_intensity * (1.0F - emergence.white_mix),
-                          /*visible_threshold=*/1.0F);
+                          /*visible_threshold=*/1.0F,
+                          fog_murk_);
     }
     if (sprite->has_weapon) {
       DrawShipEffectLayer(platform.renderer(),
@@ -973,7 +980,8 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                           vp.h,
                           ship.weapon_sprite_flash_level *
                               (1.0F - emergence.white_mix),
-                          /*visible_threshold=*/0.0F);
+                          /*visible_threshold=*/0.0F,
+                          fog_murk_);
     }
     // Emergence tint is the final ship-composite pass. Drawing it after the
     // ordinary glow/light/weapon layers is essential: putting those colored
@@ -1119,11 +1127,21 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   // Frame_UpdateViewportWrapBackgroundSprites relocates an off-edge particle to
   // the opposite edge). When murk hides them we already cleared on spawn, so
   // nothing is drawn.
-  // Each star is one tile of the 5px star-field sprite sheet (sp\x9an 700)
-  // drawn at its native pixel size. The 0x20 / murk-derived value the ORIGINAL
-  // writes into the sprite's +0xa2..0xa8 fields is a BLEND-CODE sentinel (0x20
-  // = raw/tinted-raw blit; round(murk*0.9) in [2,29] selects a hazy tinted/
-  // indexed blend), not a pixel dimension - so each star stays ~5px regardless.
+  //
+  // Star murkiness: with murk == 0 the original takes the plain opaque-copy
+  // fast path; otherwise it writes t = trunc(murk * 0.9) (double 0.9 at
+  // 0x005753c0), clamped to [2, 29], into the star sprite's RGB tint channels
+  // at brightness 0x20 / distance 0 (0x0042e590). The tinted span then draws
+  // additively: dst + src*t/32. The port maps t to the additive alpha, so each
+  // star stays ~5px but a murky system's starfield reads as a hazy glow.
+  const int star_murk = sys ? static_cast<int>(sys->murk) : 0;
+  // The original multiplies the integer murk by the binary64 constant 0.9 and
+  // truncates toward zero (FMUL double at 0x0042e5f6, then the x87 FIST idiom).
+  const int star_tint =
+      star_murk > 0
+          ? std::clamp(
+                static_cast<int>(static_cast<double>(star_murk) * 0.9), 2, 0x1d)
+          : 0;
   const Viewport vp = CurrentViewport(platform);
   const SpriteAsset *sheet = StarFieldSheet(platform);
   for (const auto &s : ambient_stars_) {
@@ -1132,10 +1150,16 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
     }
     if (sheet && !sheet->frames.empty()) {
       // Native tile size, centred, with one-exit wraparound; linear filtering
-      // so the tiny 5x5 star tiles read as soft glows when scaled.
+      // so the tiny 5x5 star tiles read as soft glows when scaled. Stars use
+      // the murk tint above, not the per-sprite distance fog (the original
+      // leaves the star's distance_brightness at 0).
       SpriteDrawOptions opts;
       opts.wrap = true;
       opts.linear_scale = true;
+      if (star_tint > 0) {
+        opts.additive = true;
+        opts.alpha_mod = static_cast<float>(star_tint) / 32.0F;
+      }
       DrawSprite(renderer,
                  *sheet,
                  s.frame,
@@ -1255,6 +1279,7 @@ void SpaceflightView::DrawFadingEffects(SdlPlatform &platform,
     SpriteDrawOptions options;
     options.alpha_mod =
         std::clamp(fragment.lifetime_ticks / 249.0F, 0.0F, 1.0F);
+    ApplyFog(options);
     DrawSprite(platform.renderer(),
                debris->base,
                frame,
@@ -1297,6 +1322,7 @@ void SpaceflightView::DrawFreeflightObjects(SdlPlatform &platform,
     }
     SpriteDrawOptions options;
     options.alpha_mod = std::clamp(object.lifetime_ticks / 32.0F, 0.0F, 1.0F);
+    ApplyFog(options);
     DrawSprite(platform.renderer(),
                *set,
                frame,
@@ -1353,6 +1379,8 @@ void SpaceflightView::DrawAsteroids(SdlPlatform &platform,
     }
     int frame = static_cast<int>(wander);
     frame = std::clamp(frame, 0, std::max(0, frame_count - 1));
+    SpriteDrawOptions options;
+    ApplyFog(options);
     DrawSprite(platform.renderer(),
                *set,
                frame,
@@ -1361,7 +1389,8 @@ void SpaceflightView::DrawAsteroids(SdlPlatform &platform,
                camera_x,
                camera_y,
                vp.w,
-               vp.h);
+               vp.h,
+               options);
   }
 }
 
@@ -1546,6 +1575,8 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
         frame_idx =
             std::clamp(anim_it->second.current_frame, 0, set->frame_count - 1);
       }
+      SpriteDrawOptions options;
+      ApplyFog(options);
       DrawSprite(platform.renderer(),
                  *set,
                  frame_idx,
@@ -1554,7 +1585,8 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
                  camera_x,
                  camera_y,
                  vp.w,
-                 vp.h);
+                 vp.h,
+                 options);
       continue;
     }
     // Fallback tinted disc (centred on screen coords like the sprite above).
@@ -1617,6 +1649,7 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
     if (set && !set->frames.empty()) {
       SpriteDrawOptions opts;
       opts.wrap = false;
+      ApplyFog(opts);
       int frame;
       if ((w->flags & 0x0001U) == 0) {
         // Static/heading branch: the frame is the shot's firing bearing.
@@ -1683,6 +1716,7 @@ void SpaceflightView::DrawImpactEffects(SdlPlatform &platform,
                                            static_cast<float>(set->frame_count),
                                 0.0F,
                                 1.0F);
+    ApplyFog(opts);
     DrawSprite(platform.renderer(),
                *set,
                frame,
@@ -1722,10 +1756,10 @@ void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
     if (particle.life_ticks <= 1) {
       continue;
     }
-    const float screen_x =
-        static_cast<float>(particle.pos_x) / 256.0F - camera_x + half_w;
-    const float screen_y =
-        static_cast<float>(particle.pos_y) / 256.0F - camera_y + half_h;
+    const float world_x = static_cast<float>(particle.pos_x) / 256.0F;
+    const float world_y = static_cast<float>(particle.pos_y) / 256.0F;
+    const float screen_x = world_x - camera_x + half_w;
+    const float screen_y = world_y - camera_y + half_h;
     if (screen_x < 0.0F || screen_x >= static_cast<float>(vp.w) ||
         screen_y < 0.0F || screen_y >= static_cast<float>(vp.h)) {
       continue;
@@ -1736,8 +1770,23 @@ void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
     constexpr int kFullParticleWeight = 0x20;
     const int life_weight =
         std::clamp<int>(particle.life_ticks, 0, kFullParticleWeight);
-    const auto alpha = static_cast<std::uint8_t>(
-        life_weight * SDL_ALPHA_OPAQUE / kFullParticleWeight);
+    int alpha = life_weight * SDL_ALPHA_OPAQUE / kFullParticleWeight;
+    // BUGFIX(original): the executable never applies the system murkiness
+    // distance fog to SWParticles, so weapon sparks and asteroid debris stay
+    // full-bright at any range even in a murky system. Dim them with the same
+    // distance_brightness the sprite layers use; alpha-only fading is enough
+    // here because particles composite over whatever is behind them (unlike
+    // the opaque ship silhouette, there is nothing to occlude). Gated by
+    // kApplyOriginalBugFixes; see docs/system_murk_rendering.md.
+    if (kApplyOriginalBugFixes && fog_murk_ > 0) {
+      const int distance_brightness = Sprite_DistanceBrightness(
+          fog_murk_, camera_x, camera_y, world_x, world_y);
+      // d >= 0x1f is fully fogged (matches the sprite fog's ceiling snap).
+      const int fog = distance_brightness >= kFullParticleWeight
+                          ? 0
+                          : kFullParticleWeight - distance_brightness;
+      alpha = alpha * fog / kFullParticleWeight;
+    }
     SDL_SetRenderDrawColor(renderer, red, green, blue, alpha);
     SDL_RenderPoint(renderer, screen_x, screen_y);
   }
@@ -1789,36 +1838,76 @@ void SpaceflightView::DrawBeamsOverShips(SdlPlatform &platform,
   }
 }
 
-// Draws the whole in-flight world, compositing every visible entity in the
-// fixed layer order the original's sprite layers use (Ghidra Frame_Spaceflight-
-// Loop scope 2 sprite-world present: the background is cleared/filled first,
-// then the spiralled sprite layers are drawn in layer order). The precedence,
-// bottom to top, is locked as:
+// Fills a sprite draw's fog fields from the current frame's effective murk and
+// space colour (see SpriteDrawOptions.fog_murk).
+void SpaceflightView::ApplyFog(SpriteDrawOptions &opts) const {
+  opts.fog_murk = fog_murk_;
+  opts.fog_color = fog_color_;
+}
+
+// Draws the whole in-flight world. The original builds 14 ordered SpriteLayer
+// objects in NovaUi_InitializeFlightViewSurfaces (0x004ab9d4) and draws them
+// head-to-tail in SpriteWorld_RenderLayers (0x00477fa0), so append order is
+// draw order; ships additionally hop between the disabled/escort/normal ship
+// layers at runtime (Ship_UpdateVisualState 0x00428340). Original order, bottom
+// to top: ambient stars -> stellars (+ flags-0x2000 under-ships beams) ->
+// asteroids -> disabled ships -> freeflight objects + fading effects -> smoke
+// puffs -> shots -> escort ships -> ships (player + NPC) -> shots -> impact /
+// destruction effects -> directional weapon effects (+ visible beams).
+//
+// The port locks the precedence explicitly here (rather than spreading it over
+// the per-subsystem drawers) as:
 //
 //   background (space tint + ambient starfield)   -- DrawBackground
-//   under-ships beams (flags_secondary 0x2000)     -- DrawBeamsUnderShips
 //   stellar bodies (planets / stations)            -- DrawStellarBodies
+//   under-ships beams (flags_secondary 0x2000)     -- DrawBeamsUnderShips
+//   asteroids                                      -- DrawAsteroids
+//   freeflight objects (pods / drones)             -- DrawFreeflightObjects
+//   directional destruction fragments              -- DrawFadingEffects
 //   shots / projectiles                           -- DrawShots
 //   ships (NPCs + player at the camera centre)     -- DrawNpcShips + player
 //   destruction / impact effects                   -- DrawImpactEffects
-//   directional destruction fragments              -- DrawFadingEffects
-//   over-ships beams (all other beams)             -- DrawBeamsOverShips
-// That is: every ship sprite (player and NPC alike) shares the ship layer and
-// composites below the impact/destruction-effect layer, so a dying hull's
-// explosions are drawn over the wreck. Beam weapons render in two of the
-// original's sprite-world layers: 0x2000-flagged beams sit on the second layer
-// (above the backdrop only, Ghidra 0x00438c40) while every other beam sits on
-// the topmost layer above ships and effects (Ghidra Shot_DrawBeamHitQueueFor-
-// Surface 0x00438810). Keeping the order explicit here (rather than spread
-// across the per-subsystem drawers) makes the composed precedence auditable
-// and lets a future layer-table refactor replace the fixed sequence wholesale.
+//   reticles + over-ships beams (all other beams)  -- DrawShipTargetReticle,
+//                                                     DrawTravelTargetReticle,
+//                                                     DrawBeamsOverShips
+//   weapon sparks / debris (SWParticles)           -- DrawSwParticles
+//
+// Impact/destruction effects composite over ships (original layer 13 above
+// layer 11), so a dying hull's explosions cover the wreck. Beams render in two
+// original layers: flags-0x2000 beams on layer 2 (above the backdrop only,
+// Ghidra 0x00438c40), after that layer's stellar sprites, and every other beam
+// on topmost layer 14 (Ghidra Shot_DrawBeamHitQueueForSurface 0x00438810).
+// Remaining divergence: the original's disabled-ship (layer 4) and escort-ship
+// (layer 10) sub-layers and its per-mode shot containers are not split out; the
+// port draws all ships on one pass and all shots on one pass. Keeping the order
+// explicit here makes the precedence auditable and lets a future layer-table
+// refactor replace the fixed sequence wholesale.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
+  // Effective system murk (raw system murk + owned MurkMod outfits), rebuilt
+  // for this frame's distance fog. Ghidra caches it in
+  // g_distance_intensity_scale via Outfit_RecomputeOutfitDerivedState;
+  // recomputing here keeps it correct across system changes without depending
+  // on the recompute call sites. The fog target is the system's BkgndColor, so
+  // a fully fogged sprite collapses to the backdrop colour.
+  fog_murk_ = NovaSystem_GetEffectiveMurkPercent(state);
+  if (const auto *sys = state.scenario.System(
+          static_cast<std::int16_t>(state.player.current_system_id + 0x80))) {
+    fog_color_ = sys->bkgnd_color;
+  } else {
+    fog_color_ = 0;
+  }
   DrawBackground(platform, state); // backmost: tint + ambient stars
-  DrawBeamsUnderShips(platform,
-                      state);         // flags-0x2000 beams above backdrop only
-  DrawStellarBodies(platform, state); // stellar planets / stations
-  DrawShots(platform, state);         // projectiles above stellars
-  DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
+  // Original sprite layer 2: stellar sprites first, then the layer's
+  // under-ships beam callback (flags_secondary 0x2000) runs after them.
+  DrawStellarBodies(platform, state);   // stellar planets / stations
+  DrawBeamsUnderShips(platform, state); // flags-0x2000 beams, below ships
+  DrawAsteroids(platform, state);       // layer 3: drifting asteroid field
+  // Layer 5: freeflight objects are appended before fading effects, so they
+  // sit below them; both are below shots and ships.
+  DrawFreeflightObjects(platform, state); // jettisoned pods / launched drones
+  DrawFadingEffects(platform, state);     // directional destruction fragments
+  DrawShots(platform, state);             // layers 7-9: projectiles below ships
+  DrawNpcShips(platform, state);          // ships above shots (layers 10-11)
 
   // Player ship at the play-area centre, frame selected by heading. Because
   // the camera is centred on the player, drawing at the ship's own world
@@ -1835,6 +1924,8 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
                                             ship_sprite_behavior_flags_,
                                             ship_frames_per_rotation_,
                                             ship_row_count_);
+    SpriteDrawOptions hull_opts;
+    ApplyFog(hull_opts);
     DrawSprite(platform.renderer(),
                ship_,
                frame,
@@ -1843,7 +1934,8 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
                state.player.pos_x,
                state.player.pos_y,
                vp.w,
-               vp.h);
+               vp.h,
+               hull_opts);
 
     // Engine-glow layer: drawn over the base with the same heading-selected
     // frame and a thrust-driven additive intensity. The original binds the glow
@@ -1871,6 +1963,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
       SpriteDrawOptions opts;
       opts.alpha_mod = state.player.engine_glow_intensity;
       opts.additive = true;
+      ApplyFog(opts);
       DrawSprite(platform.renderer(),
                  glow_,
                  glow_frame,
@@ -1903,7 +1996,8 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
                           vp.w,
                           vp.h,
                           state.player.light_intensity,
-                          /*visible_threshold=*/1.0F);
+                          /*visible_threshold=*/1.0F,
+                          fog_murk_);
     }
     if (has_weapon_) {
       DrawShipEffectLayer(platform.renderer(),
@@ -1916,14 +2010,12 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
                           vp.w,
                           vp.h,
                           state.player.weapon_sprite_flash_level,
-                          /*visible_threshold=*/0.0F);
+                          /*visible_threshold=*/0.0F,
+                          fog_murk_);
     }
   }
 
-  DrawImpactEffects(platform, state); // destruction/impact effects over ships
-  DrawFadingEffects(platform, state); // directional destruction fragments
-  DrawFreeflightObjects(platform, state);   // jettisoned pods / launched drones
-  DrawAsteroids(platform, state);           // drifting asteroid field
+  DrawImpactEffects(platform, state);       // layer 13: explosions over ships
   DrawShipTargetReticle(platform, state);   // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target
   DrawBeamsOverShips(platform, state);      // topmost layer: normal beams

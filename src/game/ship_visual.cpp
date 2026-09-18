@@ -11,6 +11,8 @@
 #include "nova_random.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
+#include "sprite_world.hpp"
+#include "travel.hpp"
 #include "weapon.hpp"
 
 #include <algorithm>
@@ -402,10 +404,11 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
   // (0x0042a3a4) and writes it into the sprite's RGB tint channels at
   // brightness 32 (0x0042a4ca), i.e. additive contribution src * level/32.
   // The port stores that fraction in engine_glow_intensity for the renderer.
-  // The original also folds the per-ship distance-brightness fog into NPC
-  // glow (level = min(level, 32 - distance_brightness*1.5), 0x00575340/
-  // 0x00575348); the port does not track the murk fog yet, so that reduction
-  // is not applied (TODO(decomp)).
+  // The original also folds the per-ship distance-brightness fog into NPC glow
+  // (level = min(level, trunc(32 - distance_brightness*1.5)) while
+  // distance_brightness > 0, then clamps level >= 0; 32.0 = double at
+  // 0x00575348, 1.5 = k_pd_range_scalar_mult_f64 0x00575340). The player
+  // (ship_instance_id 0) is always at distance 0, so the cap only bites NPCs.
   if (cls->engine_glow_image_id > 0) {
     const std::int16_t flicker =
         static_cast<std::int16_t>(RandomBelow(state, 6));
@@ -416,6 +419,20 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
     } else {
       if (level > 0x20) {
         level = 0x20;
+      }
+      const int distance_brightness =
+          Sprite_DistanceBrightness(NovaSystem_GetEffectiveMurkPercent(state),
+                                    state.player.pos_x,
+                                    state.player.pos_y,
+                                    ship.pos_x,
+                                    ship.pos_y);
+      const float fog_cap = 32.0F - static_cast<float>(distance_brightness) *
+                                        1.5F; // k_pd_range_scalar_mult_f64
+      if (fog_cap < static_cast<float>(level)) {
+        level = static_cast<std::int16_t>(fog_cap); // trunc toward zero
+        if (level < 0) {
+          level = 0;
+        }
       }
       ship.engine_glow_intensity = static_cast<float>(level) / 32.0F;
     }
