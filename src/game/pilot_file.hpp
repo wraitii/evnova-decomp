@@ -63,7 +63,6 @@ struct PilotFile {
   std::int32_t player_combat_rating_points = 0;
   std::int16_t ship_class_id = 0; // block1+0x02 (0 = default class)
   std::int16_t current_system_id = 0;
-  std::int16_t active_weapon_bank_slot = 0;
   // The in-game calendar (block1+0x14/+0x16/+0x18 month/day/year).
   GameDate date{};
   std::string date_prefix; // block2+0x5ede, bounded to 15 bytes

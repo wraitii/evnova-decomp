@@ -251,6 +251,149 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   REQUIRE(state.active_shots.size() == 1); // no second shot while cooling down
 }
 
+TEST_CASE("the starter light blaster is never an eligible secondary",
+          "[weapon][data]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.ship_class_id = 0;
+  SeedStockWeaponBanks(state);
+
+  const Weapon *light_blaster = state.scenario.Weapon(0x80);
+  REQUIRE(light_blaster != nullptr);
+  // Bible wëap Flags 0x0002 = "Weapon fired by second trigger". The Light
+  // Blaster's Flags1c does not set it, so the secondary-cycle predicate
+  // (PlayerTick_WeaponCycleContinuation 0x0044eab4, Eligibility checks
+  // WeaponDef+0x20 & 2) must never select bank 0.
+  CHECK((light_blaster->flags & 0x0002U) == 0U);
+
+  // A single ineligible primary weapon is "none": the cycle denies and leaves
+  // the live selection untouched (denial cue is transition index 3).
+  state.player.active_weapon_bank_slot = -1;
+  NovaWeapon_TickPlayerWeaponCommands(
+      state, PlayerWeaponCommandInput{.cycle_secondary = true}, 0.0F);
+  CHECK(state.player.active_weapon_bank_slot == -1);
+  REQUIRE(state.pending_ui_sounds.size() == 1);
+  CHECK(state.pending_ui_sounds[0].transition_index == 3);
+
+  // Secondary fire with no selection must not spawn the mounted primary.
+  state.pending_ui_sounds.clear();
+  state.player.armor_points = 100.0F;
+  NovaWeapon_TickPlayerWeaponCommands(
+      state, PlayerWeaponCommandInput{.fire_secondary_held = true}, 0.0F);
+  CHECK(state.active_shots.empty());
+
+  // Positive control: the fire gates are open; the same command fires the
+  // Light Blaster when the (unpersisted) selection is forced to bank 0, which
+  // is exactly the reload bug this guards against.
+  state.weapon_bank_cooldown.fill(0.0F);
+  state.player.active_weapon_bank_slot = 0;
+  NovaWeapon_TickPlayerWeaponCommands(
+      state, PlayerWeaponCommandInput{.fire_secondary_held = true}, 0.0F);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].weapon_id == 0);
+}
+
+TEST_CASE("secondary cycling wraps past ineligible banks and fires the "
+          "selected weapon",
+          "[weapon]") {
+  GameState state;
+  state.scenario.weapons.resize(0x30);
+  Ship &player = state.player;
+  player.armor_points = 100.0F;
+  player.shield_points = 100.0F;
+
+  auto make_secondary = [&](std::int16_t bank) {
+    Weapon &weapon = state.scenario.weapons[static_cast<std::size_t>(bank)];
+    weapon.name = "Secondary";
+    weapon.flags = 0x0002U; // Bible "Weapon fired by second trigger"
+    weapon.weapon_mode_code = -1;
+    weapon.ammo_type = -1; // unlimited
+    weapon.reload_ticks = 10;
+    weapon.lifetime_ticks = 30;
+    weapon.projectile_speed = 1000.0F;
+    state.weapon_count_by_class[static_cast<std::size_t>(bank) * 100] = 1;
+  };
+  make_secondary(0x10);
+  make_secondary(0x20);
+  // A primary weapon between the two secondaries must be skipped by the walk.
+  state.scenario.weapons[0x11].flags = 0;
+  state.scenario.weapons[0x11].weapon_mode_code = -1;
+  state.weapon_count_by_class[0x11 * 100] = 1;
+
+  const auto cycle = [&](bool backwards) {
+    NovaWeapon_TickPlayerWeaponCommands(
+        state,
+        PlayerWeaponCommandInput{.cycle_secondary = true,
+                                 .cycle_secondary_backwards = backwards},
+        0.0F);
+  };
+
+  player.active_weapon_bank_slot = -1;
+  cycle(false);
+  CHECK(player.active_weapon_bank_slot == 0x10);
+  cycle(false);
+  CHECK(player.active_weapon_bank_slot == 0x20); // skips 0x11, wraps forward
+  cycle(false);
+  CHECK(player.active_weapon_bank_slot == 0x10);
+  cycle(true);
+  CHECK(player.active_weapon_bank_slot == 0x20); // wraps backward
+
+  // Clear-selection command deselects and cues acceptance (index 2).
+  player.active_weapon_bank_slot = 0x10;
+  state.pending_ui_sounds.clear();
+  NovaWeapon_TickPlayerWeaponCommands(
+      state, PlayerWeaponCommandInput{.clear_secondary = true}, 0.0F);
+  CHECK(player.active_weapon_bank_slot == -1);
+  REQUIRE(state.pending_ui_sounds.size() == 1);
+  CHECK(state.pending_ui_sounds[0].transition_index == 2);
+
+  // Fire the selected secondary: one shot, weapon id == bank index.
+  player.active_weapon_bank_slot = 0x10;
+  NovaWeapon_TickPlayerWeaponCommands(
+      state, PlayerWeaponCommandInput{.fire_secondary_held = true}, 0.0F);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].weapon_id == 0x10);
+
+  // A secondary with ammo_type in [0,255] stays cycle-selectable while its
+  // ammo counter is empty (the 0x800 "must stay fireable" flag is clear), but
+  // Weapon_CanFireWeaponBank suppresses the shot. Prove selection by cycling
+  // onto it from 0x10, then fire and observe no shot.
+  Weapon &ammo_secondary = state.scenario.weapons[0x20];
+  ammo_secondary.ammo_type = 0x21;
+  state.weapon_secondary_count_by_class[0x21 * 100] = 0;
+  player.active_weapon_bank_slot = 0x10;
+  cycle(false);
+  CHECK(player.active_weapon_bank_slot == 0x20); // still selectable
+  state.active_shots.clear();
+  state.weapon_bank_cooldown.fill(0.0F);
+  NovaWeapon_TickPlayerWeaponCommands(
+      state, PlayerWeaponCommandInput{.fire_secondary_held = true}, 0.0F);
+  CHECK(state.active_shots.empty());
+
+  // With flags_secondary 0x800 set the depleted bank becomes ineligible and
+  // the cycle skips it.
+  ammo_secondary.flags_secondary = 0x0800U;
+  player.active_weapon_bank_slot = 0x10;
+  cycle(false);
+  CHECK(player.active_weapon_bank_slot == 0x10); // 0x20 skipped, wrapped
+
+  // Reloading the cost bank makes the 0x800 bank eligible again; the cycle
+  // must re-select it, then firing spends exactly one round.
+  state.weapon_secondary_count_by_class[0x21 * 100] = 3;
+  cycle(false);
+  CHECK(player.active_weapon_bank_slot == 0x20);
+  state.active_shots.clear();
+  state.weapon_bank_cooldown.fill(0.0F);
+  NovaWeapon_TickPlayerWeaponCommands(
+      state, PlayerWeaponCommandInput{.fire_secondary_held = true}, 0.0F);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].weapon_id == 0x20);
+  CHECK(state.weapon_secondary_count_by_class[0x21 * 100] == 2);
+}
+
 TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
           "[weapon][npc]") {
   if (!ArchivesAvailable()) {

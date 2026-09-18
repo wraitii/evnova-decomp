@@ -50,7 +50,6 @@ struct TemporaryDirectory {
   p.player_combat_rating_points = 987654;
   p.ship_class_id = 3;
   p.current_system_id = 7;
-  p.active_weapon_bank_slot = 2;
   p.timed_action_counter = 99;
   p.death_timer_active = -0.5F;
   p.shield_points = 500.4F;
@@ -152,6 +151,22 @@ TEST_CASE("fresh pilot application retains the christened ship name") {
   CHECK(state.pilot.first_name == "Jacqueline");
   CHECK(state.pilot.last_name == "Maclean");
   CHECK(state.player.ship_name == "Vengeance");
+}
+
+TEST_CASE("PilotFileApply leaves the live secondary selection untouched") {
+  // ShipState.active_weapon_bank_slot (+0x72) is live runtime state: the
+  // saver/loader (0x004c7dd0/0x004cb260) never touch it, and
+  // Ship_ResetPlayerShipState (0x004b3350) supplies -1. Apply must preserve.
+  game::GameState state;
+  const game::PilotFile record = game::PilotFile::Fresh();
+
+  state.player.active_weapon_bank_slot = 7;
+  game::PilotFileApply(record, state);
+  CHECK(state.player.active_weapon_bank_slot == 7);
+
+  state.player.active_weapon_bank_slot = -1;
+  game::PilotFileApply(record, state);
+  CHECK(state.player.active_weapon_bank_slot == -1);
 }
 
 TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
@@ -446,6 +461,9 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   CHECK(loaded_state.player.ship_class_id == p.ship_class_id);
   CHECK(loaded_state.player.is_active);
   CHECK(loaded_state.player.death_timer_active == -1.0F);
+  // +0x72 is live runtime state: the pre-load reset leaves -1 and the saved
+  // data never carries it (see the dedicated apply/fixture tests).
+  CHECK(loaded_state.player.active_weapon_bank_slot == -1);
   CHECK_FALSE(loaded_state.player.death_timer_seeded);
   CHECK_FALSE(loaded_state.player.destruction_visual_triggered);
   CHECK_FALSE(loaded_state.player.destruction_finale_triggered);
