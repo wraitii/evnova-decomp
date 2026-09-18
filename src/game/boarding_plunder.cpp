@@ -34,6 +34,7 @@
 #include "ship_visual.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
+#include "ui_dialog.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -497,16 +498,7 @@ void Boarding_ResetShipAndAttackersAfterBoarding(GameState &state, Ship &ship) {
   ship.ai_hostility_accumulator = 0;
   ship.defense_fleet_home_stellar_id = -1;
   ship.pers_def_slot = -1;
-  ship.voice_type_mode = RandomBelow(state, 2);
-  const ShipClass *ship_class =
-      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-  if (ship_class != nullptr && ship_class->inherent_attributes_govt != -1) {
-    if (const Government *govt = state.scenario.GovernmentByIndex(
-            ship_class->inherent_attributes_govt);
-        govt != nullptr && govt->voice_type_mode != -1) {
-      ship.voice_type_mode = govt->voice_type_mode;
-    }
-  }
+  NovaShip_ApplyInherentGovernmentVoice(state, ship);
 }
 
 // Ghidra 0x0045a3d0 Player_HandleBoardTargetCommand.
@@ -864,6 +856,12 @@ constexpr std::uint16_t kMiscEscortCap = 0x7c;      // "You already have the
 constexpr std::uint16_t kMiscAssignedEscort = 0x7b; // "You assigned this ship
                                                     // to your fleet of
                                                     // escorts."
+// Captured-ship rename prompt and its cancel overlay (Ghidra 0x00482940 swap
+// arm -> NovaUi_ShowTextConfirmCodeDialog 0x00497900).
+constexpr std::uint16_t kMiscCaptureRenamePrompt = 0x77; // "Now rename this
+                                                         // captured ship:"
+constexpr std::uint16_t kMiscCaptureAbandoned =
+    0x7a; // "You decided not to capture this ship after all."
 // Fuel/energy-transfer overlays (STR# 0x7d2 entries 4..6 = pool 0x03..0x05,
 // DAT_0072d6cc/d7cc/d8cc per the original loader).
 constexpr std::uint16_t kMiscFuelNowFull = 0x04;  // "You filled your reactors
@@ -1893,19 +1891,67 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
                                                             : nullptr);
             }
             if (take_ship) {
-              // Ghidra 0x00497eb0 -> 0x00423fa0: the accepted "Use As My
-              // Ship" choice promotes the boarded hull into slot zero. The
-              // rename-confirm dialog's random suffix is still a UI gap; use
-              // the captured class name supplied by the escort hull.
-              // The original calls Player_SwapShipWithEscort with flag 0
-              // here. Flag 1 is the separate damaged-transfer state that
-              // leaves the outgoing player hull disabled at one armor.
-              if (Player_SwapShipWithEscort(state, target, false)) {
-                close_reason = "target captured as player ship";
-                result.target_captured_as_player = true;
-                state.InvalidateDerivedStatCaches();
+              // Ghidra 0x00482940 swap arm -> NovaUi_ShowTextConfirmCodeDialog
+              // (0x00497900): prompt with the captured class display name plus
+              // a space and three random digits 1-9, maximum 0x40 characters.
+              // Cancel abandons the capture; accept writes g_player_ship_name
+              // (`state.player.ship_name`), calls
+              // Player_ReplaceShipWithCapturedHull(..., flag 0), then
+              // reinstalls the government gameplay interface layout
+              // (Ui_InstallGameplayInterfaceLayout 0x004cda50).
+              std::string initial_name = target_class != nullptr
+                                             ? target_class->display_name
+                                             : std::string{};
+              initial_name += ' ';
+              for (int i = 0; i < 3; ++i) {
+                initial_name +=
+                    static_cast<char>('1' + RandomBelow(state.rng, 9));
+              }
+              const auto render_background = [&]() {
+                view.DrawGameFrame(platform, state, hud);
+                platform.SetCenteredPlayfield();
+                DrawBoardWindow(platform,
+                                font_cache,
+                                art,
+                                buttons,
+                                options,
+                                state,
+                                view,
+                                hud,
+                                backdrop ? backdrop->get() : nullptr,
+                                -1);
+              };
+              auto new_name = NovaUi_ShowTextEntryDialog(
+                  platform,
+                  font_cache,
+                  LoadBoardMiscString(kMiscCaptureRenamePrompt,
+                                      "Now rename this captured ship:"),
+                  initial_name,
+                  0x40,
+                  render_background);
+              if (!new_name) {
+                BoardShowOverlay(
+                    state,
+                    kMiscCaptureAbandoned,
+                    "You decided not to capture this ship after all.");
+                close_reason = "capture rename canceled";
                 break;
               }
+              state.player.ship_name = *new_name;
+              // The original calls Ui_InstallGameplayInterfaceLayout after the
+              // swap unconditionally, including the slot-allocation-failure
+              // return that shows STR# 0x7d2 0x131.
+              const bool promoted =
+                  Player_ReplaceShipWithCapturedHull(state, target, false);
+              hud.Install(platform, state);
+              state.InvalidateDerivedStatCaches();
+              if (promoted) {
+                close_reason = "target captured as player ship";
+                result.target_captured_as_player = true;
+              } else {
+                close_reason = "capture could not allocate escort slot";
+              }
+              break;
             }
             close = true;
             close_reason = "target captured as escort";

@@ -200,7 +200,7 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
   // mounted-count goes into weapon_count_by_class[weapon_id-0x80] and any
   // carried rounds (ammo_load, when > 0) into the matching secondary/ammo
   // counter. The original seeds the new ship's banks this way in
-  // Menu_RunNewGameFlow and Player_SwapShipWithEscort, then calls
+  // Menu_RunNewGameFlow and Player_ReplaceShipWithCapturedHull, then calls
   // Weapon_ReconcileOutfitPoolWithWeaponBanks to register the mounted stock
   // guns as owned outfits.
   const ShipClass *ship =
@@ -219,7 +219,7 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
       // The original seeds the secondary counter at the mounted weapon's
       // ammo_or_energy_cost_code (mode-99 carried-ship bays and out-of-range
       // codes fall back to the bank); it is NOT the weapon bank itself. See
-      // Menu_RunNewGameFlow 0x00489d70 and Player_SwapShipWithEscort
+      // Menu_RunNewGameFlow 0x00489d70 and Player_ReplaceShipWithCapturedHull
       // 0x00423fa0.
       std::size_t secondary_bank = bank;
       const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);

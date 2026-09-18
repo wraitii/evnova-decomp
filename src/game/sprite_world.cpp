@@ -510,6 +510,49 @@ const SdlTexture *ResolveFrameMask(const SpriteFrameImage &image) {
   }
   return nullptr;
 }
+
+// Decode one raw SpriteDrawOptions::tint_rgb5 channel to SDL's 0..255 color
+// mod. The original base-hull scale is `channel - base_transparency` in the
+// RGB555 blitter, clamped to the 0x20 neutral (BlitPixel_TintRgb15Span
+// 0x004736c0 / SpriteRleCommandStream_BlitTintedRgb15 0x00472900). The port
+// does not yet model base_transparency and cannot express a channel's additive
+// overflow, so this traces the multiplicative part only: values at or above
+// 0x20 become the 0x20 neutral, and the government 8-bit<<8 colors therefore
+// render untinted rather than boosted.
+std::uint8_t TintChannelToColorMod(std::int16_t channel) {
+  const int raw = static_cast<std::uint16_t>(channel);
+  const int scale = std::clamp(raw, 0, 0x20);
+  return static_cast<std::uint8_t>(scale * 255 / 0x20);
+}
+
+// Applies/clears the optional source tint around one frame draw. The scope is
+// local because the shared frame textures must not be left tinted.
+class TintScope {
+public:
+  TintScope(const SdlTexture &texture,
+            const std::optional<std::array<std::int16_t, 3>> &tint)
+      : texture_(texture), active_(tint.has_value()) {
+    if (active_) {
+      SDL_SetTextureColorMod(texture_.get(),
+                             TintChannelToColorMod((*tint)[0]),
+                             TintChannelToColorMod((*tint)[1]),
+                             TintChannelToColorMod((*tint)[2]));
+    }
+  }
+
+  ~TintScope() {
+    if (active_) {
+      SDL_SetTextureColorMod(texture_.get(), 255, 255, 255);
+    }
+  }
+
+  TintScope(const TintScope &) = delete;
+  TintScope &operator=(const TintScope &) = delete;
+
+private:
+  const SdlTexture &texture_;
+  bool active_;
+};
 } // namespace
 
 void DrawSprite(SDL_Renderer *renderer,
@@ -536,6 +579,7 @@ void DrawSprite(SDL_Renderer *renderer,
   // never use the silhouette as its own fog mask.
   const SdlTexture *fog_mask =
       opts.white_silhouette ? nullptr : sf.white_silhouette.get();
+  const TintScope tint_scope(*texture, opts.tint_rgb5);
   // Anchor-aware placement: align the frame's anchor (or the opts override) to
   // the world position -- the genuine Sprite_SetPositionFromCurrentFrameAnchor
   // math. For tile/sheet frames the stored anchor is the frame centre, so this
@@ -583,6 +627,7 @@ void DrawSprite(SDL_Renderer *renderer,
   }
   const SdlTexture *fog_mask =
       opts.white_silhouette ? nullptr : ResolveFrameMask(*image);
+  const TintScope tint_scope(*texture, opts.tint_rgb5);
   const auto [ax, ay] =
       (opts.anchor_x && opts.anchor_y)
           ? std::pair<float, float>{*opts.anchor_x, *opts.anchor_y}

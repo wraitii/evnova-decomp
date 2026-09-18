@@ -39,6 +39,21 @@ inline constexpr double kHullBlastDamageAddend = 25.0;
 // Resource four-byte type code for the ship-animation descriptor (sh\x8an).
 constexpr std::uint32_t kShipVisualResourceType = 0x73688a6e;
 
+// One resolved hull tint: the original's raw 16-bit channels (same units as
+// the global ship-paint globals). PersDef/outfit colors are 5-bit (0x20 =
+// neutral); the loader stores a government's 8-bit ShipColor as byte << 8.
+struct NovaShipTintColor {
+  std::int16_t red = 0x20;
+  std::int16_t green = 0x20;
+  std::int16_t blue = 0x20;
+};
+
+// Ghidra 0x0046e470 Ship_ResolveShipTintColor. Defaults to the global paint,
+// then for a non-player hull overrides from pers_def_slot color or the faction
+// government's ShipColor; all-zero falls back to 0x20.
+[[nodiscard]] NovaShipTintColor
+NovaShip_ResolveTintColor(const GameState &state, const Ship &ship);
+
 // Decoded sh\x8an base-image fields (Bible names in parentheses) plus the
 // rotation metadata used to index frames by heading.
 struct ShipVisualDescriptor {

@@ -137,6 +137,21 @@ NovaUi_ShowConfirmDialog(SdlPlatform &platform,
                          std::string_view message,
                          const std::function<void()> &render_background = {});
 
+// Ghidra 0x00497900 NovaUi_ShowTextConfirmCodeDialog: the shared text-entry
+// modal (DLOG 0xbb9; row 3 = prompt, row 5 = edit text, activation code 1 =
+// OK, 6 = Cancel). OK is accepted only when the text fits `max_chars`;
+// otherwise the edit field is reselected and the loop continues. Returns the
+// final text on accept, nullopt on cancel/quit or when DLOG 0xbb9 is missing.
+// Call sites: new-game ship christening, shipyard purchase confirm, and the
+// boarding-window captured-ship rename prompt.
+[[nodiscard]] std::optional<std::string>
+NovaUi_ShowTextEntryDialog(SdlPlatform &platform,
+                           NovaFontCache &font_cache,
+                           std::string_view prompt,
+                           std::string_view initial_text,
+                           std::int32_t max_chars,
+                           const std::function<void()> &render_background = {});
+
 // Maps one DITL item rect (top,left,bottom,right in the dialog's own space)
 // to an SDL_FRect in playfield coordinates by adding the window origin.
 [[nodiscard]] inline SDL_FRect ItemRect(const NovaDialogItem &item,

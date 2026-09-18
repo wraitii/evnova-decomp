@@ -9,9 +9,11 @@
 #include "game/outfit.hpp"
 #include "game/ship_ai.hpp"
 #include "game/ship_spawn.hpp"
+#include "game/ship_visual.hpp"
 #include "game/travel.hpp"
 #include "game/weapon.hpp"
 
+#include <array>
 #include <string>
 #include <string_view>
 
@@ -114,7 +116,7 @@ TEST_CASE("Capture ship swap leaves the outgoing player hull operable",
   captured.current_system_id = 3;
   captured.armor_points = 10.0F;
 
-  REQUIRE(game::Player_SwapShipWithEscort(state, captured, false));
+  REQUIRE(game::Player_ReplaceShipWithCapturedHull(state, captured, false));
   CHECK(state.player.ship_class_id == 1);
 
   const game::Ship *outgoing = nullptr;
@@ -129,6 +131,407 @@ TEST_CASE("Capture ship swap leaves the outgoing player hull operable",
   CHECK(outgoing->ai_behavior_code == 6);
   CHECK(outgoing->squad_leader_ship_slot == 0);
   CHECK_FALSE(game::NovaAiShip_IsDisabled(state, *outgoing));
+}
+
+namespace {
+
+void SetupCaptureFixture(game::GameState &state) {
+  state.scenario.ships.resize(2);
+  state.player.is_active = true;
+  state.player.ship_class_id = 0;
+  state.player.current_system_id = 3;
+  state.player.armor_points = 90.0F;
+  state.scenario.ships[0].base_armor = 90;
+  state.scenario.ships[1].base_armor = 120;
+  game::Ship &captured = state.ShipAt(1);
+  captured.is_active = true;
+  captured.ship_class_id = 1;
+  captured.ship_instance_id = 1;
+  captured.current_system_id = 3;
+  captured.armor_points = 10.0F;
+}
+
+const game::Ship *FindActiveHullByClass(const game::GameState &state,
+                                        std::int16_t class_id) {
+  for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
+    const game::Ship &ship = state.ShipAt(slot);
+    if (ship.is_active && ship.ship_class_id == class_id) {
+      return &ship;
+    }
+  }
+  return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("Capture preserves the player's credits, identity and mission fields",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.player.credits = 12'345;
+  state.player.dude_class_id = 7;
+  state.player.mission_owner_slot = 3;
+  state.player.escort_command_code = 9;
+  state.player.ai_state_code = 4;
+  state.scenario.pers_defs.resize(2);
+  state.player.pers_def_slot = 1;
+  state.scenario.pers_defs[1].alive = true;
+  state.ShipAt(1).pers_def_slot = 0;
+  state.ShipAt(1).credits = 999;
+  state.scenario.pers_defs[0].alive = true;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.player.credits == 12'345);
+  CHECK(state.player.dude_class_id == 7);
+  CHECK(state.player.mission_owner_slot == 3);
+  CHECK(state.player.escort_command_code == 9);
+  CHECK(state.player.ai_state_code == 4);
+  CHECK(state.player.pers_def_slot == 1);
+  CHECK_FALSE(state.scenario.pers_defs[0].alive);
+}
+
+TEST_CASE("Capture paint uses the captured personality colour",
+          "[landed_store][capture][tint]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.ship_paint_rgb5 = {1, 2, 3};
+  state.scenario.pers_defs.resize(1);
+  state.ShipAt(1).pers_def_slot = 0;
+  state.scenario.pers_defs[0].color_r5 = 5;
+  state.scenario.pers_defs[0].color_g5 = 11;
+  state.scenario.pers_defs[0].color_b5 = 21;
+  // A personality color takes priority over the faction government color.
+  state.scenario.governments.resize(1);
+  state.scenario.governments[0].ship_red = 0x80;
+  state.ShipAt(1).faction_or_government_id = 0;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.ship_paint_rgb5 == std::array<std::uint16_t, 3>{5, 11, 21});
+  // The player's per-frame tint resolves from that written paint.
+  const game::NovaShipTintColor tint =
+      game::NovaShip_ResolveTintColor(state, state.player);
+  CHECK(tint.red == 5);
+  CHECK(tint.green == 11);
+  CHECK(tint.blue == 21);
+}
+
+TEST_CASE("Capture paint stores the government 8-bit ShipColor << 8",
+          "[landed_store][capture][tint]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.governments.resize(1);
+  state.scenario.governments[0].ship_red = 0xff;
+  state.scenario.governments[0].ship_green = 0x80;
+  state.scenario.governments[0].ship_blue = 0x01;
+  state.ShipAt(1).pers_def_slot = -1;
+  state.ShipAt(1).faction_or_government_id = 0;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.ship_paint_rgb5 ==
+        std::array<std::uint16_t, 3>{0xff00, 0x8000, 0x0100});
+}
+
+TEST_CASE("Ship tint falls back to neutral 0x20 when everything is zero",
+          "[landed_store][capture][tint]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.ship_paint_rgb5 = {0, 0, 0};
+  // The captured hull has no personality and no faction color, so the
+  // override resolves all-zero and the resolver substitutes the 0x20 neutral.
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.ship_paint_rgb5 ==
+        std::array<std::uint16_t, 3>{0x20, 0x20, 0x20});
+}
+
+TEST_CASE("Player ship tint reads the global paint for slot 0",
+          "[landed_store][capture][tint]") {
+  game::GameState state;
+  state.player.ship_instance_id = 0;
+  state.ship_paint_rgb5 = {3, 17, 29};
+  const game::NovaShipTintColor tint =
+      game::NovaShip_ResolveTintColor(state, state.player);
+  CHECK(tint.red == 3);
+  CHECK(tint.green == 17);
+  CHECK(tint.blue == 29);
+}
+
+// 0x00427770 decodes the FIRST ModType-43 slot's 15-bit ModVal into the 5-bit
+// global paint, even when the outfit has later paint slots.
+TEST_CASE("Paint outfit decodes only the first ModType-43 slot",
+          "[landed_store][tint]") {
+  game::GameState state;
+  state.scenario.outfits.resize(1);
+  state.inventory.outfit_owned_count.fill(0);
+  game::Outfit &outfit = state.scenario.outfits[0];
+  const auto kPaint = static_cast<std::int16_t>(game::OutfitEffect::kPaint);
+  outfit.mod_type = kPaint;
+  outfit.mod_val = static_cast<std::int16_t>((0x1f << 10) | (0 << 5) | 0);
+  outfit.alt_mod_types = {kPaint, 0, 0};
+  outfit.alt_mod_vals = {static_cast<std::int16_t>(0 | (0 << 5) | 0x1f), 0, 0};
+
+  REQUIRE(game::NovaOutfit_GrantOutfitToPlayer(state, 0));
+  CHECK(state.ship_paint_rgb5 == std::array<std::uint16_t, 3>{0x1f, 0, 0});
+}
+
+TEST_CASE("Capture releases only followers of the captured hull",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.ships[1].default_ai_behavior = 4;
+  game::Ship &captured_follower = state.ShipAt(2);
+  captured_follower.is_active = true;
+  captured_follower.ship_class_id = 1;
+  captured_follower.ship_instance_id = 2;
+  captured_follower.current_system_id = 3;
+  captured_follower.squad_leader_ship_slot = 1;
+  captured_follower.armor_points = 10.0F;
+  game::Ship &player_follower = state.ShipAt(3);
+  player_follower.is_active = true;
+  player_follower.ship_class_id = 1;
+  player_follower.ship_instance_id = 3;
+  player_follower.current_system_id = 3;
+  player_follower.squad_leader_ship_slot = 0;
+  player_follower.armor_points = 10.0F;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(captured_follower.squad_leader_ship_slot == -1);
+  CHECK(captured_follower.ai_behavior_code == 4);
+  CHECK(player_follower.squad_leader_ship_slot == 0);
+}
+
+TEST_CASE("Capture truncates both hull headings from radians to degrees",
+          "[landed_store][capture]") {
+  constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.player.heading = 1.5F * kDegToRad;
+  state.ShipAt(1).heading = 90.0F * kDegToRad;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.player.ai_desired_heading_deg == 90);
+  const game::Ship *outgoing = FindActiveHullByClass(state, 0);
+  REQUIRE(outgoing != nullptr);
+  CHECK(outgoing->ai_desired_heading_deg == 1);
+}
+
+TEST_CASE("Undamaged capture swaps cargo between the two hulls",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.inventory.cargo_bins[0] = 25;
+  state.ShipAt(1).cargo_bins[0] = 7;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.inventory.cargo_bins[0] == 7);
+  const game::Ship *outgoing = FindActiveHullByClass(state, 0);
+  REQUIRE(outgoing != nullptr);
+  CHECK(outgoing->cargo_bins[0] == 25);
+}
+
+TEST_CASE("Damaged capture scales player cargo and junk into the outgoing hull",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.ships[0].cargo_holds = 40;
+  state.scenario.ships[1].cargo_holds = 40;
+  state.scenario.ships[1].default_ai_behavior = 1;
+  state.inventory.cargo_bins[0] = 100;
+  state.inventory.junk_counts[0] = 100;
+  // Denominator 40 (player) + 40 (escort slot 2) + 40 (the freshly allocated
+  // outgoing replacement itself, which is already active with leader 0 and
+  // behavior 6 — the original's inline denominator counts it too); recipient
+  // capacity 40, so ratio 1/3 and a third of each holding transfers.
+  game::Ship &escort = state.ShipAt(2);
+  escort.is_active = true;
+  escort.ship_class_id = 1;
+  escort.ship_instance_id = 2;
+  escort.current_system_id = 3;
+  escort.squad_leader_ship_slot = 0;
+  escort.ai_behavior_code = 6;
+  escort.mission_fleet_slot = -1;
+  escort.armor_points = 10.0F;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), true));
+  CHECK(state.inventory.cargo_bins[0] == 0);
+  CHECK(state.inventory.junk_counts[0] == 67);
+  const game::Ship *outgoing = FindActiveHullByClass(state, 0);
+  REQUIRE(outgoing != nullptr);
+  CHECK(outgoing->cargo_bins[0] == 33);
+  CHECK(outgoing->squad_leader_ship_slot == -1);
+  CHECK(outgoing->ai_behavior_code == -1);
+  CHECK(state.player.squad_leader_ship_slot == -1);
+  CHECK(state.player.ai_behavior_code == -1);
+}
+
+TEST_CASE("Capture merges the captured hull's carried weapons and ammo",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.weapons.resize(0x100);
+  state.scenario.outfits.resize(8);
+  state.scenario.outfits[5].mod_type = 1; // weapon bank 0
+  state.scenario.outfits[5].mod_val = 0;
+  state.scenario.outfits[6].mod_type = 3; // ammo bank 0x10
+  state.scenario.outfits[6].mod_val = 0x10;
+  state.ShipAt(1).npc_weapon_count_by_class[0] = 2;
+  state.ShipAt(1).npc_weapon_secondary_count_by_class[0] = 5;
+  state.ShipAt(1).npc_weapon_banks_ship_class = 1;
+  state.scenario.weapons[0].ammo_type = 0x10;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.weapon_count_by_class[0] == 2);
+  CHECK(state.weapon_secondary_count_by_class[0x10 * 100] == 5);
+}
+
+TEST_CASE("Damaged-capture secondary copy tests the source bank, not the ammo "
+          "bank",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.weapons.resize(0x100);
+  state.scenario.outfits.resize(8);
+  // Persistent weapon outfit keeps player bank 0's secondary at 1, so the
+  // captured secondary must NOT be copied to the remapped ammo bank.
+  state.scenario.outfits[5].mod_type = 1;
+  state.scenario.outfits[5].mod_val = 0;
+  state.scenario.outfits[5].persistent_on_ship_swap = true;
+  state.inventory.outfit_owned_count[5] = 1;
+  state.weapon_count_by_class[0] = 1;
+  state.weapon_secondary_count_by_class[0] = 1;
+  state.ShipAt(1).npc_weapon_secondary_count_by_class[0] = 5;
+  state.ShipAt(1).npc_weapon_banks_ship_class = 1;
+  state.scenario.weapons[0].ammo_type = 0x10;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.weapon_secondary_count_by_class[0x10 * 100] == 0);
+}
+
+TEST_CASE("Capture keeps a mode-99 captured secondary in its own bank",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.weapons.resize(0x100);
+  state.scenario.outfits.resize(8);
+  // Mode-99 bay ammo is backed by an ammo outfit at the same bank, so the
+  // merge's leftover materializes and the rebuild restores it.
+  state.scenario.outfits[6].mod_type = 3;
+  state.scenario.outfits[6].mod_val = 0;
+  state.scenario.weapons[0].weapon_mode_code = 99;
+  state.scenario.weapons[0].ammo_type = 0x10; // ignored for mode 99
+  state.ShipAt(1).npc_weapon_secondary_count_by_class[0] = 5;
+  state.ShipAt(1).npc_weapon_banks_ship_class = 1;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.weapon_secondary_count_by_class[0] == 5);
+  CHECK(state.weapon_secondary_count_by_class[0x10 * 100] == 0);
+}
+
+TEST_CASE("Captured secondary remap overwrites a non-empty destination bank",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.weapons.resize(0x100);
+  state.scenario.outfits.resize(8);
+  // Persistent weapon bank 0 keeps its player secondary across the clear.
+  state.scenario.outfits[5].mod_type = 1;
+  state.scenario.outfits[5].mod_val = 0;
+  state.scenario.outfits[5].persistent_on_ship_swap = true;
+  state.inventory.outfit_owned_count[5] = 1;
+  state.weapon_count_by_class[0] = 1;
+  state.weapon_secondary_count_by_class[0] = 1;
+  // An ammo outfit at destination bank 0 lets the merge's leftover survive.
+  state.scenario.outfits[6].mod_type = 3;
+  state.scenario.outfits[6].mod_val = 0;
+  // Captured source bank 1 remaps onto destination ammo bank 0. The original
+  // gates on the SOURCE bank being empty and then writes the destination
+  // unconditionally, overwriting the persistent round (5, not 1+5=6).
+  state.ShipAt(1).npc_weapon_secondary_count_by_class[1] = 5;
+  state.ShipAt(1).npc_weapon_banks_ship_class = 1;
+  state.scenario.weapons[1].ammo_type = 0;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.weapon_secondary_count_by_class[0] == 5);
+}
+
+TEST_CASE("Outgoing hull NPC banks seed from the old class stock weapons",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.ships[0].stock_weapons[0] =
+      game::ShipDefaultWeaponBank{0x80, 3, 7};
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  const game::Ship *outgoing = FindActiveHullByClass(state, 0);
+  REQUIRE(outgoing != nullptr);
+  CHECK(outgoing->npc_weapon_count_by_class[0] == 3);
+  CHECK(outgoing->npc_weapon_secondary_count_by_class[0] == 7);
+  CHECK(outgoing->npc_weapon_banks_ship_class == 0);
+}
+
+TEST_CASE("Replacement hull derives afterburner, mining and voice fields",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  // Old class: always-afterburner flag, inherent-government voice override and
+  // a built-in mining-scoop default outfit.
+  state.scenario.ships[0].capability_flags = 0x40;
+  state.scenario.ships[0].inherent_attributes_govt = 0;
+  state.scenario.ships[0].default_outfit_ids[0] = 0x80;
+  state.scenario.ships[0].default_outfit_counts[0] = 1;
+  state.scenario.governments.resize(1);
+  state.scenario.governments[0].voice_type_mode = 1;
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].mod_type = 0x1f;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  const game::Ship *outgoing = FindActiveHullByClass(state, 0);
+  REQUIRE(outgoing != nullptr);
+  CHECK(outgoing->afterburner_latch == 1);
+  CHECK(outgoing->mining_scoop_active == 1);
+  CHECK(outgoing->voice_type_mode == 1);
+}
+
+TEST_CASE("Outgoing hull armor repair uses the outgoing class's flags",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  // Old (outgoing) hull is a 0x10-flag hull: repair fraction 0.1. The captured
+  // hull has no such flag, so using it would give 0.3333 instead.
+  state.scenario.ships[0].capability_flags = 0x10;
+  state.player.armor_points = 0.0F;
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  const game::Ship *outgoing = FindActiveHullByClass(state, 0);
+  REQUIRE(outgoing != nullptr);
+  CHECK(outgoing->armor_points == Catch::Approx(90.0F * 0.1F + 1.0F));
+}
+
+TEST_CASE("Capture runs OnRetire then OnCapture reaction scripts",
+          "[landed_store][capture]") {
+  game::GameState state;
+  SetupCaptureFixture(state);
+  state.scenario.ships[0].on_retire_expr = "B100";
+  state.scenario.ships[1].on_capture_expr = "B101";
+
+  REQUIRE(
+      game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
+  CHECK(state.control.ControlBit(100));
+  CHECK(state.control.ControlBit(101));
 }
 
 TEST_CASE("Cargo transfer uses the unclamped same-system fleet capacity",

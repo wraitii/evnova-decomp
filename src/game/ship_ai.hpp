@@ -601,6 +601,11 @@ void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship);
 [[nodiscard]] bool NovaShip_CanShipUseAfterburner(GameState &state,
                                                   const Ship &ship);
 
+// Ghidra 0x00423fa0 / 0x00415cb0 shared tail: roll voice_type_mode 0..1, then
+// override it from the ship class's inherent_attributes_govt Government voice
+// code when both the class government and the voice code are present.
+void NovaShip_ApplyInherentGovernmentVoice(GameState &state, Ship &ship);
+
 // Ghidra 0x00402810 Ship_ResetShipAiBehaviorRuntimeFields: resets the core
 // per-behavior runtime slots (ai_state_code/ai_control_mode, travel target
 // cache, escort mirror cache, resolved-target slot).

@@ -1,9 +1,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <SDL3/SDL.h>
+
 #include <memory>
+#include <vector>
 
 #include "game/sprite_world.hpp"
+#include "sdl_platform.hpp"
 
 namespace game {
 
@@ -84,6 +88,121 @@ TEST_CASE("distance brightness matches the murk fog formula",
   CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 1.9F, 0.0F) == 0);
   // Symmetric in the axis deltas (both axes contribute).
   CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 0.0F, -100.0F) == 12);
+}
+
+// The optional SpriteDrawOptions.tint_rgb5 color mod (SDL approximation of the
+// original RGB555 hull tint): a white frame multiplied by 0x10/0x20/0x00 per
+// channel must read back as 127/255/0.
+TEST_CASE("sprite tint color mod multiplies the frame channels",
+          "[sprite][tint]") {
+  std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface{
+      SDL_CreateSurface(40, 40, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface};
+  REQUIRE(surface);
+  std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer{
+      SDL_CreateSoftwareRenderer(surface.get()), SDL_DestroyRenderer};
+  REQUIRE(renderer);
+
+  const std::vector<std::uint8_t> white(8 * 8 * 4, 0xff);
+  auto texture = SdlTexture::Create(renderer.get(), 8, 8, white);
+  REQUIRE(texture);
+  Sprite sprite;
+  REQUIRE(sprite.AddFrame(Sprite_InitFrameImage(
+              std::move(texture), 0.0F, 0.0F, 8, 8)) >= 0);
+
+  REQUIRE(SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255));
+  REQUIRE(SDL_RenderClear(renderer.get()));
+  SpriteDrawOptions opts;
+  opts.tint_rgb5 = std::array<std::int16_t, 3>{0x10, 0x20, 0x00};
+  DrawSprite(renderer.get(), sprite, 0, 0.0F, 0.0F, 0.0F, 0.0F, 40, 40, opts);
+  REQUIRE(SDL_FlushRenderer(renderer.get()));
+
+  SDL_Color color{};
+  REQUIRE(SDL_ReadSurfacePixel(
+      surface.get(), 22, 22, &color.r, &color.g, &color.b, &color.a));
+  CHECK(color.r == 127);
+  CHECK(color.g == 255);
+  CHECK(color.b == 0);
+}
+
+// High-bit government colors are `byte << 8` (e.g. 0x8000). The raw channel is
+// unsigned; a signed interpretation clamped it to black. The port currently
+// reproduces only the multiplicative part and clamps above-neutral channels, so
+// this must read back as the untinted frame (not black).
+TEST_CASE("sprite tint keeps high-bit channels out of the black clamp",
+          "[sprite][tint]") {
+  std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface{
+      SDL_CreateSurface(40, 40, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface};
+  REQUIRE(surface);
+  std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer{
+      SDL_CreateSoftwareRenderer(surface.get()), SDL_DestroyRenderer};
+  REQUIRE(renderer);
+
+  const std::vector<std::uint8_t> white(8 * 8 * 4, 0xff);
+  auto texture = SdlTexture::Create(renderer.get(), 8, 8, white);
+  REQUIRE(texture);
+  Sprite sprite;
+  REQUIRE(sprite.AddFrame(Sprite_InitFrameImage(
+              std::move(texture), 0.0F, 0.0F, 8, 8)) >= 0);
+
+  REQUIRE(SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255));
+  REQUIRE(SDL_RenderClear(renderer.get()));
+  SpriteDrawOptions opts;
+  opts.tint_rgb5 = std::array<std::int16_t, 3>{
+      static_cast<std::int16_t>(0x8000), 0x20, 0x20};
+  DrawSprite(renderer.get(), sprite, 0, 0.0F, 0.0F, 0.0F, 0.0F, 40, 40, opts);
+  REQUIRE(SDL_FlushRenderer(renderer.get()));
+
+  SDL_Color color{};
+  REQUIRE(SDL_ReadSurfacePixel(
+      surface.get(), 22, 22, &color.r, &color.g, &color.b, &color.a));
+  CHECK(color.r == 255);
+  CHECK(color.g == 255);
+  CHECK(color.b == 255);
+}
+
+// The tint is applied per draw and restored afterwards, so a later untinted
+// draw of the same shared frame texture is not left modulated.
+TEST_CASE("sprite tint restores the shared texture modulation",
+          "[sprite][tint]") {
+  std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface{
+      SDL_CreateSurface(40, 40, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface};
+  REQUIRE(surface);
+  std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer{
+      SDL_CreateSoftwareRenderer(surface.get()), SDL_DestroyRenderer};
+  REQUIRE(renderer);
+
+  const std::vector<std::uint8_t> white(8 * 8 * 4, 0xff);
+  auto texture = SdlTexture::Create(renderer.get(), 8, 8, white);
+  REQUIRE(texture);
+  Sprite sprite;
+  REQUIRE(sprite.AddFrame(Sprite_InitFrameImage(
+              std::move(texture), 0.0F, 0.0F, 8, 8)) >= 0);
+
+  REQUIRE(SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255));
+  REQUIRE(SDL_RenderClear(renderer.get()));
+  SpriteDrawOptions tinted;
+  tinted.tint_rgb5 = std::array<std::int16_t, 3>{0x10, 0x10, 0x10};
+  DrawSprite(renderer.get(), sprite, 0, 0.0F, 0.0F, 0.0F, 0.0F, 40, 40, tinted);
+
+  REQUIRE(SDL_RenderClear(renderer.get()));
+  DrawSprite(renderer.get(),
+             sprite,
+             0,
+             0.0F,
+             0.0F,
+             0.0F,
+             0.0F,
+             40,
+             40,
+             SpriteDrawOptions{});
+  REQUIRE(SDL_FlushRenderer(renderer.get()));
+
+  SDL_Color color{};
+  REQUIRE(SDL_ReadSurfacePixel(
+      surface.get(), 22, 22, &color.r, &color.g, &color.b, &color.a));
+  CHECK(color.r == 255);
+  CHECK(color.g == 255);
+  CHECK(color.b == 255);
 }
 
 } // namespace game

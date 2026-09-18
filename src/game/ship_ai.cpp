@@ -2054,6 +2054,23 @@ bool NovaShip_CanShipUseAfterburner(GameState &state, const Ship &ship) {
   return false;
 }
 
+// Ghidra 0x00423fa0 (replacement init) and 0x00415cb0 (captured escort reset)
+// share this tail: random voice mode, then the class inherent-government
+// override.
+void NovaShip_ApplyInherentGovernmentVoice(GameState &state, Ship &ship) {
+  ship.voice_type_mode = RandomBelow(state.rng, 2);
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr || cls->inherent_attributes_govt == -1) {
+    return;
+  }
+  const Government *govt =
+      state.scenario.GovernmentByIndex(cls->inherent_attributes_govt);
+  if (govt != nullptr && govt->voice_type_mode != -1) {
+    ship.voice_type_mode = govt->voice_type_mode;
+  }
+}
+
 // Ghidra 0x00402810 Ship_ResetShipAiBehaviorRuntimeFields.
 void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
   ship.ai_state_code = 0;
