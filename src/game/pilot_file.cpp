@@ -256,7 +256,9 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   state.player_combat_rating_points = pilot_file.player_combat_rating_points;
   state.player.ship_class_id = pilot_file.ship_class_id;
   state.player.current_system_id = pilot_file.current_system_id;
-  state.player.active_weapon_bank_slot = pilot_file.active_weapon_bank_slot;
+  // ShipState.active_weapon_bank_slot (+0x72) is unsaved runtime state; the
+  // pre-load Ship_ResetPlayerShipState (0x004b3350) supplies -1 and load must
+  // preserve it.
   state.date = pilot_file.date;
   state.date_prefix = pilot_file.date_prefix;
   state.date_suffix = pilot_file.date_suffix;
@@ -427,7 +429,6 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.date_prefix = state.date_prefix;
   out.date_suffix = state.date_suffix;
   out.ship_paint_rgb5 = state.ship_paint_rgb5;
-  out.active_weapon_bank_slot = state.player.active_weapon_bank_slot;
   out.timed_action_counter = state.player.timed_action_counter;
   out.death_timer_active = state.player.death_timer_active;
   out.shield_points = state.player.shield_points;

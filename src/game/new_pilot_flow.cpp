@@ -948,7 +948,6 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   record.date_suffix = state.date_suffix;
   record.ship_class_id = state.player.ship_class_id;
   record.current_system_id = state.player.current_system_id;
-  record.active_weapon_bank_slot = state.player.active_weapon_bank_slot;
   record.timed_action_counter = state.player.timed_action_counter;
   record.death_timer_active = state.player.death_timer_active;
   record.shield_points = state.player.shield_points;
