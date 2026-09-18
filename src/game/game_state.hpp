@@ -387,9 +387,19 @@ struct Ship {
   // Ghidra ShipState +0xC8E4. Phase advanced by Ship_HandleShip's banking
   // animation and mapped to ai_turn_bias_dir (+0xC8F8).
   float turn_bank_animation_phase = 0.0F; // +0xC8E4
+  // Ghidra ShipState +0xC8F4. Alternate-overlay sheet set index: the sh\x8an
+  // AltImageID sheet is drawn over the hull at
+  // alternate_sprite_cycle_index * FramesPer + heading_frame, advancing one set
+  // per AnimDelay while the sheet exists (Ship_UpdateVisualState 0x00428340).
+  std::int16_t alternate_sprite_cycle_index = 0; // +0xC8F4
   // Ghidra ShipState +0xC8F6. Sprite animation cycle initialized from the
   // class skill-variance range.
   std::int16_t sprite_animation_cycle_index = 0; // +0xC8F6
+  // Ghidra ShipState +0xA8. 60 Hz tick (NovaTime_GetTickCount60Hz) of the last
+  // weapon fire; Ship_UpdateVisualState's Flags-0x02/0x80 fold arm uses
+  // `last_weapon_fire_time_ms + 0x2d <= now` to re-trigger the unfold, and the
+  // fire sites fold the ship and store the current tick here.
+  std::uint32_t last_weapon_fire_time_ms = 0; // +0xA8
   // Ghidra ShipState +0xC8E8. Weapon-effects sprite flash level 0..32, raised
   // to 32 at the fire site when the fired WeaponDef carries flags_secondary
   // 0x200 and faded per tick by ShipClass.weapon_glow_decay_rate while
@@ -904,6 +914,12 @@ struct ActiveShot {
   std::int16_t damage_decay_points = 0;
   // Ghidra ShotState.impact_variant, used later by impact visual/effect code.
   std::int8_t impact_variant = 0;
+  // The sprite container's above-ships flag, fixed at spawn by
+  // Shot_SpawnShotFromWeapon 0x0041fd30: a mode-4 shot from a ship whose class
+  // sets Flags3 0x0040 lives in g_shot_container_mode4_alt (the original's
+  // layer 12, drawn above the ships), while every other shot lives in the
+  // mode9/mode1/default containers (layers 7-9, below the ships).
+  bool draws_above_ships = false;
   // Ghidra ShotState.linked_shot_generation (+0x36), zeroed by
   // Shot_SpawnShotFromWeapon and set to (parent + 1) by
   // Shot_SpawnLinkedShotsOnImpact. Compared against the weapon's

@@ -60,7 +60,7 @@ struct ShipVisualDescriptor {
   // (Ghidra ShipClass_LoadShipClassVisualAndLaunchData gates it on
   // AltImageID > 0 && AltSetCount > 0); the basic sets themselves all live in
   // the base sheet (Bible BaseSetCount). -1/0 = none on most classes.
-  std::uint16_t alt_image_id = 0;
+  std::int16_t alt_image_id = -1;
   std::uint16_t alt_mask_id = 0;
   // AltSetCount (+0x10): sprite sets of the alternate sheet (Flags 0x0002
   // cycling); NOT extra rows appended to the base sheet.
@@ -106,6 +106,17 @@ struct ShipVisualDescriptor {
   std::int16_t weapon_mask_id = 0;  // WeapMaskID (+0x28)
   std::uint16_t weapon_x_size = 0;  // WeapXSize (+0x2a)
   std::uint16_t weapon_y_size = 0;  // WeapYSize (+0x2c)
+
+  // Shield-bubble layer (Bible ShieldImageID). Loader 0x004b4ee0 reads
+  // image/mask/x/y at +0x40/+0x42/+0x44/+0x46 and builds the per-class shield
+  // sprite set (a number of frames equal to 1, FramesPer, or
+  // BaseSetCount*FramesPer). Ship_UpdateVisualState 0x00428340 drives its
+  // brightness from shield_bubble_flash_intensity. The clean-room renderer
+  // loads the sheet but the draw stays deferred (see SpaceflightView).
+  std::int16_t shield_image_id = 0; // ShieldImageID (+0x40)
+  std::int16_t shield_mask_id = 0;  // ShieldMaskID (+0x42)
+  std::uint16_t shield_x_size = 0;  // ShieldXSize (+0x44)
+  std::uint16_t shield_y_size = 0;  // ShieldYSize (+0x46)
 
   // Running-lights blink program. Ghidra's loader names sh\x8an +0x36..+0x3e
   // gun/turret/guided exit positions, but every consumer is the light blink
@@ -165,6 +176,33 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship);
 // Runs the once-per-wreck bookkeeping and deactivates the hull; exported for
 // the player-ship death path, which ticks its own presentation timer.
 void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship);
+
+// Ghidra 0x00428340 Ship_UpdateVisualState, sprite-frame composition slice
+// (all hulls). Advances the flags-selected base-row state machines and the
+// separate AltImageID overlay cycle. The renderer composes the displayed
+// base/alt frame from the resulting fields at draw time, matching the
+// original's Sprite_SetCurrentFrame writes.
+//
+// Row selection (only active when the base sheet has more than one set, i.e.
+// ShipClassDef.base_set_count >= 2):
+//   0x0001 banking     -> ai_turn_bias_dir (row 1 left / row 2 right)
+//   0x0002 fold/unfold -> waypoint_arrival_marker_b, step timer
+//                         turn_bank_animation_phase, AnimDelay per step
+//   0x0004 carry       -> row 1 while a launch bay is loaded (draw time)
+//   0x0008 combat/part -> sprite_animation_cycle_index, step timer
+//                         sprite_animation_timer, AnimDelay per step
+// The first four are mutually exclusive. The alt sheet cycles in lockstep with
+// the 0x0008 arm when that arm is active, otherwise on its own AnimDelay timer.
+void NovaShip_TickSpriteAnimation(GameState &state,
+                                  Ship &ship,
+                                  float elapsed_ticks);
+
+// Composes the base sprite row for the class's Flags from the ship's current
+// animation state. Pure; called by the renderer so the frame stays in sync
+// with the tick above without caching a row. Returns 0 for a single base set.
+[[nodiscard]] int ComposeShipBaseRow(const GameState &state,
+                                     const Ship &ship,
+                                     const ShipClass &cls);
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, weapon-effects + running-lights
 // slice (all hulls). Decays the weapon-effects sprite flash level set at the

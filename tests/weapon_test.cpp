@@ -1051,4 +1051,38 @@ TEST_CASE("point defense prioritizes and damages an inbound guided shot",
   CHECK(state.active_shots[0].consumed);
 }
 
+TEST_CASE("mode-4 shots follow the owner class turreted-above container flag",
+          "[weapon][render]") {
+  // Bible Ship Flags3 0x0040: "ship's turreted shots appear above the ship".
+  // Shot_SpawnShotFromWeapon 0x0041fd30 places a mode-4 shot in the layer-12
+  // mode4_alt container when the owner class sets it, otherwise the default
+  // (below-ships) container.
+  GameState state;
+  state.scenario.ships.assign(1, ShipClass{});
+  state.scenario.weapons.assign(1, Weapon{});
+  state.scenario.weapons[0].weapon_mode_code = 4;
+  state.scenario.weapons[0].sprite_id = 0;
+  state.scenario.weapons[0].projectile_speed = 100.0F;
+  state.scenario.weapons[0].lifetime_ticks = 10;
+  state.player.ship_class_id = 0;
+  state.player.ship_instance_id = 0;
+
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK_FALSE(state.active_shots[0].draws_above_ships);
+
+  state.scenario.ships[0].availability_flags = 0x0040;
+  state.active_shots.clear();
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].draws_above_ships);
+
+  // A non-mode-4 weapon never uses the above-ships container.
+  state.scenario.weapons[0].weapon_mode_code = 1;
+  state.active_shots.clear();
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK_FALSE(state.active_shots[0].draws_above_ships);
+}
+
 } // namespace game

@@ -115,25 +115,16 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
 }
 
 // Ghidra Ship_UpdateVisualState (0x00428340) frame composition: the displayed
-// index is row * frames_per_rotation + heading_frame. Row 0 is the straight-
-// flight rotation grid; for banking classes (sh\x8an Flags & 1) the sprite's
-// alternate rows show the bank-left (row 1) / bank-right (row 2) cycle chosen
-// by ai_turn_bias_dir (+0xc8f8). The row is clamped to the loaded rows so a
-// class without an alt sheet falls back to row 0.
+// index is row * frames_per_rotation + heading_frame. The row comes from
+// ComposeShipBaseRow (banking / fold / carry / combat-sequence flags) and is
+// clamped to the loaded rows so a sheet shorter than the flags imply falls
+// back safely.
 [[nodiscard]] int ComposeShipFrameIndex(const Ship &ship,
-                                        std::uint16_t sprite_behavior_flags,
+                                        int row,
                                         int frames_per_rotation,
                                         int row_count) {
-  int row = 0;
-  if ((sprite_behavior_flags & 1U) != 0U) {
-    if (ship.ai_turn_bias_dir < 0) {
-      row = 1;
-    } else if (ship.ai_turn_bias_dir > 0) {
-      row = 2;
-    }
-  }
-  row = std::clamp(row, 0, std::max(1, row_count) - 1);
-  return row * frames_per_rotation +
+  const int clamped_row = std::clamp(row, 0, std::max(1, row_count) - 1);
+  return clamped_row * frames_per_rotation +
          FrameForHeading(ship.heading, frames_per_rotation);
 }
 
@@ -716,137 +707,64 @@ ShipEmergencePresentation NovaShip_EmergencePresentation(const Ship &ship) {
 
 bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
                                        GameState &state) {
+  // The player uses the same per-class sprite cache as the NPCs; a class
+  // change (shipyard purchase / capture) simply loads the new class entry.
   const std::int16_t player_class =
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80);
-  if (player_sprite_ship_class_id_ == player_class && !ship_.frames.empty()) {
-    return true;
-  }
-  if (player_sprite_ship_class_id_ != player_class) {
-    ship_ = {};
-    glow_ = {};
-    light_ = {};
-    weapon_ = {};
-    has_glow_ = false;
-    has_light_ = false;
-    has_weapon_ = false;
-    glow_last_drawn_ = false;
-    player_sprite_ship_class_id_ = player_class;
-  }
-  const auto *ship_class = state.scenario.Ship(player_class);
-  if (!ship_class) {
-    NovaLog::Warn("ship sprite: no ship class {:#x} in scenario tables",
-                  static_cast<unsigned>(player_class));
-    return false;
-  }
-  // The sh\x8an descriptor id matches the ship class id.
-  const auto visual_data = NovaResource_Load(
-      kShipVisualResourceType, static_cast<std::uint16_t>(player_class));
-  if (!visual_data) {
-    NovaLog::Warn("ship sprite: no sh.x9an descriptor for class '{}'",
-                  ship_class->display_name);
-    return false;
-  }
-  const auto visual = DecodeShipVisualDescriptor(*visual_data);
-  if (!visual) {
-    NovaLog::Warn("ship sprite: malformed sh.x9an descriptor for class '{}'",
-                  ship_class->display_name);
-    return false;
-  }
-  SDL_Renderer *const renderer = platform.renderer();
-  // Bare rl\x91D ship sheets load through the shared sheet decoder.
-  auto base = SpriteAsset::LoadSheet(renderer, visual->base_image_id);
-  if (!base) {
-    NovaLog::Warn("ship sprite: no usable rl.x91D sheet {} for class '{}'",
-                  visual->base_image_id,
-                  ship_class->display_name);
-    return false;
-  }
-  ship_ = std::move(*base);
-  ship_frames_per_rotation_ = visual->frames_per_rotation;
-  ship_sprite_behavior_flags_ = visual->sprite_behavior_flags;
-  // Basic sprite sets are rows in one rl\x91D sheet (Bible BaseSetCount); the
-  // shuttle's 108 frames are three rows of 36. sh\x8an AltImageID names a
-  // separate sheet used only by the Flags 0x0002 cycler, not another base row.
-  ship_row_count_ = std::max(1, ship_.frame_count / ship_frames_per_rotation_);
-
-  // Engine-glow layer (GlowImageID). The original loads it into the per-class
-  // glow sprite set sharing the base's rotation grid; it is drawn over the
-  // base with a thrust-driven alpha (see Draw). Running-lights (LightImageID)
-  // and weapon-effects (WeapImageID) layers share the same grid and are driven
-  // by Ship.light_intensity / Ship.weapon_sprite_flash_level.
-  LoadShipVisualLayer(renderer,
-                      visual->engine_glow_image_id,
-                      "engine glow",
-                      ship_class->display_name,
-                      ship_.frame_count,
-                      glow_,
-                      has_glow_);
-  LoadShipVisualLayer(renderer,
-                      visual->light_image_id,
-                      "running lights",
-                      ship_class->display_name,
-                      ship_.frame_count,
-                      light_,
-                      has_light_);
-  LoadShipVisualLayer(renderer,
-                      visual->weapon_image_id,
-                      "weapon effects",
-                      ship_class->display_name,
-                      ship_.frame_count,
-                      weapon_,
-                      has_weapon_);
-
-  NovaLog::Info("ship sprite loaded for '{}': {}x{} x{} frames ({} set(s))",
-                ship_class->display_name,
-                ship_.tile_width,
-                ship_.tile_height,
-                ship_.frame_count,
-                visual->base_set_count);
-  return true;
+  const ShipSpriteSet *set = ShipSprites(platform, player_class);
+  return set != nullptr && !set->base.frames.empty();
 }
 
-// Loads (and caches) an NPC ship's heading-rotation sheet and engine-glow layer
-// for a ship class resource id. This is the general form of EnsureShipSprite's
-// base load; the player's call keeps its own glow/muzzle handling on top of the
-// same sheet. NPC glow uses the class's GlowImageID (the same sheet the player
-// draws), sharing the base's rotation grid; a class with no glow sheet just
-// draws base-only.
-const SpaceflightView::NpcShipSprite *
-SpaceflightView::ShipClassSprite(SdlPlatform &platform,
-                                 std::int16_t ship_class_id) {
-  const auto cached = npc_ship_sprites_.find(ship_class_id);
-  if (cached != npc_ship_sprites_.end()) {
-    return &cached->second;
+// Loads (and caches) a ship class's sh\x8an sprite layers for a class resource
+// id. Covers the base hull plus the alt, engine-glow, running-lights,
+// weapon-effects and shield overlay sheets the class descriptor names; the
+// player and NPCs share the cache. Returns a pointer to the cached entry, or
+// null when the class/base sheet cannot be loaded.
+const SpaceflightView::ShipSpriteSet *
+SpaceflightView::ShipSprites(SdlPlatform &platform,
+                             std::int16_t ship_class_id) {
+  const auto cached = ship_sprites_.find(ship_class_id);
+  if (cached != ship_sprites_.end()) {
+    return cached->second.base.frames.empty() ? nullptr : &cached->second;
   }
 
-  NpcShipSprite entry;
+  ShipSpriteSet entry;
   const auto visual_data = NovaResource_Load(
       kShipVisualResourceType, static_cast<std::uint16_t>(ship_class_id));
   const auto visual =
       visual_data ? DecodeShipVisualDescriptor(*visual_data) : std::nullopt;
   if (!visual) {
     // Cache a failed entry so a missing class is not retried every frame.
-    npc_ship_sprites_[ship_class_id] = std::move(entry);
+    ship_sprites_[ship_class_id] = std::move(entry);
     return nullptr;
   }
   auto base =
       SpriteAsset::LoadSheet(platform.renderer(), visual->base_image_id);
   if (!base) {
-    npc_ship_sprites_[ship_class_id] = std::move(entry);
+    ship_sprites_[ship_class_id] = std::move(entry);
     return nullptr;
   }
   entry.base = std::move(*base);
   entry.frames_per_rotation = visual->frames_per_rotation;
-  entry.sprite_behavior_flags = visual->sprite_behavior_flags;
-  // Basic sets all live in the base sheet (see the player-path note in
-  // EnsureShipSprite); no alt-sheet append.
   entry.row_count =
       std::max(1, entry.base.frame_count / entry.frames_per_rotation);
-  // Engine-glow, running-lights and weapon-effects layers, all sharing the
-  // base's rotation grid. A non-positive image id, or a sheet that fails to
-  // load, just means the NPC lacks that layer (not fatal).
+  entry.alt_set_count =
+      static_cast<int>(std::max<std::int16_t>(0, visual->alt_set_count));
+  // Overlay layers, all sharing the base's rotation grid. A non-positive image
+  // id, or a sheet that fails to load, just means the class lacks that layer
+  // (not fatal). The alt sheet's frame count is AltSetCount * FramesPer; the
+  // rest are sized to the base grid.
   const std::string class_label =
       "class " + std::to_string(static_cast<unsigned>(ship_class_id));
+  if (visual->alt_image_id > 0 && entry.alt_set_count > 0) {
+    LoadShipVisualLayer(platform.renderer(),
+                        visual->alt_image_id,
+                        "alt sprite",
+                        class_label,
+                        entry.alt_set_count * entry.frames_per_rotation,
+                        entry.alt,
+                        entry.has_alt);
+  }
   LoadShipVisualLayer(platform.renderer(),
                       visual->engine_glow_image_id,
                       "engine glow",
@@ -868,139 +786,214 @@ SpaceflightView::ShipClassSprite(SdlPlatform &platform,
                       entry.base.frame_count,
                       entry.weapon,
                       entry.has_weapon);
-  auto [it, inserted] =
-      npc_ship_sprites_.emplace(ship_class_id, std::move(entry));
+  LoadShipVisualLayer(platform.renderer(),
+                      visual->shield_image_id,
+                      "shield bubble",
+                      class_label,
+                      entry.base.frame_count,
+                      entry.shield,
+                      entry.has_shield);
+  auto [it, inserted] = ship_sprites_.emplace(ship_class_id, std::move(entry));
   (void)inserted;
-  NovaLog::Info(
-      "npc ship sprite loaded for class {:#x}: {}x{} x{} frames{}{}{}",
-      static_cast<unsigned>(ship_class_id),
-      it->second.base.tile_width,
-      it->second.base.tile_height,
-      it->second.base.frame_count,
-      it->second.has_glow ? " + engine glow" : "",
-      it->second.has_light ? " + running lights" : "",
-      it->second.has_weapon ? " + weapon effects" : "");
+  NovaLog::Info("ship sprite loaded for class {:#x}: {}x{} x{} frames ({} "
+                "set(s)){}{}{}{}{}",
+                static_cast<unsigned>(ship_class_id),
+                it->second.base.tile_width,
+                it->second.base.tile_height,
+                it->second.base.frame_count,
+                it->second.row_count,
+                it->second.has_alt ? " + alt" : "",
+                it->second.has_glow ? " + engine glow" : "",
+                it->second.has_light ? " + running lights" : "",
+                it->second.has_weapon ? " + weapon effects" : "",
+                it->second.has_shield ? " + shield" : "");
   return &it->second;
 }
 
-// Draws every active non-player ship in the current system at its world
-// position, frame selected by heading. Filters by system to avoid drawing NPCs
-// parked in other systems, and skips ships whose class sprite could not be
-// loaded.
-void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
-                                   const GameState &state) {
+// Draws one ship's full composite at its world position: hull -> engine glow ->
+// running lights -> weapon effects -> alt overlay -> emergence white. The
+// per-ship layer order mirrors the original's six-sprite container append
+// order (base 0x0, glow 0x4, light 0x8, weapon 0xc, alt 0x10, shield 0x14), so
+// the alt sheet composites over the hull and its additive effect layers. The
+// shield bubble is loaded for readiness but its draw stays deferred.
+void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
+                                     const GameState &state,
+                                     const Ship &ship,
+                                     const ShipSpriteSet &sprite,
+                                     int viewport_w,
+                                     int viewport_h,
+                                     float camera_x,
+                                     float camera_y) {
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr || sprite.base.frames.empty() ||
+      sprite.frames_per_rotation <= 0) {
+    return;
+  }
+  const ShipEmergencePresentation emergence =
+      NovaShip_EmergencePresentation(ship);
+  if (!emergence.visible) {
+    return;
+  }
+  const int frame = ComposeShipFrameIndex(ship,
+                                          ComposeShipBaseRow(state, ship, *cls),
+                                          sprite.frames_per_rotation,
+                                          sprite.row_count);
+  // All colored layers (glow/lights/weapon/alt) fade out as the white
+  // emergence silhouette takes over; the white pass is drawn last so it hides
+  // the colored layers instead of the reverse.
+  const float layer_alpha = emergence.hull_alpha * (1.0F - emergence.white_mix);
+
+  SpriteDrawOptions hull_opts;
+  hull_opts.alpha_mod = layer_alpha;
+  ApplyFog(hull_opts);
+  if (hull_opts.alpha_mod > 0.0F) {
+    DrawSprite(platform.renderer(),
+               sprite.base,
+               frame,
+               ship.pos_x,
+               ship.pos_y,
+               camera_x,
+               camera_y,
+               viewport_w,
+               viewport_h,
+               hull_opts);
+  }
+  // Engine-glow layer, drawn over the hull with the same heading-selected frame
+  // and a thrust-driven additive intensity (NovaShip_TickWeaponSpriteAnd-
+  // RunningLights folds the per-ship fog into it for NPCs).
+  if (sprite.has_glow && !sprite.glow.frames.empty() &&
+      ship.engine_glow_intensity > 0.0F) {
+    SpriteDrawOptions opts;
+    opts.alpha_mod = ship.engine_glow_intensity * (1.0F - emergence.white_mix);
+    opts.additive = true;
+    ApplyFog(opts);
+    DrawSprite(platform.renderer(),
+               sprite.glow,
+               frame,
+               ship.pos_x,
+               ship.pos_y,
+               camera_x,
+               camera_y,
+               viewport_w,
+               viewport_h,
+               opts);
+  }
+  // Running lights and weapon effects over the hull (additive, intensity from
+  // the visual tick).
+  if (sprite.has_light) {
+    DrawShipEffectLayer(platform.renderer(),
+                        sprite.light,
+                        frame,
+                        ship.pos_x,
+                        ship.pos_y,
+                        camera_x,
+                        camera_y,
+                        viewport_w,
+                        viewport_h,
+                        ship.light_intensity * (1.0F - emergence.white_mix),
+                        /*visible_threshold=*/1.0F,
+                        fog_murk_);
+  }
+  if (sprite.has_weapon) {
+    DrawShipEffectLayer(platform.renderer(),
+                        sprite.weapon,
+                        frame,
+                        ship.pos_x,
+                        ship.pos_y,
+                        camera_x,
+                        camera_y,
+                        viewport_w,
+                        viewport_h,
+                        ship.weapon_sprite_flash_level *
+                            (1.0F - emergence.white_mix),
+                        /*visible_threshold=*/0.0F,
+                        fog_murk_);
+  }
+  // Alt overlay sheet (sh\x8an AltImageID), an ordinary blend over the hull.
+  // The frame is alternate_sprite_cycle_index * FramesPer + heading_frame,
+  // advanced by NovaShip_TickSpriteAnimation.
+  if (sprite.has_alt && !sprite.alt.frames.empty() && layer_alpha > 0.0F) {
+    const int alt_frame =
+        ComposeShipFrameIndex(ship,
+                              ship.alternate_sprite_cycle_index,
+                              sprite.frames_per_rotation,
+                              std::max(1, sprite.alt_set_count));
+    SpriteDrawOptions opts;
+    opts.alpha_mod = layer_alpha;
+    ApplyFog(opts);
+    DrawSprite(platform.renderer(),
+               sprite.alt,
+               alt_frame,
+               ship.pos_x,
+               ship.pos_y,
+               camera_x,
+               camera_y,
+               viewport_w,
+               viewport_h,
+               opts);
+  }
+  // Shield bubble: the sheet is loaded (ShipSpriteSet::shield) but the draw is
+  // deferred. The original sets its frame and RGB tint from
+  // shield_bubble_flash_intensity, decaying it by g_avg_frame_tick_scale; the
+  // tick's shield arm is not reconstructed yet.
+  // TODO(decomp(0x00428340)): shield-bubble sprite frame + tint draw.
+
+  // Emergence tint is the final ship-composite pass. Drawing it after the
+  // ordinary glow/light/weapon/alt layers is essential: putting those colored
+  // layers on top makes the nominally white reveal visibly colored.
+  if (emergence.white_mix > 0.0F && emergence.hull_alpha > 0.0F) {
+    SpriteDrawOptions white_opts;
+    white_opts.alpha_mod = emergence.hull_alpha * emergence.white_mix;
+    white_opts.white_silhouette = true;
+    DrawSprite(platform.renderer(),
+               sprite.base,
+               frame,
+               ship.pos_x,
+               ship.pos_y,
+               camera_x,
+               camera_y,
+               viewport_w,
+               viewport_h,
+               white_opts);
+  }
+}
+
+// Draws every active ship in the current system that belongs to `layer` at its
+// world position, with its heading/flag-selected frame. Mirrors the original
+// ship container assignment in Ship_UpdateVisualState 0x00428340: disabled
+// ships (Ship_IsShipDisabled) go to the disabled layer, otherwise a
+// squad_leader_ship_slot of 0 marks a player escort, and everything else
+// (including the player) shares the normal ship layer. The player is slot 0 and
+// is drawn at the viewport centre because the camera is centred on it.
+void SpaceflightView::DrawShipsInLayer(SdlPlatform &platform,
+                                       const GameState &state,
+                                       ShipDrawLayer layer) {
   const Viewport vp = CurrentViewport(platform);
   const auto [camera_x, camera_y] = WorldCameraPosition(state);
-  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+  for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
     if (!ship.is_active ||
         ship.current_system_id != state.player.current_system_id) {
       continue;
     }
-    const ShipEmergencePresentation emergence =
-        NovaShip_EmergencePresentation(ship);
-    if (!emergence.visible) {
+    ShipDrawLayer ship_layer = ShipDrawLayer::Normal;
+    if (NovaAiShip_IsDisabled(state, ship)) {
+      ship_layer = ShipDrawLayer::Disabled;
+    } else if (ship.squad_leader_ship_slot == 0) {
+      ship_layer = ShipDrawLayer::Escort;
+    }
+    if (ship_layer != layer) {
       continue;
     }
     const std::int16_t class_id =
         static_cast<std::int16_t>(ship.ship_class_id + 0x80);
-    const NpcShipSprite *sprite = ShipClassSprite(platform, class_id);
-    if (sprite == nullptr || sprite->base.frames.empty() ||
-        sprite->frames_per_rotation <= 0) {
+    const ShipSpriteSet *sprite = ShipSprites(platform, class_id);
+    if (sprite == nullptr) {
       continue;
     }
-    const int frame = ComposeShipFrameIndex(ship,
-                                            sprite->sprite_behavior_flags,
-                                            sprite->frames_per_rotation,
-                                            sprite->row_count);
-    SpriteDrawOptions hull_opts;
-    hull_opts.alpha_mod = emergence.hull_alpha * (1.0F - emergence.white_mix);
-    ApplyFog(hull_opts);
-    if (hull_opts.alpha_mod > 0.0F) {
-      DrawSprite(platform.renderer(),
-                 sprite->base,
-                 frame,
-                 ship.pos_x,
-                 ship.pos_y,
-                 camera_x,
-                 camera_y,
-                 vp.w,
-                 vp.h,
-                 hull_opts);
-    }
-    // Engine-glow layer, drawn over the hull with the same heading-selected
-    // frame and a thrust-driven additive intensity. engine_glow_level is driven
-    // in NovaShip_IntegrateNpcMovement (Ship_HandleShip field_0xc8d4); level/24
-    // clamped to [0,1] is the exhaust intensity, matching the player's glow. A
-    // class with no glow layer or a currently-dark exhaust just skips this.
-    if (sprite->has_glow && !sprite->glow.frames.empty() &&
-        ship.engine_glow_intensity > 0.0F) {
-      SpriteDrawOptions opts;
-      opts.alpha_mod =
-          ship.engine_glow_intensity * (1.0F - emergence.white_mix);
-      opts.additive = true;
-      ApplyFog(opts);
-      DrawSprite(platform.renderer(),
-                 sprite->glow,
-                 frame,
-                 ship.pos_x,
-                 ship.pos_y,
-                 camera_x,
-                 camera_y,
-                 vp.w,
-                 vp.h,
-                 opts);
-    }
-    // Running lights and weapon-effects layers over the hull. light_intensity
-    // and weapon_sprite_flash_level are driven in
-    // NovaShip_TickWeaponSpriteAndRunningLights.
-    if (sprite->has_light) {
-      DrawShipEffectLayer(platform.renderer(),
-                          sprite->light,
-                          frame,
-                          ship.pos_x,
-                          ship.pos_y,
-                          camera_x,
-                          camera_y,
-                          vp.w,
-                          vp.h,
-                          ship.light_intensity * (1.0F - emergence.white_mix),
-                          /*visible_threshold=*/1.0F,
-                          fog_murk_);
-    }
-    if (sprite->has_weapon) {
-      DrawShipEffectLayer(platform.renderer(),
-                          sprite->weapon,
-                          frame,
-                          ship.pos_x,
-                          ship.pos_y,
-                          camera_x,
-                          camera_y,
-                          vp.w,
-                          vp.h,
-                          ship.weapon_sprite_flash_level *
-                              (1.0F - emergence.white_mix),
-                          /*visible_threshold=*/0.0F,
-                          fog_murk_);
-    }
-    // Emergence tint is the final ship-composite pass. Drawing it after the
-    // ordinary glow/light/weapon layers is essential: putting those colored
-    // layers on top makes the nominally white reveal visibly colored.
-    if (emergence.white_mix > 0.0F && emergence.hull_alpha > 0.0F) {
-      SpriteDrawOptions white_opts;
-      white_opts.alpha_mod = emergence.hull_alpha * emergence.white_mix;
-      white_opts.white_silhouette = true;
-      DrawSprite(platform.renderer(),
-                 sprite->base,
-                 frame,
-                 ship.pos_x,
-                 ship.pos_y,
-                 camera_x,
-                 camera_y,
-                 vp.w,
-                 vp.h,
-                 white_opts);
-    }
+    DrawShipSprite(
+        platform, state, ship, *sprite, vp.w, vp.h, camera_x, camera_y);
   }
 }
 
@@ -1265,7 +1258,7 @@ void SpaceflightView::DrawFadingEffects(SdlPlatform &platform,
                                         const GameState &state) {
   const Viewport vp = CurrentViewport(platform);
   const auto [camera_x, camera_y] = WorldCameraPosition(state);
-  const NpcShipSprite *debris = ShipClassSprite(platform, 0x2ff);
+  const ShipSpriteSet *debris = ShipSprites(platform, 0x2ff);
   if (debris == nullptr || debris->base.frames.empty() ||
       debris->frames_per_rotation <= 0) {
     return;
@@ -1606,7 +1599,9 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
   }
 }
 
-void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
+void SpaceflightView::DrawShots(SdlPlatform &platform,
+                                const GameState &state,
+                                ShotDrawLayer layer) {
   SDL_Renderer *const renderer = platform.renderer();
   if (state.active_shots.empty()) {
     return;
@@ -1641,6 +1636,22 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
     // NovaWeapon_FirePlayerWeaponBank).
     const Weapon *w = state.scenario.Weapon(static_cast<std::int16_t>(
         static_cast<std::int16_t>(s.weapon_id) + 0x80));
+    // The container is fixed at spawn by Shot_SpawnShotFromWeapon 0x0041fd30:
+    // mode 9 -> layer 7, mode 1 -> layer 8, mode 4 with owner Flags3 0x0040 ->
+    // layer 12 above the ships, everything else -> default layer 9. The four
+    // passes in Draw preserve the original append (draw) order.
+    const int mode = (w != nullptr) ? w->weapon_mode_code : -2;
+    ShotDrawLayer shot_layer = ShotDrawLayer::Default;
+    if (s.draws_above_ships) {
+      shot_layer = ShotDrawLayer::Mode4Alt;
+    } else if (mode == 9) {
+      shot_layer = ShotDrawLayer::Mode9;
+    } else if (mode == 1) {
+      shot_layer = ShotDrawLayer::Mode1;
+    }
+    if (shot_layer != layer) {
+      continue;
+    }
     const SpriteAsset *set =
         (w != nullptr) ? sprite_store_.Spin(
                              platform.renderer(),
@@ -1861,13 +1872,19 @@ void SpaceflightView::ApplyFog(SpriteDrawOptions &opts) const {
 //   background (space tint + ambient starfield)   -- DrawBackground
 //   stellar bodies (planets / stations)            -- DrawStellarBodies
 //   under-ships beams (flags_secondary 0x2000)     -- DrawBeamsUnderShips
-//   asteroids                                      -- DrawAsteroids
-//   freeflight objects (pods / drones)             -- DrawFreeflightObjects
-//   directional destruction fragments              -- DrawFadingEffects
-//   shots / projectiles                           -- DrawShots
-//   ships (NPCs + player at the camera centre)     -- DrawNpcShips + player
-//   destruction / impact effects                   -- DrawImpactEffects
-//   reticles + over-ships beams (all other beams)  -- DrawShipTargetReticle,
+//   asteroids (layer 3)                            -- DrawAsteroids
+//   disabled ships (layer 4)                       --
+//   DrawShipsInLayer(Disabled) freeflight objects + fading effects (layer 5) --
+//   DrawFreeflightObjects,
+//                                                     DrawFadingEffects
+//   shots, mode 9 / mode 1 / default (layers 7-9)  -- DrawShots(Mode9),
+//                                                     DrawShots(Mode1),
+//                                                     DrawShots(Default)
+//   escort ships (layer 10)                        -- DrawShipsInLayer(Escort)
+//   ships, player + non-escort NPCs (layer 11)     -- DrawShipsInLayer(Normal)
+//   turreted-above shots (layer 12)                -- DrawShots(Mode4Alt)
+//   destruction / impact effects (layer 13)        -- DrawImpactEffects
+//   reticles + over-ships beams (layer 14)         -- DrawShipTargetReticle,
 //                                                     DrawTravelTargetReticle,
 //                                                     DrawBeamsOverShips
 //   weapon sparks / debris (SWParticles)           -- DrawSwParticles
@@ -1877,11 +1894,12 @@ void SpaceflightView::ApplyFog(SpriteDrawOptions &opts) const {
 // original layers: flags-0x2000 beams on layer 2 (above the backdrop only,
 // Ghidra 0x00438c40), after that layer's stellar sprites, and every other beam
 // on topmost layer 14 (Ghidra Shot_DrawBeamHitQueueForSurface 0x00438810).
-// Remaining divergence: the original's disabled-ship (layer 4) and escort-ship
-// (layer 10) sub-layers and its per-mode shot containers are not split out; the
-// port draws all ships on one pass and all shots on one pass. Keeping the order
-// explicit here makes the precedence auditable and lets a future layer-table
-// refactor replace the fixed sequence wholesale.
+// Ships hop between the disabled/escort/normal layers exactly as
+// Ship_UpdateVisualState 0x00428340 does, and shots keep their original
+// per-mode containers (mode9/mode1/default on layers 7-9, mode4_alt on layer
+// 12). Remaining divergence: the original's layer-6 weapon smoke puffs are not
+// ported (no stock weapon enables them), and the layer-14 beam pass still
+// lacks the twin-surface branches.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   // Effective system murk (raw system murk + owned MurkMod outfits), rebuilt
   // for this frame's distance fog. Ghidra caches it in
@@ -1902,119 +1920,27 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawStellarBodies(platform, state);   // stellar planets / stations
   DrawBeamsUnderShips(platform, state); // flags-0x2000 beams, below ships
   DrawAsteroids(platform, state);       // layer 3: drifting asteroid field
+  // Layer 4: disabled ships (Ship_IsShipDisabled) sit below the freeflight
+  // objects, projectiles and active ships.
+  DrawShipsInLayer(platform, state, ShipDrawLayer::Disabled);
   // Layer 5: freeflight objects are appended before fading effects, so they
   // sit below them; both are below shots and ships.
   DrawFreeflightObjects(platform, state); // jettisoned pods / launched drones
   DrawFadingEffects(platform, state);     // directional destruction fragments
-  DrawShots(platform, state);             // layers 7-9: projectiles below ships
-  DrawNpcShips(platform, state);          // ships above shots (layers 10-11)
-
-  // Player ship at the play-area centre, frame selected by heading. Because
-  // the camera is centred on the player, drawing at the ship's own world
-  // position lands it at the viewport centre (world==camera -> centre). The
-  // hull is hidden once Ship_UpdateVisualState deactivates it (the original's
-  // inactive branch runs Sprite_SetVisible(ship, 0)). It shares the NPC ship
-  // layer: the original's ship sprites (player slot 0 and NPCs alike) sit
-  // below the impact-effect layer, so the death explosions must composite over
-  // the wreck rather than being hidden behind a front-most player hull.
-  if (state.player.is_active && !ship_.frames.empty() &&
-      ship_frames_per_rotation_ > 0) {
-    const Viewport vp = CurrentViewport(platform);
-    const int frame = ComposeShipFrameIndex(state.player,
-                                            ship_sprite_behavior_flags_,
-                                            ship_frames_per_rotation_,
-                                            ship_row_count_);
-    SpriteDrawOptions hull_opts;
-    ApplyFog(hull_opts);
-    DrawSprite(platform.renderer(),
-               ship_,
-               frame,
-               state.player.pos_x,
-               state.player.pos_y,
-               state.player.pos_x,
-               state.player.pos_y,
-               vp.w,
-               vp.h,
-               hull_opts);
-
-    // Engine-glow layer: drawn over the base with the same heading-selected
-    // frame and a thrust-driven additive intensity. The original binds the glow
-    // as a second sprite layer on top of the base set to the same frame index
-    // (Ghidra NovaUi_UpdateShipClassLaunchProgress sets both to sVar10). The
-    // glow sheet is larger than the base (exhaust jets extend beyond the hull),
-    // so it is drawn centred on the ship at its native size. The original draws
-    // it through BlitPixel_TintRgb15Span at brightness 0x20 (dst +
-    // src*intensity); the port maps the ramped thrust level to src intensity.
-    // This fades the exhaust in while accelerating and out when coasting
-    // (clean-room approximation of the original dimming the glow with
-    // throttle).
-    if (has_glow_ && state.player.engine_glow_intensity > 0.0F &&
-        !glow_.frames.empty()) {
-      if (!glow_last_drawn_) {
-        NovaLog::Info("[glow] draw ON intensity={:.2f} frames={} size={}x{}",
-                      state.player.engine_glow_intensity,
-                      glow_.frame_count,
-                      glow_.tile_width,
-                      glow_.tile_height);
-        glow_last_drawn_ = true;
-      }
-      const int glow_frame =
-          std::min(frame, std::max(0, glow_.frame_count - 1));
-      SpriteDrawOptions opts;
-      opts.alpha_mod = state.player.engine_glow_intensity;
-      opts.additive = true;
-      ApplyFog(opts);
-      DrawSprite(platform.renderer(),
-                 glow_,
-                 glow_frame,
-                 state.player.pos_x,
-                 state.player.pos_y,
-                 state.player.pos_x,
-                 state.player.pos_y,
-                 vp.w,
-                 vp.h,
-                 opts);
-    } else if (glow_last_drawn_) {
-      NovaLog::Info("[glow] draw OFF has_glow={} intensity={:.2f} frames={}",
-                    has_glow_,
-                    state.player.engine_glow_intensity,
-                    glow_.frame_count);
-      glow_last_drawn_ = false;
-    }
-
-    // Running lights and weapon-effects layers, over the hull and glow.
-    // Driven by NovaShip_TickWeaponSpriteAndRunningLights; the flash is
-    // raised at the player fire site.
-    if (has_light_) {
-      DrawShipEffectLayer(platform.renderer(),
-                          light_,
-                          frame,
-                          state.player.pos_x,
-                          state.player.pos_y,
-                          state.player.pos_x,
-                          state.player.pos_y,
-                          vp.w,
-                          vp.h,
-                          state.player.light_intensity,
-                          /*visible_threshold=*/1.0F,
-                          fog_murk_);
-    }
-    if (has_weapon_) {
-      DrawShipEffectLayer(platform.renderer(),
-                          weapon_,
-                          frame,
-                          state.player.pos_x,
-                          state.player.pos_y,
-                          state.player.pos_x,
-                          state.player.pos_y,
-                          vp.w,
-                          vp.h,
-                          state.player.weapon_sprite_flash_level,
-                          /*visible_threshold=*/0.0F,
-                          fog_murk_);
-    }
-  }
-
+  // Layers 7-9: the mode9, mode1 and default shot containers, in that order,
+  // below the ships.
+  DrawShots(platform, state, ShotDrawLayer::Mode9);
+  DrawShots(platform, state, ShotDrawLayer::Mode1);
+  DrawShots(platform, state, ShotDrawLayer::Default);
+  // Layer 10: player escorts (squad_leader_ship_slot == 0) draw below the
+  // player and the non-escort NPCs (layer 11). The player is slot 0 and lands
+  // at the viewport centre because the camera is centred on it; the death
+  // explosions (layer 13) then composite over the wreck.
+  DrawShipsInLayer(platform, state, ShipDrawLayer::Escort);
+  DrawShipsInLayer(platform, state, ShipDrawLayer::Normal);
+  // Layer 12: mode-4 shots from Flags3-0x0040 ships (Bible "ship's turreted
+  // shots appear above the ship") composite over the ships.
+  DrawShots(platform, state, ShotDrawLayer::Mode4Alt);
   DrawImpactEffects(platform, state);       // layer 13: explosions over ships
   DrawShipTargetReticle(platform, state);   // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target
@@ -2126,7 +2052,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   // exactly as the original does. The fallback uses the sheet's native tile
   // size.
   float full = 32.0F; // default Sprite_Get*HalfSpan for a missing sprite
-  if (const NpcShipSprite *sprite = ShipClassSprite(
+  if (const ShipSpriteSet *sprite = ShipSprites(
           platform, static_cast<std::int16_t>(target.ship_class_id + 0x80));
       sprite != nullptr && !sprite->base.frames.empty()) {
     full = std::max(static_cast<float>(sprite->base.tile_width),
@@ -2289,7 +2215,7 @@ std::int16_t SpaceflightView::PickShipAt(SdlPlatform &platform,
         ship.current_system_id != state.player.current_system_id) {
       continue;
     }
-    const NpcShipSprite *sprite = ShipClassSprite(
+    const ShipSpriteSet *sprite = ShipSprites(
         platform, static_cast<std::int16_t>(ship.ship_class_id + 0x80));
     if (sprite == nullptr || sprite->base.frames.empty()) {
       continue;
@@ -2367,15 +2293,17 @@ bool SpaceflightView::ClickInPlayerSprite(SdlPlatform &platform,
                                           const GameState &state,
                                           float rx,
                                           float ry) {
-  if (ship_.frames.empty()) {
+  const ShipSpriteSet *sprite = ShipSprites(
+      platform, static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  if (sprite == nullptr || sprite->base.frames.empty()) {
     return false;
   }
   const Viewport vp = CurrentViewport(platform);
   const float wx = rx - static_cast<float>(vp.w) / 2.0F + state.player.pos_x;
   const float wy = ry - static_cast<float>(vp.h) / 2.0F + state.player.pos_y;
-  float half_w = static_cast<float>(ship_.tile_width) * 0.5F;
-  float half_h = static_cast<float>(ship_.tile_height) * 0.5F;
-  if (ship_.tile_height < 0x30) {
+  float half_w = static_cast<float>(sprite->base.tile_width) * 0.5F;
+  float half_h = static_cast<float>(sprite->base.tile_height) * 0.5F;
+  if (sprite->base.tile_height < 0x30) {
     half_w += 16.0F;
     half_h += 16.0F;
   }

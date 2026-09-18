@@ -496,6 +496,25 @@ struct ShipClass {
   // ShipState.sprite_animation_cycle_index and the waypoint_arrival_marker_b
   // countdown. NOT skill variance (that is skill_variance_percent at +0x9F8).
   std::int16_t animation_cycle_count = 1;
+  // Raw sh\x8an BaseSetCount (+0x04), clamped >=1 but NOT pref-gated. The
+  // live base sprite's total frame count is BaseSetCount * FramesPer when the
+  // ship-animations preference is on (else just FramesPer), and
+  // Ship_UpdateVisualState 0x00428340 skips the whole flags row-selection
+  // block when that is <= FramesPer. The renderer currently forces the
+  // preference on, so ComposeShipBaseRow can guard on base_set_count >= 2.
+  std::int16_t base_set_count = 1;
+  // Ghidra sh\x8an AltImageID (+0x0c) / AltSetCount (+0x10): a separate
+  // overlay sheet drawn on top of the hull and cycled through AltSetCount sets
+  // at the AnimDelay rate (Ship_UpdateVisualState 0x00428340). alt_image_id is
+  // 0 when the class has none. alt_sprite_cycle_count is AltSetCount, or 1
+  // when the ship-animations preference is off, and 0 when there is no sheet.
+  std::int16_t alt_image_id = 0;
+  std::int16_t alt_sprite_cycle_count = 0;
+  // Ghidra sh\x8an ShieldImageID (+0x40): the shield-bubble overlay sheet.
+  // Non-positive means the class has no shield layer.
+  std::int16_t shield_image_id = 0;
+  // Ghidra sh\x8an WeapImageID (+0x26): weapon-effects overlay sheet id.
+  std::int16_t weapon_image_id = 0;
 
   // Ghidra ShipClassDef +0xA0A (pict_fallback_sprite_resource_id): the large
   // (200x200) portrait PICT drawn in the ship-comm dialog (DLOG 0x3ef item 10)
