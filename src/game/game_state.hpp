@@ -985,6 +985,12 @@ struct BeamHit {
   std::int16_t turret_quadrant = -1;
   std::int16_t turret_group_id = -1;
   std::int16_t forced_targeting = -1;
+  // Bearing the beam was queued with (owner heading for mode 0, target bearing
+  // for turreted modes). Shot_QueueBeamHit stores it and
+  // Shot_UpdateBeamHitQueue re-derives the visible endpoint from it every
+  // frame; the port keeps it so a mode-0 beam stays straight-ahead instead of
+  // following the target.
+  std::int16_t firing_bearing_deg = 0;
   std::int8_t impact_variant = 0;
   bool impact_resolved = false;
 };

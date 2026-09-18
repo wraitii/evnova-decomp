@@ -312,11 +312,13 @@ void DrawBeamCoreAndCorona(SDL_Renderer *renderer,
 }
 
 // Ghidra SWBeams_DrawThickFadingBeam (0x0047a410): lightning-beam plotter.
-// Chains round(max(|dx|,|dy|) * density / 2) jittered segments from muzzle to
-// target (jitter ±amplitude per axis; the final two steps land on the exact
-// target), and for each segment draws parallel lines at perpendicular offsets
-// 0..width-1 (mirrored past offset 0) at alpha base - j*0x20/(width+1).
-// Only the first segment ending exactly at the target fades, over 0x20 px.
+// Splits the muzzle->target span into round(max(|dx|,|dy|) * density * 0.01)
+// jittered segments (the original multiplies by the double DAT_00575888 = 0.01,
+// disasm 0x0047a587). Jitter is uniform on [-amplitude, amplitude] applied to
+// every segment except the single final one, which lands on the exact target.
+// Each segment draws parallel lines at perpendicular offsets 0..width-1
+// (mirrored past offset 0) at alpha base - j*0x20/(width+1); only the final
+// segment fades, over 0x20 px.
 void DrawLightningBeam(SDL_Renderer *renderer,
                        std::mt19937 &rng,
                        int xa,
@@ -328,34 +330,45 @@ void DrawLightningBeam(SDL_Renderer *renderer,
                        int density,
                        int amplitude,
                        int base_alpha) {
-  const int reach = std::max(std::abs(xb - xa), std::abs(yb - ya));
-  int steps = static_cast<int>(std::lround(static_cast<float>(reach) *
-                                           static_cast<float>(density) * 0.5F));
-  steps = std::max(steps, 1);
-  const float step_x = static_cast<float>(xb - xa) / steps;
-  const float step_y = static_cast<float>(yb - ya) / steps;
+  const int dx = xb - xa;
+  const int dy = yb - ya;
+  const int reach = std::max(std::abs(dx), std::abs(dy));
+  // The original converts the product with the x87 FIST + residual/sign
+  // correction idiom (ADD 0x7fffffff; SBB), which nets truncation toward zero,
+  // not lround/nearbyint. The product is non-negative, so static_cast is floor.
+  const int steps = static_cast<int>(static_cast<double>(reach) *
+                                     static_cast<double>(density) * 0.01);
+  if (steps < 2) {
+    // The original skips the plot entirely when the step count truncates to 1.
+    return;
+  }
+  const float step_x = static_cast<float>(dx) / static_cast<float>(steps);
+  const float step_y = static_cast<float>(dy) / static_cast<float>(steps);
   std::uniform_int_distribution<int> jitter{-amplitude, amplitude};
 
-  const bool horizontal = std::abs(xb - xa) >= std::abs(yb - ya);
+  const bool horizontal = std::abs(dx) >= std::abs(dy);
   const auto [cr, cg, cb] = SplitRgb(color);
+  const int alpha_step = 0x20 / (width + 1);
 
+  float fx = static_cast<float>(xa);
+  float fy = static_cast<float>(ya);
   int prev_x = xa;
   int prev_y = ya;
-  for (int idx = 0; idx < steps; ++idx) {
+  for (int idx = 0; idx < steps - 1; ++idx) {
+    fx += step_x;
+    fy += step_y;
     int cur_x;
     int cur_y;
-    if (idx >= steps - 2) {
+    if (idx < steps - 2) {
+      cur_x = static_cast<int>(std::nearbyint(fx)) + jitter(rng);
+      cur_y = static_cast<int>(std::nearbyint(fy)) + jitter(rng);
+    } else {
       cur_x = xb;
       cur_y = yb;
-    } else {
-      cur_x =
-          static_cast<int>(std::ceil(xa + step_x * (idx + 1))) + jitter(rng);
-      cur_y =
-          static_cast<int>(std::ceil(ya + step_y * (idx + 1))) + jitter(rng);
     }
     const int end_fade = idx == steps - 2 ? 0x20 : 0;
     for (int j = 0; j < width; ++j) {
-      const int alpha = std::max(1, base_alpha - j * (0x20 / (width + 1)));
+      const int alpha = std::max(1, base_alpha - j * alpha_step);
       if (horizontal) {
         DrawBeamBlendedLine(renderer,
                             prev_x,

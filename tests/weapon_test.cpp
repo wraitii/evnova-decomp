@@ -2,7 +2,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
+#include <random>
 
 #include "game/game_state.hpp"
 #include "game/outfit.hpp"
@@ -932,6 +934,185 @@ TEST_CASE("queued beam hits expire at sub-tick frame rates", "[weapon][npc]") {
   CHECK(beam.lifetime_ticks == -2); // reset to the inactive sentinel
 }
 
+// Thunderhead Lance geometry (wëap 0x00a6: Guidance 0, BeamLength 100): a
+// mode-0 beam is fired along the owner's heading and ends at BeamLength, with
+// no target-following. Shot_UpdateBeamHitQueue (0x0042f270) gates the target
+// endpoint on weapon_mode_code != 0, so a fixed beam must stay straight even
+// when a target is recorded. This pins that exact geometry: an off-axis target
+// is ignored, and an on-axis target is hit/truncated.
+TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
+          "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 0;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.beam_falloff = 0x10;
+  // NovaWeapon_CanProjectileHitShip resolves the target class through the
+  // scenario table; one zero-capability class makes owner and target eligible.
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F; // heading 0 points toward -y
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+
+  // On-axis but past the reach (BeamLength 100 + ceil(trunc(75*0.66)/2) = 125):
+  // the straight beam ignores it and still ends at BeamLength, 100 px up.
+  target.pos_x = 100.0F;
+  target.pos_y = 0.0F;
+  REQUIRE(NovaWeapon_QueueBeamHit(state,
+                                  0,
+                                  1,
+                                  0,
+                                  /*forced_targeting=*/-1,
+                                  /*firing_bearing_deg=*/0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  const BeamHit &queued = state.beam_hit_queue[0];
+  CHECK(queued.target_x == Catch::Approx(100.0F));
+  CHECK(queued.target_y == Catch::Approx(100.0F));
+  CHECK_FALSE(queued.impact_resolved);
+
+  // Nearby (56 px) but 45 deg off the heading, well outside the 15 deg cone:
+  // still ignored, still ends at BeamLength.
+  target.pos_x = 140.0F;
+  target.pos_y = 160.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.target_x == Catch::Approx(100.0F));
+  CHECK(queued.target_y == Catch::Approx(100.0F));
+  CHECK_FALSE(queued.impact_resolved);
+
+  // Same-government, non-squad target directly ahead and in range: the
+  // original beam scan does NOT reject same-government contacts, so it is hit
+  // (unlike the projectile Weapon_CanWeaponHitTarget gate).
+  owner.faction_or_government_id = 0;
+  target.faction_or_government_id = 0;
+  target.pos_x = 100.0F;
+  target.pos_y = 140.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.target_y == Catch::Approx(200.0F - 45.0F));
+  CHECK(queued.impact_resolved);
+  owner.faction_or_government_id = -1;
+  target.faction_or_government_id = -1;
+
+  // Friendly squad exclusion: the candidate is the owner's direct subordinate
+  // (its squad leader is the owner), so the scan skips it.
+  target.squad_leader_ship_slot = 0;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.target_y == Catch::Approx(100.0F));
+  CHECK_FALSE(queued.impact_resolved);
+  target.squad_leader_ship_slot = -1;
+
+  // Friendly squad exclusion: the candidate is the owner's own squad leader.
+  owner.squad_leader_ship_slot = 1;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.target_y == Catch::Approx(100.0F));
+  CHECK_FALSE(queued.impact_resolved);
+  owner.squad_leader_ship_slot = -1;
+
+  // Directly ahead at 60 px: the beam is truncated at distance minus
+  // 0.2*frame_height (the 0x0042f270 DAT_005753d8 scale). This target has no
+  // collision mask, so frame_height uses the 0x4b = 75 fallback: 60 - 15 = 45
+  // px, and the hit resolves.
+  target.pos_x = 100.0F;
+  target.pos_y = 140.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.target_x == Catch::Approx(100.0F));
+  CHECK(queued.target_y == Catch::Approx(200.0F - 45.0F));
+  CHECK(queued.impact_resolved);
+
+  // A valid target near the outer reach (120 px) truncates to 120 - 15 = 105
+  // px, which is longer than BeamLength: the original does not re-clamp the
+  // visible beam to BeamLength after the contact truncation, so preserve that.
+  target.pos_x = 100.0F;
+  target.pos_y = 80.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.target_x == Catch::Approx(100.0F));
+  CHECK(queued.target_y == Catch::Approx(200.0F - 105.0F));
+  CHECK(200.0F - queued.target_y > static_cast<float>(beam.beam_length_px));
+  CHECK(queued.impact_resolved);
+
+  // The source follows the live owner: a moving muzzle must not leave the
+  // beam behind at its queue-time position.
+  state.beam_hit_queue[0] = BeamHit{};
+  target.is_active = false;
+  owner.pos_x = 250.0F;
+  owner.pos_y = 400.0F;
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 0));
+  owner.pos_x = 260.0F;
+  owner.pos_y = 410.0F;
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.source_x == Catch::Approx(260.0F));
+  CHECK(queued.source_y == Catch::Approx(410.0F));
+  CHECK(queued.target_x == Catch::Approx(260.0F));
+  CHECK(queued.target_y == Catch::Approx(410.0F - 100.0F));
+}
+
+// Regression: 0x0042f270's first contact clause is candidate_slot !=
+// owner_slot, so a fixed beam can never intercept its own firing ship. The
+// port's BeamCandidateEligible omitted that clause. The geometry test above
+// masked the bug because its owner faced heading 0, and BearingDeg(point,
+// same point) yields 180 deg (atan2(+0,-0)), which fell outside the forward
+// cone. Facing the owner 180 deg puts that same self-bearing on-axis, so only
+// the owner-slot check keeps the active owner from hitting itself.
+TEST_CASE("mode-zero beams never intercept their own owner", "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 0;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.beam_falloff = 0x10;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  // The owner has a valid ship class, so without the owner-slot exclusion it
+  // is a fully eligible self-candidate at distance 0.
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 3.14159265358979323846F; // 180 deg, beam points toward +y
+
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 180));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  const BeamHit &queued = state.beam_hit_queue[0];
+  CHECK_FALSE(queued.impact_resolved);
+  CHECK(queued.target_x == Catch::Approx(100.0F));
+  CHECK(queued.target_y == Catch::Approx(300.0F));
+  CHECK(owner.armor_points == Catch::Approx(100.0F));
+}
+
 TEST_CASE("inbound weapon threat tallies only live normal-lock shots",
           "[weapon][threat]") {
   GameState state;
@@ -1083,6 +1264,179 @@ TEST_CASE("mode-4 shots follow the owner class turreted-above container flag",
   REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
   REQUIRE(state.active_shots.size() == 1);
   CHECK_FALSE(state.active_shots[0].draws_above_ships);
+}
+
+// Thunderhead / Pirate Thunderhead mount the Thunderhead Lance (weapon 0xa6,
+// Guidance 0, ExitType 3). sh\x8an group 3 holds the side-mounted exits:
+// Thunderhead lateral +7/-7/+7/-7, Pirate lateral +9/+9/-9/-9, both with
+// forward +9. Shot_QueueBeamHit (0x00427a90) stores the chosen quadrant and
+// advances the ship's per-group rotation; Shot_UpdateBeamHitQueue (0x0042f270)
+// re-derives the offset source every frame from the live owner. This test uses
+// the shipped definitions so the exit family, scales and rotation are pinned.
+TEST_CASE("Thunderhead Lance fires from alternating side exits",
+          "[weapon][beam][data]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const Weapon *lance = state.scenario.Weapon(0xa6);
+  REQUIRE(lance != nullptr);
+  CHECK(lance->weapon_mode_code == 0);
+  CHECK(lance->turret_group_id == 3);
+  CHECK(lance->beam_length_px == 100);
+  const std::int16_t lance_bank = static_cast<std::int16_t>(0xa6 - 0x80);
+
+  const ShipClass *thunder = state.scenario.Ship(0x9d);
+  REQUIRE(thunder != nullptr);
+  REQUIRE(thunder->muzzle_ready);
+  CHECK(thunder->frames_per_rotation == 36);
+  CHECK(thunder->muzzle_forward[3][0] == 9);
+  CHECK(thunder->muzzle_lateral[3][0] == 7);
+  CHECK(thunder->muzzle_lateral[3][1] == -7);
+  CHECK(thunder->muzzle_lateral[3][2] == 7);
+  CHECK(thunder->muzzle_lateral[3][3] == -7);
+  CHECK(thunder->muzzle_drop[3][0] == 0);
+  CHECK(thunder->muzzle_scale_near_x == Catch::Approx(1.30F));
+  CHECK(thunder->muzzle_scale_near_y == Catch::Approx(1.00F));
+  CHECK(thunder->muzzle_scale_far_x == Catch::Approx(1.30F));
+  CHECK(thunder->muzzle_scale_far_y == Catch::Approx(1.30F));
+
+  const ShipClass *pirate = state.scenario.Ship(0x113);
+  REQUIRE(pirate != nullptr);
+  REQUIRE(pirate->muzzle_ready);
+  CHECK(pirate->muzzle_forward[3][0] == 9);
+  CHECK(pirate->muzzle_lateral[3][0] == 9);
+  CHECK(pirate->muzzle_lateral[3][1] == 9);
+  CHECK(pirate->muzzle_lateral[3][2] == -9);
+  CHECK(pirate->muzzle_lateral[3][3] == -9);
+  CHECK(pirate->muzzle_scale_near_x == Catch::Approx(1.00F));
+  CHECK(pirate->muzzle_scale_near_y == Catch::Approx(0.70F));
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.current_system_id = state.player.current_system_id;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 1000.0F;
+  owner.pos_y = 2000.0F;
+  owner.heading = 0.0F; // rotation frame 0 -> turret bearing 0
+
+  // First quadrant is a seeded RandomBelow(4) roll; the following three are a
+  // deterministic +1 mod 4 cycle of the ship's per-group state.
+  owner.ship_class_id = 0x9d - 0x80;
+  owner.muzzle_quadrant = {-1, -1, -1, -1};
+  state.beam_hit_queue.fill(BeamHit{});
+  state.rng.seed(0x5eed);
+  std::mt19937 probe(0x5eed);
+  const int expected_first =
+      std::uniform_int_distribution<std::int32_t>{0, 3}(probe);
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, lance_bank, -1, 0));
+  const BeamHit &first = state.beam_hit_queue[0];
+  CHECK(first.turret_group_id == 3);
+  CHECK(first.turret_quadrant == expected_first);
+  const float thunder_lateral[4] = {7.0F, -7.0F, 7.0F, -7.0F};
+  CHECK(first.source_x ==
+        Catch::Approx(1000.0F + thunder_lateral[expected_first] * 1.30F));
+  CHECK(first.source_y == Catch::Approx(2000.0F - 9.0F));
+  // The queued endpoint is laid downrange from the muzzle, not the centre.
+  CHECK(first.target_x == Catch::Approx(first.source_x));
+  CHECK(first.target_y == Catch::Approx(first.source_y - 100.0F));
+  CHECK(first.target_x != Catch::Approx(1000.0F));
+  for (int i = 1; i < 4; ++i) {
+    REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, lance_bank, -1, 0));
+    const BeamHit &beam = state.beam_hit_queue[static_cast<std::size_t>(i)];
+    CHECK(beam.turret_quadrant == ((expected_first + i) & 3));
+    CHECK(
+        beam.source_x ==
+        Catch::Approx(1000.0F + thunder_lateral[beam.turret_quadrant] * 1.30F));
+  }
+
+  // Pirate Thunderhead: +9/+9/-9/-9 lateral, near scales 1.00/0.70.
+  state.beam_hit_queue.fill(BeamHit{});
+  owner.ship_class_id = 0x113 - 0x80;
+  owner.muzzle_quadrant = {0, 0, 0, 0}; // group 3 starts at quadrant 0
+  const float pirate_lateral[4] = {9.0F, 9.0F, -9.0F, -9.0F};
+  for (int i = 0; i < 4; ++i) {
+    REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, lance_bank, -1, 0));
+    const BeamHit &beam = state.beam_hit_queue[static_cast<std::size_t>(i)];
+    CHECK(beam.turret_quadrant == i);
+    CHECK(beam.source_x == Catch::Approx(1000.0F + pirate_lateral[i] * 1.00F));
+    CHECK(beam.source_y == Catch::Approx(2000.0F - 9.0F * 0.70F));
+  }
+
+  // A full beam queue must fail without consuming the ship's rotation state or
+  // an RNG roll.
+  state.beam_hit_queue.fill(BeamHit{});
+  for (BeamHit &slot : state.beam_hit_queue) {
+    slot.lifetime_ticks = 5;
+  }
+  owner.ship_class_id = 0x9d - 0x80;
+  owner.muzzle_quadrant = {0, 0, 0, 2}; // group 3 = 2
+  state.rng.seed(0x1111);
+  std::mt19937 full_probe(0x1111);
+  const auto expected_failed_draw =
+      std::uniform_int_distribution<std::int32_t>{0, 3}(full_probe);
+  CHECK_FALSE(NovaWeapon_QueueBeamHit(state, 0, -1, lance_bank, -1, 0));
+  CHECK(owner.muzzle_quadrant[3] == 2);
+  const auto first_after_failure =
+      std::uniform_int_distribution<std::int32_t>{0, 3}(state.rng);
+  CHECK(first_after_failure == expected_failed_draw);
+
+  // A queued beam keeps its chosen quadrant after the ship's per-group state
+  // advances independently; the live tick still uses the stored quadrant.
+  state.beam_hit_queue.fill(BeamHit{});
+  owner.ship_class_id = 0x9d - 0x80;
+  owner.pos_x = 1000.0F;
+  owner.pos_y = 2000.0F;
+  owner.heading = 0.0F;
+  owner.muzzle_quadrant = {0, 0, 0, 0};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, lance_bank, -1, 0));
+  BeamHit &persist = state.beam_hit_queue[0];
+  REQUIRE(persist.turret_quadrant == 0);
+  CHECK(owner.muzzle_quadrant[3] == 1); // queue advanced the ship state
+  owner.muzzle_quadrant[3] = 2;         // owner cycles on independently
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(persist.turret_quadrant == 0);
+  CHECK(persist.source_x == Catch::Approx(1000.0F + 7.0F * 1.30F));
+
+  // Moving + rotating owner: the live tick re-derives the same exit offset at
+  // heading 90 deg (frame 9), which selects the FAR scales.
+  state.beam_hit_queue.fill(BeamHit{});
+  owner.ship_class_id = 0x9d - 0x80;
+  owner.muzzle_quadrant = {0, 0, 0, 0};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, lance_bank, -1, 0));
+  BeamHit &moving = state.beam_hit_queue[0];
+  REQUIRE(moving.turret_quadrant == 0);
+  owner.pos_x = 1500.0F;
+  owner.pos_y = 2500.0F;
+  owner.heading = 1.5707963267948966F; // pi/2
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(moving.source_x == Catch::Approx(1500.0F + 9.0F * 1.30F));
+  CHECK(moving.source_y == Catch::Approx(2500.0F + 7.0F * 1.30F));
+  // Mode-0 endpoint follows the live heading from the offset source.
+  CHECK(moving.target_x == Catch::Approx(moving.source_x + 100.0F));
+  CHECK(moving.target_y == Catch::Approx(moving.source_y));
+
+  // Guards for a weapon with no turret group: no quadrant, owner centre,
+  // matching the visible result of the original's out-of-range access.
+  state.beam_hit_queue.fill(BeamHit{});
+  state.scenario.weapons.resize(1);
+  state.scenario.weapons[0].weapon_mode_code = 0;
+  state.scenario.weapons[0].beam_length_px = 100;
+  state.scenario.weapons[0].lifetime_ticks = 10;
+  state.scenario.weapons[0].turret_group_id = -1;
+  owner.ship_class_id = 0x9d - 0x80;
+  owner.heading = 0.0F;
+  owner.pos_x = 1000.0F;
+  owner.pos_y = 2000.0F;
+  owner.muzzle_quadrant = {-1, -1, -1, -1};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 0));
+  const BeamHit &centre = state.beam_hit_queue[0];
+  CHECK(centre.turret_quadrant == -1);
+  CHECK(centre.source_x == Catch::Approx(1000.0F));
+  CHECK(centre.source_y == Catch::Approx(2000.0F));
 }
 
 } // namespace game

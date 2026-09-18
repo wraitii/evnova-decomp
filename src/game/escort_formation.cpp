@@ -59,8 +59,9 @@ int RoundHeadingDeg(const Ship &ship) {
 // for clones). Divergence: non-clone classes read clone source 0 (class 0's
 // sprite) in the original when the field defaults to zero; the port always
 // uses the class's own span. TODO(decomp) if a scenario shows spacing drift.
-// Like Sprite_GetFrameFullHeight, this returns the FULL frame width (see the
-// boarding reticle note in boarding_plunder.cpp), fallback 0x4b = 75.
+// Like Sprite_GetFrameFullHeight, this returns the FULL frame height (see
+// Ghidra 0x004624c0/0x00462390; the "frame width" wording here was a misread),
+// fallback 0x4b = 75.
 // Cached per class id: the scenario resource set is fixed for the process
 // lifetime, and this runs per follower per frame.
 std::int16_t EscortClassSpriteSpanPx(std::int16_t class_id) {
