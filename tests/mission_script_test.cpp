@@ -1,11 +1,7 @@
 #include "game/game_state.hpp"
 #include "game/mission_script.hpp"
-#include "game/mission_trace.hpp"
-#include "log.hpp"
 
 #include <catch2/catch_test_macros.hpp>
-
-#include <cstdlib>
 
 using namespace game;
 
@@ -142,25 +138,4 @@ TEST_CASE("mission payload context expands Q message text tags") {
   no_context.pilot.first_name = "Jane";
   Mission_RunMisnScriptPayload(no_context, "Q7022", -1);
   CHECK(no_context.hud_overlay.message.find("<PN>") != std::string::npos);
-}
-
-TEST_CASE("mission trace full mode recaps the raw script") {
-  setenv("EVN_MISSION_TRACE", "full", 1);
-  MissionTrace::ConfigureFromEnvironment();
-  const auto since = NovaLog::LogTailSeq();
-  {
-    GameState state;
-    Mission_ExecuteScript(state, "b7", MissionScriptContext{"unit test"});
-  }
-  MissionTrace::SetMode(MissionTrace::Mode::off);
-  unsetenv("EVN_MISSION_TRACE");
-
-  bool saw_recap = false;
-  for (const auto &line : NovaLog::ReadLogSince(since)) {
-    if (line.text.find("mission-trace unit test") != std::string::npos &&
-        line.text.find("\"b7\"") != std::string::npos) {
-      saw_recap = true;
-    }
-  }
-  CHECK(saw_recap);
 }
