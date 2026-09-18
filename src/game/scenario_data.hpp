@@ -482,8 +482,8 @@ struct ShipClass {
   float muzzle_scale_far_x = 1.0F;
   float muzzle_scale_far_y = 1.0F;
   // Ghidra ShipClassDef +0x48 / resource payload +0x36A. Base ionization
-  // dissipation rate in charge points per millisecond after the loader's
-  // 0.01 scale and minimum-one clamp.
+  // dissipation rate in charge points per 30 Hz tick after the loader's
+  // conversion: raw > 0 -> raw * 0.01 (double), raw <= 0 -> 1.0.
   float ionization_decay_rate = 0.0F;
   // Ghidra ShipClassDef +0xA24. Sprite/behavior flags (bit 1 = carries
   // waypoint arrival markers, bit 2 = banking ships with sprite_behavior_flags
@@ -1663,6 +1663,11 @@ struct ImpactEffect {
   std::int16_t impact_sound_slot = -1;
   std::int16_t sprite_set_id = 0;
 };
+
+// Decodes one ship resource payload with the loader's ship decoder
+// (0x004bd3c0). Exposed for regression tests that pin per-field conversions
+// against synthetic payloads; production goes through LoadFromArchives.
+[[nodiscard]] ShipClass DecodeShipPayload(std::span<const std::byte> bytes);
 
 // Owns the parsed scenario tables indexed by (resource id - 0x80), mirroring
 // the original global arrays (g_ship_class_defs etc.). Filled by

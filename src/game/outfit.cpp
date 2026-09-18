@@ -149,13 +149,31 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
   return nullptr;
 }
 
-// Invalidate the lazily computed effective-stat snapshot. The original's
-// Ship_Compute* getters cache their result in sentinel globals
-// (_DAT_00735688/90/98...) and recompute only while the value is < 0; setting
-// stat_cache_valid = false is the clean-room equivalent of writing those
-// sentinels.
-void InvalidatePlayerStatCache(GameState &state) {
-  state.stat_cache_valid = false;
+// Player-side ModType-39 scan for Ship_ComputeIonizationDecayRate: each ion
+// dissipator adds owned * (ModVal * 0.01) to the class base. 0.01 is the
+// double constant DOUBLE_00575738 (not 0.01F), and the running total is
+// rounded back to float after each slot (the original's x87 FSTP/FLD).
+// TODO(decomp(0x0046c080)) skipped: the original's x87 64-bit intermediate
+// rounding. Double is an accepted platform-precision divergence; see
+// docs/ionization_decay_x87_precision.md.
+[[nodiscard]] float PlayerIonizationDecayFromOutfits(const GameState &state,
+                                                     float class_rate) {
+  double rate = static_cast<double>(class_rate);
+  for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
+       ++id) {
+    const std::int16_t owned = state.inventory.outfit_owned_count[id];
+    if (owned <= 0 || id >= state.scenario.outfits.size()) {
+      continue;
+    }
+    for (const Effect &e : OutfitEffects(state.scenario.outfits[id])) {
+      if (e.type == static_cast<std::int16_t>(OutfitEffect::kIonDissipator)) {
+        const double increment =
+            (static_cast<double>(e.val) * 0.01) * static_cast<double>(owned);
+        rate = static_cast<double>(static_cast<float>(increment + rate));
+      }
+    }
+  }
+  return static_cast<float>(rate);
 }
 
 } // namespace
@@ -201,7 +219,7 @@ void NovaOutfit_RefreshContrabandScanLatches(GameState &state) {
 // flags, carried-bomb class + detonation timer, and the distance-intensity/murk
 // cache.
 void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
-  InvalidatePlayerStatCache(state);
+  state.InvalidateDerivedStatCaches();
   // Ghidra 0x0046d4b0: rebuild the two contraband-scan candidate latches
   // (DAT_007356cc for held junk, DAT_007356cd for owned outfits) from scratch.
   // Ship_ScanPlayerForContraband clears each after a successful scan.
@@ -568,31 +586,25 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   return s;
 }
 
-// Ghidra 0x0046c080 Ship_ComputeIonizationDecayRate.
-float NovaOutfit_ComputeIonizationDecayRate(const GameState &state,
+// Ghidra 0x0046c080 Ship_ComputeIonizationDecayRate. The ModType-39 scan runs
+// inline in PlayerIonizationDecayFromOutfits above.
+float NovaOutfit_ComputeIonizationDecayRate(GameState &state,
                                             const Ship &ship) {
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-  float rate = cls != nullptr ? cls->ionization_decay_rate : 0.0F;
+  const float class_rate = cls != nullptr ? cls->ionization_decay_rate : 0.0F;
+  // NPC ships always read the live class base; the original never consults the
+  // player-only outfit cache for them.
   if (ship.ship_instance_id != 0) {
-    return rate;
+    return class_rate;
   }
-
-  constexpr float kModValueScale = 0.01F; // Ghidra DAT_00575738
-  for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
-       ++id) {
-    const std::int16_t owned = state.inventory.outfit_owned_count[id];
-    if (owned <= 0 || id >= state.scenario.outfits.size()) {
-      continue;
-    }
-    for (const Effect &effect : OutfitEffects(state.scenario.outfits[id])) {
-      if (effect.type ==
-          static_cast<std::int16_t>(OutfitEffect::kIonDissipator)) {
-        rate += static_cast<float>(owned) * static_cast<float>(effect.val) *
-                kModValueScale;
-      }
-    }
+  // Player cache (DAT_007356ac): valid while >= 0.0. A negative or NaN stored
+  // rate is recomputed, matching the original x87 FCOMP against 0.0.
+  if (state.cached_ionization_decay_rate >= 0.0F) {
+    return state.cached_ionization_decay_rate;
   }
+  const float rate = PlayerIonizationDecayFromOutfits(state, class_rate);
+  state.cached_ionization_decay_rate = rate;
   return rate;
 }
 
@@ -1367,7 +1379,7 @@ void Player_RedistributeFleetCargoOverflow(GameState &state,
       }
     }
     // g_playerInventoryAndLoadoutDirty.
-    state.stat_cache_valid = false;
+    state.InvalidateDerivedStatCaches();
   }
 
   // 4. Clear the player's standard bins (the junk pass above already
@@ -1388,7 +1400,7 @@ void Player_RedistributeFleetCargoOverflow(GameState &state,
   }
 
   // Outfit_RecomputeOutfitDerivedState (0x0046d4b0) is modelled lazily.
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
 }
 
 // Ghidra 0x0046cb90 Outfit_HasMiningScoopOutfit. ModType 0x1F in any of the

@@ -97,7 +97,7 @@ ChangePlayerShip(GameState &state, std::int32_t resource_id, char opcode) {
     NovaWeapon_SeedBanksFromShipStock(state, class_id);
     NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
   }
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   return true;
 }
 
