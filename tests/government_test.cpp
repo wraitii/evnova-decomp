@@ -114,7 +114,7 @@ TEST_CASE("candidate-hostility applies the stellar targeter gates",
     state.travel.selected_stellar_id = -1;
   }
 
-  SECTION("hazard marker and AI state 8 reject a candidate") {
+  SECTION("dominated targeter and AI state 8 reject a candidate") {
     ship.ship_instance_id = 1;
     ship.squad_leader_ship_slot = -1;
     stellar.dominated = true;
@@ -134,6 +134,110 @@ TEST_CASE("candidate-hostility applies the stellar targeter gates",
     stellar.field_0x47 = 1;
     CHECK(NovaGovernment_IsCandidateHostileToTargeter(
         state, ship, stellar, 0x80));
+  }
+}
+
+// Ground truth from the 0x0040fd20 disassembly. a (index 0) and b (index 1)
+// are allied through a class match; the player's system (index 0) is owned by
+// b. rep is the player's standing in that system; CrimeTol is per-government.
+GameState ShipLikeState() {
+  GameState state;
+  Government a; // index 0: the ship's faction
+  Government b; // index 1: the system government
+  a.classes = {5, -1, -1, -1};
+  b.ally_classes = {5, -1, -1, -1};
+  state.scenario.governments = {a, b};
+  game::System system;
+  system.government_id = 1;
+  state.scenario.systems = {system};
+  state.player.current_system_id = 0;
+  state.system_reputation.assign(1, 0);
+  return state;
+}
+
+TEST_CASE("does-ship-like-player follows the reputation polarity",
+          "[government][aid]") {
+  GameState state = ShipLikeState();
+  Ship ship;
+  ship.faction_or_government_id = 0;
+  ship.squad_leader_ship_slot = -1;
+  ship.mission_fleet_slot = -1;
+
+  SECTION("allied government admits aid while rep + CrimeTol >= 0") {
+    state.scenario.governments[1].crime_tol = 0;
+    state.system_reputation[0] = 0;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship));
+    state.system_reputation[0] = -5;
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship));
+    // The final GovtDef +0x83 gate is the IFF-scrambler latch.
+    state.scenario.governments[0].iff_scrambler_active = true;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship));
+  }
+
+  SECTION("hostile government inverts the CrimeTol test") {
+    // Break the alliance: b treats a's class 5 as an enemy.
+    state.scenario.governments[1].ally_classes = {-1, -1, -1, -1};
+    state.scenario.governments[1].enemy_classes = {5, -1, -1, -1};
+    state.scenario.governments[1].crime_tol = 0;
+    state.system_reputation[0] = -5;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship));
+    state.system_reputation[0] = 5;
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship));
+  }
+
+  SECTION("xenophobic faction dislikes standing with a rival system") {
+    state.scenario.governments[0].flags_primary = 0x0001U;
+    state.scenario.governments[1].crime_tol = 0;
+    state.system_reputation[0] = 5; // above the rival's CrimeTol -> no aid
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship));
+  }
+
+  SECTION("neutral government uses the 0x0002/CrimeTol polarity") {
+    // Neither allied nor hostile.
+    state.scenario.governments[1].ally_classes = {-1, -1, -1, -1};
+    state.scenario.governments[1].enemy_classes = {-1, -1, -1, -1};
+    state.scenario.governments[1].crime_tol = 10; // nonzero threshold
+    state.scenario.governments[0].flags_primary = 0x0002U;
+    state.system_reputation[0] = 0;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship)); // 0 + 10 >= 0
+    state.system_reputation[0] = -20;
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship)); // -10 < 0
+    // Without flag 0x0002 the neutral arm likes the player unconditionally.
+    state.scenario.governments[0].flags_primary = 0;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship));
+  }
+
+  SECTION("government-less system uses the faction's CrimeTol") {
+    state.scenario.systems[0].government_id = -1;
+    state.scenario.governments[0].flags_primary = 0x0002U;
+    state.scenario.governments[0].crime_tol = 10;
+    state.system_reputation[0] = 0;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship)); // 0 + 10 >= 0
+    state.system_reputation[0] = -20;
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship)); // -10 < 0
+    state.scenario.governments[0].flags_primary = 0;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship));
+  }
+
+  SECTION("mission fleet only aids for ShipGoal 3/4 and ShipBehav 1") {
+    ship.mission_fleet_slot = 0;
+    state.active_mission_runtime_flags[0].is_active = true;
+    state.active_missions[0].ship_goal = 3;
+    state.active_missions[0].ship_behavior = 1;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship));
+    state.active_missions[0].ship_behavior = -1;
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship));
+    state.active_missions[0].ship_behavior = 2;
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship));
+    state.active_missions[0].ship_goal = 1;
+    state.active_missions[0].ship_behavior = 1;
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship));
+    // ShipGoal 4 is the other successful goal.
+    state.active_missions[0].ship_goal = 4;
+    state.active_missions[0].ship_behavior = 1;
+    CHECK(game::NovaShip_DoesShipLikePlayer(state, ship));
+    state.active_mission_runtime_flags[0].is_active = false;
+    CHECK_FALSE(game::NovaShip_DoesShipLikePlayer(state, ship));
   }
 }
 

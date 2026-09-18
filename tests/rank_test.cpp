@@ -15,7 +15,6 @@ using game::Rank_Activate;
 using game::Rank_Deactivate;
 using game::Rank_HighestWeightedActiveSlot;
 using game::Rank_HighestWeightedActiveSlotForGovernment;
-using game::RankDef;
 
 // Scenario with 0x80 empty rank slots and ids pre-assigned, matching what
 // ScenarioData::LoadFromArchives and Ship_InitGameplayDataTables do.
@@ -202,6 +201,62 @@ TEST_CASE("faction combat event floods reputation through adjacency",
   CHECK(state.system_reputation[0] == -7);
   // 7 * 0.65 = 4.55, truncated toward zero (x87 FIST + residual correction).
   CHECK(state.system_reputation[1] == -4);
+}
+
+// Propagate rounding/clamp edges replicated from 0x00467140: the |delta| < 1
+// gate suppresses both the update and the adjacency recursion, the result is
+// clamped to +/-32000, a derelict event faction short-circuits, and the
+// mission_fleet_slot != -1 arm skips the flood entirely.
+TEST_CASE("faction combat flood gates, clamps, and skips",
+          "[rank][government][propagate]") {
+  auto make_state = [] {
+    GameState state;
+    state.scenario.governments.assign(0x100, {});
+    state.scenario.ranks.assign(0x80, {});
+    state.scenario.systems.assign(2, {});
+    state.scenario.systems[0].is_visible = true;
+    state.scenario.systems[0].government_id = 0;
+    state.scenario.systems[0].links[0] = 0x81;
+    state.scenario.systems[1].is_visible = true;
+    state.scenario.systems[1].government_id = 0;
+    state.system_reputation.assign(2, 0);
+    return state;
+  };
+
+  SECTION("half-scaled delta below 1.0 is ignored and does not recurse") {
+    GameState state = make_state();
+    // faction == -1 against a xenophobic system government: delta is
+    // -SmugPenalty * 0.5 = -0.5, so the gate rejects it and the linked system
+    // stays at 0 (changed == false).
+    state.scenario.governments[0].flags_primary = 0x0001U;
+    state.scenario.governments[0].smug_penalty = 1;
+    game::NovaGovernment_ProcessFactionCombatEvent(state, 0, -1, 0, -1);
+    CHECK(state.system_reputation[0] == 0);
+    CHECK(state.system_reputation[1] == 0);
+  }
+
+  SECTION("reputation is clamped to -32000") {
+    GameState state = make_state();
+    state.scenario.governments[0].kill_penalty = 32767;
+    game::NovaGovernment_ProcessFactionCombatEvent(state, 0, 0, 3, -1);
+    CHECK(state.system_reputation[0] == -32000);
+  }
+
+  SECTION("derelict event faction is skipped") {
+    GameState state = make_state();
+    state.scenario.governments[0].flags_primary = 0x0800U;
+    state.scenario.governments[0].kill_penalty = 7;
+    game::NovaGovernment_ProcessFactionCombatEvent(state, 0, 0, 3, -1);
+    CHECK(state.system_reputation[0] == 0);
+  }
+
+  SECTION("assigned mission-fleet slot skips the flood") {
+    GameState state = make_state();
+    state.scenario.governments[0].kill_penalty = 7;
+    game::NovaGovernment_ProcessFactionCombatEvent(state, 0, 0, 3, 0);
+    CHECK(state.system_reputation[0] == 0);
+    CHECK(state.system_reputation[1] == 0);
+  }
 }
 
 // Active + defined ranks OR their Contribute mask into the player's mask

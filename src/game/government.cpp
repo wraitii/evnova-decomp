@@ -257,10 +257,10 @@ bool NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
          (ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0);
 }
 
-// Ghidra 0x0040fd20 Ship_DoesShipLikePlayer. See the header
-// for the branch description. The mission-fleet branch (random-encounter
-// fleet defs) and the GovtDef +0x83 byte gate are deferred: the fleet defs
-// are not modelled, and the +0x83 byte has no clean-room field (TODO(decomp)).
+// Ghidra 0x0040fd20 Ship_DoesShipLikePlayer. See the header for the branch
+// description. The final GovtDef +0x83 gate is the per-government IFF-scrambler
+// latch `Government.iff_scrambler_active` (written by
+// Outfit_RecomputeOutfitDerivedState 0x0046d4b0 at 0x0046d901).
 bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
   if (NovaAiShip_ShouldKeepPressingTarget(state, ship)) {
     return false;
@@ -273,12 +273,26 @@ bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
           state.scenario, ship.faction_or_government_id, 0)) {
     return true;
   }
+  // Mission-fleet branch (0x0040fd72): a live mission ship aids only while its
+  // ShipGoal is 3/4 and its ShipBehav is exactly 1.
   if (ship.mission_fleet_slot != -1) {
-    // Random-encounter fleet def branch (fleet escort flags 3/4): not
-    // modelled; ships without a modelled fleet slot never reach here.
-    NovaLog::Todo("government-aid: mission-fleet branch not reconstructed "
-                  "(fleet defs not modelled)");
-    return false;
+    const std::int16_t slot = ship.mission_fleet_slot;
+    if (slot < 0 ||
+        static_cast<std::size_t>(slot) >= GameState::kMaxActiveMissions) {
+      return false;
+    }
+    const auto index = static_cast<std::size_t>(slot);
+    if (!state.active_mission_runtime_flags[index].is_active) {
+      return false;
+    }
+    const ActiveMission &mission = state.active_missions[index];
+    if (mission.ship_goal != 3 && mission.ship_goal != 4) {
+      return false;
+    }
+    if (mission.ship_behavior == -1) {
+      return false;
+    }
+    return mission.ship_behavior == 1;
   }
   if (ship.faction_or_government_id == -1) {
     return true; // faction-less ships aid anyone
@@ -292,7 +306,8 @@ bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
   // Player's current system government + reputation (g_system_reputation,
   // indexed by the 0-based system id like the original's g_system_defs_ptr).
   const std::int16_t sys_id = state.player.current_system_id;
-  const System *sys = state.scenario.System(sys_id);
+  const System *sys =
+      state.scenario.System(static_cast<std::int16_t>(sys_id + 0x80));
   const std::int16_t sys_govt = sys != nullptr ? sys->government_id : -1;
   const std::int16_t rep =
       sys_id >= 0 &&
@@ -309,9 +324,11 @@ bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
         .crime_tol;
   };
 
-  // Xenophobic ship faction (flags_primary & 1): aid is admitted when the
-  // system reputation clears the crime tolerance of the system government
-  // (or of government entry 0 when the system has no government).
+  // Xenophobic ship faction (flags_primary & 0x0001, 0x0040fe18): aid is
+  // admitted only when reputation clears the crime tolerance of the system
+  // government; a foreign system government whose tolerance is also cleared
+  // is explicitly NOT liked (a xenophobe resents the player's standing with a
+  // rival). Falling through runs the common tail below.
   if ((govt.flags_primary & 0x0001U) != 0) {
     if (sys_govt == ship.faction_or_government_id) {
       if (crime_tolerance(sys_govt) < rep) {
@@ -319,26 +336,28 @@ bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
       }
     } else if (sys_govt < 0) {
       if (crime_tolerance(0) < rep) {
-        return true;
+        return false;
       }
     } else if (crime_tolerance(sys_govt) < rep) {
-      return true;
+      return false;
     }
   }
 
-  // The 0x0002 flag and the allied/hostile ladders all admit aid when
-  // reputation + the relevant crime tolerance stays negative (the original's
-  // SBORROW4 comparison, i.e. rep + crime_tol < 0).
+  // Common ladder (0x0040fe95). When the system has no government, the 0x0002
+  // flag and the allied/neutral arms admit aid while reputation stays on the
+  // non-criminal side of the relevant CrimeTol (`rep + CrimeTol >= 0`); only
+  // a hostile government inverts that (it likes a player who is a criminal to
+  // it). Each failing arm falls through to the +0x83 IFF-scrambler gate.
   if (sys_govt < 0) {
     if ((govt.flags_primary & 0x0002U) == 0) {
       return true;
     }
-    if (rep + crime_tolerance(static_cast<std::int16_t>(faction)) < 0) {
+    if (rep + crime_tolerance(static_cast<std::int16_t>(faction)) >= 0) {
       return true;
     }
   } else if (NovaGovernment_AreGovtsAllied(
                  state.scenario, sys_govt, ship.faction_or_government_id)) {
-    if (rep + crime_tolerance(sys_govt) < 0) {
+    if (rep + crime_tolerance(sys_govt) >= 0) {
       return true;
     }
   } else if (NovaGovernment_AreGovtsHostileOrXenophobic(
@@ -348,15 +367,11 @@ bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
     }
   } else if ((govt.flags_primary & 0x0002U) == 0) {
     return true;
-  } else if (rep + crime_tolerance(sys_govt) < 0) {
+  } else if (rep + crime_tolerance(sys_govt) >= 0) {
     return true;
   }
 
-  // Ghidra Ship_DoesShipLikePlayer (0x0040fd20) also returns
-  // true when GovtDef +0x83 is set -- the final gate of the eligibility
-  // branch. TODO(decomp(0x0040fd20)) skipped: no clean-room +0x83 field, so
-  // the gate is not reproduced.
-  return false;
+  return govt.iff_scrambler_active;
 }
 
 // Ghidra 0x00413610 Government_TryTriggerGovtAssistanceEncounter.
@@ -461,8 +476,9 @@ bool NovaGovernment_TryTriggerAssistanceEncounter(GameState &state,
 //   -30128-g
 //   -40001..-40099 deduct this percentage of the player's cash
 //   <= -40100      no effect (the -50000- range is consumed at acceptance)
-// Reputation/cash rounding matches the original's x87 FISTP half-to-even
-// behavior; DAT_00575500 = 0.5 and DAT_00575508 = 0.01.
+// Cash rounding matches the original's x87 FIST + residual/sign correction
+// idiom, which truncates toward zero (see docs/x87_truncation_idiom.md);
+// DAT_00575500 = 0.5 and DAT_00575508 = 0.01.
 void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
                                                std::int32_t delta) {
   const auto clear_negative_reputation = [&state](auto &&matches) {
@@ -709,8 +725,9 @@ void NovaGovernment_ProcessFactionCombatEvent(
   }
   std::array<bool, 0x800> visit_mask{};
   if (mission_fleet_slot != -1) {
-    // The shipped mission-fleet script always passes -1; the original's
-    // non-(-1) arm skips both the flood and the rank revocation.
+    // A live mission ship's victim slot makes the event inert: the original
+    // skips both the flood and the rank revocation. Kill/disable/board pass the
+    // victim's +0xC8D2; smuggle and stellar-destruction pass -1.
     return;
   }
   NovaGovernment_PropagateFactionCombatInfluence(

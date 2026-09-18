@@ -63,8 +63,8 @@ namespace game {
 // Ghidra 0x004629E0 Government_IsCandidateHostileToTargeter. Whether `ship` is
 // a hostile target for a stellar defense battery. `stellar` is the targeter and
 // `stellar_id` its raw resource id (Ghidra StellarDef +0x8). Branches:
-//  - a hazard-marked targeter (+0x46) or a non-player ship in AI state 8 is
-//    never a candidate;
+//  - a dominated targeter (StellarDef +0x46) or a non-player ship in AI state
+//    8 is never a candidate;
 //  - ordinary stellars (availability_flags +0x34 without 0x200): the player or
 //    a squad leader uses the system-reputation / government-relation ladder
 //    (falling back to the system government when the stellar has none), while
@@ -81,17 +81,21 @@ NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
                                             const Stellar &stellar,
                                             std::int16_t stellar_id);
 
-// Ghidra 0x0040fd20 Ship_DoesShipLikePlayer. Whether the
-// ship's government would send it to help the player when hailed: false when
-// the ship keeps pressing its own target; true when it is idle with no AI
-// target, or its government policy flag 0 is set, or it has no faction at all.
-// Otherwise resolves the player's current system government against the
-// ship's faction: the xenophobic flag (0x0001) admits aid when the system
-// reputation clears the system government's flee threshold, the 0x0002 flag
-// admits aid when reputation + the relevant government's flee threshold stays
-// negative, and hostile system governments admit aid under the same threshold
-// test. The mission-fleet branch (random-encounter fleet defs) and the
-// GovtDef +0x83 byte gate are deferred (TODO(decomp): not modelled).
+// Ghidra 0x0040fd20 Ship_DoesShipLikePlayer. Whether the ship is favorably
+// disposed toward the player; consumed by the comm/hail/taunt and ship-update
+// paths, not only assistance requests. False while the ship keeps pressing its
+// own target; true when the ship belongs to the player's squad
+// (squad_leader_ship_slot == 0), its government policy flag 0 is set, or it
+// has no faction at all. A live mission-fleet ship likes the player only while
+// its mission is active with ShipGoal 3/4 and ShipBehav 1. Otherwise the
+// player's current system government is resolved against the ship's faction: a
+// xenophobic faction (0x0001) likes the player only when the system reputation
+// clears its own government's CrimeTol (and explicitly dislikes standing with
+// a rival system government), while the common ladder likes the player when
+// `reputation + CrimeTol >= 0` for allied and neutral governments and
+// `reputation + CrimeTol < 0` for hostile ones. Any arm that falls through
+// returns the government's IFF-scrambler latch (GovtDef +0x83,
+// Government.iff_scrambler_active).
 [[nodiscard]] bool NovaShip_DoesShipLikePlayer(const GameState &state,
                                                const Ship &ship);
 

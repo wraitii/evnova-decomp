@@ -29,8 +29,9 @@ Only the smuggle and stellar/attack sites pass `-1` unconditionally.
 
 Kill/disable is the gate for rank flag `0x0004`; "any crime" is flag `0x0040`.
 The stellar-destruction arm fires event 3 ten times and the travel-window arm
-five times (amplified reputation pulses; the propagate visited-mask suppresses
-re-propagation, the rank loop re-runs).
+five times. `Government_ProcessFactionCombatEvent` clears its visit mask on
+entry, so each pulse is an independent full flood (reputation shifts again) and
+the rank loop re-runs every time.
 
 The event-0 caller is the smuggle-fine path: it composes STR# 0x7d2 entries
 0x178–0x17c ("your attempt to smuggle illegal cargo through this system has
@@ -157,3 +158,27 @@ The four rank effects are now ported and unit-tested:
 
 Gameplay validation still needed: an event 3 should move `system_reputation`
 and revoke crime-sensitive allied ranks. Ask before using the probe.
+
+## Port status and continuation (2026)
+
+`Government_ProcessFactionCombatEvent` (0x00466fc0) and
+`Government_PropagateFactionCombatInfluenceToNearbySystems` (0x00467140) are
+faithful and their tracker rows are 100%. Callsites wired: `Ship_ApplyDamageToShip`
+event 1 (0x00419721) and event 3 (0x0041976f), `Shot_ResolveCollisions` stellar
+destruction event 3 x10 (0x004381ef), `Player_HandleBoardTargetCommand`
+event 2 (0x0045a85f), and the event-0 smuggle caller
+`Ship_ScanPlayerForContraband` (0x00401800, see docs/contraband_scan.md), whose
+mission-cargo / junk scan arms are the two event-0 callsites. The
+`mission_fleet_slot != -1` arm is inert.
+
+Remaining, deliberately out of scope:
+- **Demand tribute** `NovaUi_RunTravelDestinationInteractionWindow` (0x00480030)
+  event 3 x5 branch is unported (see its own TODO in negotiation_dialog.cpp).
+- **Ship_HandlePlayerShipCore** 0x00453670 event 3 x1 sits in the skipped
+  debug/cheat command arm (commands 0x38/0x6f/0x1d/0x6b/0x2a), not gameplay.
+
+Fixed alongside: `Ship_DoesShipLikePlayer` (0x0040fd20) had inverted
+allied/neutral/government-less CrimeTol polarity, a missing mission-fleet
+branch, a missing GovtDef +0x83 IFF-scrambler tail, and a
+`ScenarioData::System` lookup that omitted the +0x80 resource rebase. See
+tests/government_test.cpp and the Ghidra plate comment.
