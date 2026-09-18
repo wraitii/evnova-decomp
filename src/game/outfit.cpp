@@ -160,21 +160,52 @@ void InvalidatePlayerStatCache(GameState &state) {
 
 } // namespace
 
+// Split-out arm of NovaOutfit_RecomputeOutfitDerivedState (0x0046d4b0): the
+// DAT_007356cc/DAT_007356cd contraband-scan candidate latches. Not a separate
+// original function; the primary citation is on the recompute below.
+void NovaOutfit_RefreshContrabandScanLatches(GameState &state) {
+  state.inventory.has_scannable_junk = false;
+  state.inventory.has_scannable_outfit = false;
+  for (std::size_t i = 0; i < state.inventory.junk_counts.size() &&
+                          i < state.scenario.junk_defs.size();
+       ++i) {
+    if (state.inventory.junk_counts[i] > 0 &&
+        state.scenario.junk_defs[i].scan_mask != 0) {
+      state.inventory.has_scannable_junk = true;
+      break;
+    }
+  }
+  for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
+                          i < state.scenario.outfits.size();
+       ++i) {
+    if (state.inventory.outfit_owned_count[i] > 0 &&
+        state.scenario.outfits[i].scan_mask != 0) {
+      state.inventory.has_scannable_outfit = true;
+      break;
+    }
+  }
+}
+
 // Ghidra 0x0046d4b0 Outfit_RecomputeOutfitDerivedState. See
 // docs/outfit_derived_state.md for the two-mechanism model (eager
 // side-effecting recompute vs. the lazy Ship_Compute* sentinel caches) and the
 // caller map.
 //
 // Modelled arms: stat-cache invalidation, cargo-overflow scaling, negative
-// cargo/junk clamps, jamming
-// reset, cloak-latch reset, outfit-derived government latches (ModType
-// 0x2c/0x30), government policy_flags clear/rebuild from active ranks,
-// mining-scoop latch + cargo-capacity gate, and the recently-hit timer reset.
-// TODO(decomp): the remaining eager arms are not ported -- license clamp
-// (unlicensed -> max shield/armor 1.0), junk-derived flags, carried-bomb class
-// + detonation timer, and the distance-intensity/murk cache.
+// cargo/junk clamps, jamming reset, cloak-latch reset, outfit-derived
+// government latches (ModType 0x2c/0x30), government policy_flags
+// clear/rebuild from active ranks, mining-scoop latch + cargo-capacity gate,
+// the contraband-scan latches (NovaOutfit_RefreshContrabandScanLatches), and
+// the recently-hit timer reset. TODO(decomp): the remaining eager arms are not
+// ported -- license clamp (unlicensed -> max shield/armor 1.0), junk-derived
+// flags, carried-bomb class + detonation timer, and the distance-intensity/murk
+// cache.
 void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
   InvalidatePlayerStatCache(state);
+  // Ghidra 0x0046d4b0: rebuild the two contraband-scan candidate latches
+  // (DAT_007356cc for held junk, DAT_007356cd for owned outfits) from scratch.
+  // Ship_ScanPlayerForContraband clears each after a successful scan.
+  NovaOutfit_RefreshContrabandScanLatches(state);
   // Ghidra 0x0046d4b0: when all cargo and junk exceeds the fleet's new
   // capacity, scale each of the six ordinary cargo bins by capacity / total.
   // Mission cargo and junk participate in the denominator but are not

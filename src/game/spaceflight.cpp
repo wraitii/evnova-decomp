@@ -1940,13 +1940,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           // and the tunnel ramp schedule is cue-relative, so this rate sets the
           // whole jump cadence. The original stages the cue at rate
           // 1.0/jump_duration_multiplier (0x0046ab00: 65536/multiplier
-          // fixed-point; chassis-derived 0.91..2.08 -> rates 0.48..1.1). The
-          // port pins the multiplier to 1.0 (not decoded into ShipClass yet),
-          // so the cue plays at rate 1.0: 6.08 s of rising cue, ~2.1 s of
-          // stationary hold, ramp onset, boom as the cue resolves.
+          // fixed-point; chassis-derived 0.91..2.08 -> rates 0.48..1.1).
           audio.Play(*state.warp_up_sound,
                      1.0F,
-                     1.0F,
+                     1.0F /
+                         game::NovaTravel_PlayerJumpDurationMultiplier(state),
                      game::kHyperspaceWarpUpSoundKey,
                      /*priority_width=*/0x32);
         }

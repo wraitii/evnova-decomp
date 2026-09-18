@@ -2,15 +2,23 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <span>
+#include <string>
 
+#include "hud_overlay.hpp"
 #include "log.hpp"
+#include "mission.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "rank.hpp"
 #include "ship_ai.hpp"
 #include "travel.hpp"
+#include "util/format.hpp"
 
 namespace game {
 namespace {
@@ -729,6 +737,336 @@ void NovaGovernment_ProcessFactionCombatEvent(
     if (crime_sensitive) {
       Rank_Deactivate(state, static_cast<std::int16_t>(i));
     }
+  }
+}
+
+namespace {
+
+// Ship_ScanPlayerForContraband scan range (FLOAT_0057501c). The hyperspace
+// guard delegates to NovaTravel_PlayerPastJumpOnset so the ramp constants stay
+// in one place.
+constexpr float kContrabandScanRange = 100.0F;
+
+// The ship class name (original ShipClassDef +0x6c), used as the fallback
+// prefix for both the mission and the pers/outfit/junk message arms.
+[[nodiscard]] std::string ClassName(const GameState &state, const Ship &ship) {
+  if (ship.ship_class_id >= 0 && static_cast<std::size_t>(ship.ship_class_id) <
+                                     state.scenario.ships.size()) {
+    return state.scenario.ships[static_cast<std::size_t>(ship.ship_class_id)]
+        .display_name;
+  }
+  return {};
+}
+
+// Outfit/junk arm prefix name: the assigned përs display name, else the class.
+[[nodiscard]] std::string ScannerName(const GameState &state,
+                                      const Ship &ship) {
+  if (ship.pers_def_slot >= 0 && static_cast<std::size_t>(ship.pers_def_slot) <
+                                     state.scenario.pers_defs.size()) {
+    return state.scenario
+        .pers_defs[static_cast<std::size_t>(ship.pers_def_slot)]
+        .display_name;
+  }
+  return ClassName(state, ship);
+}
+
+// Mission arm prefix name: the active mission's fleet name when set, else the
+// scanning ship's class name (original: mission_fleet_name[0] < 1 fallback).
+[[nodiscard]] std::string MissionScanName(const GameState &state,
+                                          const Ship &ship,
+                                          const ActiveMission &mission) {
+  if (!mission.mission_fleet_name.empty()) {
+    return mission.mission_fleet_name;
+  }
+  return ClassName(state, ship);
+}
+
+// One STR# 0x7d2 entry, empty when absent (parity with Resource_AppendString-
+// Entry, which leaves the buffer untouched for a missing entry).
+[[nodiscard]] std::string ScanString(std::uint16_t entry) {
+  return NovaHud_LoadStringEntry(0x7d2, entry).value_or(std::string{});
+}
+
+[[nodiscard]] std::string ScanPrefix(const GameState &state,
+                                     const std::string &name) {
+  std::string text = name;
+  text += ":  ";
+  text += state.player.ship_name;
+  text += ", ";
+  return text;
+}
+
+// Mission/junk percentage fine (scan_fine < 0): -scan_fine percent of credits,
+// truncated toward zero and scaled to hundreds, minimum 1. Mirrors the x87
+// int conversion at 0x00402258 (FIST + truncation correction), not the flat
+// positive arm.
+[[nodiscard]] std::int32_t ContrabandPercentageFine(std::int16_t scan_fine,
+                                                    std::int32_t credits) {
+  // Disassembly (0x00402258): (credits * -scan_fine * 1e-4) is computed in
+  // double, FIST'd to an int (the inlined _ftol truncation correction makes it
+  // trunc-toward-zero of the double), then scaled by *100 as a 32-bit imul.
+  // The float store between FIST and the correction feeds only the sign test,
+  // not the integer value. Preserve the 32-bit multiply wrap (observable: a
+  // wrapped negative fine collapses to the min-1 credit fine), but clamp the
+  // double before the int cast so the cast itself is not UB.
+  const double raw = static_cast<double>(credits) *
+                     static_cast<double>(-static_cast<int>(scan_fine)) * 1.0e-4;
+  double truncated = std::trunc(raw);
+  if (truncated > 2147483647.0) {
+    truncated = 2147483647.0;
+  } else if (truncated < -2147483648.0) {
+    truncated = -2147483648.0;
+  }
+  const std::int32_t base = static_cast<std::int32_t>(truncated);
+  const std::uint32_t wrapped = static_cast<std::uint32_t>(base) * 100U;
+  std::int32_t fine = std::bit_cast<std::int32_t>(wrapped);
+  if (fine < 1) {
+    fine = 1;
+  }
+  return fine;
+}
+
+void ApplyScanFine(GameState &state, std::int32_t fine) {
+  state.player.credits -= fine;
+  if (state.player.credits < 0) {
+    state.player.credits = 0;
+  }
+  // Ghidra 0x00401800 sets g_playerInventoryAndLoadoutDirty after a fine. Its
+  // only reader, NovaUi_RefreshGameplayPanels (0x0045d320), marks the cargo HUD
+  // dirty; the port redraws it every frame, so the cell-specific scan latches
+  // are deliberately left untouched here (details in docs/contraband_scan.md).
+}
+
+void AppendFineText(std::string &text, std::int32_t fine) {
+  text += " ";
+  text += ScanString(0x17c);
+  text += " ";
+  text += evnova::util::GroupThousands(fine);
+  text += " ";
+  text += fine < 2 ? "credit" : "credits";
+  text += ".";
+}
+
+// The original matches 0x18a ("an") / 0x189 ("a") from the lowercased first
+// character of the singular outfit name (MWRuntime_FUN_004d6230 = tolower).
+[[nodiscard]] bool StartsWithVowel(const std::string &name) {
+  if (name.empty()) {
+    return false;
+  }
+  const char c =
+      static_cast<char>(std::tolower(static_cast<unsigned char>(name.front())));
+  return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u';
+}
+
+// The original plays g_nova_control_bits[164] (fine/warning) or [152] (mission
+// failure) through NovaAudio_FillVoiceSlotDescriptor(handle, 1,
+// g_centered_audio_gain). Those byte offsets are
+// g_transition_sound_handle_table slots: NovaAudio_PreloadGameplayData
+// (0x004b0740) fills g_nova_control_bits+0x94+i*4 with
+// NovaSound_LoadDecodedById(0x96+i) (snd 150+i), so +0x98 is index 1 (snd 151)
+// and +0xa4 is index 4 (snd 154). The port queues the matching
+// transition_sounds entry on the shared pending_ui_sounds channel (drained by
+// the spaceflight loop, which owns the audio device); width 1 matches the
+// original descriptor.
+void ShowScanMessage(GameState &state,
+                     std::string message,
+                     std::int16_t control_bit_offset) {
+  const std::int16_t transition_index = control_bit_offset == 152 ? 1 : 4;
+  state.pending_ui_sounds.push_back(
+      GameState::PendingUiSound{transition_index, 1});
+  NovaHud_ShowOverlayMessage(
+      state, std::move(message), static_cast<std::uint64_t>(0x190));
+}
+
+} // namespace
+
+// Ghidra 0x00401800 Ship_ScanPlayerForContraband.
+void NovaShip_ScanPlayerForContraband(GameState &state,
+                                      Ship &ship,
+                                      std::uint32_t now_ms) {
+  // Only warships (AI type 3) and interceptors (AI type 4) scan.
+  if (ship.ai_behavior_code != 3 && ship.ai_behavior_code != 4) {
+    return;
+  }
+  if (ship.faction_or_government_id == -1) {
+    return;
+  }
+  const Government *govt =
+      state.scenario.GovernmentByIndex(ship.faction_or_government_id);
+  if (govt == nullptr || govt->smug_penalty == 0) {
+    return;
+  }
+  const Ship &player = state.player;
+  if (std::abs(ship.pos_x - player.pos_x) > kContrabandScanRange ||
+      std::abs(ship.pos_y - player.pos_y) > kContrabandScanRange) {
+    return;
+  }
+  // Original passes (player, scanner) to
+  // Ship_CanShipEngageTargetUnderCloakRules.
+  if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, player, ship)) {
+    return;
+  }
+  // Single 100-sided draw; scan on <= 75. No other RNG in this function.
+  if (RandomBelow(state, 100) > 75) {
+    return;
+  }
+  // Hyperspace-committed guard: skip once the player's jump hold has passed
+  // its onset (the original gates on ai_station_hold_timer > 0, which the port
+  // tracks as TravelState::JumpPhase::kHold; the Ship field is dormant here).
+  if (state.travel.jump_phase == TravelState::JumpPhase::kHold &&
+      !NovaAiShip_IsDisabled(state, player) &&
+      NovaTravel_PlayerPastJumpOnset(state)) {
+    return;
+  }
+
+  const std::int16_t scan_mask = govt->scan_mask;
+
+  // --- Mission cargo: first matching active mission, then fall through. ---
+  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+    MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
+    const ActiveMission &mission = state.active_missions[slot];
+    if (!runtime.is_active) {
+      continue;
+    }
+    if ((static_cast<std::uint16_t>(mission.scan_mask) &
+         static_cast<std::uint16_t>(scan_mask)) == 0U) {
+      continue;
+    }
+    if (!mission.carrying_resources || mission.cargo_type_id == -1) {
+      continue;
+    }
+
+    const bool fails_on_scan = (mission.flags_primary & 0x20U) != 0U;
+    if (!fails_on_scan || runtime.is_failed) {
+      // Warning/fine arm: the mission is not failed.
+      std::string message =
+          ScanPrefix(state, MissionScanName(state, ship, mission));
+      message += ScanString(0x178);
+      message += " ";
+      message += ScanString(0x179);
+      message += " ";
+      message += ScanString(0x17a);
+      message += " ";
+      message += ScanString(0x17b);
+      message += ".";
+      ship.primary_target_ship_slot = 0;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_state_code = 4;
+      if (govt->scan_fine != 0) {
+        const std::int32_t fine =
+            govt->scan_fine > 0 ? static_cast<std::int32_t>(govt->scan_fine)
+                                : ContrabandPercentageFine(
+                                      govt->scan_fine, state.player.credits);
+        AppendFineText(message, fine);
+        ApplyScanFine(state, fine);
+      }
+      ShowScanMessage(state, std::move(message), 164);
+    } else {
+      // Failure arm: fail the mission; the voice/message is suppressed by the
+      // accept-time flag 0x400.
+      runtime.is_failed = true;
+      if ((runtime.flags_primary_at_accept & 0x400U) == 0U) {
+        ShowScanMessage(state, ScanString(0x11e), 152);
+      }
+      Mission_FailMissionSlotQuick(
+          state, static_cast<std::int16_t>(slot), now_ms);
+      ship.primary_target_ship_slot = 0;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_state_code = 4;
+    }
+    break;
+  }
+
+  // --- Outfit scan (only when no junk is scannable), else junk scan. ---
+  if (!state.inventory.has_scannable_junk) {
+    if (!state.inventory.has_scannable_outfit) {
+      return;
+    }
+    for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size();
+         ++i) {
+      if (state.inventory.outfit_owned_count[i] <= 0) {
+        continue;
+      }
+      if (i >= state.scenario.outfits.size()) {
+        continue;
+      }
+      const Outfit &outfit = state.scenario.outfits[i];
+      if ((static_cast<std::uint16_t>(outfit.scan_mask) &
+           static_cast<std::uint16_t>(scan_mask)) == 0U) {
+        continue;
+      }
+      NovaGovernment_ProcessFactionCombatEvent(state,
+                                               player.current_system_id,
+                                               ship.faction_or_government_id,
+                                               0,
+                                               -1);
+      std::string message = ScanPrefix(state, ScannerName(state, ship));
+      message += ScanString(0x177);
+      message += " ";
+      const bool singular = state.inventory.outfit_owned_count[i] == 1;
+      if (singular) {
+        message += ScanString(StartsWithVowel(outfit.lc_name) ? 0x18a : 0x189);
+        message += " ";
+        message += outfit.lc_name;
+      } else {
+        message += outfit.lc_plural;
+      }
+      message += " ";
+      message += ScanString(0x17b);
+      message += ".";
+      ship.primary_target_ship_slot = 0;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_state_code = 4;
+      // Outfit fines are flat-positive only; the percentage arm is not used.
+      if (govt->scan_fine > 0) {
+        const std::int32_t fine = govt->scan_fine;
+        AppendFineText(message, fine);
+        ApplyScanFine(state, fine);
+      }
+      ShowScanMessage(state, std::move(message), 164);
+      state.inventory.has_scannable_outfit = false;
+      return;
+    }
+    return;
+  }
+
+  for (std::size_t i = 0; i < state.inventory.junk_counts.size(); ++i) {
+    if (state.inventory.junk_counts[i] <= 0) {
+      continue;
+    }
+    if (i >= state.scenario.junk_defs.size()) {
+      continue;
+    }
+    const JunkDef &junk = state.scenario.junk_defs[i];
+    if ((static_cast<std::uint16_t>(junk.scan_mask) &
+         static_cast<std::uint16_t>(scan_mask)) == 0U) {
+      continue;
+    }
+    NovaGovernment_ProcessFactionCombatEvent(
+        state, player.current_system_id, ship.faction_or_government_id, 0, -1);
+    std::string message = ScanPrefix(state, ScannerName(state, ship));
+    message += ScanString(0x178);
+    message += " ";
+    message += junk.lc_name;
+    message += " ";
+    message += ScanString(0x17a);
+    message += " ";
+    message += ScanString(0x17b);
+    message += ".";
+    ship.primary_target_ship_slot = 0;
+    ship.ai_secondary_target_slot = -1;
+    ship.ai_state_code = 4;
+    if (govt->scan_fine != 0) {
+      const std::int32_t fine =
+          govt->scan_fine > 0
+              ? static_cast<std::int32_t>(govt->scan_fine)
+              : ContrabandPercentageFine(govt->scan_fine, state.player.credits);
+      AppendFineText(message, fine);
+      ApplyScanFine(state, fine);
+    }
+    ShowScanMessage(state, std::move(message), 164);
+    state.inventory.has_scannable_junk = false;
+    return;
   }
 }
 

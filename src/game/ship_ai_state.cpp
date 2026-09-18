@@ -518,13 +518,21 @@ void NovaAi_UpdateShipState(GameState &state,
       if (std::abs(ship.pos_x - tgt.pos_x) > kEngageDist ||
           std::abs(ship.pos_y - tgt.pos_y) > kEngageDist) {
         ship.ai_control_mode = 9;
-      } else {
-        // Within escort distance: hold formation position.
-        ship.ai_secondary_target_slot = -1;
-        ship.primary_target_ship_slot = -1;
-        ship.ai_state_code = 0;
-        ship.ai_control_mode = 0;
+        return;
       }
+      if (ship.pers_def_slot == 0x3ff) {
+        // Player-controlled ship: the shareware/licence nag arm is not
+        // reconstructed (see the TODO(decomp(0x00405590)) at this function's
+        // entry). Nothing else runs for this branch.
+        return;
+      }
+      // Within escort distance an NPC clears its target and (warships /
+      // interceptors) scans the player for contraband.
+      ship.ai_secondary_target_slot = -1;
+      ship.primary_target_ship_slot = -1;
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      NovaShip_ScanPlayerForContraband(state, ship, now_ms);
       return;
     }
     if (std::abs(ship.pos_x - tgt.pos_x) > kEngageDist ||

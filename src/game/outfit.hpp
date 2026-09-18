@@ -299,6 +299,12 @@ NovaOutfit_ComputeIonizationDecayRate(const GameState &state, const Ship &ship);
 // inventory dirty hook and immediately after a scoop pickup.
 void NovaOutfit_RefreshPlayerMiningScoopActive(GameState &state);
 
+// Rebuilds the two contraband-scan candidate latches (DAT_007356cc junk /
+// DAT_007356cd outfit) from the current inventory. An arm of the
+// Outfit_RecomputeOutfitDerivedState recompute below;
+// Ship_ScanPlayerForContraband clears each after a successful scan.
+void NovaOutfit_RefreshContrabandScanLatches(GameState &state);
+
 // Ghidra Outfit_RecomputeOutfitDerivedState (0x0046d4b0): the inventory /
 // loadout recompute hook. The original invalidates the lazily computed
 // Ship_Compute* stat caches, then eagerly rebuilds the non-cache derived

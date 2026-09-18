@@ -348,13 +348,13 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
     }
     const Government *gv = state.scenario.Government(
         static_cast<std::int16_t>(sys.government_id + 0x80));
-    if (gv == nullptr || (gv->scan_mask_short & 0x0004U) != 0U) {
+    if (gv == nullptr || (gv->flags_secondary & 0x0004U) != 0U) {
       continue;
     }
     if (!NovaSystem_HasUsableTravelDestination(state, id)) {
       continue;
     }
-    const bool small_tier = (gv->scan_mask_short & 0x0002U) != 0U;
+    const bool small_tier = (gv->flags_secondary & 0x0002U) != 0U;
     // Radius in half-pixel grid UNITS (1 unit = 2 screen px; a cell of 8
     // units is the original's 16px paint block): round(22/zoom)+12 units, or
     // round(11/zoom)+9 for the small tier. At the default zoom the large tier

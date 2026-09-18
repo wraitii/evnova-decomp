@@ -719,8 +719,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     } else {
       // The original uses elapsed wall-clock time multiplied by the ship-class
       // jump_duration_multiplier, divided by duration_ms * 0.01, then subtracts
-      // 35. That multiplier is not decoded into ShipClass yet; the base 1.0
-      // value preserves the stock timing and is marked as a follow-up gap.
+      // 35. The class multiplier is decoded (ShipClassDef +0x44) but this NPC
+      // ramp still uses 1.0; apply it here as a follow-up.
+      // TODO(decomp(0x004347e8)) skipped: NPC jump ramp class multiplier.
       const float elapsed_jump_ms =
           static_cast<float>(now_ms - ship.ai_mode_start_time_ms);
       float jump_progress =

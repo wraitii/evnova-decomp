@@ -110,14 +110,11 @@ constexpr float kJumpProgressOffset =
 // disabled-jump collapse gains its exit velocity once progress crosses it.
 constexpr float kJumpProgressOnsetThreshold = 0.0F;
 constexpr float kTunnelSpeedCap = 50.0F; // 0x5755d8 threshold and literal cap
-// ShipClassDef.jump_duration_multiplier is not decoded yet; the scenario
-// loader derives it from the chassis capability flags (flags&1: 0.7, &2: 1.3,
-// &4: 1.6, else 1.0, all *1.3, min 0.5 -- NovaData_LoadScenarioResourceTables
-// 0x004bd3c0, shp pass). Same follow-up gap as the NPC spin-up in
-// ship_ai.cpp. Pinned to 1.0, which also pins the cue playback rate to 1.0
-// (the original stages it at rate 1/multiplier, 0x0046ab00) so the ramp
-// schedule and the cue-gated fire stay aligned.
-constexpr float kJumpDurationMultiplier = 1.0F;
+// ShipClassDef.jump_duration_multiplier (loader:
+// NovaData_LoadScenarioResourceTables 0x004bd3c0, shp pass) is applied per ship
+// class. It scales the tunnel ramp clock and the 'Warp up' cue playback rate
+// (1/multiplier, 0x0046ab00) so the ramp schedule and the cue-gated fire stay
+// aligned.
 
 // The stationary hold must run at least this many 30 Hz ticks before the fire
 // (g_hyperspace_engage_hold_30hz 0x5755a8, float 30.0 -- 30 Hz ticks because
@@ -510,6 +507,19 @@ int FindLinkedTravelSlot(const GameState &state,
 }
 
 } // namespace
+
+// ShipClassDef.jump_duration_multiplier for the player's current hull. The
+// loader floors it at 0.5; 1.0 is the fallback for a missing/hostile class.
+[[nodiscard]] float
+NovaTravel_PlayerJumpDurationMultiplier(const GameState &state) {
+  const std::int16_t class_id = state.player.ship_class_id;
+  if (class_id >= 0 &&
+      static_cast<std::size_t>(class_id) < state.scenario.ships.size()) {
+    return state.scenario.ships[static_cast<std::size_t>(class_id)]
+        .jump_duration_multiplier;
+  }
+  return 1.0F;
+}
 
 // Ghidra 0x00456ca0 Stellar_EnterWormhole.
 std::int16_t
@@ -1226,9 +1236,11 @@ void NovaTravel_Tick(GameState &state,
     // it near zero). The hold accumulator freezing (0x0044c940) is subsumed
     // by the abort.
     if (NovaAiShip_IsDisabled(state, player)) {
-      const float progress = t.tunnel_elapsed_60hz * kJumpDurationMultiplier /
+      const float jump_multiplier =
+          NovaTravel_PlayerJumpDurationMultiplier(state);
+      const float progress = t.tunnel_elapsed_60hz * jump_multiplier /
                                  (kJumpDuration60HzTicks * kJumpDurationScale) -
-                             kJumpProgressOffset / kJumpDurationMultiplier;
+                             kJumpProgressOffset / jump_multiplier;
       if (progress > kJumpProgressOnsetThreshold) {
         const float speed = std::min(progress, PlayerMaxSpeed(state));
         player.vel_x = std::sin(player.heading) * speed;
@@ -1420,10 +1432,12 @@ void NovaTravel_Tick(GameState &state,
       const float align_delta_deg =
           std::abs(std::remainder(jump_deg - heading_deg, 360.0F));
       if (align_delta_deg <= std::max(class_turn_deg, kTunnelAlignDeg)) {
+        const float jump_multiplier =
+            NovaTravel_PlayerJumpDurationMultiplier(state);
         const float progress =
-            t.tunnel_elapsed_60hz * kJumpDurationMultiplier /
+            t.tunnel_elapsed_60hz * jump_multiplier /
                 (kJumpDuration60HzTicks * kJumpDurationScale) -
-            kJumpProgressOffset / kJumpDurationMultiplier;
+            kJumpProgressOffset / jump_multiplier;
         if (progress > 0.0F) {
           const float step = std::min(progress, kTunnelSpeedCap) * ticks;
           player.pos_x += std::sin(player.heading) * step;
@@ -1800,7 +1814,7 @@ bool NovaTravel_PlayerMeetsStellarAccess(const GameState &state,
     } else {
       const Government &government = state.scenario.governments[govt_index];
       if (!NovaOutfit_EvaluateRequireMask(
-              state, government.scan_mask_lo, government.scan_mask_hi)) {
+              state, government.require_lo, government.require_hi)) {
         eligible = false;
       }
     }
@@ -1932,6 +1946,18 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
     state.travel.engage_timer = -1;
     state.travel.selected_stellar_id = -1;
   }
+}
+
+bool NovaTravel_PlayerPastJumpOnset(const GameState &state) {
+  // Same ramp schedule as the in-tunnel movement block (travel.cpp ~line
+  // 1229). tunnel_elapsed_60hz is the port's authoritative player jump clock
+  // (1/60 s ticks since the hold began), standing in for the original's
+  // NovaTime_GetTickCount60Hz() - ai_mode_start_time_ms.
+  const float jump_multiplier = NovaTravel_PlayerJumpDurationMultiplier(state);
+  const float progress = state.travel.tunnel_elapsed_60hz * jump_multiplier /
+                             (kJumpDuration60HzTicks * kJumpDurationScale) -
+                         kJumpProgressOffset / jump_multiplier;
+  return progress > kJumpProgressOnsetThreshold;
 }
 
 } // namespace game

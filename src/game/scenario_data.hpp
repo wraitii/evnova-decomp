@@ -17,6 +17,7 @@
 
 #include "sprite_mask.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -368,8 +369,13 @@ struct ShipClass {
   std::int16_t inherent_combat_govt = -1;     // InherentGovt (combat)
   std::int16_t inherent_attributes_govt = -1; // InherentGovt (attributes)
   std::uint16_t capability_flags = 0;         // Flags
-  std::uint16_t flags_secondary = 0;          // Flags2
-  std::uint16_t availability_flags = 0;       // Flags3
+  // Derived by the shp loader from capability_flags (Ghidra 0x004bd3c0):
+  // bit0 -> 0.7, else bit1 -> 1.3, else bit2 -> 1.6, else 1.0; all *1.3,
+  // floored at 0.5 (the floor never binds; min product 0.91). Scales the
+  // hyperspace ramp clock and the 'Warp up' cue playback rate (1/multiplier).
+  float jump_duration_multiplier = 1.0F; // ShipClassDef +0x44
+  std::uint16_t flags_secondary = 0;     // Flags2
+  std::uint16_t availability_flags = 0;  // Flags3
 
   std::int16_t max_gun = 0;    // MaxGun
   std::int16_t max_turret = 0; // MaxTur
@@ -609,7 +615,11 @@ struct Outfit {
   // clamped 0..100 by the loader): the outfitter lists an unowned outfit only
   // while the per-day stock roll (GameState.outfit_stock_rolls) is <= this.
   std::int16_t stock_threshold = 0;
-  std::int16_t sprite_id = 0; // Graphic (p\x9ari sprite id)
+  // Bible "ScanMask" (payload +0x3ee, OutfitDef +0x28): an owned outfit whose
+  // nonzero bits intersect a government's ScanMask is contraband. There is no
+  // outfit Graphic field; the loader maps payload +0x3ee straight to
+  // OutfitDef +0x28, the field Ship_ScanPlayerForContraband (0x00401800) tests.
+  std::uint16_t scan_mask = 0; // ScanMask (payload +0x3ee)
   // Bible RequireGovt (payload +0x3f2, OutfitDef +0x22): scopes the outfit's
   // Require bits to a government-keyed outfit-id band. The loader stores the
   // raw value and clamps it to -1 unless it is one of 0x80..0x17f,
@@ -1234,9 +1244,18 @@ struct Government {
   // overlay): 0x0002 = political-map small-disc tier (overlay disc radius
   // round(11/zoom)+9 cells, strength fade 0.4, instead of round(22/zoom)+12 /
   // 0.2); 0x0004 = excluded from the political map (no overlay disc drawn).
-  std::uint16_t scan_mask_short =
-      0; // GovtDef 0x22 (payload +0x04) [Provisional]
-  std::int16_t ai_skill_percent = 0; // GovtDef 0x24 (payload +0x32)
+  // Bible "Flags2" (GovtDef 0x22, payload +0x04). Verified bits: 0x0001 no
+  // assist/beg, 0x0002 minor political-map tier, 0x0004 excluded from the
+  // political map, 0x0008 no distress/greeting, 0x0010 roadside assistance,
+  // 0x0020 no hypergates, 0x0040 prefer hypergates, 0x0080 prefer wormholes.
+  std::uint16_t flags_secondary =
+      0; // GovtDef 0x22 (payload +0x04), Bible Flags2
+  // Bible "ScanMask" (GovtDef 0x24, payload +0x32). ANDed against a carried
+  // mission's ScanMask (ActiveMission +0x1a), an owned outfit's ScanMask
+  // (OutfitDef +0x28) and a held junk type's ScanMask (g_junk_defs +0x26) by
+  // Ship_ScanPlayerForContraband (0x00401800). Do NOT confuse with GovtDef
+  // +0x28 (class_2).
+  std::int16_t scan_mask = 0; // GovtDef 0x24 (payload +0x32)
 
   // Class / alliance / enemy id lists (payload +0x18/+0x20/+0x28). Govts share
   // a class id to be treated alike; the ally/enemy lists drive
@@ -1273,8 +1292,11 @@ struct Government {
   float max_odds = 0.01F;  // GovtDef 0x60 (payload +0x16)
   float skill_mult = 1.0F; // GovtDef 0x64 (payload +0x30)
 
-  std::uint32_t scan_mask_lo = 0; // GovtDef 0x68 (payload +0x54)
-  std::uint32_t scan_mask_hi = 0; // GovtDef 0x6c (payload +0x58)
+  // Bible "Require" 64-bit pair (GovtDef 0x68/0x6c, payload +0x54/+0x58):
+  // ANDed against the player's Contribute mask to gate visiting this govt's
+  // stellars (a travel permit). Misnamed scan_mask_lo/hi previously.
+  std::uint32_t require_lo = 0; // GovtDef 0x68 (payload +0x54)
+  std::uint32_t require_hi = 0; // GovtDef 0x6c (payload +0x58)
 
   // Theme colors tag a government's systems/ships on the HUD map. The loader
   // stores 16-bit fields at GovtDef 0x70/0x76 from a packed RGB24 payload
@@ -1754,5 +1776,19 @@ struct ScenarioData {
 // LoadFromArchives once the outfit and weapon tables are available; exposed so
 // unit tests can pin the ammo keying.
 void FoldShipDefaultLoadoutMass(ScenarioData &data);
+
+// Ghidra 0x004bd3c0 shp pass (ShipClassDef +0x44 jump_duration_multiplier):
+// derived from the chassis Flags word. Bit0 -> 0.7, else bit1 -> 1.3, else
+// bit2 -> 1.6, else 1.0; all scaled by 1.3, then floored at 0.5 (0x3f000000,
+// which never binds: the minimum product is 0.91). Results are bounded to
+// {0.91, 1.3, 1.69, 2.08}.
+[[nodiscard]] inline float
+JumpDurationMultiplierFromCapabilityFlags(std::uint16_t capability_flags) {
+  const float chassis_scale = (capability_flags & 0x1U) != 0U   ? 0.7F
+                              : (capability_flags & 0x2U) != 0U ? 1.3F
+                              : (capability_flags & 0x4U) != 0U ? 1.6F
+                                                                : 1.0F;
+  return std::max(chassis_scale * 1.3F, 0.5F);
+}
 
 } // namespace game
