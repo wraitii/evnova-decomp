@@ -753,25 +753,12 @@ void DrawTextPage(SdlPlatform &platform,
 bool RunJettisonConfirmDialog(SdlPlatform &platform,
                               NovaFontCache &font_cache,
                               const std::function<void()> &render_background) {
-  auto definition = NovaResource_LoadDialogDefinition(0xbba);
-  if (!definition) {
-    NovaLog::Todo("player-info: confirm dialog DLOG 0xbba unavailable; "
-                  "jettison prompt skipped");
-    return false;
-  }
-  auto window = UiWindow_CreateFromDialogResource(platform, 0xbba);
-  if (!window) {
-    return false;
-  }
-  // DLOG 0xbba: entry 3 is the message text; the loop resolves OK to 1 and
-  // Cancel/dismiss to 5 (0x004977d0's exit arms).
-  UiPanel_SetEntryTextPascal(*window, 3, MiscString(kStrJettisonConfirm, ""));
-  short code = -1;
-  while (!platform.quit_requested() && code != 1 && code != 5) {
-    UiWindow_RunInteractionLoop(
-        platform, font_cache, *window, &code, render_background);
-  }
-  return code == 1;
+  // Ghidra Ui_ShowConfirmDialog 0x004977d0 (DLOG 0xbba): entry 3 is the
+  // message text; the loop resolves OK to 1 and Cancel/dismiss to 5.
+  return NovaUi_ShowConfirmDialog(platform,
+                                  font_cache,
+                                  MiscString(kStrJettisonConfirm, ""),
+                                  render_background);
 }
 
 } // namespace

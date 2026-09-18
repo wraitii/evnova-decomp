@@ -11,8 +11,11 @@
 #include "game/player_info_window.hpp"
 #include "game/probe_state.hpp"
 #include "game/ship_ai.hpp"
+#include "game/ship_spawn.hpp"
 #include "game/spaceflight.hpp"
 #include "game/targeting.hpp"
+#include "game/travel.hpp"
+#include "game/ui_dialog.hpp"
 #include "log.hpp"
 #include "pict_image.hpp"
 #include "rle_sprite_sheet.hpp"
@@ -1334,6 +1337,36 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
         runtime.game_active = true;
         runtime.menu_status_portrait.reset();
         runtime.menu_status_portrait_class = -1;
+        // Ghidra 0x004c9e90 / action 1 tail: clear the previous session's
+        // vacant ships, restore mission fleets, rebuild the loaded system's
+        // ambient NPC population, and fire region triggers for every visible
+        // discovered system. Player escorts are restored by PilotFileLoadSave
+        // and spared by the keep_player_engaged=false sweep, so they are not
+        // rebuilt here. EvaluateAvailability and Asteroid_InitSystem are left
+        // to the spaceflight pre-loop; the mission rearm tail is already
+        // applied by the loader.
+        game::NovaShip_DeactivateVacantShipsAndTally(
+            runtime.game, /*keep_player_engaged=*/false);
+        game::NovaSystem_RestoreMissionFleets(
+            runtime.game,
+            runtime.game.player.current_system_id,
+            /*copy_player_heading=*/true,
+            runtime.platform.gameplay_ticks_ms());
+        game::NovaSystem_PopulateInitialNpcShips(
+            runtime.game, runtime.game.player.current_system_id);
+        // 0x004870c4-0x004870e7: is_visible (+0x1eb) and discovery_state
+        // (+0x90) > 0. The decompiler's "personality_slots - 8" is the
+        // discovery_state word: personality_slots is a short[8] at +0x98, so
+        // array decay minus 8 is +0x90.
+        for (std::size_t system_index = 0;
+             system_index < runtime.game.scenario.systems.size();
+             ++system_index) {
+          const auto &system = runtime.game.scenario.systems[system_index];
+          if (system.is_visible && system.discovery_state > 0) {
+            game::NovaSystem_TriggerNebulaRegionEvents(
+                runtime.game, static_cast<std::int16_t>(system_index));
+          }
+        }
         NovaLog::Info("opened pilot file '{}'{}",
                       selection->path->string(),
                       result == game::PilotLoadError::kRepairsApplied
@@ -1844,12 +1877,22 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
   runtime.platform.ClearProbeUi();
   switch (action) {
   case GameModeAction::new_game: {
-    // Ghidra: param_1 == 0. If a game is already active the original asks
-    // before discarding it; confirmation dialogs for an active pilot are not
-    // reconstructed yet, so the new-game flow below simply restarts.
+    // Ghidra 0x00486ed0 action 0: when a game is already active the original
+    // loads STR# 0x8c row 8 and confirms through Ui_ShowConfirmDialog (DLOG
+    // 0xbba) before Menu_RunNewGameFlow discards the running pilot. A declined
+    // prompt leaves the active game untouched.
     if (runtime.game.game_active) {
-      NovaLog::Todo("confirm-discard before starting a new pilot with an "
-                    "active game is not reconstructed; starting fresh");
+      game::NovaFontCache confirm_fonts;
+      const std::string prompt =
+          game::NovaHud_LoadStringEntry(0x8c, 8).value_or(
+              "A game is already in progress. Start a new one?");
+      if (!game::NovaUi_ShowConfirmDialog(
+              runtime.platform, confirm_fonts, prompt, [&runtime] {
+                NovaRender_RedrawAndPresentFrame(runtime, 0);
+              })) {
+        NovaLog::Info("new game declined: active game kept");
+        break;
+      }
     }
     // Runs the modal new-pilot flow (naming, confirm, reset, scenario load,).
     // On success the flow marks the game active and we return to the menu; the

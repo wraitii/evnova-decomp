@@ -3,8 +3,11 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../util/geometry.hpp"
+#include "../util/render_clip_scope.hpp"
+#include "landed_window.hpp"
 #include "nova_font.hpp"
 
+#include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_render.h>
 
 #include <algorithm>
@@ -15,6 +18,7 @@
 namespace game {
 
 using evnova::util::Contains;
+using evnova::util::RenderClipScope;
 
 namespace {
 
@@ -268,13 +272,9 @@ void UiWindow_Draw(SdlPlatform &platform,
   // The original draws items into the dialog's own window surface, so the
   // window edge clips them (DITL 0xc1e carries the Character popup at y=277
   // and vestigial "name3:" items at y=357 in a 213-tall window; those must
-  // stay invisible). The port composites straight onto the renderer, so clip
-  // the item pass to the window rect instead.
-  const SDL_Rect clip{static_cast<int>(window.window_rect.x),
-                      static_cast<int>(window.window_rect.y),
-                      static_cast<int>(window.window_rect.w),
-                      static_cast<int>(window.window_rect.h)};
-  SDL_SetRenderClipRect(renderer, &clip);
+  // stay invisible). Clip the item pass to the window rect, intersected with
+  // any outer clip, and restore the prior clip afterwards.
+  RenderClipScope window_clip(renderer, window.window_rect);
   for (std::size_t row = 1; row <= window.items.size(); ++row) {
     const auto &item = window.items[row - 1];
     auto &entry = window.state[row - 1];
@@ -347,21 +347,52 @@ void UiWindow_Draw(SdlPlatform &platform,
       break;
     }
     case 8: { // Static text
-      NovaText_Draw(platform,
-                    font_cache,
-                    NovaFontFamily::kGeneva,
-                    kDialogFontSize,
-                    kNovaFontStyleRegular,
-                    kControlText,
-                    box.x,
-                    box.y + box.h / 2.0F + 5.0F,
-                    entry.text.empty() ? item.title : entry.text);
+      const std::string text = entry.text.empty() ? item.title : entry.text;
+      // Original: DrawTextW(DT_WORDBREAK), top-aligned and clipped to the
+      // item rect (UiWindow_Draw 0x004d0d00 -> 0x004bcd30), so an over-long
+      // prompt wraps inside its box instead of running to the dialog edge.
+      RenderClipScope text_clip(renderer, box);
+      const auto lines = WrapDescriptionLines(
+          text,
+          std::max(1, static_cast<int>(box.w)),
+          [&](std::string_view candidate) {
+            return font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                        kDialogFontSize,
+                                        kNovaFontStyleRegular,
+                                        candidate);
+          });
+      const float ascent = static_cast<float>(font_cache.Ascent(
+          NovaFontFamily::kGeneva, kDialogFontSize, kNovaFontStyleRegular));
+      const float line_height = static_cast<float>(font_cache.LineHeight(
+          NovaFontFamily::kGeneva, kDialogFontSize, kNovaFontStyleRegular));
+      float baseline = box.y + ascent;
+      for (const std::string &line : lines) {
+        NovaText_Draw(platform,
+                      font_cache,
+                      NovaFontFamily::kGeneva,
+                      kDialogFontSize,
+                      kNovaFontStyleRegular,
+                      kControlText,
+                      box.x,
+                      baseline,
+                      line);
+        baseline += line_height;
+      }
       break;
     }
     case 0x10: { // Edit text
       SDL_FRect inset{box.x - 1.0F, box.y - 1.0F, box.w + 2.0F, box.h + 2.0F};
       DrawBevel(renderer, inset, kWindowFill, kBevelHighlight, kWindowFill);
       FrameRect(renderer, box);
+      // The original passes NovaText_DrawText a clip/format rect of the field
+      // inset by 3 on the top/left and 3 in from the right, so typed text,
+      // the inverted selection and the caret all stop at the field edge
+      // (UiWindow_Draw 0x004d0d00).
+      const SDL_FRect field_clip{box.x + 3.0F,
+                                 box.y + 3.0F,
+                                 std::max(1.0F, box.w - 6.0F),
+                                 std::max(1.0F, box.h - 3.0F)};
+      RenderClipScope text_clip(renderer, field_clip);
       const float text_left = box.x + 3.0F;
       const float baseline = box.y + box.h - 3.0F;
       // Inverted selection between the two character offsets: the highlight
@@ -573,7 +604,6 @@ void UiWindow_Draw(SdlPlatform &platform,
       break;
     }
   }
-  SDL_SetRenderClipRect(renderer, nullptr);
 }
 
 void UiWindow_RunInteractionLoop(
@@ -780,6 +810,31 @@ void UiWindow_RunInteractionLoop(
   // Modal-loop cadence: the original yields through its frame pump
   // (NovaPlatform_PumpWindowEventsThrottled); other ported dialogs use 16 ms.
   platform.PaceFrame();
+}
+
+// Ghidra 0x004977d0 Ui_ShowConfirmDialog. Shared by the new-game
+// discard/overwrite prompts and the jettison prompt; the original takes the
+// message as a Pascal string and writes DITL entry 3 (1-based ordinal 3).
+bool NovaUi_ShowConfirmDialog(SdlPlatform &platform,
+                              NovaFontCache &font_cache,
+                              std::string_view message,
+                              const std::function<void()> &render_background) {
+  auto window = UiWindow_CreateFromDialogResource(platform, 0xbba);
+  if (!window) {
+    NovaLog::Todo("confirm dialog DLOG 0xbba unavailable; treating the prompt "
+                  "as declined");
+    return false;
+  }
+  UiPanel_SetEntryTextPascal(*window, 3, message);
+  // The original flushes queued commands and forces the cursor visible before
+  // the loop; the port's interaction loop owns input from here.
+  short code = -1;
+  while (!platform.quit_requested() && code != 1 && code != 5) {
+    UiWindow_RunInteractionLoop(
+        platform, font_cache, *window, &code, render_background);
+  }
+  // Quit is not an accept, even if OK was activated on the last frame.
+  return !platform.quit_requested() && code == 1;
 }
 
 } // namespace game

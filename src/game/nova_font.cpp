@@ -601,6 +601,15 @@ int NovaFontCache::LineHeight(NovaFontFamily family,
   return font != nullptr ? TTF_GetFontHeight(font) : 0;
 }
 
+// Logical font ascent (the original's tmAscent): the first-line baseline
+// offset used for top-aligned DT_WORDBREAK text rects.
+int NovaFontCache::Ascent(NovaFontFamily family,
+                          float point_size,
+                          std::uint16_t style) {
+  TTF_Font *font = Font(family, point_size, style);
+  return font != nullptr ? TTF_GetFontAscent(font) : 0;
+}
+
 // Ghidra 0x004bca90 DrawContext_DrawPascalString.
 // ---------------------------------------------------------------------------
 // Text drawing

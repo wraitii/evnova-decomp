@@ -6,8 +6,9 @@
 // (0x39) and an in-rect left click (the local_19 latch) fast-forward only the
 // current frame; the skip command (g_player_key_bindings[0x17], default 0x01 =
 // Escape) latches bVar9 and skips the whole sequence. After the last
-// frame, if bVar9 was not set and intro_text_desc_id != -1, it shows that
-// desc in (a stub of) the generic text-reader dialog.
+// frame, if bVar9 was not set and intro_text_desc_id != -1, it loads and
+// expands that desc and shows it in the generic text-reader dialog; empty
+// text opens no dialog.
 //
 // The return value mirrors bVar9 (true = the intro ran, intro-text dialog
 // gate holds; false = skipped by the skip command, dialog suppressed).

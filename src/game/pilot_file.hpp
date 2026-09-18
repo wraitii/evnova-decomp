@@ -196,6 +196,14 @@ struct CharacterTemplate {
 [[nodiscard]] std::optional<CharacterTemplate>
 CharacterTemplate_Read(std::string_view block_key);
 
+// Ghidra 0x004cd4b0 PilotData_InitializePlayerState (param_2 != 0): the
+// start-system pick. Counts System1-4 (+0x06) >= 0x80; if none, system 0 and
+// no draw. Otherwise rolls a slot (RandomBelow) and re-rolls until it is valid,
+// returning slot - 0x80; the draw count follows the original rejection cadence
+// (the port's PRNG is mt19937, not the original LCG).
+[[nodiscard]] std::int16_t
+PilotData_PickStartingSystem(const CharacterTemplate &tmpl, std::mt19937 &rng);
+
 // Project the scenario's loader-marked përs table into a fresh pilot record
 // before PilotFileApply copies it back. A brand-new record has its pers flags
 // zero-filled (PilotFile::Fresh), so without this carry the apply pass clears

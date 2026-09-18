@@ -6,6 +6,7 @@
 #include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "new_pilot_flow.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
@@ -232,6 +233,25 @@ CharacterTemplate_Read(std::string_view block_key) {
   tmpl.date_suffix = read_cstring(0x14a, 0x20);
   tmpl.on_start = read_pstring(0x32, 0x100);
   return tmpl;
+}
+
+std::int16_t PilotData_PickStartingSystem(const CharacterTemplate &tmpl,
+                                          std::mt19937 &rng) {
+  // PilotData_InitializePlayerState 0x004cd4b0: draw only when at least one
+  // System1-4 slot is valid; otherwise the reset value 0 stands and no RNG is
+  // consumed. The rejection loop keeps the same draw count as NovaRandom_Range.
+  const auto has_valid =
+      std::any_of(tmpl.systems.begin(),
+                  tmpl.systems.end(),
+                  [](std::int16_t id) { return id >= 0x80; });
+  if (!has_valid) {
+    return 0;
+  }
+  std::int16_t picked = 0;
+  do {
+    picked = tmpl.systems[static_cast<std::size_t>(RandomBelow(rng, 4))];
+  } while (picked < 0x80);
+  return static_cast<std::int16_t>(picked - 0x80);
 }
 
 void PilotFileSeedPersonalityPresence(const ScenarioData &scenario,

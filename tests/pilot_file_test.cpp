@@ -2,6 +2,7 @@
 
 #include "game/game_state.hpp"
 #include "game/new_pilot_flow.hpp"
+#include "game/nova_name_text.hpp"
 #include "game/pilot_file.hpp"
 
 #include <algorithm>
@@ -849,6 +850,127 @@ TEST_CASE("pilot save directory mirrors the Nova Pilots subfolder",
   REQUIRE(directory.has_value());
   CHECK(directory->filename() == "Pilots");
   CHECK(std::filesystem::is_directory(*directory));
+}
+
+TEST_CASE("NameString_StripSubtitleSuffix matches the original Pascal trim",
+          "[new_pilot]") {
+  // Ghidra 0x004cd230: truncate at the LAST ';', trim only the run of spaces
+  // before it. A name without a semicolon is returned completely unchanged,
+  // trailing spaces included (the trim lives in the found-semicolon branch).
+  using game::NovaText_StripSubtitleSuffix;
+  CHECK(NovaText_StripSubtitleSuffix("Base Name;Subtitle ") == "Base Name");
+  CHECK(NovaText_StripSubtitleSuffix("Base  ;Sub") == "Base");
+  CHECK(NovaText_StripSubtitleSuffix("Name;") == "Name");
+  CHECK(NovaText_StripSubtitleSuffix("A;B ;C") == "A;B");
+  CHECK(NovaText_StripSubtitleSuffix("A ; ;X") == "A");
+  CHECK(NovaText_StripSubtitleSuffix("A;;X") == "A");
+  CHECK(NovaText_StripSubtitleSuffix("; ;X") == ";");
+  CHECK(NovaText_StripSubtitleSuffix(";;X") == ";");
+  CHECK(NovaText_StripSubtitleSuffix(";Sub") == "");
+  CHECK(NovaText_StripSubtitleSuffix("   ;Sub") == "");
+  CHECK(NovaText_StripSubtitleSuffix("   ;X") == "");
+  CHECK(NovaText_StripSubtitleSuffix(" ") == " ");
+  CHECK(NovaText_StripSubtitleSuffix("") == "");
+  // No semicolon: unchanged, including trailing spaces.
+  CHECK(NovaText_StripSubtitleSuffix("NoSemi") == "NoSemi");
+  CHECK(NovaText_StripSubtitleSuffix("NoSemi  ") == "NoSemi  ");
+}
+
+TEST_CASE("NameString_StripSubtitleSuffix matches the literal 0x004cd230 loop",
+          "[new_pilot]") {
+  // Exhaustive check over short strings of 'A', ' ' and ';', plus a trailing
+  // suffix, against a direct transcription of the Ghidra loop (1-based
+  // Pascal semantics). This pins every prefix edge, including strings whose
+  // prefix is only spaces and semicolons.
+  using game::NovaText_StripSubtitleSuffix;
+  const auto reference = [](std::string_view input) {
+    const int len = static_cast<int>(input.size());
+    // 1-based copy; index 0 unused.
+    std::string s = " ";
+    s.append(input);
+    int bVar2 = len;
+    int uVar4 = len;
+    bool found = false;
+    int uVar3 = uVar4;
+    if (len != 0) {
+      do {
+        const char c = s[static_cast<std::size_t>(uVar4)];
+        if (found) {
+          if (c == ' ') {
+            uVar3 = uVar4 - 1;
+          } else if (c != ';') {
+            bVar2 = uVar4;
+            break;
+          }
+        } else if (c == ';') {
+          found = true;
+          uVar3 = uVar4 - 1;
+        }
+        bVar2 = uVar3;
+        --uVar4;
+      } while (0 < uVar4);
+    }
+    return s.substr(1, static_cast<std::size_t>(bVar2));
+  };
+
+  constexpr std::string_view kAlphabet = "A ;";
+  for (int length = 0; length <= 5; ++length) {
+    int combinations = 1;
+    for (int i = 0; i < length; ++i) {
+      combinations *= 3;
+    }
+    for (int code = 0; code < combinations; ++code) {
+      std::string value;
+      int digits = code;
+      for (int i = 0; i < length; ++i) {
+        value.push_back(kAlphabet[static_cast<std::size_t>(digits % 3)]);
+        digits /= 3;
+      }
+      for (const std::string_view suffix : {std::string_view{""},
+                                            std::string_view{"X"},
+                                            std::string_view{"Z;Q"}}) {
+        const std::string candidate = value + std::string{suffix};
+        INFO("input='" << candidate << "'");
+        CHECK(NovaText_StripSubtitleSuffix(candidate) == reference(candidate));
+      }
+    }
+  }
+}
+
+TEST_CASE("PilotData_PickStartingSystem preserves the original RNG draws",
+          "[new_pilot]") {
+  using game::PilotData_PickStartingSystem;
+
+  SECTION("all-invalid template keeps system 0 and consumes no RNG") {
+    game::CharacterTemplate tmpl;
+    tmpl.systems = {-1, 0x7f, -1, 0x7f};
+    std::mt19937 rng{1234};
+    std::mt19937 reference{1234};
+    CHECK(PilotData_PickStartingSystem(tmpl, rng) == 0);
+    CHECK(rng() == reference());
+  }
+
+  SECTION("rejection loop draws the same number of values") {
+    game::CharacterTemplate tmpl;
+    tmpl.systems = {0x81, 0x82, -1, -1};
+    std::mt19937 rng{7};
+    std::mt19937 reference{7};
+    const std::int16_t got = PilotData_PickStartingSystem(tmpl, rng);
+    std::uniform_int_distribution<int> roll{0, 3};
+    std::int16_t expected = 0;
+    do {
+      expected = tmpl.systems[static_cast<std::size_t>(roll(reference))];
+    } while (expected < 0x80);
+    CHECK(got == expected - 0x80);
+    CHECK(rng() == reference());
+  }
+
+  SECTION("single valid slot always resolves to it") {
+    game::CharacterTemplate tmpl;
+    tmpl.systems = {-1, -1, 0x85, -1};
+    std::mt19937 rng{99};
+    CHECK(PilotData_PickStartingSystem(tmpl, rng) == 0x85 - 0x80);
+  }
 }
 
 } // namespace
