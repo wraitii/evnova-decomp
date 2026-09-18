@@ -2470,3 +2470,82 @@ TEST_CASE("mission stellar attack directive selects a hostile stellar") {
   CHECK(ship.ai_secondary_target_slot == 0x80);
   CHECK(ship.primary_target_ship_slot == 0x80);
 }
+
+// NovaAi_ComputeMaxArmorPoints (0x004637a0) and the mission-fleet arm of
+// Ship_IsShipDisabled (0x004687b0): the max folds in the personality
+// shield_armor_scale and the behavior-5 x1.333 float store, and a mission
+// ShipGoal-5 special ship counts disabled until its runtime ship-objective-
+// complete latch is set or it is boarded.
+TEST_CASE(
+    "Ship_IsShipDisabled uses scaled max armor and the mission-fleet arm") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  int cls = -1;
+  for (std::size_t i = 0; i < state.scenario.ships.size(); ++i) {
+    const auto &candidate = state.scenario.ships[i];
+    if (candidate.base_armor >= 30.0F &&
+        (candidate.capability_flags & 0x10U) == 0U) {
+      cls = static_cast<int>(i);
+      break;
+    }
+  }
+  REQUIRE(cls >= 0);
+  const float base =
+      state.scenario.ships[static_cast<std::size_t>(cls)].base_armor;
+
+  game::Ship ship;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = static_cast<std::int16_t>(cls);
+  ship.pers_def_slot = -1;
+  ship.mission_fleet_slot = 0;
+  ship.armor_points = base;
+  ship.ai_behavior_code = 0;
+  CHECK(game::NovaAi_ComputeMaxArmorPoints(state, ship) == Catch::Approx(base));
+
+  // Behavior 5 stores the x1.333 product to float.
+  ship.ai_behavior_code = 5;
+  const float behavior5_max =
+      static_cast<float>(static_cast<double>(base) * 1.333);
+  CHECK(game::NovaAi_ComputeMaxArmorPoints(state, ship) ==
+        Catch::Approx(behavior5_max));
+  ship.ai_behavior_code = 0;
+
+  // A positive personality ShieldMod scales the NPC maximum.
+  int pers = -1;
+  for (std::size_t i = 0; i < state.scenario.pers_defs.size(); ++i) {
+    if (state.scenario.pers_defs[i].shield_armor_scale > 0.0F) {
+      pers = static_cast<int>(i);
+      break;
+    }
+  }
+  if (pers >= 0) {
+    ship.pers_def_slot = static_cast<std::int16_t>(pers);
+    const double scale = static_cast<double>(
+        state.scenario.pers_defs[static_cast<std::size_t>(pers)]
+            .shield_armor_scale);
+    CHECK(game::NovaAi_ComputeMaxArmorPoints(state, ship) ==
+          Catch::Approx(static_cast<float>(static_cast<double>(base) * scale))
+              .margin(0.01F));
+  }
+  ship.pers_def_slot = -1;
+
+  // Mission-fleet ShipGoal-5, active, objective incomplete, unboarded: the
+  // ship counts disabled even at full armor (the damage gate would not trip).
+  state.active_missions[0].ship_goal = 5;
+  state.active_mission_runtime_flags[0].is_active = true;
+  state.active_mission_runtime_flags[0].objective_complete = false;
+  ship.boarded_target_latch = 0;
+  CHECK(game::NovaAiShip_IsDisabled(state, ship));
+
+  // Completing the objective, boarding it, or dropping the mission clears the
+  // arm.
+  state.active_mission_runtime_flags[0].objective_complete = true;
+  CHECK_FALSE(game::NovaAiShip_IsDisabled(state, ship));
+  state.active_mission_runtime_flags[0].objective_complete = false;
+  ship.boarded_target_latch = 1;
+  CHECK_FALSE(game::NovaAiShip_IsDisabled(state, ship));
+  ship.boarded_target_latch = 0;
+  state.active_mission_runtime_flags[0].is_active = false;
+  CHECK_FALSE(game::NovaAiShip_IsDisabled(state, ship));
+}

@@ -183,6 +183,13 @@ bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship);
 [[nodiscard]] double NovaAi_ComputeMaxShieldPoints(const GameState &state,
                                                    const Ship &ship);
 
+// Ghidra 0x004637a0 Ship_ComputeShipMaxArmor: player via the cached outfit
+// aggregate, NPC = class base * positive personality shield_armor_scale *
+// behavior-5 difficulty. Returned as float because the original stores the
+// behavior-5 product to float.
+[[nodiscard]] float NovaAi_ComputeMaxArmorPoints(const GameState &state,
+                                                 const Ship &ship);
+
 // Ghidra 0x00463a20 Ship_ComputeShipFuelCapacity. Player capacity folds in
 // opcode-12 (kFuelCapacity) outfit bonuses via the effective-stats pass; an
 // NPC's is the raw class value (the original skips the outfit loop for
