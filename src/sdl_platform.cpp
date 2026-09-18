@@ -787,8 +787,10 @@ std::optional<char> SdlPlatform::PollCommandEvent() {
         return 'p';
       case SDLK_A:
         return 'a';
+      // Ghidra 0x004872a0 'x': ACKNOWLEDGEMENTS reader (d\x91sc 0x7ffe).
+      case SDLK_X:
+        return 'x';
       case SDLK_Q:
-      case SDLK_ESCAPE:
         return 'q';
       default:
         break;

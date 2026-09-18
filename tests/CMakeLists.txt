@@ -19,6 +19,7 @@ add_executable(evnova_tests
     mission_test.cpp
     mission_script_test.cpp
     new_pilot_dialog_test.cpp
+    nova_command_test.cpp
     nova_font_test.cpp
     outfit_clamp_test.cpp
     outfit_ionization_test.cpp

@@ -1392,7 +1392,7 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
       if (*command == 'm') {
         runtime.requested_action = NovaHud_TrackFocusHoverIndex(runtime);
       } else {
-        runtime.requested_action = NovaCommand_TranslateByInputMap(*command);
+        runtime.requested_action = NovaCommand_DispatchToMode(*command);
       }
     }
   }
@@ -1972,11 +1972,24 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     });
     break;
   }
+  case GameModeAction::acknowledgements: {
+    // Not an original action code: the 'x' branch of NovaCommand_DispatchToMode
+    // (0x004872a0) runs the shared text reader on d\x91sc 0x7ffe inline. The
+    // port routes it through requested_action for symmetry with the menu.
+    NovaRender_RedrawAndPresentFrame(runtime, 0);
+    game::NovaMenu_RunAcknowledgementsDialog(
+        runtime.platform, runtime.game, [&runtime] {
+          NovaRender_RedrawAndPresentFrame(runtime, 0);
+        });
+    break;
+  }
   }
 }
 
-// Ghidra: 0x004d6260 NovaCommand_TranslateByInputMap
-std::optional<GameModeAction> NovaCommand_TranslateByInputMap(char command) {
+// Ghidra: 0x004872a0 NovaCommand_DispatchToMode. Maps polled main-menu command
+// tokens to model actions (the true 0x004d6260 NovaCommand_TranslateByInputMap
+// is the per-thread bound-key table lookup, which the port does not need).
+std::optional<GameModeAction> NovaCommand_DispatchToMode(char command) {
   switch (command) {
   case 'n':
     return GameModeAction::new_game;
@@ -1988,6 +2001,10 @@ std::optional<GameModeAction> NovaCommand_TranslateByInputMap(char command) {
     return GameModeAction::preferences;
   case 'a':
     return GameModeAction::about_nova;
+  // 0x004872a0 branch: d\x91sc 0x7ffe (ACKNOWLEDGEMENTS) through the
+  // travel-selection reader.
+  case 'x':
+    return GameModeAction::acknowledgements;
   case 'q':
     return GameModeAction::quit;
   default:
