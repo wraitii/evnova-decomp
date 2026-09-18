@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -107,32 +108,101 @@ void AppendUtf8(std::string &out, std::uint32_t code_point) {
 constexpr const char *kBundledCharcoal = "Charcoal.ttf";
 constexpr const char *kBundledGeneva = "Geneva.ttf";
 
-// Well-known per-OS path candidates for the three non-bundled families. Each
-// family is tried in order; the first existing file wins. Empty paths are
-// skipped.
-// Full candidate lists per family as file paths (a resolved face), matching
-// the original's Times->Times New Roman, Helvetica->Arial, New York->Georgia
-// substitution.
-const char *TimesFaceCandidates[] = {
+// Resolution is tiered, in preference order:
+//   1. bundled    - the CE-shipped install-root TTF (Charcoal.ttf / Geneva.ttf)
+//   2. native     - the original Mac family's own OS face (macOS, where the
+//                   real Times / Helvetica / New York / Geneva still ship)
+//   3. substitute - the Windows CE build's GDI substitution (Times New Roman /
+//                   Arial / Georgia) plus Linux metric-compatible generics
+// If every tier misses, bundled Geneva.ttf is the last resort so a CE install
+// always renders text. The native tier is a deliberate divergence from the CE
+// reference binary (which always used the substitute names): on macOS the real
+// Mac faces win, matching the original Carbon build.
+struct FontSource {
+  const char *bundled_leaf;
+  const char *const *native;
+  const char *const *substitute;
+};
+
+const char *const kNoFaceCandidates[] = {nullptr};
+
+// Native macOS faces for the original Mac families.
+const char *const NativeTimesCandidates[] = {
     "/System/Library/Fonts/Times.ttc",
+    nullptr,
+};
+const char *const NativeHelveticaCandidates[] = {
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/HelveticaNeue.ttc",
+    nullptr,
+};
+const char *const NativeNewYorkCandidates[] = {
+    "/System/Library/Fonts/NewYork.ttf",
+    "/System/Library/Fonts/NewYorkItalic.ttf",
+    nullptr,
+};
+const char *const NativeGenevaCandidates[] = {
+    "/System/Library/Fonts/Geneva.ttf",
+    nullptr,
+};
+
+// The CE binary's GDI substitution, plus Linux metric-compatible generics.
+const char *const SubstituteTimesCandidates[] = {
     "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
     "/Library/Fonts/Times New Roman.ttf",
     "C:\\Windows\\Fonts\\times.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/liberation-serif/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/TTF/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "/usr/share/fonts/TTF/DejaVuSerif.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
+    "/usr/share/fonts/TTF/NotoSerif-Regular.ttf",
     nullptr,
 };
-
-const char *ArialFaceCandidates[] = {
+const char *const SubstituteArialCandidates[] = {
     "/System/Library/Fonts/Supplemental/Arial.ttf",
     "/System/Library/Fonts/Arial.ttf",
     "C:\\Windows\\Fonts\\arial.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/TTF/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/TTF/NotoSans-Regular.ttf",
+    nullptr,
+};
+const char *const SubstituteGeorgiaCandidates[] = {
+    "/System/Library/Fonts/Supplemental/Georgia.ttf",
+    "C:\\Windows\\Fonts\\georgia.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/liberation-serif/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/TTF/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "/usr/share/fonts/TTF/DejaVuSerif.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
+    "/usr/share/fonts/TTF/NotoSerif-Regular.ttf",
     nullptr,
 };
 
-const char *GeorgiaFaceCandidates[] = {
-    "/System/Library/Fonts/Supplemental/Georgia.ttf",
-    "C:\\Windows\\Fonts\\georgia.ttf",
-    nullptr,
-};
+// Indexed by NovaFontFamily: Chicago=0, Times=1, NewYork=2, Geneva=3,
+// Helvetica=4.
+constexpr std::array<FontSource, 5> kFontSources{{
+    /* kChicago */ {kBundledCharcoal, kNoFaceCandidates, kNoFaceCandidates},
+    /* kTimes */ {nullptr, NativeTimesCandidates, SubstituteTimesCandidates},
+    /* kNewYork */
+    {nullptr, NativeNewYorkCandidates, SubstituteGeorgiaCandidates},
+    /* kGeneva */
+    {kBundledGeneva, NativeGenevaCandidates, SubstituteArialCandidates},
+    /* kHelvetica */
+    {nullptr, NativeHelveticaCandidates, SubstituteArialCandidates},
+}};
 
 std::string FindBundled(const char *leaf) {
   // The bundled fonts sit in the install root beside Nova.rez / Nova Files.
@@ -156,6 +226,31 @@ std::string FindFirstExisting(const char *const *candidates) {
     }
   }
   return {};
+}
+
+// Logs once per family where its face resolved, so a missing or substituted
+// face is diagnosable without one line per (size, style) open.
+void LogFontResolutionOnce(NovaFontFamily family,
+                           std::string_view path,
+                           bool last_resort) {
+  static std::array<std::atomic<bool>, 5> logged{};
+  const auto index = static_cast<std::size_t>(family);
+  if (index >= logged.size() || logged[index].exchange(true)) {
+    return;
+  }
+  if (path.empty()) {
+    NovaLog::Warn("font family {}: no face resolved; text will not render",
+                  static_cast<unsigned>(family));
+  } else if (last_resort) {
+    NovaLog::Todo(
+        "font family {}: no bundled/native/substitute face found; using "
+        "bundled last-resort '{}'",
+        static_cast<unsigned>(family),
+        path);
+  } else {
+    NovaLog::Info(
+        "font family {}: using '{}'", static_cast<unsigned>(family), path);
+  }
 }
 
 // Keep the cache key stable while allowing fractional logical-presentation
@@ -348,19 +443,28 @@ void NovaFontCache::Clear() {
 }
 
 std::string NovaFontCache::ResolveFontFile(NovaFontFamily family) const {
-  switch (family) {
-  case NovaFontFamily::kChicago:
-    return FindBundled(kBundledCharcoal);
-  case NovaFontFamily::kGeneva:
-    return FindBundled(kBundledGeneva);
-  case NovaFontFamily::kTimes:
-    return FindFirstExisting(TimesFaceCandidates);
-  case NovaFontFamily::kHelvetica:
-    return FindFirstExisting(ArialFaceCandidates);
-  case NovaFontFamily::kNewYork:
-    return FindFirstExisting(GeorgiaFaceCandidates);
+  const auto index = static_cast<std::size_t>(family);
+  if (index >= kFontSources.size()) {
+    return {};
   }
-  return {};
+  const FontSource &source = kFontSources[index];
+  std::string path;
+  if (source.bundled_leaf != nullptr) {
+    path = FindBundled(source.bundled_leaf);
+  }
+  if (path.empty()) {
+    path = FindFirstExisting(source.native);
+  }
+  if (path.empty()) {
+    path = FindFirstExisting(source.substitute);
+  }
+  bool last_resort = false;
+  if (path.empty()) {
+    path = FindBundled(kBundledGeneva);
+    last_resort = !path.empty();
+  }
+  LogFontResolutionOnce(family, path, last_resort);
+  return path;
 }
 
 bool NovaFontCache::IsFamilyAvailable(NovaFontFamily family) const {

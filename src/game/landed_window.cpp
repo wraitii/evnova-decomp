@@ -1275,7 +1275,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
       !font_cache.IsFamilyAvailable(NovaFontFamily::kGeneva)) {
     NovaLog::Warn(
         "bundled Charcoal.ttf/Geneva.ttf not found next to the executable "
-        "(looked in EV Nova/); text will fall back to debug font");
+        "(looked in EV Nova/); text will not render");
   }
 
   bool entered_sub_screen = false;
