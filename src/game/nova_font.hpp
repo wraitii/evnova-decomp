@@ -114,10 +114,9 @@ public:
                                float point_size,
                                std::uint16_t style = kNovaFontStyleRegular);
 
-  // True when the source font file for `family` could be located (bundled
-  // Charcoal/Geneva TTF or an OS font our resolver maps it to). Used to log a
-  // clear divergence when a look is unavailable rather than silently falling
-  // back to a different face.
+  // True when a face for `family` could be located through the tiered
+  // resolver (bundled CE TTF, native macOS family, or the CE substitution /
+  // Linux generic), i.e. text will render for it.
   [[nodiscard]] bool IsFamilyAvailable(NovaFontFamily family) const;
 
   // Releases all cached font handles (called at shutdown).
@@ -141,8 +140,9 @@ private:
     }
   };
 
-  // Resolves a family to a concrete font file path (bundled TTF or an OS font
-  // our substitution maps it to). Empty when unresolvable.
+  // Resolves a family through the tiers: bundled CE TTF, native macOS face,
+  // CE GDI substitution / Linux generic, then bundled Geneva.ttf as the last
+  // resort (logged once per family). Empty when nothing resolves.
   [[nodiscard]] std::string ResolveFontFile(NovaFontFamily family) const;
 
   std::unordered_map<FontKey, TTF_Font *, FontKeyHash> fonts_;

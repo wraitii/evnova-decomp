@@ -994,7 +994,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004BC100	CStringBuffer_ReplaceSubstring		0%	
 0x004BC2A0	NovaSound_LoadDecodedById	src/brgr_archive.cpp	85%	Loads `snd ` resources
 0x004BC300	FontCache_NoOpCleanup		0%	
-0x004BC3E0	FontCache_InitializeDefaultFamilies	src/game/nova_font.cpp	70%	NovaFontFamily enum + ResolveFontFile mapping Chicago/Charcoal, Geneva, Times->Times New Roman, Helvetica->Arial, New York->Georgia; bundled Charcoal+Geneva ttfs shipped by CE build
+0x004BC3E0	FontCache_InitializeDefaultFamilies	src/game/nova_font.cpp	70%	NovaFontFamily enum + ResolveFontFile mapping Chicago/Charcoal, Geneva, Times->Times New Roman, Helvetica->Arial, New York->Georgia; bundled Charcoal+Geneva ttfs shipped by CE build; tiered resolver: bundled CE TTF -> native macOS family face (Times/Helvetica/NewYork/Geneva) -> CE GDI substitution names (Times New Roman/Arial/Georgia) + Linux generics -> bundled Geneva last resort; resolved face logged once per family. Native-macOS tier is a deliberate divergence from the CE reference (which always used the substitute names)
 0x004BC450	FontFamily_CreateFontHandle	src/game/nova_font.cpp	40%	style bold/italic flags mapped onto the SDL_ttf face (bold synthesized via TTF_STYLE_BOLD, no post-open weight setter in this version)
 0x004BC5C0	FontCache_CreateFamilyEntry		0%	
 0x004BC600	FontFamily_FindHandleBySizeAndStyle		0%	
