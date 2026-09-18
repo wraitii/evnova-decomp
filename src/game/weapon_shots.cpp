@@ -22,8 +22,11 @@
 
 namespace game {
 using weapon_detail::AddPolarVelocity;
+using weapon_detail::ApplyTurretSpreadVelocity;
+using weapon_detail::ChooseBestTurretQuadrantForTarget;
 using weapon_detail::RoundHeadingDeg;
 using weapon_detail::RoundRangeEnvelope;
+using weapon_detail::TurretBearingDegForShip;
 using weapon_detail::WeaponAt;
 
 namespace {
@@ -951,6 +954,98 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
   }
 }
 
+namespace {
+// Ghidra 0x0042f270 beam-scan eligibility. This is the beam path's own inline
+// test, NOT the projectile Weapon_CanWeaponHitTarget 0x00426ef0 gate: the beam
+// scan does not reject same-government non-squad ships. Conditions, in the
+// decompile's order: active, same system, not the owner, ship_class != 0x2ff,
+// weapon flags_primary 0x400 == candidate class capability_flags 0x400, not the
+// owner's direct subordinate / own squad leader / player-squad mate, and the
+// mission-critical (dude booty_flags 0x100) owner/candidate exclusions.
+[[nodiscard]] bool BeamCandidateEligible(const GameState &state,
+                                         const Ship &owner,
+                                         std::int16_t owner_slot,
+                                         const Ship &candidate,
+                                         std::int16_t candidate_slot,
+                                         const Weapon &weapon) {
+  constexpr std::int16_t kInvalidShipClass = 0x2ff;
+  // 0x0042f270's first contact clause is candidate_slot != owner_slot; a ship
+  // never intercepts its own beam.
+  if (candidate_slot == owner_slot || !candidate.is_active ||
+      candidate.current_system_id != owner.current_system_id ||
+      candidate.ship_class_id == kInvalidShipClass) {
+    return false;
+  }
+  const ShipClass *candidate_class = ShipClassFor(state, candidate);
+  if (candidate_class == nullptr ||
+      (weapon.flags & 0x0400U) !=
+          (candidate_class->capability_flags & 0x0400U)) {
+    return false;
+  }
+  // local_42: exclude the owner's direct subordinate, the owner's own squad
+  // leader, and a fellow player-squad member.
+  bool not_friendly = true;
+  if (candidate.squad_leader_ship_slot != -1) {
+    not_friendly = candidate.squad_leader_ship_slot != owner_slot;
+    if (NovaShip_IsInPlayerSquad(state, candidate) &&
+        NovaShip_IsInPlayerSquad(state, owner)) {
+      not_friendly = false;
+    }
+  }
+  if (candidate_slot == owner.squad_leader_ship_slot) {
+    not_friendly = false;
+  }
+  if (!not_friendly) {
+    return false;
+  }
+  // bVar8: mission-critical dude exclusions.
+  const auto dude_for = [&state](const Ship &ship) -> const DudeDef * {
+    if (ship.dude_class_id < 0) {
+      return nullptr;
+    }
+    return state.scenario.Dude(
+        static_cast<std::int16_t>(ship.dude_class_id + 0x80));
+  };
+  bool owner_chain_to_player = false;
+  for (std::int16_t current = owner_slot, step = 0;
+       step < static_cast<std::int16_t>(GameState::kMaxShips);
+       ++step) {
+    if (current == 0) {
+      owner_chain_to_player = true;
+      break;
+    }
+    if (current < 0 ||
+        current >= static_cast<std::int16_t>(GameState::kMaxShips)) {
+      break;
+    }
+    current =
+        state.ShipAt(static_cast<std::size_t>(current)).squad_leader_ship_slot;
+    if (current == -1) {
+      break;
+    }
+  }
+  const DudeDef *candidate_dude = dude_for(candidate);
+  if (owner_chain_to_player && candidate_dude != nullptr &&
+      (candidate_dude->booty_flags & 0x0100U) != 0U) {
+    return false;
+  }
+  const bool candidate_player_squad =
+      candidate_slot == 0 || NovaShip_IsInPlayerSquad(state, candidate);
+  if (candidate_player_squad) {
+    const DudeDef *owner_dude = dude_for(owner);
+    if (owner_dude == nullptr && owner.squad_leader_ship_slot != -1) {
+      const Ship &leader =
+          state.ShipAt(static_cast<std::size_t>(owner.squad_leader_ship_slot));
+      owner_dude = dude_for(leader);
+    }
+    if (owner_dude != nullptr && (owner_dude->booty_flags & 0x0100U) != 0U) {
+      return false;
+    }
+  }
+  return true;
+}
+} // namespace
+
 // Ghidra 0x00427a90 Shot_QueueBeamHit.
 bool NovaWeapon_QueueBeamHit(GameState &state,
                              std::int16_t owner_ship_slot,
@@ -971,14 +1066,82 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
     if (beam.lifetime_ticks >= -1) {
       continue;
     }
-    const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+    Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+    const bool target_in_range =
+        target_ship_slot >= 0 &&
+        target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips);
+
+    // Shot_QueueBeamHit (0x00427a90): pick the turret-exit quadrant for the
+    // weapon's group and advance the ship's per-group rotation exactly once.
+    // Every port beam callsite passes the original's -1 sentinel, so the
+    // explicit-quadrant arm is not modelled. TODO(decomp(0x00427a90)) skipped:
+    // the original indexes g_ship_states+0xc8fe by the raw group id with no
+    // bounds check (group < 0 or > 3 reads/advances the neighbouring field
+    // and consumes one RNG roll); the port bounds-guards instead, leaving
+    // turret_quadrant = -1 so the beam stays at the owner centre, which is the
+    // visible original result.
+    const int turret_group = weapon->turret_group_id;
+    std::int16_t turret_quadrant = -1;
+    if (turret_group >= 0 && turret_group < 4) {
+      int stored =
+          owner.muzzle_quadrant[static_cast<std::size_t>(turret_group)];
+      if (stored < 0 || stored > 3) {
+        stored = RandomBelow(state, 4);
+      }
+      if ((weapon->flags_tertiary & 0x0010U) != 0U && forced_targeting != 1 &&
+          target_in_range) {
+        if (const ShipClass *owner_cls = ShipClassFor(state, owner)) {
+          const Ship &target =
+              state.ShipAt(static_cast<std::size_t>(target_ship_slot));
+          // Disasm 0x00427c98 (FLD dword [owner+0x44]) truncates the raw
+          // hull heading (radians) to an int; 0x00427cd9 MOVSX ECX,AX then
+          // 0x00427ce2 PUSH ECX passes it to
+          // Weapon_ChooseBestTurretQuadrantForTarget (0x0046c4e0) as the
+          // bearing. The original feeds radians where degrees are expected;
+          // preserved.
+          turret_quadrant =
+              static_cast<std::int16_t>(ChooseBestTurretQuadrantForTarget(
+                  *owner_cls,
+                  owner.pos_x,
+                  owner.pos_y,
+                  static_cast<std::int16_t>(static_cast<int>(owner.heading)),
+                  turret_group,
+                  target.pos_x,
+                  target.pos_y));
+        }
+      } else {
+        turret_quadrant = static_cast<std::int16_t>(stored);
+      }
+      // The advance is always driven by the stored state, not by the
+      // target-nearest choice above (original Shot_QueueBeamHit).
+      owner.muzzle_quadrant[static_cast<std::size_t>(turret_group)] =
+          static_cast<std::int8_t>((stored + 1) & 3);
+    }
+
     beam.source_x = owner.pos_x;
     beam.source_y = owner.pos_y;
+    // Shot_UpdateBeamHitQueue (0x0042f270) re-derives the turret-exit offset
+    // every frame from the live owner; apply the same transform at queue time
+    // so the first frame is not drawn from the owner centre.
+    const ShipClass *owner_cls = ShipClassFor(state, owner);
+    if (owner_cls != nullptr && turret_group >= 0 && turret_group < 4 &&
+        turret_quadrant >= 0) {
+      ApplyTurretSpreadVelocity(
+          *owner_cls,
+          beam.source_x,
+          beam.source_y,
+          TurretBearingDegForShip(owner, owner_cls->frames_per_rotation),
+          turret_group,
+          turret_quadrant);
+    }
     beam.target_x = owner.pos_x;
     beam.target_y = owner.pos_y;
+    beam.firing_bearing_deg = firing_bearing_deg;
     bool aimed_at_target = false;
-    if (target_ship_slot >= 0 &&
-        target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips)) {
+    // Shot_UpdateBeamHitQueue (0x0042f270) only uses the target position for
+    // turreted/PD modes (3/10); a mode-0 beam keeps the straight heading
+    // bearing and ends at its BeamLength.
+    if (weapon->weapon_mode_code != 0 && target_in_range) {
       const Ship &target =
           state.ShipAt(static_cast<std::size_t>(target_ship_slot));
       beam.target_x = target.pos_x;
@@ -986,10 +1149,11 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
       aimed_at_target = true;
     }
     if (!aimed_at_target) {
-      // No target: lay the beam downrange along the firing bearing. The
-      // original derives endpoints per frame in Shot_UpdateBeamHitQueue
-      // (0x0042f270); BeamLength + 32 is its beam-reach constant.
-      const float reach = static_cast<float>(weapon->beam_length_px) + 32.0F;
+      // No target endpoint: lay the beam downrange along the firing bearing.
+      // The original derives endpoints per frame in Shot_UpdateBeamHitQueue
+      // (0x0042f270); with no ship in reach the visible length is exactly
+      // BeamLength (the +0x20 term is only the AI fire-reach gate).
+      const float reach = static_cast<float>(weapon->beam_length_px);
       const float rad = static_cast<float>(firing_bearing_deg) *
                         (3.14159265358979323846F / 180.0F);
       beam.target_x = beam.source_x + std::sin(rad) * reach;
@@ -1001,7 +1165,7 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
     beam.owner_ship_slot = owner_ship_slot;
     beam.target_ship_slot = target_ship_slot;
     beam.forced_targeting = forced_targeting;
-    beam.turret_quadrant = -1;
+    beam.turret_quadrant = turret_quadrant;
     beam.turret_group_id = weapon->turret_group_id;
     beam.impact_variant = (weapon->flags_secondary & 0x1000U) != 0U ? 1 : 0;
     // Shot_QueueBeamHit (0x00427a90) also marks locked-on non-player beams
@@ -1009,7 +1173,8 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
     // targeting, a live (non-disabled) target exists, and the owner is locked
     // on it (Ship_IsShipLockedOnTarget 0x004124f0).
     if (beam.impact_variant == 0 && owner_ship_slot > 0 &&
-        forced_targeting != 1 && aimed_at_target &&
+        forced_targeting != 1 && target_ship_slot >= 0 &&
+        target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips) &&
         !NovaAiShip_IsDisabled(
             state, state.ShipAt(static_cast<std::size_t>(target_ship_slot))) &&
         NovaAiShip_IsShipLockedOnTarget(
@@ -1028,6 +1193,35 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
     if (beam.lifetime_ticks < -1) {
       continue;
     }
+    const Weapon *beam_weapon = WeaponAt(state, beam.weapon_id);
+    // Shot_UpdateBeamHitQueue (0x0042f270) re-derives the source from the live
+    // owner each frame, so a beam follows a moving owner rather than freezing
+    // at the queue-time muzzle position.
+    const bool owner_valid =
+        beam.owner_ship_slot >= 0 &&
+        beam.owner_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips);
+    if (owner_valid) {
+      const Ship &owner =
+          state.ShipAt(static_cast<std::size_t>(beam.owner_ship_slot));
+      beam.source_x = owner.pos_x;
+      beam.source_y = owner.pos_y;
+      // Shot_UpdateBeamHitQueue (0x0042f270) recomputes the turret-exit
+      // offset from the live owner every frame (rotation, near/far scale and
+      // drop), so the source tracks a moving/rotating ship instead of
+      // freezing at the queue-time muzzle.
+      const ShipClass *owner_cls = ShipClassFor(state, owner);
+      if (owner_cls != nullptr && beam.turret_group_id >= 0 &&
+          beam.turret_group_id < 4 && beam.turret_quadrant >= 0 &&
+          beam.turret_quadrant < 4) {
+        ApplyTurretSpreadVelocity(
+            *owner_cls,
+            beam.source_x,
+            beam.source_y,
+            TurretBearingDegForShip(owner, owner_cls->frames_per_rotation),
+            beam.turret_group_id,
+            beam.turret_quadrant);
+      }
+    }
     if (beam.forced_targeting == 1 && beam.target_shot_slot >= 0) {
       const auto shot_slot = static_cast<std::size_t>(beam.target_shot_slot);
       if (shot_slot >= state.active_shots.size() ||
@@ -1039,17 +1233,102 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
         ActiveShot &shot = state.active_shots[shot_slot];
         beam.target_x = shot.pos_x;
         beam.target_y = shot.pos_y;
-        const Weapon *pd_weapon = WeaponAt(state, beam.weapon_id);
         if (shot.point_defense_durability < 1) {
           shot.consumed = true;
           shot.life_ticks_remaining = 0.0F;
-        } else if (pd_weapon != nullptr) {
+        } else if (beam_weapon != nullptr) {
           const int damage =
-              static_cast<int>(pd_weapon->mass_damage) +
-              (static_cast<int>(pd_weapon->energy_damage) + 1) / 2;
+              static_cast<int>(beam_weapon->mass_damage) +
+              (static_cast<int>(beam_weapon->energy_damage) + 1) / 2;
           shot.point_defense_durability =
               static_cast<std::int16_t>(shot.point_defense_durability - damage);
         }
+      }
+    } else if (beam_weapon != nullptr && beam_weapon->weapon_mode_code == 0) {
+      // Shot_UpdateBeamHitQueue (0x0042f270) keeps a mode-0 beam on the owner's
+      // current heading (falling back to the queued bearing when there is no
+      // live owner) and scans for the nearest active ship inside a narrow
+      // forward cone within BeamLength + ceil(trunc(frame_height*0.66)/2). A
+      // hit truncates the visible endpoint to distance - frame_height*0.2;
+      // with nothing in reach the beam ends exactly at BeamLength.
+      // frame_height = Sprite_GetShipClassEscortFrameHeight (0x004624c0), a
+      // FULL frame height (bottom - top) with fallback 0x4b = 75; 0.66 and 0.2
+      // are the doubles DAT_005753d0 / DAT_005753d8.
+      // The 0.66 (DAT_005753d0) and 0.2 (DAT_005753d8) scales are IEEE
+      // doubles; the original multiplies with FMUL double, then the x87 FIST+
+      // residual/sign correction truncates toward zero.
+      constexpr double kBeamReachFrameScale = 0.66;
+      constexpr double kBeamTruncateFrameScale = 0.2;
+      float bearing_deg = static_cast<float>(beam.firing_bearing_deg);
+      if (owner_valid) {
+        const Ship &owner =
+            state.ShipAt(static_cast<std::size_t>(beam.owner_ship_slot));
+        bearing_deg = owner.heading * (180.0F / 3.14159265358979323846F);
+      }
+      const float beam_length = static_cast<float>(beam_weapon->beam_length_px);
+      float visible_length = beam_length;
+      std::int16_t hit_slot = -1;
+      float best_distance = 0.0F;
+      if (owner_valid) {
+        // Ghidra 0x0042f270 eligibility (BeamCandidateEligible). This is the
+        // beam path's own inline test; it deliberately does NOT reject
+        // same-government non-squad targets, matching the original.
+        const Ship &owner =
+            state.ShipAt(static_cast<std::size_t>(beam.owner_ship_slot));
+        for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+          if (!BeamCandidateEligible(state,
+                                     owner,
+                                     beam.owner_ship_slot,
+                                     state.ShipAt(slot),
+                                     static_cast<std::int16_t>(slot),
+                                     *beam_weapon)) {
+            continue;
+          }
+          const Ship &candidate = state.ShipAt(slot);
+          const float frame_height =
+              candidate.collision_mask.HasMask()
+                  ? static_cast<float>(candidate.collision_mask.mask->height)
+                  : 75.0F;
+          const int scaled_extent = static_cast<int>(
+              static_cast<double>(frame_height) * kBeamReachFrameScale);
+          const float dx = candidate.pos_x - beam.source_x;
+          const float dy = candidate.pos_y - beam.source_y;
+          const float distance = std::sqrt(dx * dx + dy * dy);
+          if (distance >
+              beam_length + static_cast<float>((scaled_extent + 1) / 2)) {
+            continue;
+          }
+          const float target_bearing = BearingDeg(
+              beam.source_x, beam.source_y, candidate.pos_x, candidate.pos_y);
+          const float delta =
+              std::remainder(target_bearing - bearing_deg, 360.0F);
+          if (std::abs(delta) >
+              static_cast<float>(scaled_extent) * 10.0F / 32.0F) {
+            continue;
+          }
+          if (hit_slot == -1 || distance < best_distance) {
+            best_distance = distance;
+            // The original stores the contact-truncated length as a truncated
+            // int (x87 FIST + residual/sign correction), not a float.
+            const double truncated =
+                static_cast<double>(distance) -
+                static_cast<double>(frame_height) * kBeamTruncateFrameScale;
+            visible_length =
+                std::max(0.0F, static_cast<float>(std::trunc(truncated)));
+            hit_slot = static_cast<std::int16_t>(slot);
+          }
+        }
+      }
+      const float rad = bearing_deg * (3.14159265358979323846F / 180.0F);
+      beam.target_x = beam.source_x + std::sin(rad) * visible_length;
+      beam.target_y = beam.source_y - std::cos(rad) * visible_length;
+      if (!beam.impact_resolved && hit_slot >= 0) {
+        NovaWeapon_ResolveDirectWeaponHit(state,
+                                          beam.owner_ship_slot,
+                                          hit_slot,
+                                          beam.weapon_id,
+                                          beam.impact_variant);
+        beam.impact_resolved = true;
       }
     } else if (beam.target_ship_slot >= 0 &&
                beam.target_ship_slot <

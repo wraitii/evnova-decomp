@@ -136,6 +136,21 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(pulse->projectile_speed == 900.0F); // 9 px/frame * 100
   CHECK(pulse->lifetime_ticks == 55);
 
+  // Thunderhead Lance (outfit 0xd9 -> wëap 0xa6): a short-range fixed beam.
+  // Guidance 0, BeamLength 100, BeamWidth 2, no lightning, green core+corona.
+  // beam_falloff is 0 in the payload and normalized to 0x10 because
+  // BeamLength > 0 (loader 0x004bd3c0).
+  const Weapon *lance = data.Weapon(0xa6);
+  REQUIRE(lance != nullptr);
+  CHECK(lance->weapon_mode_code == 0); // straight-ahead, non-turreted
+  CHECK(lance->beam_length_px == 100);
+  CHECK(lance->beam_width_or_animation_frame_delay == 2);
+  CHECK(lance->beam_lightning_density == 0);
+  CHECK(lance->beam_lightning_amplitude == 0);
+  CHECK(lance->beam_falloff == 0x10);
+  CHECK(lance->beam_core_color == 0x00e962U);
+  CHECK(lance->beam_corona_color == 0x00e962U);
+
   // Gjinchar-class Aurora Cruiser (0x9a) mounts Fusion Pulse Batteries
   // (ExitType 1). sh\x8an interleaves each exit family's four X/Y pairs;
   // the turret family is X +0x58 / Y +0x60, not the adjacent gun Y block.

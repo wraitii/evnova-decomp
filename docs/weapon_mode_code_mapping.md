@@ -104,6 +104,57 @@ its position/velocity/heading taken from the parent. `SubTheta < 0` fans the chi
 randomizes; `SubLimit` caps recursion via `ShotState.linked_shot_generation` (+0x36). See `src/game/weapon.cpp`
 `NovaWeapon_SpawnLinkedShotsOnImpact` and `tests/collision_test.cpp` `[linked]`.
 
+## Beam endpoint geometry and lightning rendering
+
+`Shot_UpdateBeamHitQueue` (0x0042f270) derives every visible endpoint per frame; `Shot_QueueBeamHit` (0x00427a90)
+stores no coordinates. Source = owner position + owner turret-exit offset (now modelled by the port:
+`weapon_detail::ApplyTurretSpreadVelocity`, applied at queue time and every tick).
+
+- **Mode 0 (fixed beam)** keeps the owner's current heading, even when a target slot was recorded. It scans for the
+  nearest eligible ship within `BeamLength + ceil(trunc(frame_height*0.66)/2)` and inside a
+  forward cone of `trunc(frame_height*0.66)*10/32` degrees (frame_height = `Sprite_GetShipClassEscortFrameHeight`
+  0x004624c0, a full frame height, fallback 0x4b=75). A hit truncates the endpoint to `trunc(distance -
+  frame_height*0.2)`; nothing in reach ends at exactly `BeamLength`. The 0.66 and 0.2 scales are the doubles
+  DAT_005753d0 / DAT_005753d8; all three conversions use the x87 FIST truncation idiom, not round-to-nearest. A valid
+  contact near the outer reach can truncate to longer than `BeamLength` (e.g. 120 px target -> 105 px beam); the original
+  does not re-clamp to `BeamLength`.
+- **Mode 3 (turreted) / mode 10 (PD)** take `Math_BearingFromPointToPoint(source,target)` instead.
+- A mode-0 `BeamLength` is the visible/hit range; the AI fire gate's `BeamLength + 0x20` (`Weapon_FireShipWeapons`
+  0x00414550, NPC only; the player path 0x00455150 has no reach gate) is a separate reach envelope.
+
+`SWBeams_DrawThickFadingBeam` (0x0047a410, the mode-0 `LiDensity > 0` lightning plotter) splits the span into
+`trunc(max(|dx|,|dy|) * LiDensity * 0.01)` segments (DAT_00575888 is the double 0.01, not 0.5; the conversion is the
+x87 truncation idiom). Every segment is jittered by `LiAmplitude` except the single final segment, which lands exactly
+on the target and gets the 0x20 end fade; a step count below 2 draws nothing. `SWBeams_DrawShortBeam` (0x00479fe0) is the
+straight `LiDensity == 0` plotter.
+
+### Turret-exit quadrant selection (beam records)
+
+Every beam callsite passes `turret_quadrant = -1`, so `Shot_QueueBeamHit` chooses the quadrant from the per-ship
+per-group rotation state `Ship.muzzle_quadrant` (`g_ship_states +0xc8fe`, one slot per ExitType): a still-unset slot is
+randomized in `[0,4)` (`NovaRandom_Range`), and the stored slot then advances `+1 mod 4` once per successfully queued
+beam. `flags_tertiary 0x10` redirects the stored selection to the target-nearest barrel
+(`Weapon_ChooseBestTurretQuadrantForTarget` 0x0046c4e0) when a target is passed and targeting is not forced; the
+original feeds that helper the raw hull heading in **radians** truncated to a short where degrees are expected
+(disasm 0x00427c98 `FLD [owner+0x44]` / 0x00427cd9 `MOVSX ECX,AX` / 0x00427ce2 `PUSH ECX`), preserved in the port.
+The quadrant is stored per beam record (not per ship), so it persists across the owner's later rotations. The source
+offset itself is re-derived every frame in `Shot_UpdateBeamHitQueue` using the stored quadrant and the current displayed
+rotation frame (`Weapon_ApplyTurretSpreadVelocity` 0x0046c5c0; near/far scale selection and drop). Thunderhead / Pirate
+Thunderhead mount the Thunderhead Lance (weapon 0xa6, ExitType 3): sh\x8an group 3 lateral is `+7/-7/+7/-7`
+(Thunderhead) and `+9/+9/-9/-9` (Pirate), forward `+9`, so the Lance fires from the two side exits alternately.
+
+### Beam port gaps (as of this pass)
+
+- The mode-0 scan uses the original inline eligibility from 0x0042f270 (ported as `BeamCandidateEligible`): active,
+  same system, not the owner, ship_class != 0x2ff, weapon `flags_primary 0x400` == target-class
+  `capability_flags 0x400`, not the owner's direct subordinate / own squad leader / player-squad mate, and the
+  mission-critical dude `booty_flags 0x100` exclusions. It deliberately does **not** reject same-government non-squad
+  ships, matching the original (unlike the projectile `Weapon_CanWeaponHitTarget` 0x00426ef0 gate).
+- The scan lacks the original's asteroid arm and applies a hit once rather than per tick; `shot_random_spread`
+  (Bible Inaccuracy) is not added to the beam bearing per tick.
+- Twin-surface plotters `SWBeams_DrawKinkedBeam` 0x0047AC50 / `SWBeams_DrawBeamWithFlare` 0x0047AFD0 (the
+  `Shot_DrawBeamHitQueueForSurface` 0x00438810 `field_0xec != 0` path) are not ported.
+
 ## Notes for future RE
 
 - Treat wiki semantics as naming guidance, not absolute truth.
