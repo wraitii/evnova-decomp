@@ -27,6 +27,8 @@
 #include "travel.hpp"
 #include "weapon.hpp"
 
+#include "../util/math.hpp"
+
 namespace game {
 
 using namespace ship_ai_detail;
@@ -65,6 +67,12 @@ constexpr float kAssistTurnRadiusScale =
 // between outer and inner). 15.0 (FLOAT_005750d4) belongs to state 9's range.
 constexpr float kAssistInnerTurnRadiusScale = 60.0F;
 constexpr float kCombatStationRange = 251.0F;
+// State-4 standoff weapon-range scale (0x5750b8 double, aliased at 0x575850);
+// the reach is multiplied in x87 and the result truncated toward zero.
+constexpr double kStandoffRangeScale = 0.85;
+// Disabled standoff target halves the already-truncated reach (0x575038
+// double 0.5), also truncated toward zero.
+constexpr double kStandoffDisabledScale = 0.5;
 
 } // namespace
 
@@ -713,19 +721,61 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.primary_target_ship_slot = -1;
         return;
       }
+      // Flags2 0x0002 (Bible "prefers standoff attacks"; carriers carry 0x82)
+      // replaces the intercept test with a max-weapon-range envelope.
+      const ShipClass *ship_class = ShipClassFor(state, ship);
+      const bool standoff =
+          ship_class != nullptr && (ship_class->flags_secondary & 0x0002U) != 0;
       if (dx > kCombatCloseRange || dy > kCombatCloseRange) {
-        if (NovaAiShip_CanInterceptCurrentPrimaryTarget(state, ship)) {
-          if (ship.ai_behavior_code < 3) {
-            ship.ai_state_code = 3;
-            ship.ai_control_mode = 5;
-          } else {
-            ship.ai_control_mode = 0xe;
+        if (!standoff) {
+          if (NovaAiShip_CanInterceptCurrentPrimaryTarget(state, ship)) {
+            if (ship.ai_behavior_code < 3) {
+              ship.ai_state_code = 3;
+              ship.ai_control_mode = 5;
+            } else {
+              ship.ai_control_mode = 0xe;
+            }
+          } else if (ship.ai_control_mode != 0x11) {
+            ship.ai_control_mode = 7;
           }
-        } else if (ship.ai_control_mode != 0x11) {
-          ship.ai_control_mode = 7;
+        } else {
+          // Reach is (short)Weapon_GetShipMaxWeaponRange * 0.85 truncated
+          // toward zero and narrowed to signed short, then halved and
+          // truncated again for a disabled target (x87 FIST + sign backoff,
+          // 0x00406a54..0x00406b4d). The range formatter clamps to 0x7fff, so
+          // the 16-bit narrowing cannot bite.
+          const std::int16_t range = static_cast<std::int16_t>(
+              NovaWeapon_GetShipMaxWeaponRange(state, ship));
+          const std::int16_t scaled = static_cast<std::int16_t>(
+              evnova::util::TruncateToInt32(static_cast<float>(
+                  static_cast<double>(range) * kStandoffRangeScale)));
+          std::int16_t standoff_range = scaled;
+          if (NovaAiShip_IsDisabled(state, target)) {
+            standoff_range = static_cast<std::int16_t>(
+                evnova::util::TruncateToInt32(static_cast<float>(
+                    static_cast<double>(scaled) * kStandoffDisabledScale)));
+          }
+          // The enclosing far arm guarantees a >165 px axis, so the original's
+          // redundant near check always takes the mode-0xe branch.
+          ship.ai_control_mode = (static_cast<float>(standoff_range) < dx ||
+                                  static_cast<float>(standoff_range) < dy)
+                                     ? 7
+                                     : 0xe;
         }
-      } else if (ship.ai_control_mode != 0x10) {
-        ship.ai_control_mode = 6;
+      } else if (!standoff) {
+        if (ship.ai_control_mode != 0x10) {
+          ship.ai_control_mode = 6;
+        }
+      } else {
+        ship.ai_control_mode = 5;
+      }
+      // LAB_00406bc2 tail: while a state-4 target stays valid and the ship is
+      // not disabled, every frame runs the carrier-bay launch driver, then
+      // Government_TryTriggerGovtAssistanceEncounter (0x00413610).
+      if (!NovaAiShip_IsDisabled(state, ship)) {
+        NovaShip_LaunchShipFromCarrierBay(state, ship);
+        (void)NovaGovernment_TryTriggerAssistanceEncounter(
+            state, ship, /*force=*/false);
       }
     }
     return;
@@ -816,13 +866,6 @@ void NovaAi_UpdateShipState(GameState &state,
       ship.ai_control_mode = 0;
       ship.primary_target_ship_slot = -1;
       ship.ai_secondary_target_slot = -1;
-    }
-    // LAB_00406bc2 tail: while a state-2 target stays valid and the ship is
-    // not disabled, every frame runs the carrier-bay launch driver (and in
-    // the original Government_TryTriggerGovtAssistanceEncounter 0x00413610,
-    // not yet reimplemented -- TODO(decomp)).
-    if (!NovaAiShip_IsDisabled(state, ship)) {
-      NovaShip_LaunchShipFromCarrierBay(state, ship);
     }
     return;
   }

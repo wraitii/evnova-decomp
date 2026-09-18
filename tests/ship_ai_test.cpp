@@ -172,13 +172,33 @@ TEST_CASE("escort order tiers use each side's stocked weapon reach") {
   NovaAi_IssueEscortOrders(state, leader);
 
   // The target's stocked weapon reaches the leader, while the leader's does
-  // not reach the target. The corrected low-shield tier therefore attacks
-  // with categories 0/1; the original literal weapon-1 probes were symmetric.
-  CHECK(state.ShipAt(3).escort_command_code == 2);
+  // not reach the target. Category 1 keeps the corrected asymmetric low-shield
+  // tier and attacks. Category 0 (fighters) uses the fixed 382 px BUGFIX
+  // radius; this 100 px target is inside it, so the fighters Defend.
+  CHECK(state.ShipAt(3).escort_command_code == 1);
   CHECK(state.ShipAt(4).escort_command_code == 2);
   CHECK(state.ShipAt(5).escort_command_code == 1);
   CHECK(state.ShipAt(6).escort_command_code == 0);
   CHECK(state.ShipAt(3).escort_command_pending == 1);
+
+  SECTION("fighters attack a locked target beyond the fixed radius") {
+    target.pos_x = 500.0F; // beyond the 382 px reference reach
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 2);
+  }
+
+  SECTION("fighters attack a target that is not engaging the leader") {
+    target.primary_target_ship_slot = -1;
+    target.pos_x = 500.0F;
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 2);
+  }
+
+  SECTION("fighters attack a disabled target inside the radius") {
+    target.armor_points = 0.0F;
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 2);
+  }
 
   SECTION("leaders that can reach their attacker keep damaged escorts close") {
     state.scenario.weapons[0].range_scalar = 100.0F;
@@ -190,7 +210,9 @@ TEST_CASE("escort order tiers use each side's stocked weapon reach") {
   SECTION("range asymmetry matters only when the target attacks the leader") {
     target.primary_target_ship_slot = -1;
     NovaAi_IssueEscortOrders(state, leader);
-    CHECK(state.ShipAt(3).escort_command_code == 1);
+    // Category 0 attacks a target that is not engaging the leader; category 1
+    // keeps the asymmetric tier and Defends (neither side is in range).
+    CHECK(state.ShipAt(3).escort_command_code == 2);
     CHECK(state.ShipAt(4).escort_command_code == 1);
   }
 
@@ -225,7 +247,9 @@ TEST_CASE("escort order tiers use each side's stocked weapon reach") {
     leader.ai_odds_score = -1.0F;
     target.armor_points = 100.0F;
     NovaAi_IssueEscortOrders(state, leader);
-    CHECK(state.ShipAt(3).escort_command_code == 2);
+    // Category 0 Defends (the 100 px target is inside the fixed radius); the
+    // warship category keeps the odds gate and stays in Formation.
+    CHECK(state.ShipAt(3).escort_command_code == 1);
     CHECK(state.ShipAt(4).escort_command_code == 2);
     CHECK(state.ShipAt(5).escort_command_code == 0);
     CHECK(state.ShipAt(6).escort_command_code == 0);
@@ -265,6 +289,7 @@ TEST_CASE("escort orders obey caller cadence and bypasses") {
   // The order pass runs before the disabled auto-guard clears the leader.
   state.spaceflight_frame_counter = 0;
   NovaAi_UpdateShipAI(state, leader, false, 0);
+  // No primary target (not locked): the fixed-radius fighter rule attacks.
   CHECK(escort.escort_command_code == 2);
   CHECK(leader.squad_leader_ship_slot == -1);
 
@@ -454,7 +479,10 @@ TEST_CASE("behavior-0x03 acquires a hostile player and pursues") {
 
   CHECK(ship.primary_target_ship_slot == 0);
   CHECK(ship.ai_state_code == 4);
-  CHECK(ship.ai_control_mode == 6);
+  // The Fed Destroyer carries Flags2 0x0082, so the state-4 standoff arm
+  // selects close engagement mode 5 (the pre-fix port ignored Flags2 0x0002
+  // and wrote mode 6).
+  CHECK(ship.ai_control_mode == 5);
   CHECK(ship.ai_desired_heading_deg != 0);
 }
 
@@ -1532,6 +1560,184 @@ namespace {
 }
 
 } // namespace
+
+namespace {
+
+// Hand-built carrier scenario: class 0 is the carrier (optionally Flags2
+// 0x0002 standoff), class 1 is the carried fighter/target, and the weapon
+// table holds a mode-99 bay (bank 0) plus a mode -1 free-energy standoff
+// weapon (bank 1). Only two classes avoid the stock-archive dependency.
+constexpr std::int16_t kBayBank = 0;
+constexpr std::int16_t kStandoffBank = 1;
+
+void BuildCarrierScenario(GameState &state,
+                          bool standoff_class,
+                          float standoff_range_scalar) {
+  state.scenario.ships.resize(4);
+  state.scenario.ships[0].base_shield = 100;
+  state.scenario.ships[0].base_armor = 100;
+  state.scenario.ships[0].turn_rate = 10.0F;
+  if (standoff_class) {
+    state.scenario.ships[0].flags_secondary |= 0x0002U;
+  }
+  state.scenario.ships[1].base_shield = 10;
+  state.scenario.ships[1].base_armor = 10;
+
+  state.scenario.weapons.resize(2);
+  state.scenario.weapons[kBayBank].weapon_mode_code = 99;
+  state.scenario.weapons[kBayBank].ammo_type = 0x80 + 1; // fighter class 1
+  state.scenario.weapons[kBayBank].reload_ticks = 2;
+  state.scenario.weapons[kStandoffBank].weapon_mode_code = -1;
+  state.scenario.weapons[kStandoffBank].ammo_type = -1; // free energy
+  state.scenario.weapons[kStandoffBank].range_scalar = standoff_range_scalar;
+}
+
+// Allocate a live carrier carrying two fighters in the loaded bay.
+game::Ship &MakeLoadedCarrier(GameState &state) {
+  const int slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  game::Ship &carrier = state.ShipAt(static_cast<std::size_t>(slot));
+  carrier.ship_class_id = 0;
+  carrier.ai_state_code = 4;
+  carrier.ai_behavior_code = 3;
+  carrier.armor_points = 100.0F;
+  carrier.shield_points = 100.0F;
+  carrier.npc_weapon_count_by_class[kBayBank] = 1;
+  carrier.npc_weapon_secondary_count_by_class[kBayBank] = 2;
+  return carrier;
+}
+
+[[nodiscard]] int ActiveShipCount(const GameState &state) {
+  int n = 0;
+  for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+    if (state.ShipAt(i).is_active) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+} // namespace
+
+// Ghidra 0x00405590 state-4 valid-target tail (LAB_00406bc2): the carrier-bay
+// launch runs every frame regardless of the selected control mode. A close
+// target selects mode 6 (non-standoff class); the original also launched in
+// modes 5/7. Regression for the misplaced call that used to live in the
+// state-0xd boarding block.
+TEST_CASE("state-4 carrier launches fighters for a non-0xe control mode",
+          "[ai][carrier]") {
+  GameState state;
+  BuildCarrierScenario(state,
+                       /*standoff_class=*/false,
+                       /*standoff_range_scalar=*/0.0F);
+  game::Ship &carrier = MakeLoadedCarrier(state);
+  carrier.pos_x = 0.0F;
+  carrier.pos_y = 0.0F;
+
+  const int target_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  game::Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  target.ship_class_id = 1;
+  target.armor_points = 10.0F;
+  target.pos_x = 10.0F; // inside 165 px -> mode 6
+  target.pos_y = 0.0F;
+  carrier.primary_target_ship_slot = static_cast<std::int16_t>(target_slot);
+
+  const int before = ActiveShipCount(state);
+  game::NovaAi_UpdateShipState(state, carrier, /*now_ms=*/0);
+
+  CHECK(carrier.ai_control_mode == 6);
+  CHECK(ActiveShipCount(state) == before + 1);
+  CHECK(carrier.npc_weapon_secondary_count_by_class[kBayBank] == 1);
+  bool spawned_fighter = false;
+  for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+    const game::Ship &s = state.ShipAt(i);
+    if (s.is_active && s.ai_behavior_code == 5 &&
+        s.squad_leader_ship_slot == carrier.ship_instance_id) {
+      spawned_fighter = true;
+    }
+  }
+  CHECK(spawned_fighter);
+}
+
+// The original state-0xd capture approach has no launch call; an armed carrier
+// boarding a disabled ship must not deploy its bay.
+TEST_CASE("state-0xd boarding approach does not launch carried fighters",
+          "[ai][carrier]") {
+  GameState state;
+  BuildCarrierScenario(state,
+                       /*standoff_class=*/false,
+                       /*standoff_range_scalar=*/0.0F);
+  game::Ship &carrier = MakeLoadedCarrier(state);
+  carrier.ai_state_code = 0xd;
+  carrier.pos_x = 0.0F;
+  carrier.pos_y = 0.0F;
+
+  const int target_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  game::Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  target.ship_class_id = 1;
+  target.armor_points = 1.0F; // below 1/3 of the fighter class's 10
+  target.pos_x = 5.0F;
+  target.pos_y = 0.0F;
+  carrier.primary_target_ship_slot = static_cast<std::int16_t>(target_slot);
+  REQUIRE(game::NovaAiShip_IsDisabled(state, target));
+
+  const int before = ActiveShipCount(state);
+  game::NovaAi_UpdateShipState(state, carrier, /*now_ms=*/0);
+
+  CHECK(carrier.ai_control_mode == 0xf);
+  CHECK(ActiveShipCount(state) == before);
+  CHECK(carrier.npc_weapon_secondary_count_by_class[kBayBank] == 2);
+}
+
+// The Flags2 0x0002 standoff arm selects the control mode from the truncated
+// 0.85x max weapon reach (0x00406a54..0x00406b4d); a disabled target halves
+// that reach before the mode decision. The 404/172 case pins the signed-short
+// truncation of the halved envelope (trunc(343*0.5)=171, not 172).
+TEST_CASE("state-4 standoff class selects mode from weapon range",
+          "[ai][carrier]") {
+  GameState state;
+  BuildCarrierScenario(state,
+                       /*standoff_class=*/true,
+                       /*standoff_range_scalar=*/1000.0F);
+
+  const int carrier_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  game::Ship &carrier = state.ShipAt(static_cast<std::size_t>(carrier_slot));
+  carrier.ship_class_id = 0;
+  carrier.ai_state_code = 4;
+  carrier.ai_behavior_code = 3;
+  carrier.armor_points = 100.0F;
+  carrier.shield_points = 100.0F;
+  carrier.npc_weapon_count_by_class[kStandoffBank] = 1;
+  carrier.pos_x = 0.0F;
+  carrier.pos_y = 0.0F;
+
+  const int target_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  game::Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  target.ship_class_id = 1;
+  target.armor_points = 10.0F;
+  target.pos_x = 400.0F;
+  target.pos_y = 0.0F;
+  carrier.primary_target_ship_slot = static_cast<std::int16_t>(target_slot);
+
+  SECTION("reach beyond the target selects mode 0xe") {
+    game::NovaAi_UpdateShipState(state, carrier, /*now_ms=*/0);
+    CHECK(carrier.ai_control_mode == 0xe);
+  }
+
+  SECTION("short reach selects mode 7") {
+    state.scenario.weapons[kStandoffBank].range_scalar = 100.0F;
+    game::NovaAi_UpdateShipState(state, carrier, /*now_ms=*/0);
+    CHECK(carrier.ai_control_mode == 7);
+  }
+
+  SECTION("disabled target halves the truncated reach") {
+    state.scenario.weapons[kStandoffBank].range_scalar = 404.0F;
+    target.armor_points = 1.0F;
+    REQUIRE(game::NovaAiShip_IsDisabled(state, target));
+    target.pos_x = 172.0F;
+    game::NovaAi_UpdateShipState(state, carrier, /*now_ms=*/0);
+    CHECK(carrier.ai_control_mode == 7);
+  }
+}
 
 // End-to-end capture-approach drive (Ghidra 0x004038b0 supervisor -> 0x00405590
 // state 0xd -> 0x00408150 mode 0xf -> Boarding_BoardShipAndTransferCargo): a

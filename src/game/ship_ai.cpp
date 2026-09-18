@@ -32,7 +32,6 @@
 #include <vector>
 
 #include "boarding_plunder.hpp"
-#include "compatibility.hpp"
 #include "escort_formation.hpp"
 #include "frame_timing.hpp"
 #include "government.hpp"
@@ -597,10 +596,28 @@ void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
 // Ghidra 0x004152E0 Ship_IssueEscortOrders.
 // Commands are Formation=0, Defend=1, Attack=2, and Return=3.
 void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
+  // Deliberate, ungated divergence from the original range probes. 0x004152E0
+  // calls Weapon_IsShipWithinWeaponRangeOfTarget (0x00411600) with the literal
+  // weapon slot 1 for BOTH directions, which reads global wëap resource 0x81
+  // ("Medium Blaster", reach 350; the helper adds 32 for non-beam modes ->
+  // 382 px) no matter what either ship carries. The two probes are therefore
+  // symmetric and the intended outranging check is dead; the threshold is an
+  // undocumented artifact of the compiled index. The port substitutes each
+  // side's own stock-armed reach for categories 1..3 and a fixed 382 px
+  // reference for category-0 fighters. Because the whole reconstruction is a
+  // divergence it is not routed through kApplyOriginalBugFixes; that policy no
+  // longer restores the literal index.
+  //
+  // Fixed category-0 fighter reference radius: the shipped wëap 0x81 envelope
+  // (350 + 32). Pinned rather than read back from the weapon table so a mod
+  // editing the unrelated wëap 0x81 cannot move fighter escort orders.
+  constexpr int kEscortFighterDecisionRangePx = 382;
   std::array<std::int16_t, 4> commands{3, 3, 3, 3};
   bool target_disabled = false;
   bool target_can_hit_leader = false;
   bool leader_can_hit_target = false;
+  bool target_locked = false;
+  bool target_beyond_fighter_decision_range = false;
 
   if (ship.ai_behavior_code < 3) {
     const long double max_shield =
@@ -621,19 +638,24 @@ void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
             static_cast<std::size_t>(ship.primary_target_ship_slot))) {
       const Ship &target =
           state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
-      if (NovaAiShip_IsShipLockedOnAttackerInState4(target, ship)) {
-        // BUGFIX(original): the executable passes weapon slot 1 for both
-        // directions, so it cannot distinguish an outranging target from an
-        // outranged leader. The inferred correction checks each class's stock
-        // weapon reach, without checking current ammo. Disabling the shared
-        // compatibility policy restores the literal index.
-        const std::int16_t range_weapon_slot =
-            kApplyOriginalBugFixes ? static_cast<std::int16_t>(-1)
-                                   : static_cast<std::int16_t>(1);
+      target_locked = NovaAiShip_IsShipLockedOnAttackerInState4(target, ship);
+      if (target_locked) {
+        // Divergence (see the function comment): read each side's own
+        // stock-armed reach instead of the original's literal slot 1. The scan
+        // ignores current ammo, matching the original helper's stock-weapon
+        // (weapon_slot == -1) arm. Feeds categories 1..3 only; category 0 uses
+        // the fixed reference below.
         target_can_hit_leader = NovaWeapon_ShipWithinWeaponRangeOfTarget(
-            state, target, ship, range_weapon_slot);
+            state, target, ship, /*weapon_slot=*/-1);
         leader_can_hit_target = NovaWeapon_ShipWithinWeaponRangeOfTarget(
-            state, ship, target, range_weapon_slot);
+            state, ship, target, /*weapon_slot=*/-1);
+        // Replicate the 0x00411600 envelope's floor(|dx|)^2 + floor(|dy|)^2
+        // comparison against the fixed reference reach.
+        const int dx = static_cast<int>(std::abs(ship.pos_x - target.pos_x));
+        const int dy = static_cast<int>(std::abs(ship.pos_y - target.pos_y));
+        target_beyond_fighter_decision_range =
+            dx * dx + dy * dy >
+            kEscortFighterDecisionRangePx * kEscortFighterDecisionRangePx;
       }
       target_disabled = NovaAiShip_IsDisabled(state, target);
     }
@@ -674,6 +696,20 @@ void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
             (ship.ai_odds_score >= 0.0F && ship.ai_odds_score < 0.5F) ? 2 : 0;
       }
       commands[3] = 0;
+      // Divergence: category-0 fighters use the fixed 382 px reference instead
+      // of the tier result. They hold station only while the target is engaging
+      // the leader from inside that radius; otherwise they attack (a target not
+      // engaging us, a disabled target, or a locked target beyond the radius).
+      // This is the original high-shield arm (!disabled && R) ? Defend :
+      // Attack, with R = locked && within 382, applied at every shield fraction
+      // -- the original ordered Defend at all fractions below 0.66. It keeps a
+      // long-range carrier's fighters attacking at range where the per-class
+      // stock-weapon scan above would have them Defend. Categories 1..3 keep
+      // the tier logic.
+      commands[0] = (target_locked && !target_disabled &&
+                     !target_beyond_fighter_decision_range)
+                        ? 1
+                        : 2;
     }
   }
 

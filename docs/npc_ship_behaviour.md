@@ -87,12 +87,31 @@ category 0 below 66%. At high shields, the unrelated index-1 envelope
 instead controls category 0's order, gated on the target being in state 4
 and targeting the leader.
 
-The port's `BUGFIX(original)` uses the shared `kApplyOriginalBugFixes`
-policy to select helper mode -1 instead of 1. Mode -1 checks each ship
+The port diverges from this unconditionally. It is not routed through the
+shared `kApplyOriginalBugFixes` policy: the whole escort range decision is
+treated as a deliberate divergence, and disabling that policy no longer
+restores the literal-1 probes. (The old gate was misleading because only
+the non-fighter tiers honoured it.)
+
+For categories 1-3 the port calls helper mode -1, which checks each ship
 class's stock-armed weapon definitions with weapon mode <9. It restores
 the asymmetric range decision; it does not check current ammunition or
 model escorts' own reach. This is an inferred correction, not recovered
-original intent. Disabling the policy preserves the literal-1 behavior.
+original intent.
+
+Category 0 (fighters) is overridden separately. The original's literal
+slot-1 envelope comes from global wëap resource 0x81 "Medium Blaster"
+(reach 350 + 32 = 382 px), so the original's fighter order depends on an
+unrelated weapon that a mod can freely change. The port pins a fixed
+382 px reference instead of reading the weapon table: a fighter Defends
+only while the target is engaging the leader (state 4 and primary target =
+the leader) from inside 382 px; it Attacks otherwise (a target that is not
+engaging the leader, a disabled target, or a locked target beyond 382 px).
+This is the original high-shield arm `(!D && R) ? Defend : Attack`, with
+`R` the locked-and-within-382 term, applied at every shield fraction -- the
+original ordered Defend at all fractions below 0.66. It keeps a long-range
+carrier's fighters attacking at range where the per-class scan ordered
+Defend at any reachable distance.
 
 The practical distinction is pursuit distance: Defend in 0x004048a0
 acquires through 0x00412030 with a 550-pixel leader-radius limit and drops
@@ -134,6 +153,20 @@ exclusive mapping.
 
 State `0x13` is deliberately neutral: its lack of a state-specific arm is
 evidence, whereas its callers have not yet established a reliable role.
+
+State `0x04` (attack engagement) has a valid-target tail at `LAB_00406bc2`
+(0x00406bd2; the enclosing block is entered from the `ai_state_code == 4`
+test at 0x00406247 -> 0x00406780): while the ship itself is not disabled it
+runs `Ship_LaunchShipFromCarrierBay` (0x0040d9a0) every frame, then
+`Government_TryTriggerGovtAssistanceEncounter` (0x00413610), independent of
+the selected control mode (modes 5/6/7/0xe all converge there). A carried-ship
+launch remains subject to target validity, the state-4 early exits, and the
+launch driver's bank/ammunition/cooldown gates; it does not require the carrier
+to select any particular combat mode. State `0x0d` has no launch call. A
+standoff class (`shïp` Flags2 `0x0002`, e.g. the carriers' `0x82`) selects mode
+`0x07`/`0x0e`/`0x05` from the max weapon range (`Weapon_GetShipMaxWeaponRange`
+0x0046cec0, x0.85, halved for a disabled target) rather than from
+`Ship_CanShipInterceptCurrentPrimaryTarget`.
 
 Arrival clarification: the original random-dude and encounter-fleet spawners
 call `Stellar_SelectRandomAdjacentDestination`. Its 1-in-3 roll selects a
@@ -348,6 +381,35 @@ labels.
   (including 6/7/0x16, where the original never calls it) and also mode `0x17`,
   which has no arm in the original. Tracked as `TODO(decomp(0x00408150))` in
   `src/game/ship_ai_controls.cpp`.
+
+- **Carrier-bay launch and state-4 standoff arm.** The original state-4
+  valid-target tail (`LAB_00406bc2`, 0x00406bd2) now runs in the port
+  (`src/game/ship_ai_state.cpp`): while the carrier is not disabled it calls
+  `NovaShip_LaunchShipFromCarrierBay` (0x0040d9a0) and
+  `NovaGovernment_TryTriggerAssistanceEncounter` (0x00413610) every state-4
+  frame, independent of the selected control mode. The misplaced call in the
+  state-0xd boarding block is removed (state 0xd does not launch); the
+  control-mode 0xe call site (0x0040ab42) remains at
+  `src/game/ship_ai_controls.cpp:1181`. The `flags_secondary & 0x0002` standoff
+  arm is ported: it selects mode `0x07`/`0x0e`/`0x05` from the truncated
+  `0.85 * max weapon range` envelope, halved for a disabled target (one
+  observable consequence: the Fed Destroyer, Flags2 `0x0082`, now selects mode
+  `0x05` at close range instead of the pre-fix mode `0x06`).
+  Remaining divergence: the port's state-4 early-exit chain is a subset of the
+  original's (it checks only the self/primary-target case, not the full
+  squad-leader chain or the allied-government case), so the launch tail can run
+  where the original returns early. The original state-3 mode-5 arm also calls
+  `Government_TryTriggerGovtAssistanceEncounter`; that call remains unported.
+
+- **Fighter escort order radius.** Category-0 fighter orders in
+  `Ship_IssueEscortOrders` use a hardcoded 382 px attack/defend radius (the
+  original literal slot-1 envelope, wëap `0x81` Medium Blaster reach 350 + 32)
+  instead of the per-class stock-weapon scan. Defend only while the target is
+  locked on the leader inside 382 px; Attack otherwise (including a target not
+  engaging the leader). This is a deliberate, ungated divergence: the original
+  threshold depended on the unrelated wëap `0x81`, so the value is pinned
+  rather than read from the live weapon table. The non-fighter tiers keep the
+  reconstructed probe logic; neither tier is gated by `kApplyOriginalBugFixes`.
 
 ## Documentation practice
 
