@@ -24,10 +24,10 @@ namespace {
 
 [[nodiscard]] std::optional<std::filesystem::path> FindInstallRoot() {
   std::vector<std::filesystem::path> candidates;
-  const char *base = SDL_GetBasePath();
-  if (base != nullptr) {
+  // SDL3 returns a const pointer it caches internally and frees in
+  // SDL_QuitFilesystem, so the caller must not free it. emplace_back copies.
+  if (const char *base = SDL_GetBasePath()) {
     candidates.emplace_back(base);
-    SDL_free(const_cast<char *>(base));
   }
   candidates.emplace_back("EV Nova");
   candidates.emplace_back("../../../EV Nova");
