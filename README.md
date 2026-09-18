@@ -31,22 +31,49 @@ As for the assets, that's probably under ATMOS copyright, and I think Cosmic Fro
 
 ## Prerequisites
 
-Install CMake (3.25+), Ninja, a C++23-capable compiler, and [vcpkg](https://github.com/microsoft/vcpkg). On macOS with Homebrew:
+You need CMake (3.25+), [Ninja](https://ninja-build.org/), a C++23-capable
+compiler (AppleClang/Clang, GCC 13+, or MSVC 19.3x), and
+[vcpkg](https://github.com/microsoft/vcpkg). Ninja is used on every platform,
+including Windows with MSVC.
+
+Clone and bootstrap vcpkg once; this is where CMake fetches the SDL3, fmt and
+Catch2 dependencies from:
 
 ```sh
-brew install vcpkg ninja
 git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+"$HOME/vcpkg/bootstrap-vcpkg.sh"
 ```
 
-Set `VCPKG_ROOT` to that checkout before configuring. The variable can live in your shell profile if desired:
+Then point `VCPKG_ROOT` at that checkout (add it to your shell profile to keep
+it across sessions):
 
 ```sh
 export VCPKG_ROOT="$HOME/vcpkg"
 ```
 
+Platform notes:
+
+- **macOS:** `brew install cmake ninja` (the Xcode command line tools provide
+the compiler).
+- **Linux:** install `cmake`, `ninja-build` and a C++23 compiler from your
+distro (`g++` 13+ or `clang++` 17+).
+- **Windows:** install Visual Studio 2022 with the *Desktop development with
+C++* workload plus CMake and Ninja (`winget install Kitware.CMake
+Ninja-build.Ninja`), then bootstrap vcpkg from PowerShell:
+
+  ```powershell
+  git clone https://github.com/microsoft/vcpkg.git "$env:USERPROFILE\vcpkg"
+  & "$env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat"
+  $env:VCPKG_ROOT = "$env:USERPROFILE\vcpkg"
+  ```
+
+  Run the build from an *x64 Native Tools Command Prompt for VS 2022* (or after
+  running `vcvars64.bat`) so Ninja can find `cl.exe`.
+
 ## Build and test
 
-Configure, build, and test the Release preset (CMake installs the `vcpkg.json` dependencies automatically):
+Configure, build, and test the Release preset (CMake installs the `vcpkg.json`
+dependencies automatically the first time):
 
 ```sh
 cmake --preset release
@@ -57,5 +84,17 @@ ctest --test-dir build/release --output-on-failure
 Run the game with:
 
 ```sh
-./build/release/src/evnova
+./build/release/src/evnova          # macOS / Linux
+build\release\src\evnova.exe        # Windows
 ```
+
+The optional probe/control harness ([docs/probe_harness.md](docs/probe_harness.md))
+is built by default on macOS/Linux and off on Windows, since its transport is a
+POSIX socket server. Toggle it with `-DEVNOVA_ENABLE_PROBE=ON|OFF` when
+configuring.
+
+The reimplementation loads the installed CE data (`Nova.rez`, `Nova Files/`,
+and the bundled `Charcoal.ttf`/`Geneva.ttf`), which this repo does not ship.
+Either run the binary from the install folder or from the repo root (which
+contains the `EV Nova/` folder); the resolver looks next to the executable
+first, then for `EV Nova` relative to the working directory.

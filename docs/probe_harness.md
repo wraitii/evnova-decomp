@@ -13,6 +13,17 @@ and the binary behaves exactly as before. The implementation lives in
 `src/game/probe_state.cpp` (state reader) and hooks inside
 `src/sdl_platform.{hpp,cpp}`.
 
+## Building
+
+The harness is a CMake option, `EVNOVA_ENABLE_PROBE`. It defaults to **ON**
+on POSIX hosts (where `probe_server.cpp`'s raw socket transport compiles) and
+**OFF** on Windows, whose Winsock backend is not written yet. When off,
+`probe_server_stub.cpp` provides the same `ProbeServer` surface as no-ops, so
+the game-side publish/consume call sites stay compiled and inert and the
+build stays portable. Configure explicitly with
+`-DEVNOVA_ENABLE_PROBE=ON|OFF` (or `EVNOVA_ENABLE_PROBE=1` in
+`CMakePresets.json`) when you need to test either side.
+
 ## Threading / safety model
 
 - The server thread **never** touches SDL or GameState. It parses requests,

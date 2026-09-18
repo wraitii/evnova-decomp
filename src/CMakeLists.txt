@@ -82,7 +82,6 @@ add_library(evnova_runtime
     nova_paths.cpp
     pict_image.cpp
     pixpat_image.cpp
-    probe_server.cpp
     rle_sprite_sheet.cpp
     sdl_audio.cpp
     sdl_music.cpp
@@ -91,6 +90,18 @@ add_library(evnova_runtime
 
 target_include_directories(evnova_runtime PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(evnova_runtime PUBLIC SDL3::SDL3 SDL3_mixer::SDL3_mixer SDL3_ttf::SDL3_ttf fmt::fmt)
+
+# The probe's POSIX socket server is the only non-portable runtime piece;
+# compile the no-op transport when it is disabled so the game-side call sites
+# stay compiled and inert (see docs/probe_harness.md).
+if(EVNOVA_ENABLE_PROBE)
+    target_sources(evnova_runtime PRIVATE probe_server.cpp)
+    target_compile_definitions(evnova_runtime PUBLIC EVNOVA_ENABLE_PROBE=1)
+else()
+    target_sources(evnova_runtime PRIVATE probe_server_stub.cpp)
+    target_compile_definitions(evnova_runtime PUBLIC EVNOVA_ENABLE_PROBE=0)
+    message(STATUS "Probe harness disabled (EVNOVA_ENABLE_PROBE=OFF)")
+endif()
 
 target_compile_features(evnova_runtime PUBLIC cxx_std_23)
 if(MSVC)

@@ -17,8 +17,10 @@ constexpr int kPlayfieldHeight = 480;
 // upscaled fixed screens render their 1024-native art at ~1:1.
 constexpr int kMinimumWindowWidth = 1024;
 constexpr int kMinimumWindowHeight = 768;
+#if EVNOVA_ENABLE_PROBE
 // Default port for the external probe harness (override with EVN_PROBE_PORT).
 constexpr int kDefaultProbePort = 8190;
+#endif
 
 // Convert SDL's physical scancode to the DirectInput-style code stored in the
 // original g_player_key_bindings table. Codes through 0x58 mostly retain the
@@ -325,6 +327,7 @@ bool SdlPlatform::Initialize() {
   // External probe harness (docs/probe_harness.md): enabled only via the
   // environment; the game runs completely unmodified without it.
   if (std::getenv("EVN_PROBE") != nullptr) {
+#if EVNOVA_ENABLE_PROBE
     int port = kDefaultProbePort;
     if (const char *requested = std::getenv("EVN_PROBE_PORT");
         requested != nullptr) {
@@ -332,6 +335,10 @@ bool SdlPlatform::Initialize() {
     }
     probe_.Start(port);
     probe_.SetQuitLatch([this] { quit_requested_ = true; });
+#else
+    NovaLog::Warn("EVN_PROBE is set but this build was configured with "
+                  "EVNOVA_ENABLE_PROBE=OFF; the probe harness is inactive");
+#endif
   }
   return true;
 }
