@@ -116,9 +116,9 @@ std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
     if (const Government *govt =
             state.scenario.GovernmentByIndex(ship.faction_or_government_id);
         govt != nullptr) {
-      mask20 = (govt->scan_mask_short & 0x20U) != 0U;
-      prefer_1000 = (govt->scan_mask_short & 0x40U) != 0U;
-      prefer_2000 = (govt->scan_mask_short & 0x80U) != 0U;
+      mask20 = (govt->flags_secondary & 0x20U) != 0U;
+      prefer_1000 = (govt->flags_secondary & 0x40U) != 0U;
+      prefer_2000 = (govt->flags_secondary & 0x80U) != 0U;
     }
   }
 
@@ -890,7 +890,7 @@ void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship) {
   }
   const auto govt_suppresses = [&state](std::int16_t govt_index) {
     const Government *govt = state.scenario.GovernmentByIndex(govt_index);
-    return govt != nullptr && (govt->scan_mask_short & 0x08U) != 0U;
+    return govt != nullptr && (govt->flags_secondary & 0x08U) != 0U;
   };
   if (govt_suppresses(ship.faction_or_government_id)) {
     return;

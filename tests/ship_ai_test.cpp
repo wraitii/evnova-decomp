@@ -2344,7 +2344,7 @@ bool BuildTwoSlotTravelSystem(GameState &state) {
     st.strength_capacity = 0; // IsStellarActive false => sprite-active
   }
   state.scenario.stellars[1].availability_flags = 0x2000;
-  state.scenario.governments[0].scan_mask_short = 0;
+  state.scenario.governments[0].flags_secondary = 0;
   return true;
 }
 
@@ -2378,7 +2378,7 @@ TEST_CASE("adjacency selector prefers avail_2000 when ScanMask says so") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   REQUIRE(BuildTwoSlotTravelSystem(state));
-  state.scenario.governments[0].scan_mask_short = 0x0080;
+  state.scenario.governments[0].flags_secondary = 0x0080;
 
   game::Ship ship;
   ship.current_system_id = 0;
@@ -2399,7 +2399,7 @@ TEST_CASE("adjacency selector unrestricted_only takes the plain slot") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   REQUIRE(BuildTwoSlotTravelSystem(state));
-  state.scenario.governments[0].scan_mask_short = 0x0080;
+  state.scenario.governments[0].flags_secondary = 0x0080;
 
   game::Ship ship;
   ship.current_system_id = 0;
@@ -2433,7 +2433,7 @@ TEST_CASE("spawn destination wrapper accepts only restricted travel points") {
 
   // With ScanMask 0x80 the selector routes to the 0x2000 slot, which the
   // wrapper then accepts as a wormhole.
-  state.scenario.governments[0].scan_mask_short = 0x0080;
+  state.scenario.governments[0].flags_secondary = 0x0080;
   for (int i = 0; i < 64; ++i) {
     CHECK(game::NovaAi_SelectRandomAdjacentDestination(state, ship) == 0x81);
   }

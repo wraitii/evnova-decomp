@@ -1093,16 +1093,16 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   // button / short-circuits comm), bit 8 = comm-special, bit 0x10 = free help
   // (local_10: the bribe is granted without the payment window). The class's
   // inherent government contributes its bit 8.
-  const bool special_mask = govt != nullptr && (govt->scan_mask_short & 1) != 0;
-  bool comm_special = govt != nullptr && (govt->scan_mask_short & 8) != 0;
-  if (class_govt != nullptr && (class_govt->scan_mask_short & 8) != 0) {
+  const bool special_mask = govt != nullptr && (govt->flags_secondary & 1) != 0;
+  bool comm_special = govt != nullptr && (govt->flags_secondary & 8) != 0;
+  if (class_govt != nullptr && (class_govt->flags_secondary & 8) != 0) {
     comm_special = true;
   }
   const bool keep_refusal = govt != nullptr && target.ai_behavior_code > 2 &&
                             (govt->flags_primary & kGovtFlagKeepRefusal) != 0U;
   const bool govt_aid_flag =
       govt != nullptr && (govt->flags_primary & kGovtFlagXenophobic) != 0U;
-  const bool free_help = govt != nullptr && (govt->scan_mask_short & 0x10) != 0;
+  const bool free_help = govt != nullptr && (govt->flags_secondary & 0x10) != 0;
 
   // Per-launch random flavour index (g_travel_interaction_random_index).
   const std::int16_t random_index = RandomBelow(state.rng, 5);

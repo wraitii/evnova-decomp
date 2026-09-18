@@ -312,10 +312,10 @@ TEST_CASE("outfit tail fields decode at their real payload offsets",
   CHECK(o->flags == 0x0001U); // fixed gun
   CHECK(o->cost == 5000);
   // DispWeight is the leading word (+0x00); the +0x3ec..+0x3f3 tail holds
-  // ItemClass / Graphic / InStock % / RequireGovt. The raw RequireGovt 0x7f is
+  // ItemClass / ScanMask / InStock % / RequireGovt. The raw RequireGovt 0x7f is
   // normalized to -1 ("apply in all shops") by the loader's band clamp.
   CHECK(o->display_weight == 100);
-  CHECK(o->sprite_id == 0);
+  CHECK(o->scan_mask == 0);
   CHECK(o->stock_threshold == 100);
   CHECK(o->item_class == 0);
   CHECK(o->require_govt == -1);
@@ -402,7 +402,7 @@ TEST_CASE("government table loads and decodes the Federation class",
   CHECK(f->voice_type_code == 1);
   CHECK(f->voice_type_mode == -1);
   CHECK(f->flags_primary == 0xe2b0U);
-  CHECK(f->ai_skill_percent == -32768);
+  CHECK(f->scan_mask == -32768);
   // classes/ally/enemy lists from payload +0x18/+0x20/+0x28.
   CHECK(f->classes[0] == 1);
   CHECK(f->classes[1] == -1);
@@ -1367,4 +1367,30 @@ TEST_CASE("temp personality probe", "[.persprobe]") {
       }
     }
   }
+}
+
+// Ghidra 0x004bd3c0 shp pass: ShipClassDef +0x44 jump_duration_multiplier is
+// derived from the chassis Flags word. Bounded to {0.91, 1.3, 1.69, 2.08}.
+TEST_CASE("ship jump_duration_multiplier derives from chassis flags",
+          "[scenario][data]") {
+  using namespace game;
+  CHECK(JumpDurationMultiplierFromCapabilityFlags(0x0000) ==
+        Catch::Approx(1.3F));
+  CHECK(JumpDurationMultiplierFromCapabilityFlags(0x0001) ==
+        Catch::Approx(0.91F));
+  CHECK(JumpDurationMultiplierFromCapabilityFlags(0x0002) ==
+        Catch::Approx(1.69F));
+  CHECK(JumpDurationMultiplierFromCapabilityFlags(0x0004) ==
+        Catch::Approx(2.08F));
+  // Bit0 wins over the lower-priority chassis bits.
+  CHECK(JumpDurationMultiplierFromCapabilityFlags(0x0007) ==
+        Catch::Approx(0.91F));
+
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const ShipClass *shuttle = data.Ship(0x80);
+  REQUIRE(shuttle != nullptr);
+  CHECK(shuttle->jump_duration_multiplier ==
+        Catch::Approx(JumpDurationMultiplierFromCapabilityFlags(
+            shuttle->capability_flags)));
 }

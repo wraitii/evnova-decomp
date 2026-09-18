@@ -48,10 +48,10 @@
 //     immediately (no separate post-fire tunnel phase); the ship streaks
 //     through the new system while coasting.
 // Known remaining divergences: escort warp-sync and the multi-jump outfit
-// (Stellar_ComputeShipJumpDepth 0x0046cdd0), ShipClassDef
-// jump_duration_multiplier-driven audio staging
-// (NovaAudio_PreStageJumpSoundBySeconds), the multi-hop planned-route jump
+// (Stellar_ComputeShipJumpDepth 0x0046cdd0), the multi-hop planned-route jump
 // continuation, and the disabled-in-jump 'hyperspace field collapsed' exit.
+// (The jump_duration_multiplier ramp clock and 'Warp up' cue rate are decoded
+// and applied.)
 
 #include <cstdint>
 
@@ -388,5 +388,17 @@ void NovaTravel_ProcessArrivalPayroll(
 // (travel_flags 0x20) arms are deferred (the port's docking gate rejects those
 // targets anyway).
 void NovaTravel_UpdateEngagementProgress(GameState &state);
+
+// ShipClassDef.jump_duration_multiplier for the player's current hull; the
+// ramp clock and the 'Warp up' cue rate (1/multiplier) both use it.
+[[nodiscard]] float
+NovaTravel_PlayerJumpDurationMultiplier(const GameState &state);
+
+// Ghidra 0x00401800's hyperspace-committed guard: true once the player's jump
+// tunnel ramp has passed its onset, using the same schedule as the tunnel
+// movement block (progress = elapsed60hz * multiplier / (duration * 0.01) -
+// 35 / multiplier > 0). Ship_ScanPlayerForContraband skips the scan while this
+// holds, so a player already committed to a jump cannot be scanned.
+[[nodiscard]] bool NovaTravel_PlayerPastJumpOnset(const GameState &state);
 
 } // namespace game

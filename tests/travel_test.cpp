@@ -216,7 +216,7 @@ TEST_CASE("stellar government ScanMask gates hypergate access") {
   gate.government_id = 0;
   gate.min_status = -0x7fff;
   gate.availability_flags = game::Stellar::kHypergate;
-  state.scenario.governments[0].scan_mask_lo = 0x20;
+  state.scenario.governments[0].require_lo = 0x20;
 
   CHECK_FALSE(game::NovaTravel_PlayerMeetsStellarAccess(state, 0x80));
   state.scenario.ships[0].contribute_lo = 0x20;
@@ -1005,4 +1005,25 @@ TEST_CASE(
   state.player.pos_x = 3000.0F;
   state.player.pos_y = 3000.0F;
   CHECK(NovaTravel_PlayerInJumpRange(state));
+}
+
+// The scanner's hyperspace-committed guard (Ghidra 0x00401800) now uses the
+// decoded ShipClassDef.jump_duration_multiplier instead of a pinned 1.0.
+// Onset: tunnel_elapsed_60hz > 35 * (364*0.01) / multiplier^2.
+TEST_CASE("jump onset guard scales with the class jump multiplier",
+          "[travel][contraband]") {
+  GameState state;
+  state.scenario.ships.resize(1);
+  state.player.ship_class_id = 0;
+
+  state.scenario.ships[0].jump_duration_multiplier = 1.3F;
+  state.travel.tunnel_elapsed_60hz = 100.0F; // onset = 127.4/1.69 = 75.4
+  CHECK(game::NovaTravel_PlayerPastJumpOnset(state));
+
+  state.scenario.ships[0].jump_duration_multiplier = 0.91F;
+  // onset = 127.4/0.8281 = 153.8, so 100 ticks is still before onset.
+  CHECK_FALSE(game::NovaTravel_PlayerPastJumpOnset(state));
+
+  state.player.ship_class_id = -1; // missing class -> fallback 1.0
+  CHECK_FALSE(game::NovaTravel_PlayerPastJumpOnset(state));
 }

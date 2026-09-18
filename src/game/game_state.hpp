@@ -851,6 +851,15 @@ struct PlayerInventory {
   // Junk quantities (Ghidra g_junk_defs strided array), summed for the
   // total-held cargo bookkeeping.
   std::array<std::int16_t, 0x80> junk_counts{};
+  // Ghidra DAT_007356cc: any held junk type with a nonzero ScanMask
+  // (g_junk_defs +0x26). Rebuilt by NovaOutfit_RecomputeOutfitDerivedState and
+  // cleared by a successful junk scan (Ship_ScanPlayerForContraband). While
+  // set, the outfit scan is skipped entirely (original quirk).
+  bool has_scannable_junk = false;
+  // Ghidra DAT_007356cd: any owned outfit with a nonzero ScanMask
+  // (OutfitDef +0x28). Rebuilt by NovaOutfit_RecomputeOutfitDerivedState and
+  // cleared by a successful outfit scan.
+  bool has_scannable_outfit = false;
 };
 
 // A single fired round (clean-room stand-in for one Ghidra ShotState).

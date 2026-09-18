@@ -149,4 +149,17 @@ void NovaGovernment_ProcessFactionCombatEvent(
     std::int16_t event_code,
     std::int16_t mission_fleet_slot);
 
+// Ghidra 0x00401800 Ship_ScanPlayerForContraband. An eligible NPC warship or
+// interceptor within 100 px of the player may scan for contraband (single
+// 76% RNG gate). It handles the first active mission whose ScanMask matches
+// the government's, then independently the first matching outfit or junk type
+// (a junk with a nonzero ScanMask suppresses the outfit scan for that
+// inventory generation -- original quirk). Each match fires faction event 0
+// (outfit/junk only; the mission arm just fines/fails) and shows STR# 0x7d2
+// feedback. `now_ms` is the mission-clock time for the failure path; the
+// hyperspace-committed guard uses GameState::tick_60hz.
+void NovaShip_ScanPlayerForContraband(GameState &state,
+                                      Ship &ship,
+                                      std::uint32_t now_ms);
+
 } // namespace game
