@@ -277,48 +277,6 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
   return true;
 }
 
-// Ghidra 0x00497900 NovaUi_ShowTextConfirmCodeDialog: the shared text-entry
-// modal (DLOG 0xbb9; row 3 = prompt, row 5 = edit text, codes 1 = OK / 6 =
-// Cancel). Accept only when the text fits max_chars, else re-select the field
-// and continue. Returns the final text on accept, nullopt on cancel.
-[[nodiscard]] std::optional<std::string>
-NovaUi_ShowTextEntryDialog(SdlPlatform &platform,
-                           NovaFontCache &font_cache,
-                           std::string_view prompt,
-                           std::string_view initial_text,
-                           std::int32_t max_chars,
-                           const std::function<void()> &render_background) {
-  auto window = UiWindow_CreateFromDialogResource(platform, 0xbb9);
-  if (!window) {
-    return std::nullopt;
-  }
-  UiPanel_SetEntryTextPascal(*window, 3, prompt);
-  UiPanel_SetEntryTextPascal(*window, 5, initial_text);
-  UiPanel_SetTextEntrySelectionRange(*window, 5, 0, 0xfe);
-
-  short code = -1;
-  bool accepted = false;
-  while (!accepted && !platform.quit_requested()) {
-    UiWindow_RunInteractionLoop(
-        platform, font_cache, *window, &code, render_background);
-    if (code == 1) {
-      if (static_cast<std::int32_t>(
-              UiPanel_GetEntryTextPascal(*window, 5).size()) > max_chars) {
-        UiPanel_SetTextEntrySelectionRange(*window, 5, 0, max_chars - 1);
-      } else {
-        accepted = true;
-      }
-    }
-    if (code == 6) {
-      return std::nullopt;
-    }
-    code = -1;
-  }
-  return accepted && !platform.quit_requested()
-             ? std::make_optional(UiPanel_GetEntryTextPascal(*window, 5))
-             : std::nullopt;
-}
-
 } // namespace
 
 // ===========================================================================

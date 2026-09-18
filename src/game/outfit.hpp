@@ -136,7 +136,9 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
 // Ghidra 0x00427770 Outfit_GrantOutfitToPlayer. Scans the outfit's four
 // (ModType, ModVal) slots:
 //  - ModType 16 (kMap): galaxy-map reveal (see below) -> returns consumed;
-//  - ModType 43 (kPaint): ship tint -> consumed (rendering not modelled yet);
+//  - ModType 43 (kPaint): decodes the first slot's 15-bit ModVal into the
+//    global ship-paint 5-bit channels (state.ship_paint_rgb5), consumed by the
+//    hull tint -> consumed;
 //  - ModType 21 (kCleanRecord): clears negative system reputation (-1 = all
 //    visible systems, else the government id in ModVal) -> consumed;
 //  - otherwise: adds one to the owned inventory (via

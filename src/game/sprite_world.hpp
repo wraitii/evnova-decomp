@@ -23,6 +23,7 @@
 //   * bare rl\x91D sheets: each frame is one image (e.g. the player ship's
 //     heading-rotation sheet and its engine-glow layer, from sh\x8an).
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -248,6 +249,12 @@ struct SpriteDrawOptions {
   // transparent under SDL_BLENDMODE_ADD.
   bool additive = false;
   bool white_silhouette = false;
+  // Optional source tint in the original's raw resolved-channel units
+  // (game::NovaShip_ResolveTintColor). BlitFrame decodes it to a multiplicative
+  // SDL color mod and clamps at the 0x20 neutral; the original's additive
+  // overflow for channels above 0x20 is not reproduced (see
+  // docs/ship_sprite_rendering_path.md). nullopt leaves the frame untinted.
+  std::optional<std::array<std::int16_t, 3>> tint_rgb5 = std::nullopt;
   bool wrap = false; // one-exit wraparound for the extending viewport
   // Use the smooth (linear) filtering when the frame is drawn scaled, e.g. the
   // tiny 5x5px star tiles upscaled so they read as soft glows rather than

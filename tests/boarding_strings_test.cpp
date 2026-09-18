@@ -39,6 +39,12 @@ TEST_CASE("STR# 0x7d2 boarding strings (1-based entries)") {
   REQUIRE(entry(0x7c) ==
           "You already have the maximum possible number of escorts.");
   REQUIRE(entry(0x7d) == "Your attempt to capture this ship was unsuccessful.");
+  // Captured-ship rename (swap arm) and its retained/allocated overlays.
+  REQUIRE(entry(0x77) == "Now rename this captured ship:");
+  REQUIRE(entry(0x7a) == "You decided not to capture this ship after all.");
+  REQUIRE(entry(0x130) == "You retained your old ship as an escort.");
+  REQUIRE(entry(0x131) ==
+          "You were unable to retain your old ship as an escort.");
 
   // Capture-decision dialog (DLOG 0x3fa / RunCaptureDecisionDialog): the
   // offer question drawn into the DITL item-2 text panel.

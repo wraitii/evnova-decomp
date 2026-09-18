@@ -846,6 +846,14 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
 
   SpriteDrawOptions hull_opts;
   hull_opts.alpha_mod = layer_alpha;
+  // Base-hull tint from Ship_ResolveShipTintColor (0x0046e470): the player uses
+  // the global paint, NPCs their personality/faction color. See
+  // SpriteDrawOptions.tint_rgb5 for the SDL approximation.
+  {
+    const NovaShipTintColor tint = NovaShip_ResolveTintColor(state, ship);
+    hull_opts.tint_rgb5 =
+        std::array<std::int16_t, 3>{tint.red, tint.green, tint.blue};
+  }
   ApplyFog(hull_opts);
   if (hull_opts.alpha_mod > 0.0F) {
     DrawSprite(platform.renderer(),

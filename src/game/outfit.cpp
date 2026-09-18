@@ -936,12 +936,15 @@ bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
   bool has_map = false;
   std::int16_t map_val = 0;
   bool has_paint = false;
+  std::int16_t paint_val = 0;
   for (const Effect &e : OutfitEffects(*outfit)) {
     if (e.type == static_cast<std::int16_t>(OutfitEffect::kMap) && !has_map) {
       has_map = true;
       map_val = e.val;
-    } else if (e.type == static_cast<std::int16_t>(OutfitEffect::kPaint)) {
+    } else if (e.type == static_cast<std::int16_t>(OutfitEffect::kPaint) &&
+               !has_paint) {
       has_paint = true;
+      paint_val = e.val;
     }
   }
 
@@ -1027,11 +1030,12 @@ bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
   }
 
   if (has_paint) {
-    // Ghidra decodes ModVal as 15-bit RGB into 5-bit channels
-    // (DAT_00733b4a/b/c/e). Ship paint rendering is not modelled yet.
-    // TODO(decomp): store + consume the tint in ship_visual once paint is
-    // reconstructed; for now the outfit is still treated as consumed
-    // (non-stackable), matching the original's ownership behavior.
+    // Ghidra 0x00427770 decodes the first ModType-43 ModVal as 15-bit RGB into
+    // the global ship-paint 5-bit channels, which the hull render consumes.
+    const auto paint = static_cast<std::uint16_t>(paint_val);
+    state.ship_paint_rgb5 = {static_cast<std::uint16_t>((paint >> 10) & 0x1f),
+                             static_cast<std::uint16_t>((paint >> 5) & 0x1f),
+                             static_cast<std::uint16_t>(paint & 0x1f)};
     consumed = true;
   }
 

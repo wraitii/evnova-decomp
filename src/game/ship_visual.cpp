@@ -730,4 +730,44 @@ void NovaShip_TickCloakFadeState(GameState &state,
   }
 }
 
+// Ghidra 0x0046e470 Ship_ResolveShipTintColor.
+NovaShipTintColor NovaShip_ResolveTintColor(const GameState &state,
+                                            const Ship &ship) {
+  std::int16_t red = static_cast<std::int16_t>(state.ship_paint_rgb5[0]);
+  std::int16_t green = static_cast<std::int16_t>(state.ship_paint_rgb5[1]);
+  std::int16_t blue = static_cast<std::int16_t>(state.ship_paint_rgb5[2]);
+
+  if (ship.ship_instance_id != 0) {
+    if (ship.pers_def_slot == -1) {
+      red = 0x20;
+      green = 0x20;
+      blue = 0x20;
+      if (ship.faction_or_government_id != -1) {
+        const Government *gov =
+            state.scenario.GovernmentByIndex(ship.faction_or_government_id);
+        if (gov != nullptr) {
+          red = static_cast<std::int16_t>(gov->ship_red << 8);
+          green = static_cast<std::int16_t>(gov->ship_green << 8);
+          blue = static_cast<std::int16_t>(gov->ship_blue << 8);
+        }
+      }
+    } else if (ship.pers_def_slot >= 0 &&
+               static_cast<std::size_t>(ship.pers_def_slot) <
+                   state.scenario.pers_defs.size()) {
+      const PersDef &pers =
+          state.scenario
+              .pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
+      red = pers.color_r5;
+      green = pers.color_g5;
+      blue = pers.color_b5;
+    }
+  }
+  if (red == 0 && green == 0 && blue == 0) {
+    red = 0x20;
+    green = 0x20;
+    blue = 0x20;
+  }
+  return NovaShipTintColor{red, green, blue};
+}
+
 } // namespace game

@@ -174,7 +174,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
       your fleet of escorts." (0x7a).
     - swap path: confirm-code dialog (rename, random 3 digits appended to
       class name; STR# 0x7d2 0x76/0x77), on confirm
-      `Player_SwapShipWithEscort` + gameplay layout reinstall.
+      `Player_ReplaceShipWithCapturedHull` + gameplay layout reinstall.
 - After every action the window repaints and the loop continues until an
   action closes it. Loot actions set `local_223` (capture re-roll latch:
   next loop iteration rolls `rand(100) <= panic` → target self-destructs:
@@ -291,10 +291,12 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    three-state art) over the still-open boarding window; both choices play
    transition-table [1]; shown only when the player class capture_power
    (crew) >= 1. Strings pinned by tests/boarding_strings_test.cpp. The
-   "Use As My Ship" arm is TODO(decomp(0x00497eb0)) skipped — the rename-
-   confirm + Player_SwapShipWithEscort machinery (docked-loadout
-   transfer + interface reinstall) is deferred; the escort conversion is the
-   port's fallback for both choices (logged).
+   "Use As My Ship" arm is DONE: on confirm it opens the STR# 0x7d2 0x77
+   rename text dialog (initial = class display name + three random 1-9
+   digits, max 0x40), writes the player ship name, calls
+   `Player_ReplaceShipWithCapturedHull(..., flag 0)` and reinstalls the
+   gameplay layout (`HudRenderer::Install`); cancel shows STR# 0x7d2 0x7a and
+   abandons the capture (no escort conversion). See docs/player_ship_swap.md.
 7. **progress.csv + doc updates** — updated per iteration (1/2 landed).
 8. **AI boarding resolution (0x00412550) + capture-variant supervisor
    (0x004038b0)** — DONE, wired:
