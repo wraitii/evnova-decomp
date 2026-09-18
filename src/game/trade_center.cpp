@@ -306,7 +306,7 @@ std::int16_t NovaTradeCenter_Buy(GameState &state,
     return 0;
   }
   state.player.credits -= slot->price * qty;
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   return static_cast<std::int16_t>(qty);
 }
 
@@ -337,7 +337,7 @@ std::int16_t NovaTradeCenter_Sell(GameState &state,
     return 0;
   }
   state.player.credits += slot->price * qty;
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   return static_cast<std::int16_t>(qty);
 }
 

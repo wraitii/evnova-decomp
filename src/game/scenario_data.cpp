@@ -567,8 +567,13 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
                                    ? static_cast<std::int16_t>(key - 0x80)
                                    : static_cast<std::int16_t>(-1);
   }
+  // Ghidra 0x004bd3c0 ship section: Deionize (payload +0x36a -> ShipClassDef
+  // +0x48). The loader stores (float)raw, then: raw <= 0 -> 1.0,
+  // raw > 0 -> (float)(raw * 0.01_double). There is no positive-value minimum.
+  const std::int16_t deionize = ReadBeI16(bytes, 0x36a);
   s.ionization_decay_rate =
-      std::max(1.0F, static_cast<float>(ReadBeI16(bytes, 0x36a)) * 0.01F);
+      deionize > 0 ? static_cast<float>(static_cast<double>(deionize) * 0.01)
+                   : 1.0F;
   s.flags_secondary = ReadBe16(bytes, 0x62);
   if (bytes.size() >= 0x728) {
     s.availability_flags = ReadBe16(bytes, 0x726);
@@ -1431,6 +1436,10 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 }
 
 } // namespace
+
+ShipClass DecodeShipPayload(std::span<const std::byte> bytes) {
+  return DecodeShip(bytes);
+}
 
 const ShipClass *ScenarioData::Ship(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;

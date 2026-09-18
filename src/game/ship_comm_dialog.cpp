@@ -994,7 +994,7 @@ bool NovaEscortManagement_ApplyAction(GameState &state,
         ship_class != nullptr ? ship_class->default_ai_behavior : 1;
     NovaShip_ResetAiBehaviorRuntimeFields(escort);
     NovaAi_EnterState2ClearPrimaryTarget(escort, now_ms);
-    state.stat_cache_valid = false;
+    state.InvalidateDerivedStatCaches();
     return true;
   }
   case EscortManagementAction::kToggleUpgrade:

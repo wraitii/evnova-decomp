@@ -496,7 +496,7 @@ void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
   if (delta >= 1) {
     state.player.credits += delta;
     // g_playerInventoryAndLoadoutDirty in the original.
-    state.stat_cache_valid = false;
+    state.InvalidateDerivedStatCaches();
     return;
   }
   if (delta > -20000) {

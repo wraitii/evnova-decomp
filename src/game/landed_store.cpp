@@ -754,7 +754,7 @@ OutfitSaleResult NovaLanded_SellOutfit(GameState &state,
       for (const auto &[type, value] : mod_slots) {
         if (type == 1 && state.player.active_weapon_bank_slot == value) {
           state.player.active_weapon_bank_slot = -1;
-          state.stat_cache_valid = false;
+          state.InvalidateDerivedStatCaches();
           break;
         }
       }
@@ -781,7 +781,7 @@ void NovaLanded_CloseOutfitterSession(GameState &state) {
     }
   }
   NovaWeapon_RebuildBanksFromOwnedOutfits(state);
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   const PlayerEffectiveStats stats = Outfit_ComputePlayerEffectiveStats(state);
   state.player.fuel_points =
       std::min(state.player.fuel_points, stats.fuel_capacity);
@@ -1103,7 +1103,7 @@ bool Player_SwapShipWithEscort(GameState &state,
   state.player.cargo_bins = escort.cargo_bins;
   NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
   NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   state.player.active_weapon_bank_slot = -1;
   const PlayerEffectiveStats stats = Outfit_ComputePlayerEffectiveStats(state);
   state.player.shield_points = 0.0F;
@@ -1182,7 +1182,7 @@ bool NovaLanded_BuyShip(GameState &state,
     secondary = std::max<std::int16_t>(secondary, stock.ammo_load);
   }
   Player_TransferCargoAndJunkToEscortByRatio(state, 0);
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   state.player.active_weapon_bank_slot = -1;
   state.player.primary_target_ship_slot = -1;
   NovaLanded_ExecuteControlSet(
@@ -1363,7 +1363,7 @@ void Player_ProcessEscortFleetAtStellar(
       sold_value += static_cast<std::uint32_t>(value);
       ship.is_active = false;
       ship.squad_leader_ship_slot = -1;
-      state.stat_cache_valid = false;
+      state.InvalidateDerivedStatCaches();
       ++sold;
     }
 
@@ -1383,7 +1383,7 @@ void Player_ProcessEscortFleetAtStellar(
         ++upgraded;
         upgraded_cost += static_cast<std::uint32_t>(cost);
         state.player.credits -= cost;
-        state.stat_cache_valid = false;
+        state.InvalidateDerivedStatCaches();
         ship.ship_class_id = cls->upgrade_to_ship_class_id;
         ship.npc_weapon_count_by_class.fill(0);
         ship.npc_weapon_secondary_count_by_class.fill(0);
@@ -1490,13 +1490,13 @@ void Player_ProcessEscortPayroll(
           Player_TransferCargoAndJunkToEscortByRatio(
               state, static_cast<std::int16_t>(slot));
         }
-        state.stat_cache_valid = false;
+        state.InvalidateDerivedStatCaches();
         ship.is_active = false;
         ship.squad_leader_ship_slot = -1;
         ship.ai_behavior_code = 1;
       } else {
         state.player.credits -= upkeep;
-        state.stat_cache_valid = false;
+        state.InvalidateDerivedStatCaches();
       }
     }
   }

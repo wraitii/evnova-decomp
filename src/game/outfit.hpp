@@ -280,9 +280,9 @@ Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state);
 
 // Ghidra Ship_ComputeIonizationDecayRate (0x0046c080). Returns the class base
 // dissipation rate plus player-owned ModType 39 (ion dissipator) bonuses.
-// Rates are charge points per millisecond, matching g_avg_frame_time_ms.
-[[nodiscard]] float
-NovaOutfit_ComputeIonizationDecayRate(const GameState &state, const Ship &ship);
+// Rates are charge points per 30 Hz tick, matching g_avg_frame_tick_scale.
+[[nodiscard]] float NovaOutfit_ComputeIonizationDecayRate(GameState &state,
+                                                          const Ship &ship);
 
 // Ghidra 0x0046cb90 Outfit_HasMiningScoopOutfit. Whether the ship carries a
 // mining-scoop outfit (ModType 0x1F in any of the four mod slots): the player

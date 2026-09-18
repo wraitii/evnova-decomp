@@ -303,7 +303,7 @@ void Player_CollectStellarTribute(GameState &state) {
     state.player.credits += stellar.tribute;
     // g_playerInventoryAndLoadoutDirty = 1: the port's stat cache is the
     // consumer of that latch.
-    state.stat_cache_valid = false;
+    state.InvalidateDerivedStatCaches();
   }
 }
 

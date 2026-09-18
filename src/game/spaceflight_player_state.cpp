@@ -379,7 +379,7 @@ void DetonateCarriedBomb(GameState &state) {
   }
   // Ghidra g_player_status_panel_dirty + Outfit_RecomputeOutfitDerivedState:
   // the outfit pool changed, so derived stats must be recomputed.
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
   state.stat_cache_valid = true;
 }
@@ -562,7 +562,7 @@ void RespawnResetPlayerShipState(GameState &state) {
 
   // Meters are computed BEFORE the outfit counts are cleared (original
   // order), so the pre-death outfit bonuses still apply to class 0 here.
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   const PlayerEffectiveStats eff = Outfit_ComputePlayerEffectiveStats(state);
   p.shield_points = eff.max_shield_points;
   p.armor_points = eff.max_armor_points;
@@ -856,7 +856,7 @@ void RunPlayerEjectTransform(GameState &state) {
   // (Math_AddPolarVelocity 0x0043b4a0, unclamped).
   p.vel_x = 0.0F;
   p.vel_y = 0.0F;
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   const PlayerEffectiveStats launch_eff =
       Outfit_ComputePlayerEffectiveStats(state);
   state.cached_stats = launch_eff;
@@ -1166,7 +1166,7 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
   // Meters refill. Original quirk (0x0044d83f, verified: both call sites
   // target 0x00463550): the ARMOR refill uses Ship_ComputeShipMaxShieldPoints,
   // so the player returns with armor equal to the max SHIELD value. Preserve.
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   const PlayerEffectiveStats refill = Outfit_ComputePlayerEffectiveStats(state);
   p.fuel_points = refill.fuel_capacity;
   p.shield_points = refill.max_shield_points;

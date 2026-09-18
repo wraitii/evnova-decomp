@@ -1914,7 +1914,7 @@ bool Mission_TryConsumeMissionInteractionResources(GameState &state,
     }
   }
   // g_playerInventoryAndLoadoutDirty + Outfit_RecomputeOutfitDerivedState.
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   return true;
 }
 
@@ -2266,7 +2266,7 @@ void Mission_ProcessInteractionReactionSlotResources(
                       mission.mission_template_id,
                       mission.brief_description_ids[3]);
       }
-      state.stat_cache_valid = false;
+      state.InvalidateDerivedStatCaches();
     }
   }
   if (NovaStellar_AreStellarsEquivalent(
@@ -2281,7 +2281,7 @@ void Mission_ProcessInteractionReactionSlotResources(
                     mission.mission_template_id,
                     mission.brief_description_ids[3]);
     }
-    state.stat_cache_valid = false;
+    state.InvalidateDerivedStatCaches();
   }
 }
 

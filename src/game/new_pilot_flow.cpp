@@ -525,7 +525,7 @@ void RecomputePlayerMeters(GameState &state) {
   // starting outfit counts are seeded, so this helper runs after the inventory
   // seed rather than during the ship-state reset. Falls back to the class
   // template defaults when the class table is unavailable.
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   const game::PlayerEffectiveStats eff =
       game::Outfit_ComputePlayerEffectiveStats(state);
   state.player.shield_points = eff.max_shield_points;

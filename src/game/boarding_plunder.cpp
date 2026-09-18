@@ -1903,7 +1903,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
               if (Player_SwapShipWithEscort(state, target, false)) {
                 close_reason = "target captured as player ship";
                 result.target_captured_as_player = true;
-                state.stat_cache_valid = false;
+                state.InvalidateDerivedStatCaches();
                 break;
               }
             }
@@ -1944,7 +1944,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
                 state,
                 kMiscAssignedEscort,
                 "You assigned this ship to your fleet of escorts.");
-            state.stat_cache_valid = false;
+            state.InvalidateDerivedStatCaches();
             result.target_captured_as_escort = true;
           }
         }
@@ -1961,7 +1961,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
   // Original restores the draw context and recomputes outfit-derived state on
   // close; the SDL modal has no context stack, so just mark the derived stats
   // stale for the flight loop.
-  state.stat_cache_valid = false;
+  state.InvalidateDerivedStatCaches();
   return result;
 }
 
@@ -2185,7 +2185,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
     }
     if (transferred > 0) {
       // g_playerInventoryAndLoadoutDirty.
-      state.stat_cache_valid = false;
+      state.InvalidateDerivedStatCaches();
     }
   }
 
@@ -2212,7 +2212,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
        boarded.mission_fleet_slot == -1 && boarded.post_hit_mode_hint > 0);
   if (show_loot_message) {
     // g_playerInventoryAndLoadoutDirty.
-    state.stat_cache_valid = false;
+    state.InvalidateDerivedStatCaches();
     if (transferred > 0 || credits_taken > 0) {
       std::string text;
       if (transferred > 0) {

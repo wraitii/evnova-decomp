@@ -318,7 +318,7 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
     // recipient, even though other destroyed escorts are excluded.
     Player_TransferCargoAndJunkToEscortByRatio(state, self_slot);
     NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
-    state.stat_cache_valid = false;
+    state.InvalidateDerivedStatCaches();
   }
   // TODO(decomp): finale audio de-registrations.
 
