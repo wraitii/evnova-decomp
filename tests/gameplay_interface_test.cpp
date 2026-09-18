@@ -98,10 +98,14 @@ TEST_CASE("full 1024x768 canvas yields origin (512,384) and anchor (0,0)",
 
 // ---- Life-bar fill geometry ----------------------------------------------
 // Mirrors NovaUi_DrawPlayerShieldBar / _ArmorBar / _FuelLevelBar: the fill axis
-// is chosen by the panel rect's aspect (tall slot fills from the top down;
-// wide slot fills from the right, depleting left).
+// is chosen by the panel rect's aspect (height < width -> wide, else tall),
+// and the fill anchor is the left edge (wide) or the bottom edge (tall). The
+// original stores `trunc(anchor -/+ extent)` into the moved edge, and the x87
+// FIST + residual/sign correction truncates toward zero (see
+// docs/x87_truncation_idiom.md), so the wide extent is floor(width*fraction)
+// and the tall extent is ceil(height*fraction).
 
-TEST_CASE("tall life-bar slot fills from the top down", "[interface][hud]") {
+TEST_CASE("tall life-bar slot fills from the bottom up", "[interface][hud]") {
   // The Federation shield panel (200,35)-(207,184) is 7x149 (tall).
   const HudPanelRect panel{200, 35, 207, 184};
 
@@ -113,17 +117,64 @@ TEST_CASE("tall life-bar slot fills from the top down", "[interface][hud]") {
   CHECK(full.height == 149);
   CHECK_FALSE(full.empty());
 
-  // Half -> anchored to the top, grows down to the midpoint.
+  // Half -> anchored at the bottom: top = 184 - ceil(149*0.5) = 109, height 75.
   const HudBarFill half = HudBar_FillRect(panel, 0.5F);
   CHECK(half.left == 200);
-  CHECK(half.top == 35);
+  CHECK(half.top == 109);
   CHECK(half.width == 7);
-  // The original's post-round adjustment produces floor(149 * 0.5) = 74.
-  CHECK(half.height == 74);
+  CHECK(half.height == 75);
 
-  // Depleted -> clamp to zero (empty fill, nothing drawn).
-  const HudBarFill empty = HudBar_FillRect(panel, 0.0F);
-  CHECK(empty.empty());
+  // Depleted -> empty (nothing drawn).
+  CHECK(HudBar_FillRect(panel, 0.0F).empty());
+}
+
+// NovaUi_DrawPlayerFuelLevelBar (0x0045f086): sVar7 = trunc(fuel/100) (the
+// residual/sign correction at 0x0045f2a6 makes the FIST truncate), and the
+// reserve segment runs from floor(sVar7*100/capacity) to the usable edge; the
+// wide slot moves its LEFT edge, so the segment is the fuel above the last full
+// hundred. Capacity 200 keeps the hundred mark exact.
+TEST_CASE("fuel reserve segment uses the truncated hundred mark",
+          "[interface][hud]") {
+  const HudPanelRect panel{0, 10, 200, 20}; // 200x10 wide
+  constexpr float kCapacity = 200.0F;
+
+  const auto reserve = [&](float fuel) {
+    return HudBar_FuelReserveFill(panel, fuel, kCapacity);
+  };
+
+  // Below one hundred: sVar7 = 0, so the reserve is the whole usable fill.
+  CHECK(reserve(49.0F).left == 0.0F);
+  CHECK(reserve(49.0F).width == 49.0F);
+  CHECK(reserve(50.0F).left == 0.0F);
+  CHECK(reserve(50.0F).width == 50.0F);
+  CHECK(reserve(51.0F).left == 0.0F);
+  CHECK(reserve(51.0F).width == 51.0F);
+  CHECK(reserve(99.0F).left == 0.0F);
+  CHECK(reserve(99.0F).width == 99.0F);
+
+  // Exactly one hundred: sVar7 = 1 and the segment is empty (the usable fill
+  // alone is drawn).
+  CHECK(reserve(100.0F).empty());
+
+  // Above one hundred: the left edge jumps to the 100-ton mark (100px) and the
+  // segment covers the remainder.
+  CHECK(reserve(149.0F).left == 100.0F);
+  CHECK(reserve(149.0F).width == 49.0F);
+  CHECK(reserve(150.0F).left == 100.0F);
+  CHECK(reserve(150.0F).width == 50.0F);
+  CHECK(reserve(151.0F).left == 100.0F);
+  CHECK(reserve(151.0F).width == 51.0F);
+
+  // Orientation: a tall panel moves the BOTTOM edge and leaves the top at the
+  // usable edge. For fuel 150/200 the usable top is 200-ceil(150)=50 and the
+  // reserve bottom is 200-ceil(100)=100.
+  const HudPanelRect tall{0, 0, 10, 200}; // 10x200 tall
+  const HudBarFill tall_reserve =
+      HudBar_FuelReserveFill(tall, 150.0F, kCapacity);
+  CHECK(tall_reserve.left == 0.0F);
+  CHECK(tall_reserve.width == 10.0F);
+  CHECK(tall_reserve.top == 50.0F);
+  CHECK(tall_reserve.height == 50.0F);
 }
 
 } // namespace game

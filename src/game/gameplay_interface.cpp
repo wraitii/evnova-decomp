@@ -64,30 +64,74 @@ constexpr std::uint32_t kInterfaceLayoutType = 0x956e7466U;
 
 } // namespace
 
-HudBarFill HudBar_FillRect(const HudPanelRect &panel, float fraction) {
+HudBarFill
+HudBar_FillRectBetween(const HudPanelRect &panel, double lo, double hi) {
   HudBarFill out;
   if (!panel.valid()) {
     return out;
   }
-  fraction = std::clamp(fraction, 0.0F, 1.0F);
-  const float w = static_cast<float>(panel.width());
-  const float h = static_cast<float>(panel.height());
-  if (panel.height() > panel.width()) {
-    // Tall slot: fill anchored to the top, growing downward. The game computes
-    // the cut point `top + height*(value/max)` and clamps it to the bottom.
+  lo = std::clamp(lo, 0.0, 1.0);
+  hi = std::clamp(hi, 0.0, 1.0);
+  if (hi <= lo) {
+    return out;
+  }
+  const double w = static_cast<double>(panel.width());
+  const double h = static_cast<double>(panel.height());
+  // The original selects the axis with height < width -> wide, else tall
+  // (a square slot is tall).
+  if (panel.height() >= panel.width()) {
+    // Tall slot: bottom-anchored. The original stores
+    // `trunc(bottom - height*fraction)` into the rect's top; truncation toward
+    // zero makes the extent ceil(height*fraction).
+    const int hi_px = static_cast<int>(std::ceil(h * hi));
+    const int lo_px = static_cast<int>(std::ceil(h * lo));
     out.left = static_cast<float>(panel.left);
-    out.top = static_cast<float>(panel.top);
-    out.width = w;
-    out.height = std::floor(h * fraction);
+    out.top = static_cast<float>(panel.bottom - hi_px);
+    out.width = static_cast<float>(w);
+    out.height = static_cast<float>(hi_px - lo_px);
   } else {
-    // Wide slot: fill anchored to the left, growing rightward. This is the
-    // observed behavior of the shipped cockpit's horizontal life bars.
-    out.width = std::floor(w * fraction);
-    out.left = static_cast<float>(panel.left);
+    // Wide slot: left-anchored. `trunc(left + width*fraction)` equals
+    // left + floor(width*fraction) for an integer left and non-negative edge.
+    const int hi_px = static_cast<int>(std::floor(w * hi));
+    const int lo_px = static_cast<int>(std::floor(w * lo));
+    out.left = static_cast<float>(panel.left + lo_px);
     out.top = static_cast<float>(panel.top);
-    out.height = h;
+    out.width = static_cast<float>(hi_px - lo_px);
+    out.height = static_cast<float>(h);
   }
   return out;
+}
+
+HudBarFill HudBar_FillRect(const HudPanelRect &panel, double fraction) {
+  return HudBar_FillRectBetween(panel, 0.0, fraction);
+}
+
+HudBarFill
+HudBar_FuelReserveFill(const HudPanelRect &panel, float fuel, float capacity) {
+  HudBarFill out;
+  if (capacity <= 0.0F || fuel <= 0.0F) {
+    return out;
+  }
+  // sVar7 = (int)(fuel/100) with the FIST residual/sign correction, i.e.
+  // truncation toward zero (docs/x87_truncation_idiom.md), so the reserve mark
+  // is floor(fuel/100)*100 tons.
+  const int reserve_hundreds =
+      static_cast<int>(static_cast<double>(fuel) / 100.0);
+  // Draw gate: trunc(fuel - sVar7) > 0 (only false below ~1 ton).
+  if (static_cast<int>(static_cast<double>(fuel) -
+                       static_cast<double>(reserve_hundreds)) <= 0) {
+    return out;
+  }
+  // The original keeps the fuel/capacity quotient in x87 extended precision
+  // across the width multiply (FDIVR at 0x0045f165 -> FMULP at 0x0045f17e, no
+  // intervening float store), so compute the edges in double rather than
+  // truncating the quotient to float first. (Exact 80-bit boundary values are
+  // still not bit-verified.)
+  const double usable_fraction =
+      static_cast<double>(fuel) / static_cast<double>(capacity);
+  const double reserve_fraction = static_cast<double>(reserve_hundreds) *
+                                  100.0 / static_cast<double>(capacity);
+  return HudBar_FillRectBetween(panel, reserve_fraction, usable_fraction);
 }
 
 HudPanelRect HudPanel_AnchorTopRight(const HudPanelRect &panel,

@@ -875,11 +875,12 @@ std::int16_t NovaWeapon_BankAmmoCount(const GameState &state,
   }
   // A special (mode 99) or out-of-range ammo_type weapon reads its own bank's
   // secondary counter; a normal weapon reads the ammo counter of the weapon
-  // bank whose id equals its ammo_type.
+  // bank whose id equals its ammo_type. The original hands the counter straight
+  // to PascalString_FromUInt (no display clamp), so return the raw value.
   const std::int16_t source_bank =
       (w->ammo_type < 0 || w->ammo_type > 0xff || w->weapon_mode_code == 99)
           ? weapon_bank
           : w->ammo_type;
-  return std::min<std::int16_t>(BankSecondary(state, source_bank), 9999);
+  return BankSecondary(state, source_bank);
 }
 } // namespace game
