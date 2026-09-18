@@ -27,6 +27,7 @@ add_executable(evnova_tests
     pixpat_test.cpp
     preferences_test.cpp
     rank_test.cpp
+    render_clip_scope_test.cpp
     scenario_data_test.cpp
     services_buttons_test.cpp
     sdl_audio_test.cpp

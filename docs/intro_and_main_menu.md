@@ -136,10 +136,21 @@ depending on the game-active flag:
 | `x`   | —      | Immediate travel-selection dialog |
 
 - `Menu_OpenPilotFileDialog` (0x004c9e90) — GetOpenFileNameA pilot selector; on selection
-  resets ship state and loads the save via `PilotFile_LoadSave` (0x004cb260).
+  resets ship state and loads the save via `PilotFile_LoadSave` (0x004cb260). On a successful
+  load `NovaGameMode_DispatchAction` (0x00486ED0) runs the action-1 tail: Ship_Deactivate-
+  VacantShipsAndTally(0), `System_RebuildInitialNpcAndMissionPopulation(current, 1)` (flag==1 →
+  copy the player heading while restoring mission fleets) and then a per-system region-trigger
+  loop. That loop's predicate, byte-verified at 0x004870c4–0x004870e7, is
+  `SystemDef.is_visible (+0x1eb) && SystemDef.discovery_state (+0x90) > 0`; the decompiler's
+  "`personality_slots - 8`" rendering is array decay of the `short[8]` at `+0x98`, not a
+  personality count. Recomputed player escorts are restored by `PilotFile_LoadSave` itself and
+  only spared by the vacancy sweep.
 - `Menu_RunNewGameFlow` (0x00489d70) — full new-game init: pilot selection dialog, player reset,
   scenario tables, starting destination, `IntroCinematic_SetupFrames`, sets `DAT_00596d28=1`,
-  renders.
+  renders. The overwrite confirmation runs **before** the ship christening; the dialogs fill
+  caller-owned temporaries and the persistent `g_player_name`/`g_player_ship_name`/`g_strict_play`/
+  gender state is committed only in the success tail, so cancelling any prompt leaves the running
+  pilot and menu status unchanged.
 - `Menu_RunPilotSelectionDialog` (0x0048a7e0) — pilot choose/name dialog (variant 0xc1d/0xc1e).
 - `Menu_RunSettingsDialog` (0x00488650) — preferences dialog (0xfa3).
 - `Menu_RunAboutNovaDialog` (0x00486120) — About Nova dialog.
@@ -176,11 +187,15 @@ boot-phase splash above; it is a timed scripted sequence tied to a starting a ru
   is silent there. There is **no** on-screen hint text in the original.
 - After the sequence, if not skipped and an intro text dësc is set
   (`g_intro_cinematic.intro_text_desc_id != -1`, the Bible chär `IntroTextID` at block `+0x30`)
-  it loads that dësc (`Ui_LoadSelectionDialogResource` 0x004c6d50) and shows it in the generic
-  scrolling text-reader `Ui_RunTravelSelectionDialog` (0x004982a0, gating `DAT_007d1fa6 = 1`).
+  it loads that dësc (`Ui_LoadSelectionDialogResource` 0x004c6d50), applies
+  `Stellar_BuildTravelDestinationDescription('\0',-1)`, and shows the result in the generic
+  scrolling text-reader `Ui_RunTravelSelectionDialog` (0x004982a0, setting
+  `g_selection_dialog_over_static_surface = 1`).
   The "travel" in that function name is a misnomer — it is the game's generic desc-text reader.
-  **Stock data never opens it**: the .Trader block carries `intro_text_desc_id = -1`; the 0x7ffd
-  "open with empty text" value only occurs in the no-save fallback.
+  The reader opens **no dialog when the expanded text is empty** (its empty-text arm runs only the
+  redraw prologue). **Stock data never opens it**: the .Trader block carries
+  `intro_text_desc_id = -1`; the no-save fallback uses 0x7ffd, which is not a valid dësc, so the
+  expanded text is empty and the reader stays closed.
   See `docs/char_resource_format.md` for the `chär` `+0x30` field and the other
   character-template fields.
 
@@ -203,7 +218,8 @@ extern IntroCinematicData g_intro_cinematic;   // resolves from 0x007d1f42
   empty) and populates `g_intro_cinematic`: source_pict_ids (block `+0x20`), duration_60h_ticks
   (block `+0x28`), and intro_text_desc_id (block `+0x30`, Bible chär `IntroTextID`).
 - When no pilot block exists, defaults to a single intro frame PICT `0x2008` for 10 ticks with
-  intro text desc 0x7ffd (not a valid desc: the reader opens with empty text).
+  intro text desc 0x7ffd (not a valid dësc, so the expanded text is empty and the reader opens no
+  dialog).
 - Companion accessors: `ResourceData_AccessByKey` (0x004ce300) and
   `PilotData_FindActivePilotName` (0x004cd290, first family entry with flags bit 0 set at
   block+0x132 — stock: .Trader — used to preselect the dialog's Character popup).

@@ -114,6 +114,12 @@ public:
                                float point_size,
                                std::uint16_t style = kNovaFontStyleRegular);
 
+  // Logical first-line baseline offset from the top of a DT_WORDBREAK text
+  // rect (the original's tmAscent), for top-aligned wrapped text.
+  [[nodiscard]] int Ascent(NovaFontFamily family,
+                           float point_size,
+                           std::uint16_t style = kNovaFontStyleRegular);
+
   // True when a face for `family` could be located through the tiered
   // resolver (bundled CE TTF, native macOS family, or the CE substitution /
   // Linux generic), i.e. text will render for it.

@@ -3,6 +3,7 @@
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../util/byte_reader.hpp"
+#include "nova_name_text.hpp"
 #include "ship_visual.hpp"
 
 #include <algorithm>
@@ -30,18 +31,6 @@ using evnova::util::ReadCString;
                                              std::size_t max_len) {
   return ReadCString(bytes.first(std::min(bytes.size(), offset + max_len)),
                      offset);
-}
-
-// NameString_StripSubtitleSuffix (0x004cd230): truncates a display name at
-// the first ';' and trims trailing spaces ("Base Name;Sub " -> "Base Name").
-[[nodiscard]] std::string StripSubtitleSuffix(std::string_view name) {
-  if (const auto cut = name.find(';'); cut != std::string_view::npos) {
-    name = name.substr(0, cut);
-  }
-  while (!name.empty() && name.back() == ' ') {
-    name.remove_suffix(1);
-  }
-  return std::string{name};
 }
 
 [[nodiscard]] MissionDef DecodeMission(std::span<const std::byte> bytes) {
@@ -1685,7 +1674,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
       // ';'-subtitle suffix stripped (the loader fills ShipClassDef+0x6c via
       // ResourceData_ReadEntryMetadata + NameString_StripSubtitleSuffix
       // 0x004cd230, bounded to 0x3f chars), not a numeric header field.
-      cls.display_name = StripSubtitleSuffix(res->name);
+      cls.display_name = NovaText_StripSubtitleSuffix(res->name);
       const std::size_t index = static_cast<std::size_t>(id) - 0x80;
       // Clone-source derivation: the sh\x8an descriptor shares the class id,
       // and its BaseImageID (+0x00) is the sheet the class's sprites are cut
@@ -2120,7 +2109,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
       // Ghidra 0x0043bbb0 (misn loader) runs the resource name through
       // NameString_StripSubtitleSuffix (0x004cd230) before storing it, so the
       // BBS/computer list rows show "Base Name" for "Base Name;Subtitle".
-      mission.display_name = StripSubtitleSuffix(res->name);
+      mission.display_name = NovaText_StripSubtitleSuffix(res->name);
       missions[static_cast<std::size_t>(id) - 0x80] = std::move(mission);
       ++loaded_missions;
     }
@@ -2135,7 +2124,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
       PersDef def = DecodePers(res->bytes, ships);
       // +0x624 display_name_buf: record name with the ';'-subtitle stripped
       // (NameString_StripSubtitleSuffix 0x004cd230).
-      def.display_name = StripSubtitleSuffix(res->name);
+      def.display_name = NovaText_StripSubtitleSuffix(res->name);
       pers_defs[static_cast<std::size_t>(id) - 0x80] = std::move(def);
       ++loaded_pers;
     }
@@ -2159,7 +2148,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
     if (const auto res = NovaResource_LoadNamed(
             scenario::kDisasterResourceType, static_cast<std::uint16_t>(id))) {
       DisasterDef def = DecodeDisaster(res->bytes);
-      def.display_name = StripSubtitleSuffix(res->name);
+      def.display_name = NovaText_StripSubtitleSuffix(res->name);
       disaster_defs[static_cast<std::size_t>(id) - 0x80] = std::move(def);
       ++loaded_disasters;
     }
@@ -2172,7 +2161,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
     if (const auto res = NovaResource_LoadNamed(
             scenario::kJunkResourceType, static_cast<std::uint16_t>(id))) {
       JunkDef def = DecodeJunk(res->bytes);
-      def.display_name = StripSubtitleSuffix(res->name);
+      def.display_name = NovaText_StripSubtitleSuffix(res->name);
       junk_defs[static_cast<std::size_t>(id) - 0x80] = std::move(def);
       ++loaded_junk;
     }
@@ -2185,7 +2174,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
     if (const auto res = NovaResource_LoadNamed(
             scenario::kRankResourceType, static_cast<std::uint16_t>(id))) {
       RankDef def = DecodeRank(res->bytes);
-      def.full_name = StripSubtitleSuffix(res->name);
+      def.full_name = NovaText_StripSubtitleSuffix(res->name);
       ranks[static_cast<std::size_t>(id) - 0x80] = std::move(def);
       ++loaded_ranks;
     }

@@ -127,6 +127,16 @@ void UiWindow_RunInteractionLoop(
     short *code_out,
     const std::function<void()> &render_background = {});
 
+// Ghidra 0x004977d0 Ui_ShowConfirmDialog: the game's shared confirmation
+// modal (DLOG 0xbba). Sets entry 3 to `message` and runs the interaction loop;
+// OK (activation code 1) returns true, Cancel/dismiss (code 5) and quit return
+// false. Returns false when the dialog resource is unavailable.
+[[nodiscard]] bool
+NovaUi_ShowConfirmDialog(SdlPlatform &platform,
+                         NovaFontCache &font_cache,
+                         std::string_view message,
+                         const std::function<void()> &render_background = {});
+
 // Maps one DITL item rect (top,left,bottom,right in the dialog's own space)
 // to an SDL_FRect in playfield coordinates by adding the window origin.
 [[nodiscard]] inline SDL_FRect ItemRect(const NovaDialogItem &item,

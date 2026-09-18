@@ -10,6 +10,7 @@
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "nova_font.hpp"
+#include "nova_name_text.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
 #include "ship_spawn.hpp"
@@ -32,15 +33,6 @@
 namespace game {
 namespace {
 
-// Where a brand-new pilot begins. The real game randomizes the start system
-// among a few candidates at PilotData_InitializePlayerState (fresh-seed picks a
-// random valid starting system from the pilot-block's four stored choices); we
-// hardcode one (Tichel, zero-based 1) for now so the in-flight view has a known
-// landmark. TODO(decomp): implement the randomized start-system selection once
-// the pilot-block start candidates are decoded.
-constexpr std::int16_t kStartSystemId = 1;            // zero-based (Tichel)
-constexpr std::int16_t kStartSystemResourceId = 0x81; // resource id
-
 // NovaText_StripLeadingArticle: drops the leading article from a name string.
 // TODO(decomp): the original's exact article set is not reconstructed; the
 // stock STR# 0x80 sample names carry none, so this only guards mod-added
@@ -54,11 +46,6 @@ void StripLeadingArticle(std::string &name) {
     name.erase(0, kThe.size());
   }
 }
-
-// NameString_StripSubtitleSuffix: drops a trailing "the <x>"-style suffix.
-// TODO(decomp): suffix marker not reconstructed; provisional no-op that keeps
-// the call-site ordering visible.
-void StripSubtitleSuffix(std::string &) {}
 
 [[nodiscard]] int RandomIndex(GameState &state, int count) {
   return static_cast<int>(
@@ -141,15 +128,37 @@ ResolveStartTypeFromTemplate(const std::string &template_name) {
   return 0;
 }
 
+// Selections captured by the new-pilot dialogs. Held in locals until every
+// cancellable prompt (pilot selection, overwrite, christening) has succeeded,
+// mirroring the original's DAT_007d20b7 / DAT_007d21b7 / DAT_007d22b7 /
+// DAT_007d23b7 + *is_new_pilot_flag / DAT_007d4c0e temporaries; the persistent
+// g_player_* globals are only written in Menu_RunNewGameFlow's success tail
+// (0x0048a51e onward), so a cancel never touches the running pilot.
+struct NewPilotDraft {
+  std::string first_name;
+  std::string last_name;
+  std::string character_template;
+  std::string ship_name;
+  // Menu_RunNewGameFlow initializes *is_new_pilot_flag to 0 before calling the
+  // selection dialog, so a fresh draft starts unchecked regardless of the
+  // active pilot's g_strict_play.
+  bool strict_play = false;
+  bool male = false;
+  std::int16_t start_type_code = 0;
+};
+
 // Ghidra 0x0048a7e0 Menu_RunPilotSelectionDialog. DITL rows (1-based):
 // 4 = Strict Play checkbox (code 4), 8/9 = Full Name / Nickname edit texts
 // (prefilled from STR# 0x80 rows 1-3 / 4-6), 11 = Gender popup (MENU 0x1f4),
 // 13 = Character popup (MENU 0x1f5, filled from the 0x63688a72 family census;
 // offscreen in the 0xc1e single-pilot variant). Accept validates both names
-// <= 0x18 chars, refusing to close until they pass. Returns true on OK.
+// <= 0x18 chars, refusing to close until they pass. Writes only `draft` on
+// accept; it consumes `state.rng` but does not write any live pilot state.
+// Returns true on OK.
 bool RunPilotSelectionDialog(SdlPlatform &platform,
                              NovaFontCache &font_cache,
                              GameState &state,
+                             NewPilotDraft &draft,
                              const std::function<void()> &render_background) {
   // Variant pick: 0xc1d when two or more non-hidden entries exist, else 0xc1e
   // (stock Nova only ships the hidden .Trader, so its census is 0).
@@ -165,8 +174,9 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
     return false;
   }
 
-  // Row 4: the new-pilot (Strict Play) checkbox state from the current flag.
-  UiControl_SetValue(*window, 4, state.pilot.strict_play ? 1 : 0);
+  // Row 4: the new-pilot (Strict Play) checkbox state, from the draft (the
+  // original initializes its flag to 0 before the call).
+  UiControl_SetValue(*window, 4, draft.strict_play ? 1 : 0);
   // Rows 8/9: random sample Full Name / Nickname from STR# 0x80 rows 1-3 /
   // 4-6 (1-based, like every STR# entry number).
   UiPanel_SetEntryTextPascal(
@@ -226,44 +236,42 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
       accepted = valid;
     }
     if (code == 4) { // Strict Play checkbox: the dialog owns the toggle.
-      state.pilot.strict_play = UiControl_GetValue(*window, 4) == 0;
-      UiControl_SetValue(*window, 4, state.pilot.strict_play ? 1 : 0);
+      draft.strict_play = UiControl_GetValue(*window, 4) == 0;
+      UiControl_SetValue(*window, 4, draft.strict_play ? 1 : 0);
     }
     if (code == 2) { // Cancel
       cancelled = true;
     }
     code = -1;
   }
-  if (!accepted) {
+  if (!accepted || platform.quit_requested()) {
     return false;
   }
 
-  // Copy the names back (the original strips articles/subtitle suffixes from
-  // these buffers right after the dialog returns).
-  state.pilot.first_name = UiPanel_GetEntryTextPascal(*window, 8);
-  state.pilot.last_name = UiPanel_GetEntryTextPascal(*window, 9);
-  StripLeadingArticle(state.pilot.first_name);
-  StripLeadingArticle(state.pilot.last_name);
-  StripSubtitleSuffix(state.pilot.first_name);
-  StripSubtitleSuffix(state.pilot.last_name);
-  state.pilot.strict_play = UiControl_GetValue(*window, 4) != 0;
+  // Copy the names into the draft (the original strips articles/subtitle
+  // suffixes from these buffers right after the dialog returns).
+  draft.first_name = UiPanel_GetEntryTextPascal(*window, 8);
+  draft.last_name = UiPanel_GetEntryTextPascal(*window, 9);
+  StripLeadingArticle(draft.first_name);
+  StripLeadingArticle(draft.last_name);
+  draft.first_name = NovaText_StripSubtitleSuffix(draft.first_name);
+  draft.last_name = NovaText_StripSubtitleSuffix(draft.last_name);
+  draft.strict_play = UiControl_GetValue(*window, 4) != 0;
 
   // Row 11: Gender popup selection; the flow latches male on a first char of
   // 'm' (MWRuntime_FUN_004d6230 table lookup compared to 0x6d).
   if (const auto gender = UiPanel_GetEntryTextPascalIndexed(
           *window, 11, UiControl_GetValue(*window, 11))) {
-    state.pilot.male =
-        !gender->empty() &&
-        std::tolower(static_cast<unsigned char>((*gender)[0])) == 'm';
+    draft.male = !gender->empty() &&
+                 std::tolower(static_cast<unsigned char>((*gender)[0])) == 'm';
   }
-  state.control.male = state.pilot.male;
 
   // Row 13: the selected character-template name (empty in the 0xc1e variant;
   // Menu_RunNewGameFlow then falls back to the family's first entry).
   if (dialog_id == 0xc1d) {
     if (const auto choice = UiPanel_GetEntryTextPascalIndexed(
             *window, 13, UiControl_GetValue(*window, 13))) {
-      state.pilot.character_template = *choice;
+      draft.character_template = *choice;
     }
   }
   return true;
@@ -306,8 +314,9 @@ NovaUi_ShowTextEntryDialog(SdlPlatform &platform,
     }
     code = -1;
   }
-  return accepted ? std::make_optional(UiPanel_GetEntryTextPascal(*window, 5))
-                  : std::nullopt;
+  return accepted && !platform.quit_requested()
+             ? std::make_optional(UiPanel_GetEntryTextPascal(*window, 5))
+             : std::nullopt;
 }
 
 } // namespace
@@ -448,24 +457,28 @@ void Stub_DiscoverStartingSystems(GameState &state) {
     system.discovery_state = 0;
     system.discovered_this_rebuild = false;
   }
-  if (kStartSystemId < 0 || static_cast<std::size_t>(kStartSystemId) >=
-                                state.scenario.systems.size()) {
+  const std::int16_t start_system_id = state.player.current_system_id;
+  const std::int16_t start_system_resource_id =
+      static_cast<std::int16_t>(start_system_id + 0x80);
+  if (start_system_id < 0 || static_cast<std::size_t>(start_system_id) >=
+                                 state.scenario.systems.size()) {
     NovaLog::Todo("starting system {} out of range; discovery left empty",
-                  kStartSystemId);
+                  start_system_id);
     return;
   }
 
   // Current system and its discovery slot (the visibility-twin root).
-  NovaSystem_MarkSystemVisited(state, kStartSystemId, 1);
+  NovaSystem_MarkSystemVisited(state, start_system_id, 1);
   NovaSystem_MarkSystemVisited(
-      state, NovaSystem_ResolveDiscoverySlot(state, kStartSystemId), 1);
+      state, NovaSystem_ResolveDiscoverySlot(state, start_system_id), 1);
 
   // Direct adjacency: the original walks the system's 16 Con slots and books
   // each visible target's discovery slot as visited. The port's links are
   // already normalized to visibility roots and stored as 0x80-based resource
   // ids (scenario_data.cpp link pass), so mark each link's discovery slot.
   for (const std::int16_t link :
-       state.scenario.systems[static_cast<std::size_t>(kStartSystemId)].links) {
+       state.scenario.systems[static_cast<std::size_t>(start_system_id)]
+           .links) {
     if (link < 0x80) {
       continue;
     }
@@ -486,8 +499,8 @@ void Stub_DiscoverStartingSystems(GameState &state) {
   NovaSystem_RebuildDiscoveredLatch(state);
   NovaLog::Info("starting system discovery seeded: {} (resource {}) and "
                 "adjacent neighbours now visited on the starmap",
-                kStartSystemId,
-                kStartSystemResourceId);
+                start_system_id,
+                start_system_resource_id);
 }
 
 [[nodiscard]] std::int16_t PickFirstSaveStellar(const GameState &state) {
@@ -551,27 +564,43 @@ void ResetPlayerShipForNewGame(GameState &state) {
   // finalized here: Menu_RunNewGameFlow recomputes them after the starting
   // outfit counts are seeded (see RecomputePlayerMeters).
   //
-  // Start in the hardcoded starting system (Tichel for now; the original
-  // randomizes among a few start candidates). The world coordinate axes follow
-  // the game convention confirmed from the flight renderer: heading 0 = up
-  // (-y), so world +y is down on screen (Math_AddPolarVelocity projects
-  // heading -> vel = (sin, -cos); pos += vel * dt).
+  // The system-dependent placement (start system, reinforcement timer, starmap
+  // pan, spawn position) is applied later by PlacePlayerInStartSystem, after
+  // PilotData_InitializePlayerState has picked the character template's start
+  // system. Ship_ResetPlayerShipState leaves current_system_id = 0.
+  // The world coordinate axes follow the game convention confirmed from the
+  // flight renderer: heading 0 = up (-y), so world +y is down on screen
+  // (Math_AddPolarVelocity projects heading -> vel = (sin, -cos); pos += vel *
+  // dt).
   NovaShip_ResetPlayerShipState(state);
-  state.player.current_system_id = kStartSystemId;
   state.player.credits = 10000;
+  state.player.ship_class_id = state.pilot.start_type_code; // ch r ShipType
+  // Ship_ResetPlayerShipState leaves the active weapon bank unselected (-1);
+  // the firing loop (NovaWeapon_TickPlayerWeaponCommands) fires every loaded
+  // bank regardless, so the selection latch is only carried for save/UI
+  // fidelity.
+}
+
+// Applies the system-dependent placement Menu_RunNewGameFlow performs after
+// PilotData_InitializePlayerState: starting-system reinforcement countdown
+// (0x0048a1b4), starmap pan origin (0x0048a3a5) and the provisional spawn
+// beside the landing stellar.
+void PlacePlayerInStartSystem(GameState &state) {
+  const std::int16_t system_id = state.player.current_system_id;
+  const std::int16_t system_resource_id =
+      static_cast<std::int16_t>(system_id + 0x80);
   // Ghidra Menu_RunNewGameFlow 0x0048a1b4: the starting system's reinforcement
   // countdown is armed to -1 with a zero cooldown so a fresh pilot does not
   // inherit the previous pilot's pending enemy spawn timer.
-  if (kStartSystemId >= 0 && static_cast<std::size_t>(kStartSystemId) <
-                                 state.reinforcement_countdown.size()) {
-    state.reinforcement_countdown[static_cast<std::size_t>(kStartSystemId)] =
-        -1.0F;
-    state.reinforcement_retrigger_delay[static_cast<std::size_t>(
-        kStartSystemId)] = 0;
+  if (system_id >= 0 && static_cast<std::size_t>(system_id) <
+                            state.reinforcement_countdown.size()) {
+    state.reinforcement_countdown[static_cast<std::size_t>(system_id)] = -1.0F;
+    state.reinforcement_retrigger_delay[static_cast<std::size_t>(system_id)] =
+        0;
   }
   // Ghidra 0x0048a3a5 (Menu_RunNewGameFlow): the starmap pan origin starts on
   // the starting system's position so the map opens centred there.
-  if (const auto *start_sys = state.scenario.System(kStartSystemResourceId)) {
+  if (const auto *start_sys = state.scenario.System(system_resource_id)) {
     state.starmap_pan_x = static_cast<float>(start_sys->pos_x);
     state.starmap_pan_y = static_cast<float>(start_sys->pos_y);
   }
@@ -582,7 +611,7 @@ void ResetPlayerShipForNewGame(GameState &state) {
   // adjacent to the planet it just left; the offset is provisional until the
   // landing/launch placement is reconstructed.
   state.player.pos_y = 60.0F;
-  if (const auto *sys = state.scenario.System(kStartSystemResourceId); sys) {
+  if (const auto *sys = state.scenario.System(system_resource_id); sys) {
     if (const auto anchor_id = PickLandingStellarResource(sys->nav_defs);
         anchor_id >= 0x80) {
       if (const auto *anchor = state.scenario.Stellar(anchor_id); anchor) {
@@ -600,14 +629,8 @@ void ResetPlayerShipForNewGame(GameState &state) {
   } else {
     NovaLog::Todo("starting system {:#x} not in scenario tables; spawn kept at "
                   "the origin",
-                  kStartSystemResourceId);
+                  system_resource_id);
   }
-
-  state.player.ship_class_id = state.pilot.start_type_code; // ch r ShipType
-  // Ship_ResetPlayerShipState leaves the active weapon bank unselected (-1);
-  // the firing loop (NovaWeapon_TickPlayerWeaponCommands) fires every loaded
-  // bank regardless, so the selection latch is only carried for save/UI
-  // fidelity.
 }
 
 void SetNewGameDateAndStrings(GameState &state) {
@@ -640,6 +663,7 @@ std::string ApplyCharacterTemplate(GameState &state) {
   if (!tmpl) {
     // Absent-block seed (0x004cd4b0): 10000 credits/class 0/system 0 already
     // applied elsewhere, calendar 2250/1/1, no date prefix/suffix.
+    state.player.current_system_id = 0;
     state.date = GameDate{2250, 1, 1};
     state.date_prefix.clear();
     state.date_suffix.clear();
@@ -651,6 +675,12 @@ std::string ApplyCharacterTemplate(GameState &state) {
 
   state.player.credits = std::max<std::int32_t>(tmpl->credits, 0);
   state.player_combat_rating_points = tmpl->combat_rating_points;
+  // Start system: the original's rejection pick among System1-4 (+0x06).
+  // Ship_ResetPlayerShipState already wrote 0, and PilotData_PickStartingSystem
+  // returns 0 without consuming RNG when no slot is valid, so the absent/
+  // template-less path stays on system 0 (no Tichel hardcode).
+  state.player.current_system_id =
+      PilotData_PickStartingSystem(*tmpl, state.rng);
   // Per-govt starting legal record: for each present Govt entry, apply Status
   // to every system owned by an allied government and negate it for that
   // government's enemies (the original's 4 x 0x800 double loop, which leaves
@@ -782,35 +812,61 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // template; the port strips articles/subtitle suffixes inside the dialog
   // port, matching the original's post-accept strip.
   NovaFontCache font_cache;
+  NewPilotDraft draft;
   if (!RunPilotSelectionDialog(
-          platform, font_cache, state, render_background)) {
+          platform, font_cache, state, draft, render_background)) {
     return false;
+  }
+
+  // ---- Step 2: overwrite-existing-pilot confirmation ----------------------
+  // Ghidra Menu_RunNewGameFlow 0x00489d70 confirms the overwrite BEFORE the
+  // ship christening: after the names are stripped it builds
+  // <nova_files><Full Name>.plt and, when PilotFile_ProbeExists (0x004cd030)
+  // hits, opens Ui_ShowConfirmDialog (0x004977d0, DLOG 0xbba) with STR# 0x8c
+  // row 9; a declined prompt aborts the flow. The save directory must resolve
+  // before any state is committed, so a missing directory aborts here too.
+  const auto directory = PilotFileSaveDirectory();
+  if (!directory) {
+    NovaLog::Error("new pilot: no pilot save directory; aborting before any "
+                   "state change");
+    return false;
+  }
+  const auto new_pilot_path = *directory / (draft.first_name + ".plt");
+  if (PilotFileProbeExists(new_pilot_path)) {
+    const std::string prompt = NovaHud_LoadStringEntry(0x8c, 9).value_or(
+        "A pilot with this name already exists. Replace it?");
+    if (!NovaUi_ShowConfirmDialog(
+            platform, font_cache, prompt, render_background)) {
+      NovaLog::Info("new pilot: overwrite declined for '{}'",
+                    new_pilot_path.string());
+      return false;
+    }
   }
 
   // The 0xc1e variant leaves the Character popup offscreen; the flow falls
   // back to the family's first entry (stock: the hidden .Trader).
-  if (state.pilot.character_template.empty()) {
+  if (draft.character_template.empty()) {
     const auto templates = EnumeratePilotTemplates();
     if (!templates.empty()) {
-      state.pilot.character_template = templates.front().name;
+      draft.character_template = templates.front().name;
     }
   }
-  state.pilot.start_type_code =
-      ResolveStartTypeFromTemplate(state.pilot.character_template);
+  draft.start_type_code =
+      ResolveStartTypeFromTemplate(draft.character_template);
 
-  // ---- Step 2: ship christening -------------------------------------------
+  // ---- Step 3: ship christening -------------------------------------------
   // Ghidra: NovaUi_ShowTextConfirmCodeDialog (DLOG 0xbb9) with prompt =
   // STR# 0x7d2 row 0x79 + the start class's long name (DAT_005a9bcc table;
   // the port reads Ship::long_name from the scenario tables) and initial text
   // = a random STR# 0x80 row 7-9 ship name, max 0x40 chars. The result is
-  // article-stripped into the ship-name global (g_player_ship_name).
+  // article-stripped into the draft ship name; the original writes the live
+  // g_player_ship_name only in the success tail.
   {
     const std::string class_caption =
         state.scenario.Ship(
-            static_cast<std::int16_t>(state.pilot.start_type_code + 0x80))
+            static_cast<std::int16_t>(draft.start_type_code + 0x80))
             ? state.scenario
-                  .Ship(static_cast<std::int16_t>(state.pilot.start_type_code +
-                                                  0x80))
+                  .Ship(static_cast<std::int16_t>(draft.start_type_code + 0x80))
                   ->long_name
             : "";
     std::string prompt;
@@ -834,23 +890,27 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
       return false;
     }
     StripLeadingArticle(*ship_name);
-    state.player.ship_name = std::move(*ship_name);
-  }
-
-  // ---- Step 3: overwrite-existing-pilot confirmation ----------------------
-  // Ghidra asks for confirmation here. The shared confirmation dialog is not
-  // yet exposed to this flow, so preserve the existing behavior and log the
-  // remaining UI gap when this will replace a save.
-  if (const auto directory = PilotFileSaveDirectory()) {
-    const auto path = *directory / (state.pilot.first_name + ".plt");
-    if (PilotFileProbeExists(path)) {
-      NovaLog::Todo("new pilot: overwrite confirmation dialog for '{}' is not "
-                    "reconstructed; replacing the existing save",
-                    path.string());
-    }
+    draft.ship_name = std::move(*ship_name);
   }
 
   // ---- Step 4: fresh-world reset ------------------------------------------
+  // Every cancellable prompt has succeeded. Commit the draft's selections to
+  // the live state only here; the original writes g_player_name /
+  // g_player_ship_name / g_strict_play / the gender latch in
+  // Menu_RunNewGameFlow's success tail (0x0048a51e onward). This keeps the
+  // running pilot and the main-menu status panel unchanged when any prompt is
+  // cancelled or quit before acceptance.
+  if (platform.quit_requested()) {
+    return false;
+  }
+  state.pilot.first_name = std::move(draft.first_name);
+  state.pilot.last_name = std::move(draft.last_name);
+  state.pilot.strict_play = draft.strict_play;
+  state.pilot.male = draft.male;
+  state.control.male = draft.male;
+  state.pilot.character_template = std::move(draft.character_template);
+  state.pilot.start_type_code = draft.start_type_code;
+  state.player.ship_name = std::move(draft.ship_name);
   // Ghidra: g_travel_interaction_loop_active = 0, Ship_ResetPlayerShipState,
   // Game_ResetReputationAndAvailability/State, zero outfit/weapon tables,
   // PilotData_InitializePlayerState, clear system discovery, re-seed the
@@ -872,18 +932,24 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   ResetPlayerShipForNewGame(state);
   Stub_ResetReputationAndWorldTables(state);
   Stub_SeedStartingInventory(state);
+  // Game_ResetNewGameState seeds the calendar from the local clock+250; the
+  // selected character template then overrides it
+  // (PilotData_InitializePlayerState 0x004cd4b0 param_2 != 0).
+  SetNewGameDateAndStrings(state);
+  // PilotData_InitializePlayerState 0x004cd4b0 (param_2 != 0): credits, combat
+  // rating, the random System1-4 start-system pick, per-govt reputations and
+  // the template start date. Runs before discovery so the picked system drives
+  // the discovery/starmap/spawn seeding below. Returns the OnStart control-bit
+  // set string, run after the world reset.
+  const std::string on_start_script = ApplyCharacterTemplate(state);
+  // System-dependent placement (reinforcement countdown, starmap pan origin,
+  // spawn position) now that current_system_id is final.
+  PlacePlayerInStartSystem(state);
   // Menu_RunNewGameFlow finalizes shield/armor/fuel only after the starting
   // outfit counts and weapon banks are seeded, so their max capacities account
   // for the starter loadout's outfit bonuses.
   RecomputePlayerMeters(state);
   Stub_DiscoverStartingSystems(state);
-  // Game_ResetNewGameState seeds the calendar from the local clock+250; the
-  // selected character template then overrides it
-  // (PilotData_InitializePlayerState 0x004cd4b0 param_2 != 0).
-  // ApplyCharacterTemplate returns the OnStart control-bit set string, run
-  // after the world reset below.
-  SetNewGameDateAndStrings(state);
-  const std::string on_start_script = ApplyCharacterTemplate(state);
 
   // ---- Step 5: first travel destination + scenario spawn ------------------
   const std::int16_t first_save_stellar = PickFirstSaveStellar(state);
@@ -892,13 +958,18 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // previous pilot's escorts are vacant too; leaving this call out lets them
   // leak into the new pilot and consume fleet slots/save rows.
   NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/true);
-  // Ghidra: System_RebuildInitialNpcAndMissionPopulation +
+  // Ghidra 0x00489d70: Frame_TriggerSystemRegionEvents(current system)
+  // 0x00467bd0, after the vacancy sweep and before the population rebuild. An
+  // already-latched region fires nothing (each trigger is once-only), so this
+  // does not duplicate the per-frame player-core call.
+  NovaSystem_TriggerNebulaRegionEvents(state, state.player.current_system_id);
+  // Ghidra: System_RebuildInitialNpcAndMissionPopulation(current, 1) +
   // System_UpdateSystemAndStellar display state + Asteroid_InitSystem (the
-  // system's asteroid field). The mission-fleet restore slice and the initial
-  // System.avg_ships ambient slice are both reconstructed.
+  // system's asteroid field). flag==1 maps to copy_player_heading=true in the
+  // mission-fleet restore slice.
   NovaSystem_RestoreMissionFleets(state,
                                   state.player.current_system_id,
-                                  /*copy_player_heading=*/false,
+                                  /*copy_player_heading=*/true,
                                   platform.gameplay_ticks_ms());
   // First offering roll for the fresh world (Ship_InitGameplayDataTables
   // 0x00458802 arm also re-rolls on arrival; the loader zeroed the table).
@@ -906,13 +977,10 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
   // TODO(decomp(0x00489d70)) skipped scopes from Menu_RunNewGameFlow's
   // fresh-world tail, each with a known original call:
-  //   - Ship_DeactivateVacantShipsAndTally(1)
-  //   - Frame_TriggerSystemRegionEvents(current system)
-  //   - NovaResources_EvaluateAvailability() (per-stellar availability rolls)
   //   - the stellar hazard-marker pass (availability flags 0x20/0x40 over all
   //     0x800 stellars)
   //   - the live date-block copy (g_current_game_year_month/day, DAT_00735460)
-  //   - starmap pan origin init + current-system field_0xc8/0xc4
+  //   - current-system field_0xc8/0xc4
   //   - per-ship zeroing of ionization_points/field_0xb0/
   //     turn_bank_animation_phase/ai_turn_bias_dir and DAT_007cab1c = 0xfffd
   //   - the second PilotData_InitializePlayerState pass (param 0) after the
@@ -1061,12 +1129,11 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   }
   // Ghidra 0x00489d70 calls PilotFile_SaveGame after the fresh state and
   // character block have been finalized. The selected starting stellar is
-  // the restore point persisted at block1+0x00.
-  if (const auto directory = PilotFileSaveDirectory()) {
-    if (!PilotFileSaveGame(*directory, state, first_save_stellar)) {
-      NovaLog::Error("new pilot: initial save failed for '{}'",
-                     state.pilot.first_name);
-    }
+  // the restore point persisted at block1+0x00. `directory` was resolved
+  // before any prompt-confirmed state change.
+  if (!PilotFileSaveGame(*directory, state, first_save_stellar)) {
+    NovaLog::Error("new pilot: initial save failed for '{}'",
+                   state.pilot.first_name);
   }
   NovaLog::Info("new pilot active: callsign '{}', start type {}",
                 state.pilot.first_name,

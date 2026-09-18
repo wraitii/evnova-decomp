@@ -6,11 +6,14 @@
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "mission.hpp"
+#include "selection_text_dialog.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -54,24 +57,35 @@ void PresentPict(SDL_Renderer *renderer, const PictImage &pict) {
   SDL_RenderTexture(renderer, texture->get(), nullptr, &destination);
 }
 
-// Ghidra IntroCinematic_Run's epilogue: after the last frame, when not skipped
-// and g_intro_cinematic.intro_text_desc_id != -1 it loads that desc
-// (Ui_LoadSelectionDialogResource) and shows it in the generic text-reader
-// Ui_RunTravelSelectionDialog, gating DAT_007d1fa6 = 1. The reader itself is
-// not reconstructed. The field is the Bible char resource IntroTextID
-// (block+0x30). Stock Nova's .Trader block carries -1, so the epilogue never
-// opens there; the no-save SetupFrames fallback uses 0x7ffd, which does open
-// (with empty text).
-void RunPostIntroTextStub(const GameState &state) {
+// Ghidra IntroCinematic_Run's epilogue (0x0048adc0): when not skipped and
+// intro_text_desc_id != -1, loads the desc (0x004c6d50), runs the placeholder
+// and wildcard passes, and opens the generic text reader (0x004982a0). Empty
+// text opens no dialog, matching the reader's empty-text arm. Stock .Trader
+// carries -1; the no-save fallback 0x7ffd is not a valid desc.
+void RunPostIntroTextReader(SdlPlatform &platform,
+                            GameState &state,
+                            const std::function<void()> &render_background) {
   if (!state.intro_cinematic.should_open_intro_text_dialog()) {
     return;
   }
-  NovaLog::Todo(
-      "intro text-reader dialog (Ui_RunTravelSelectionDialog "
-      "0x004982a0 / Ui_LoadSelectionDialogResource 0x004c6d50) is not "
-      "reconstructed: the intro gated on intro_text_desc_id {} but no "
-      "text reader is available",
-      state.intro_cinematic.intro_text_desc_id);
+  std::string text;
+  if (const auto desc = NovaResource_LoadDescription(static_cast<std::uint16_t>(
+          state.intro_cinematic.intro_text_desc_id))) {
+    text = desc->text;
+    // Ui_LoadSelectionDialogResource's placeholder pass runs at load time,
+    // before the wildcard pass (0x004c6d50 -> 0x0044a4d0 -> 0x004444f0).
+    Mission_ExpandStringPlaceholders(state, text);
+    text = Mission_ExpandMissionWildcards(state, text, false, -1);
+  }
+  if (text.empty()) {
+    NovaLog::Info("intro text desc {} produced empty text; reader stays "
+                  "closed (original's empty-text arm)",
+                  state.intro_cinematic.intro_text_desc_id);
+    return;
+  }
+  // g_selection_dialog_over_static_surface = 1 in the original: the reader
+  // redraws the dark space background rather than the live frame.
+  NovaUi_RunTextReaderDialog(platform, state, text, false, render_background);
 }
 
 // Per-iteration input poll of the intro wait loop. Mirrors the original's
@@ -280,7 +294,12 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
   if (!platform.quit_requested() && !input_state.skip_all) {
     NovaLog::Info("intro cinematic finished (input may have advanced "
                   "individual frames)");
-    RunPostIntroTextStub(state);
+    // over_static_surface variant: fill the dark space background (PTR_DAT_
+    // 00575acc equivalent) rather than the live frame.
+    RunPostIntroTextReader(platform, state, [renderer]() {
+      SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
+      SDL_RenderClear(renderer);
+    });
   }
   // Return the bVar9 mirror (see intro_cinematic.hpp).
   return !input_state.skip_all;
