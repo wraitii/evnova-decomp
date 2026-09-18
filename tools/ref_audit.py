@@ -132,12 +132,15 @@ def main() -> None:
     dump = Path("/tmp/ghidra_full_decompile")
     if dump.is_dir():
         dump_addrs = {f"0x{p[:8].lower()}" for p in os.listdir(dump) if p.endswith(".c")}
-        tracked = p_addrs | s_addrs
-        missing = dump_addrs - tracked - {r["address"].lower() for r in rows if "INTERNAL LABEL" in r["comment"]}
-        if missing:
-            out.append(f"!! functions in decompile dump without a row ({len(missing)}): {sorted(missing)[:10]}")
+        if not dump_addrs:
+            out.append("(decompile dump present but empty; coverage check unavailable)")
         else:
-            out.append(f"census vs decompile dump ({len(dump_addrs)} functions): complete")
+            tracked = p_addrs | s_addrs
+            missing = dump_addrs - tracked - {r["address"].lower() for r in rows if "INTERNAL LABEL" in r["comment"]}
+            if missing:
+                out.append(f"!! functions in decompile dump without a row ({len(missing)}): {sorted(missing)[:10]}")
+            else:
+                out.append(f"census vs decompile dump ({len(dump_addrs)} functions): complete")
     else:
         out.append("(no decompile dump at /tmp/ghidra_full_decompile; union check skipped)")
 
