@@ -196,8 +196,10 @@ void Mission_FailMissionSlotQuick(GameState &state,
 
 // Ghidra 0x00447d90 Mission_ResolveMisnSlot. Auto-abort/goal completion:
 // resolve payload, on-resolve repeat count (DatePostInc daily world update),
-// the Flags 0x0008 100-unit fuel penalty, Flags2 0x0002 pay application, and
-// slot teardown.
+// the Flags 0x0008 100-unit fuel penalty, Flags2 0x0002 pay application, the
+// opt-in CompGovt/CompReward reputation walk for missions flagged Flags2
+// 0x0002 or Flags 0x0040 (see docs/known_original_bugs.md and
+// kApplyOriginalBugFixes), and slot teardown.
 void Mission_ResolveMisnSlot(GameState &state,
                              std::int16_t mission_slot,
                              std::uint32_t now_ms);

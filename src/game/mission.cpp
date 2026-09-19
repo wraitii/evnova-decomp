@@ -1715,6 +1715,45 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
   // the clean-room ambient-roll cache latch is not modelled (TODO(decomp)).
 }
 
+// Applies the Bible CompGovt/CompReward "competing government" reputation
+// delta shared by the success resolution and, under kApplyOriginalBugFixes,
+// the auto-abort resolution. Full `delta` is added to every system owned by
+// `govt`. When `include_relations` is set (Mission_ResolveMissionSuccess
+// 0x00440410), systems whose government is hostile/xenophobic to `govt` take
+// `-delta/2` and allied systems `+delta/2` (x87 truncation toward zero, not
+// round-to-nearest); when clear (the NovaUi_RunMissionComputerWindow
+// 0x00446150 Flags 0x0040 manual-abort reversal), only exact-government
+// systems change. Independent systems (govt -1) and a `govt` outside 0..0xff
+// are no-ops.
+void ApplyCompetingGovernmentReputation(GameState &state,
+                                        std::int16_t govt,
+                                        std::int16_t delta,
+                                        bool include_relations) {
+  if (govt < 0 || govt >= 0x100) {
+    return;
+  }
+  const auto count = static_cast<std::int16_t>(
+      std::min<std::size_t>(state.system_reputation.size(), 0x800));
+  for (std::int16_t i = 0; i < count; ++i) {
+    const std::int16_t system_govt =
+        state.scenario.systems[static_cast<std::size_t>(i)].government_id;
+    auto &rep = state.system_reputation[static_cast<std::size_t>(i)];
+    if (system_govt == govt) {
+      rep = static_cast<std::int16_t>(rep + delta);
+    } else if (include_relations && system_govt != -1) {
+      if (NovaGovernment_AreGovtsHostileOrXenophobic(
+              state.scenario, system_govt, govt)) {
+        rep = static_cast<std::int16_t>(static_cast<float>(rep) -
+                                        static_cast<float>(delta) * 0.5F);
+      } else if (NovaGovernment_AreGovtsAllied(
+                     state.scenario, system_govt, govt)) {
+        rep = static_cast<std::int16_t>(static_cast<float>(rep) +
+                                        static_cast<float>(delta) * 0.5F);
+      }
+    }
+  }
+}
+
 // Ghidra 0x00440410 Mission_ResolveMissionSuccess.
 void Mission_ResolveMissionSuccess(GameState &state,
                                    std::int16_t mission_slot,
@@ -1773,32 +1812,10 @@ void Mission_ResolveMissionSuccess(GameState &state,
   for (std::int16_t i = 0; i < mission.on_resolve_repeat_count; ++i) {
     Mission_TickDailyWorldUpdate(state);
   }
-  const std::int16_t govt = mission.comp_govt_id;
-  const std::int16_t delta = mission.comp_reward_delta;
-  if (govt >= 0 && govt < 0x100) {
-    const auto count = static_cast<std::int16_t>(
-        std::min<std::size_t>(state.system_reputation.size(), 0x800));
-    for (std::int16_t i = 0; i < count; ++i) {
-      const std::int16_t system_govt =
-          state.scenario.systems[static_cast<std::size_t>(i)].government_id;
-      auto &rep = state.system_reputation[static_cast<std::size_t>(i)];
-      if (system_govt == govt) {
-        rep = static_cast<std::int16_t>(rep + delta);
-      } else if (system_govt != -1) {
-        if (NovaGovernment_AreGovtsHostileOrXenophobic(
-                state.scenario, system_govt, govt)) {
-          // 0x00440410 truncates toward zero (x87 FIST + residual/sign
-          // correction), not round-to-nearest.
-          rep = static_cast<std::int16_t>(static_cast<float>(rep) -
-                                          static_cast<float>(delta) * 0.5F);
-        } else if (NovaGovernment_AreGovtsAllied(
-                       state.scenario, system_govt, govt)) {
-          rep = static_cast<std::int16_t>(static_cast<float>(rep) +
-                                          static_cast<float>(delta) * 0.5F);
-        }
-      }
-    }
-  }
+  ApplyCompetingGovernmentReputation(state,
+                                     mission.comp_govt_id,
+                                     mission.comp_reward_delta,
+                                     /*include_relations=*/true);
   NovaGovernment_ApplyReputationCreditDelta(state,
                                             mission.resource_delta_or_cost);
   // Ambient-roll latch invalidation is not modelled (TODO(decomp)).
@@ -1969,6 +1986,27 @@ void Mission_ResolveMisnSlot(GameState &state,
   if ((mission.flags_secondary & 0x0002U) != 0U) {
     NovaGovernment_ApplyReputationCreditDelta(state,
                                               mission.resource_delta_or_cost);
+  }
+  // BUGFIX(original): the shipped auto-abort resolver never runs the
+  // CompGovt/CompReward walk that Mission_ResolveMissionSuccess (0x00440410)
+  // applies. Restrict the fix to missions that opt into an auto-abort
+  // consequence by either documented flag: Flags2 0x0002 (pay on auto-abort)
+  // or Flags 0x0040 (reversal on abort). In the stock data that covers the
+  // Refuel Trader missions (+2 Civvies) and Eamon (-200 Wild Geese), plus the
+  // 16 Avoid missions, whose 0x0040 reversal (-5x, exact-government systems
+  // only, mirroring NovaUi_RunMissionComputerWindow 0x00446150) the original
+  // could only reach through a manual abort the family blocks with CanAbort 0.
+  // With the policy off, reproduce the original omission. See
+  // docs/known_original_bugs.md.
+  const bool reversal = (mission.flags_primary & 0x0040U) != 0U;
+  const bool pay_on_auto_abort = (mission.flags_secondary & 0x0002U) != 0U;
+  if (kApplyOriginalBugFixes && (reversal || pay_on_auto_abort)) {
+    ApplyCompetingGovernmentReputation(
+        state,
+        mission.comp_govt_id,
+        reversal ? static_cast<std::int16_t>(mission.comp_reward_delta * -5)
+                 : mission.comp_reward_delta,
+        /*include_relations=*/!reversal);
   }
   Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
 }

@@ -1,3 +1,4 @@
+#include "game/compatibility.hpp"
 #include "game/game_state.hpp"
 #include "game/mission.hpp"
 #include "game/outfit.hpp"
@@ -1037,4 +1038,72 @@ TEST_CASE("mission loader reset clears interaction latches") {
   CHECK_FALSE(state.active_mission_runtime_flags[1].is_active);
   CHECK_FALSE(state.active_mission_runtime_flags[1].is_failed);
   CHECK_FALSE(state.control.ControlBit(311));
+}
+
+// BUGFIX(original): Mission_ResolveMisnSlot (0x00447d90) never ran the
+// CompGovt/CompReward walk. Under kApplyOriginalBugFixes it applies the
+// success walk when the mission sets Flags2 0x0002 (pay on auto-abort), or the
+// manual-abort Flags 0x0040 -5x reversal
+// (NovaUi_RunMissionComputerWindow 0x00446150) when that flag is set. With the
+// policy off, the original omission is reproduced. See
+// docs/known_original_bugs.md.
+TEST_CASE("auto-abort applies the competing-government reward under the fix "
+          "policy") {
+  const auto seed = [](GameState &state,
+                       std::int16_t comp_govt,
+                       std::int16_t comp_reward,
+                       std::uint16_t flags_primary,
+                       std::uint16_t flags_secondary) {
+    state.scenario.systems.resize(2);
+    state.scenario.systems[0].government_id = comp_govt;
+    state.scenario.systems[1].government_id = -1; // independent
+    state.system_reputation.assign(2, 0);
+    auto &mission = state.active_missions[0];
+    mission.comp_govt_id = comp_govt;
+    mission.comp_reward_delta = comp_reward;
+    mission.flags_primary = flags_primary;
+    mission.flags_secondary = flags_secondary;
+    state.active_mission_runtime_flags[0].is_active = true;
+  };
+
+  // Flags2 0x0002 (pay on auto-abort): the full success delta lands on the
+  // competing government's systems.
+  {
+    GameState state;
+    seed(state,
+         /*comp_govt=*/0,
+         /*comp_reward=*/10,
+         /*flags_primary=*/0x0001,
+         /*flags_secondary=*/0x0002);
+    Mission_ResolveMisnSlot(state, 0, 0);
+    CHECK(state.system_reputation[0] == (kApplyOriginalBugFixes ? 10 : 0));
+    CHECK(state.system_reputation[1] == 0);
+  }
+
+  // Flags 0x0040 alone (the stock Avoid case): the -5x reversal applies to
+  // exact-government systems only.
+  {
+    GameState state;
+    seed(state,
+         /*comp_govt=*/0,
+         /*comp_reward=*/10,
+         /*flags_primary=*/0x0041,
+         /*flags_secondary=*/0x0000);
+    Mission_ResolveMisnSlot(state, 0, 0);
+    CHECK(state.system_reputation[0] == (kApplyOriginalBugFixes ? -50 : 0));
+    CHECK(state.system_reputation[1] == 0);
+  }
+
+  // Neither flag: the reward stays inert.
+  {
+    GameState state;
+    seed(state,
+         /*comp_govt=*/0,
+         /*comp_reward=*/10,
+         /*flags_primary=*/0x0001,
+         /*flags_secondary=*/0x0000);
+    Mission_ResolveMisnSlot(state, 0, 0);
+    CHECK(state.system_reputation[0] == 0);
+    CHECK(state.system_reputation[1] == 0);
+  }
 }
