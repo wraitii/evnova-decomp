@@ -1,0 +1,36 @@
+version = 1
+name = "tichel-pirate-hunt"
+
+# Assumes the probe is already in flight in Tichel (system govt Federation).
+# Tichel's dude slot 6 is the "Association" dude (Association of Free Traders,
+# weight 15); 32% of its ship picks are class "Pirate Enterprise". Landing
+# sweeps vacant NPCs and launching repopulates exactly avg_ships (4 here), so
+# each land/launch is a fresh roll. Reshuffle until one is up, then kill it.
+#
+# Note: `until` is evaluated after each iteration, so the body always
+# reshuffles first. `destroy_ship` fails loudly if the loop never lands a
+# target, so no extra validation step is needed for a smoke test.
+
+[defaults]
+timeout_ms = 180000
+
+[[steps]]
+action = "repeat"
+count = 30
+until = { "ships.ships.*.ship_class" = "Pirate Enterprise" }
+steps = [
+  { action = "command", cmd = "land_at", target = "Viking" },
+  { action = "click", element = "launch" },
+  { action = "wait", expect = { "ui.window" = "" } },
+]
+
+[[steps]]
+action = "command"
+cmd = "destroy_ship"
+target = "Pirate Enterprise"
+timeout_ms = 240000
+
+[[steps]]
+action = "wait"
+expect = { "automation.goal" = "destroy", "automation.phase" = "complete" }
+timeout_ms = 240000

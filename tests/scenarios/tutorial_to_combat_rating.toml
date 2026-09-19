@@ -1,0 +1,348 @@
+version = 1
+name = "tutorial-to-combat-rating"
+
+[defaults]
+timeout_ms = 30000
+
+# Full-progression smoke route: create a stock `.Trader` pilot, run Barry's
+# Tutorial 001 to Sol, finish it on Earth, fly Sol -> Tau Ceti -> Sanddown and
+# run the reusable medical trade route to bank >1e6 credits and the six-Terrapin
+# escort cap, return to Earth and trade the starting Shuttle in for a combat
+# hull, then jump to Tichel and repeat the pirate hunt until the career combat
+# rating passes 300.
+#
+# System links used (verified against the s\xd8st resource graph):
+#   Sol -> Tau Ceti -> Sanddown, Sanddown -> Tau Ceti -> Sol, Sol -> Tichel.
+# Earth is the only reachable shipyard in tech range for a real combat upgrade
+# (tech 7); Sanddown's Kolan/Kinik\x8e have no shipyard. The Earth shipyard can
+# stock more BuyRandom classes than fit one 4x5 page, so ship purchases page the
+# grid by label before buying.
+
+# ------------------------------------------------------------------ new pilot --
+# Create a pilot through the normal dialogs and accept Barry's Tutorial 001
+# wherever the random `.Trader` start placed it; the fragment ends in Sol space.
+[[steps]]
+action = "call"
+scenario = "fragments/new_pilot"
+
+[[steps]]
+action = "call"
+scenario = "fragments/tutorial_reach_sol"
+
+# ------------------------------------------------- finish tutorial 001 at Earth --
+# Tutorial 001 (mission 123) resolves on landing at Earth; the debrief is a
+# text reader over the dock.
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "missions.missions.0.template_id" = 123, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+# A generic Spaceport offer can pop over the dock; clear it before refuelling.
+[[steps]]
+action = "decline_mission"
+
+# Refuel before leaving Sol: the Moonrise start lands at Earth on an empty
+# tank, and the Kania/Fomalhaut/Porto Rillia starts arrive with one jump left.
+[[steps]]
+action = "click"
+element = "refuel"
+
+# ----------------------------------------------------- Sanddown trade route --
+# Land to hand the pilot to the route; it assumes it is called from Sanddown
+# space and ends docked at Kolan with the escort cap hired.
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tau Ceti"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tau Ceti" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sanddown"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sanddown" }
+timeout_ms = 180000
+
+[[steps]]
+action = "call"
+scenario = "sanddown_medical_route"
+
+# The Sanddown round trip burns two of the Shuttle's three jumps, so top up
+# at Kolan (refuel is available at every non-hypergate spaceport).
+[[steps]]
+action = "click"
+element = "refuel"
+
+# The route restores ordinary speed on exit; retime the trip back to Earth.
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = 100
+suppress_audio = true
+
+# ----------------------------------------------------- Earth: buy a combat hull --
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tau Ceti"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tau Ceti" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+# The Spaceport AvailLoc offer pass can pop a generic mission over the dock.
+[[steps]]
+action = "decline_mission"
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+# Buy the licences the combat hulls check at purchase time. Licences are
+# persistent across the hull swap, and NovaLanded_CanBuyShip re-checks the
+# Require mask even though the list builder only filters on it when
+# Availability bit 0x0200 is set (it is not for these classes), so without the
+# licences the store lists the hull but every Buy click is a silent no-op.
+# Heavy Weapons (0x1), Missile Weapons (0x2) and Protective Tech (0x8)
+# together clear Starbridge (0xb), Valkyrie/Thunderhead (0x3) and Lightning
+# (0x2).
+#
+# The store publishes each cell's raw short_name as its `label`; these three
+# wrap across two lines in the resource (`Heavy Weapons\nLicense`, etc.), so
+# the literal `\n` marker (backslash + n, TOML `\\n`) must be part of the match.
+# They also have DisplayWeight 5/4/5 and Earth has heavily weighted weapons
+# ahead of them, so the reusable fragment pages the 4x5 grid ROW by ROW until
+# each label is on the current page. The store rebuild is order-preserving for
+# these purchases, so the page generally stays put between buys.
+[[steps]]
+action = "click"
+element = "outfitter"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "outfitter" }
+timeout_ms = 180000
+
+[[steps]]
+action = "call"
+scenario = "fragments/buy_outfit"
+args = { label = "Heavy Weapons\\nLicense" }
+
+[[steps]]
+action = "call"
+scenario = "fragments/buy_outfit"
+args = { label = "Missile Weapons\\nLicense" }
+
+[[steps]]
+action = "call"
+scenario = "fragments/buy_outfit"
+args = { label = "Protective Tech\\nLicense" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+# Now the shipyard will actually sell a combat hull. Buy a Starbridge: its
+# daily BuyRandom is 50%, so if the shipyard does not list it this game-day,
+# launch and reland at Earth to advance a day. Stellar_Launch runs the daily
+# world tick (Mission_TickDailyWorldUpdate), which rerolls every ship class's
+# limit roll, so each relaunch is a fresh availability draw. A successful
+# purchase returns to the Spaceport with state.ship_class = Starbridge, which
+# guards off the rest of that pass and stops the loop.
+[[steps]]
+action = "repeat"
+count = 12
+until = { "state.ship_class" = "Starbridge" }
+
+[[steps.steps]]
+# Each landed Earth visit can pop a generic Spaceport mission offer; clear it
+# so the shipyard button stays clickable.
+action = "decline_mission"
+
+[[steps.steps]]
+action = "click"
+element = "shipyard"
+trigger = { "ui.window" = "spaceport" }
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "shipyard" }
+timeout_ms = 180000
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+# Page the 4x5 grid to the class when it is offered this day. The shipyard list
+# can exceed one page (Earth stocks the used Shuttle/Heavy Shuttle variants
+# plus many BuyRandom hulls) and only the current page's cells are published.
+# Paging here first is what lets the call's trigger tell "offered on a later
+# page" from "withheld by today's roll", so a missing class relaunches instead
+# of reaching buy_ship's terminal not-offered failure.
+[[steps.steps]]
+action = "repeat"
+count = 16
+until = { "ui.window" = "shipyard", "ui.items.*.label" = "Starbridge" }
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+[[steps.steps.steps]]
+action = "click"
+element = "next"
+trigger = { "ui.window" = "shipyard" }
+trigger_not = { "ui.items.*.label" = "Starbridge" }
+
+[[steps.steps]]
+action = "call"
+scenario = "fragments/buy_ship"
+args = { label = "Starbridge" }
+trigger = { "ui.window" = "shipyard", "ui.items.*.label" = "Starbridge" }
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+# Starbridge was not offered: leave the yard, launch (daily reroll), and land
+# again for the next attempt. The wait after land_at re-syncs on the
+# Spaceport; the next pass's decline_mission clears any offer that follows.
+[[steps.steps]]
+action = "click"
+element = "done"
+trigger = { "ui.window" = "shipyard" }
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+# Clicks are async: click_when_available posts the input and returns without
+# waiting for the dock loop to consume it. Wait for the menu to actually be
+# live again before pressing Launch, otherwise the trigger below is read while
+# the shipyard is still up, the launch is skipped, and the following land_at
+# waits forever on a docked (non-running) flight loop.
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+timeout_ms = 180000
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+trigger = { "ui.window" = "spaceport" }
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+trigger_not = { "state.ship_class" = "Starbridge" }
+
+# Fail loudly (rather than fly the starting Shuttle) if the rolls withheld
+# Starbridge for every attempt.
+[[steps]]
+action = "validate_state"
+expect = { "state.ship_class" = "Starbridge" }
+
+[[steps]]
+action = "screenshot"
+name = "combat-hull-purchased"
+
+# ------------------------------------------------- Tichel pirate-hunt x5 --
+# The six Terrapin escorts survive the hull swap. Every shipped Pirate
+# Enterprise variant has strength 325, so each kill is worth 65 career rating
+# points (0.2 x strength); five kills clear 300 with margin.
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tichel"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tichel" }
+timeout_ms = 180000
+
+[[steps]]
+action = "repeat"
+count = 5
+
+[[steps.steps]]
+action = "call"
+scenario = "tichel_pirate_hunt"
+
+[[steps]]
+action = "validate_state"
+matches = { "state.combat_rating" = "[3-9][0-9]{2,}" }
+
+[[steps]]
+action = "screenshot"
+name = "combat-rating-300"
+
+[[steps]]
+action = "quit"
