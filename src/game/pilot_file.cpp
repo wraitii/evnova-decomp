@@ -547,8 +547,19 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
         state.scenario.disaster_defs[i].active_stellar;
   }
   for (std::size_t i = 0; i < state.cron_event_states.size(); ++i) {
-    out.cron_duration_counters[i] = state.cron_event_states[i].duration_counter;
-    out.cron_holdoff_counters[i] = state.cron_event_states[i].holdoff_counter;
+    const auto &runtime = state.cron_event_states[i];
+    // Ghidra 0x004c7dd0 PilotFile_SaveGameCore writes the 0xffff sentinel pair
+    // for a slot that is not active, so load keeps it inactive. Writing the
+    // live counters instead (the port's former behaviour) is a regression:
+    // PilotFileApply treats either counter >= 0 as active, and deactivation
+    // leaves holdoff_counter at 0, so a retired event resurrects on reload.
+    if (!runtime.is_active) {
+      out.cron_duration_counters[i] = -1;
+      out.cron_holdoff_counters[i] = -1;
+    } else {
+      out.cron_duration_counters[i] = runtime.duration_counter;
+      out.cron_holdoff_counters[i] = runtime.holdoff_counter;
+    }
   }
   const std::size_t rank_count =
       std::min(state.scenario.ranks.size(), out.rank_active_flags.size());

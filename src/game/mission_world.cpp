@@ -107,6 +107,40 @@ int NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
 
 namespace {
 
+// The original's month/day lower-bound arm for the First* triple; the year
+// bound is handled by the caller. Reproduces 0x0046c829-0x0046c842:
+// - FirstMonth == 0 gates on FirstDay alone (day-of-month, any month);
+// - FirstMonth > 0 && FirstDay == 0 gates on the month alone;
+// - both > 0 gate on the month*0x20 + day composite.
+[[nodiscard]] bool CronFirstMonthDayAllows(const CronEventDef &def,
+                                           const GameDate &date) {
+  if (def.first_month == 0) {
+    return !(def.first_day > 0 && date.day < def.first_day);
+  }
+  if (def.first_month < 1 || def.first_day != 0) {
+    return !(def.first_month > 0 && def.first_day > 0 &&
+             date.month * 0x20 + date.day <
+                 def.first_month * 0x20 + def.first_day);
+  }
+  return date.month >= def.first_month;
+}
+
+// The original's month/day upper-bound arm for the Last* triple (0x0046c8b0+).
+// LastMonth == 0 gates on LastDay alone; LastMonth > 0 && LastDay == 0 gates on
+// the month alone; both > 0 gate on the month*0x20 + day composite.
+[[nodiscard]] bool CronLastMonthDayAllows(const CronEventDef &def,
+                                          const GameDate &date) {
+  if (def.last_month == 0) {
+    return def.last_day <= 0 || date.day <= def.last_day;
+  }
+  if (def.last_month < 1 || def.last_day != 0) {
+    return !(def.last_month > 0 && def.last_day > 0 &&
+             def.last_month * 0x20 + def.last_day <
+                 date.month * 0x20 + date.day);
+  }
+  return date.month <= def.last_month;
+}
+
 // Ghidra 0x0046c800 Frame_IsRectVisibleInViewport (the crön-event arm; the
 // same helper also culls rects elsewhere). Called with a g_cron_event_states
 // block pointer it reads FirstYear/FirstMonth/FirstDay (+2/+4/+6) and
@@ -120,37 +154,46 @@ namespace {
 // Quirks preserved verbatim, including the month*0x20 composite comparison.
 [[nodiscard]] bool CronEventDateWindowAllows(const CronEventDef &def,
                                              const GameDate &date) {
+  if (kApplyOriginalBugFixes) {
+    // BUGFIX(original): the original checks the year bounds and the month/day
+    // bounds independently, so a range whose endpoints share a month/day
+    // composite (1/1/1178-1/1/1179) collapses to that single day-of-year.
+    // Apply the month/day bound only at the boundary year, making a multi-year
+    // range the contiguous interval the Bible describes.
+    if (def.first_year > 0) {
+      if (date.year < def.first_year) {
+        return false;
+      }
+      if (date.year == def.first_year && !CronFirstMonthDayAllows(def, date)) {
+        return false;
+      }
+    } else if (!CronFirstMonthDayAllows(def, date)) {
+      return false;
+    }
+    if (def.last_year > 0) {
+      if (date.year > def.last_year) {
+        return false;
+      }
+      if (date.year == def.last_year && !CronLastMonthDayAllows(def, date)) {
+        return false;
+      }
+    } else if (!CronLastMonthDayAllows(def, date)) {
+      return false;
+    }
+    return true;
+  }
+  // Original behaviour, quirks preserved verbatim (month/day checked in every
+  // year, independently of the year bounds).
   if (def.first_year > 0 && date.year < def.first_year) {
     return false;
   }
-  if (def.first_month == 0) {
-    if (def.first_day > 0 && date.day < def.first_day) {
-      return false;
-    }
-  } else if (def.first_month < 1 || def.first_day != 0) {
-    if (def.first_month > 0 && def.first_day > 0 &&
-        date.month * 0x20 + date.day < def.first_month * 0x20 + def.first_day) {
-      return false;
-    }
-  } else if (def.first_month < date.month) {
+  if (!CronFirstMonthDayAllows(def, date)) {
     return false;
   }
   if (def.last_year > 0 && def.last_year < date.year) {
     return false;
   }
-  if (def.last_month == 0) {
-    if (def.last_day > 0) {
-      if (def.last_day < date.day) {
-        return false;
-      }
-      return true;
-    }
-  } else if (def.last_month < 1 || def.last_day != 0) {
-    if (def.last_month > 0 && def.last_day > 0 &&
-        def.last_month * 0x20 + def.last_day < date.month * 0x20 + date.day) {
-      return false;
-    }
-  } else if (def.last_month < date.month) {
+  if (!CronLastMonthDayAllows(def, date)) {
     return false;
   }
   return true;
@@ -219,6 +262,14 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
 //   deactivation unless a post-holdoff wait keeps the slot busy).
 // Events with no TimeLimit (duration == -1, the absent-slot sentinel) are
 // never touched.
+// Under kApplyOriginalBugFixes four confirmed quirks are corrected: Random is
+// a true 1..100 percent roll (the original draws 0..100 and tests <=); a
+// multi-year date range is the contiguous interval the Bible describes (the
+// original applies the month/day bound in every year); a duration-0 event runs
+// OnEnd once instead of twice (the original leaves the slot active with a zero
+// holdoff); and the post-end wait uses PostHoldoff (the original reloads
+// PreHoldoff at duration end, so with PreHoldoff == 0 the slot never
+// deactivates and re-runs OnEnd daily).
 void Mission_TickDailyCronEvents(GameState &state) {
   const std::size_t count = std::min(state.scenario.cron_events.size(),
                                      state.cron_event_states.size());
@@ -229,8 +280,14 @@ void Mission_TickDailyCronEvents(GameState &state) {
       continue;
     }
     if (!runtime.is_active) {
-      if (std::uniform_int_distribution<int>{0, 100}(state.rng) >
-          def.trigger_odds) {
+      // Original draws NovaRandom_Range(0x65) = 0..100 inclusive and tests
+      // roll <= odds, so Random 0 still fires ~1/101 of eligible days.
+      // BUGFIX(original): roll 1..100 so the fields are true percentages.
+      const int odds_roll =
+          kApplyOriginalBugFixes
+              ? std::uniform_int_distribution<int>{1, 100}(state.rng)
+              : std::uniform_int_distribution<int>{0, 100}(state.rng);
+      if (odds_roll > def.trigger_odds) {
         continue;
       }
       if (!CronEventDateWindowAllows(def, state.date) ||
@@ -249,6 +306,10 @@ void Mission_TickDailyCronEvents(GameState &state) {
           runtime.duration_counter = -1;
           if (def.post_holdoff > 0) {
             runtime.holdoff_counter = def.post_holdoff;
+          } else if (kApplyOriginalBugFixes) {
+            // BUGFIX(original): the original leaves the slot active with a
+            // zero holdoff, so the next daily tick runs OnEnd a second time.
+            runtime.is_active = false;
           }
         }
       } else {
@@ -258,10 +319,21 @@ void Mission_TickDailyCronEvents(GameState &state) {
       --runtime.duration_counter;
       if (runtime.duration_counter < 1) {
         Mission_TerminateCronEvent(state, static_cast<std::int16_t>(index));
+        if (kApplyOriginalBugFixes) {
+          // BUGFIX(original): latch the event as ended, so the post-holdoff
+          // arm deactivates it instead of re-running OnStart/OnEnd once the
+          // wait expires.
+          runtime.duration_counter = -1;
+        }
         if (def.post_holdoff < 1) {
           runtime.is_active = false;
         } else {
-          runtime.holdoff_counter = def.post_holdoff;
+          // Original quirk: the post-end wait is loaded from PreHoldoff, not
+          // PostHoldoff (0x004395d9 reads block +0x22 = PreHoldoff), so with
+          // PreHoldoff == 0 the slot never deactivates and re-runs OnEnd every
+          // day. BUGFIX(original): use the Bible's PostHoldoff.
+          runtime.holdoff_counter =
+              kApplyOriginalBugFixes ? def.post_holdoff : def.pre_holdoff;
         }
       }
     } else {
@@ -273,6 +345,17 @@ void Mission_TickDailyCronEvents(GameState &state) {
           Mission_ActivateCronEvent(state, static_cast<std::int16_t>(index));
           if (runtime.duration_counter == 0) {
             Mission_TerminateCronEvent(state, static_cast<std::int16_t>(index));
+            if (kApplyOriginalBugFixes) {
+              // BUGFIX(original): the zero-duration event has now run OnStart
+              // and OnEnd; wait out PostHoldoff (or deactivate) instead of
+              // re-running OnEnd on the next daily tick.
+              runtime.duration_counter = -1;
+              if (def.post_holdoff > 0) {
+                runtime.holdoff_counter = def.post_holdoff;
+              } else {
+                runtime.is_active = false;
+              }
+            }
           }
         }
       }

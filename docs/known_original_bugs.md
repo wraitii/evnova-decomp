@@ -62,7 +62,10 @@ Per the discord.
 * **Windows hyperspace flash does not build up like the Mac implementation.** 
 * **`DispWeight` does not control mission ordering**; Mac 1.1 presents missions by increasing resource ID instead. 
 * **Economy-at-Work (asteroid miners) ships can become hostile when the player requests assistance.** 
-* **Crön date ranges split day/month and year ranges incorrectly**, so a range such as 1/1/1178–1/1/1179 only fires on two calendar dates rather than throughout the interval. 
+* **Crön date ranges split day/month and year ranges incorrectly**, so a range such as 1/1/1178–1/1/1179 only fires on two calendar dates rather than throughout the interval. Corrected in `CronEventDateWindowAllows` under `kApplyOriginalBugFixes` (the month/day bound applies only at the boundary year); the original is reproduced when the policy is off. 
+* **`Random` 0 still fires a crön.** The per-day roll is `NovaRandom_Range(0x65)` = 0..100 inclusive tested with `<=`, so `Random` 0 activates on roll 0 (~1/101 of eligible days) and the effective odds are `(Random+1)/101`. Corrected under `kApplyOriginalBugFixes` (rolls 1..100). 
+* **A zero-duration crön runs its OnEnd script twice.** After the OnStart+OnEnd pair the slot stays active with a zero holdoff, so the next daily tick runs OnEnd again before deactivating (49 of the 125 shipped cröns use `Duration` 0). Corrected under `kApplyOriginalBugFixes`. 
+* **A crön's post-end wait is loaded from `PreHoldoff`, not `PostHoldoff`.** On duration expiry the engine re-arms the holdoff counter from `PreHoldoff` (0x004395d9 reads block +0x22) whenever `PostHoldoff > 0`. With `PreHoldoff == 0` the slot never deactivates and re-runs OnEnd every day; shipped `V Rare Aur/Fed Syst Change` (0x00b8/0x00b9) and `Reb/Fed Syst Change 1` (0x00c0) also therefore only ever fire once per game. Fixed in `Mission_TickDailyCronEvents` under `kApplyOriginalBugFixes` (uses the Bible's `PostHoldoff`); the original is reproduced when the policy is off. 
 * **Bay-launched fighters receive only 75% of normal damage** while regenerating at the normal rate. 
 * **A shield-breaking hit also applies the weapon's full armour damage**, rather than only the unused portion of the hit. 
 * **AI-fired weapons and their submunitions cannot damage the ship that fired them.** 

@@ -924,6 +924,134 @@ TEST_CASE("crön date window and post-holdoff gate the daily tick") {
   CHECK_FALSE(state.cron_event_states[1].is_active);
 }
 
+TEST_CASE("crön month-only start gate opens no earlier than FirstMonth") {
+  GameState state;
+  state.scenario.cron_events.resize(4);
+  auto &def = state.scenario.cron_events[2];
+  def = {};
+  def.present = true;
+  def.duration = 1;
+  def.trigger_odds = 100;
+  def.first_month = 3; // FirstDay 0: the month alone gates the window.
+  def.first_day = 0;
+
+  // Before March the window is closed (0x0046c835: month < FirstMonth).
+  state.date.year = 1180;
+  state.date.month = 2;
+  state.date.day = 15;
+  Mission_TickDailyCronEvents(state);
+  CHECK_FALSE(state.cron_event_states[2].is_active);
+
+  // March onwards it is open (0x0046c835: month >= FirstMonth).
+  state.date.month = 4;
+  Mission_TickDailyCronEvents(state);
+  CHECK(state.cron_event_states[2].is_active);
+}
+
+TEST_CASE("crön post-end wait follows kApplyOriginalBugFixes") {
+  GameState state;
+  state.scenario.cron_events.resize(4);
+  auto &def = state.scenario.cron_events[3];
+  def = {};
+  def.present = true;
+  def.duration = 1;
+  def.trigger_odds = 100;
+  def.pre_holdoff = 3;
+  def.post_holdoff = 1;
+  def.on_start = "b303";
+  def.on_end = "!b303";
+
+  Mission_TickDailyCronEvents(state); // arm; wait the PreHoldoff
+  CHECK(state.cron_event_states[3].holdoff_counter == 3);
+  Mission_TickDailyCronEvents(state); // 3 -> 2
+  Mission_TickDailyCronEvents(state); // 2 -> 1
+  Mission_TickDailyCronEvents(state); // 1 -> 0: OnStart
+  CHECK(state.control.ControlBit(303));
+  Mission_TickDailyCronEvents(state); // duration expires: OnEnd, re-arm
+  CHECK_FALSE(state.control.ControlBit(303));
+  // Original 0x004395d9 reloads PreHoldoff here; the Bible documents
+  // PostHoldoff, which the port applies under kApplyOriginalBugFixes.
+  CHECK(state.cron_event_states[3].holdoff_counter ==
+        (kApplyOriginalBugFixes ? def.post_holdoff : def.pre_holdoff));
+}
+
+TEST_CASE("crön multi-year date range is contiguous under "
+          "kApplyOriginalBugFixes") {
+  GameState state;
+  state.scenario.cron_events.resize(4);
+  auto &def = state.scenario.cron_events[2];
+  def = {};
+  def.present = true;
+  def.duration = 1;
+  def.trigger_odds = 100;
+  def.first_day = 1;
+  def.first_month = 1;
+  def.first_year = 1178;
+  def.last_day = 1;
+  def.last_month = 1;
+  def.last_year = 1179;
+
+  const auto activates_on =
+      [&](std::int16_t day, std::int16_t month, std::int16_t year) {
+        state.date.day = day;
+        state.date.month = month;
+        state.date.year = year;
+        state.cron_event_states[2] = {};
+        Mission_TickDailyCronEvents(state);
+        return state.cron_event_states[2].is_active;
+      };
+
+  CHECK(activates_on(1, 1, 1178));
+  CHECK(activates_on(1, 1, 1179));
+  CHECK_FALSE(activates_on(31, 12, 1177));
+  CHECK_FALSE(activates_on(2, 1, 1179));
+  // The original collapses the range to 1 January (month*0x20+day equal at
+  // both ends); the fix keeps it open through 1178 and up to 1/1/1179.
+  CHECK(activates_on(15, 6, 1178) == kApplyOriginalBugFixes);
+  CHECK_FALSE(activates_on(15, 6, 1179));
+}
+
+TEST_CASE("crön Random 0 never activates under kApplyOriginalBugFixes") {
+  GameState state;
+  state.scenario.cron_events.resize(4);
+  auto &def = state.scenario.cron_events[2];
+  def = {};
+  def.present = true;
+  def.duration = 1;
+  def.trigger_odds = 0;
+
+  // With the original 0..100 roll, roll 0 matches Random 0 (~1/101 per
+  // eligible day). The fix rolls 1..100, so 0 never fires.
+  for (int day = 0; day < 400 && kApplyOriginalBugFixes; ++day) {
+    state.date.day = static_cast<std::int16_t>(1 + day % 28);
+    Mission_TickDailyCronEvents(state);
+    REQUIRE_FALSE(state.cron_event_states[2].is_active);
+  }
+}
+
+TEST_CASE("crön duration-0 event runs OnEnd once under "
+          "kApplyOriginalBugFixes") {
+  GameState state;
+  state.scenario.cron_events.resize(4);
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].max_count = 10; // stackable grant target
+  auto &def = state.scenario.cron_events[2];
+  def = {};
+  def.present = true;
+  def.duration = 0;
+  def.trigger_odds = 100;
+  def.on_end = "G128"; // grant outfit 0x80: owned count +1 per OnEnd run
+
+  Mission_TickDailyCronEvents(state);
+  CHECK(state.inventory.outfit_owned_count[0] == 1);
+
+  // Block re-arming so the second tick only exercises the lingering slot.
+  def.trigger_odds = 0;
+  Mission_TickDailyCronEvents(state);
+  CHECK(state.inventory.outfit_owned_count[0] ==
+        (kApplyOriginalBugFixes ? 1 : 2));
+}
+
 TEST_CASE("disaster slots roll their per-day chance and count down",
           "[scenario][disaster]") {
   GameState state;
