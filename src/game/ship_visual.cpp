@@ -2,6 +2,7 @@
 
 #include "../util/byte_reader.hpp"
 #include "collision.hpp"
+#include "compatibility.hpp"
 #include "frame_timing.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
@@ -198,26 +199,37 @@ void NovaShip_TickDestroyedShipVisualStateRawCall(GameState &state,
   if (!NovaAiShip_IsDestroyed(ship)) {
     return;
   }
-  // The original seeds the presentation the first time it observes the
-  // destroyed state. The port-side latch also makes that ownership explicit
-  // across relaunches; the port scheduler above preserves the original
-  // integer countdown and therefore cannot skip the 0<timer<=2 finale window.
-  if (!ship.death_timer_seeded) {
-    ship.death_timer_seeded = true;
-    if (ship.death_timer_active <= 0.0F) {
-      float reseed = static_cast<float>(cls->death_delay_frames);
-      if (ship.ship_instance_id == 0) {
-        reseed *= kPlayerDeathTimerScale;
+  // The original reseeds the presentation whenever death_timer_active <= 0.
+  // The port-side latch makes that ownership explicit across relaunches: the
+  // time-adjusted scheduler can drive an already-owned timer below zero, which
+  // the original's constant 1.0 step cannot, and a reseed there would skip the
+  // 0 < timer <= 2 finale window.
+  const bool was_seeded = ship.death_timer_seeded;
+  ship.death_timer_seeded = true;
+  float reseed = static_cast<float>(cls->death_delay_frames);
+  if (ship.ship_instance_id == 0) {
+    reseed *= kPlayerDeathTimerScale;
+  }
+  // DeathDelay 0/1 (resolved reseed <= 1) is the original's immortal-ghost
+  // case: the per-call decrement lands the timer on zero before the check, so
+  // the original's `fVar1 <= 0` branch retakes every call and neither the
+  // > 2.0 debris window nor the finale ever runs. Keep reseeding -- and stay
+  // alive -- when kApplyOriginalBugFixes is off; run the finale immediately
+  // when it is on. A larger delay resolves (next check sees 1..2) so the latch
+  // owns it after the first seed.
+  const bool ghost_reseed = reseed <= 1.0F;
+  if (ship.death_timer_active <= 0.0F && (!was_seeded || ghost_reseed)) {
+    ship.death_timer_active = reseed;
+    if (ghost_reseed) {
+      if (!kApplyOriginalBugFixes) {
+        ship.death_timer_seeded = false;
+        return;
       }
-      ship.death_timer_active = reseed;
-      if (reseed <= 0.0F) {
-        // Port divergence: a zero DeathDelay hull would linger forever in the
-        // original (reseed to 0 keeps the finale from ever firing); the port
-        // treats those as immediate destructions.
-        NovaShip_RunShipDestructionFinale(state, ship);
-      }
-      return;
+      // BUGFIX(original): the zero/low reseed leaves the wreck lingering as
+      // an immortal ghost sprite. Treat it as an immediate destruction.
+      NovaShip_RunShipDestructionFinale(state, ship);
     }
+    return;
   }
   if (ship.death_timer_active > 2.0F) {
     // Debris-puff window: roll and spawn the Explode1 cadence. The original's

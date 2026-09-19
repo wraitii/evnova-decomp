@@ -140,7 +140,7 @@ TEST_CASE("a fragmenting asteroid still spawns its children and its yield",
   NovaWeapon_ResolveDirectShotCollisions(state);
 
   REQUIRE_FALSE(asteroid.active);
-  // Child count = rand(2) + ceil(2/2) = 1..2.
+  // Child count = rand(2) + floor(2/2) = 1..2.
   const int children = ActiveChildAsteroidCount(state);
   CHECK(children >= 1);
   CHECK(children <= 2);
@@ -148,6 +148,42 @@ TEST_CASE("a fragmenting asteroid still spawns its children and its yield",
   const int boxes = ActiveFreeflightCount(state);
   CHECK(boxes >= 5);
   CHECK(boxes <= 15);
+}
+
+TEST_CASE("frag_count 1 spawns one child (BUGFIX(original))",
+          "[asteroid][scoop]") {
+  GameState state;
+  AsteroidState &asteroid = SeedBreakableAsteroid(state,
+                                                  /*yield_qty=*/0,
+                                                  /*yield_type=*/0,
+                                                  /*fragments=*/{0, -1, 1});
+
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  NovaWeapon_ResolveDirectShotCollisions(state);
+
+  REQUIRE_FALSE(asteroid.active);
+  // Original: rand(1) + floor(1/2) == 0 children. BUGFIX(original): the Bible
+  // documents the average +/-50%, whose lower bound is one.
+  CHECK(ActiveChildAsteroidCount(state) == 1);
+}
+
+TEST_CASE("odd frag_count keeps the original floor baseline",
+          "[asteroid][scoop]") {
+  GameState state;
+  AsteroidState &asteroid = SeedBreakableAsteroid(state,
+                                                  /*yield_qty=*/0,
+                                                  /*yield_type=*/0,
+                                                  /*fragments=*/{0, -1, 3});
+
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  NovaWeapon_ResolveDirectShotCollisions(state);
+
+  REQUIRE_FALSE(asteroid.active);
+  // floor(3/2)=1 baseline, roll 0..2 -> 1..3 (the +/-50% lower bound would be
+  // 2; the original deliberately stays one low for odd counts).
+  const int children = ActiveChildAsteroidCount(state);
+  CHECK(children >= 1);
+  CHECK(children <= 3);
 }
 
 TEST_CASE("scoop-equipped player collects cargo from a resource-box",

@@ -322,6 +322,14 @@ void DrawReticle(SDL_Renderer *renderer,
 // with fade 0.2 (0.4 small tier); the final 16-bit colour component is the
 // government theme byte * strength * 2.0 (0x004aa850) drawn opaque -- i.e. a
 // fade to black over the black map, which equals alpha = strength*2 here.
+//
+// BUGFIX(original): the executable clears and paints a fixed 512-wide,
+// 0x35c-tall half-pixel buffer (0x004a9d50), so a galaxy layout larger than
+// that map area has its government territory clipped. Confirmed engine bug
+// (docs/known_original_bugs.md). The port allocates the buffer to the actual
+// starmap panel instead, so custom layouts are not clipped. Not routed
+// through kApplyOriginalBugFixes: the fixed buffer is a software-surface
+// artifact of the original renderer, not reproducible gameplay state.
 PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
                                        const MapView &view,
                                        const SDL_FRect &panel) {

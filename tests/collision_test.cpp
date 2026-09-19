@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "game/collision.hpp"
+#include "game/compatibility.hpp"
 #include "game/game_state.hpp"
 #include "game/ship_ai.hpp"
 #include "game/ship_visual.hpp"
@@ -1172,6 +1173,29 @@ TEST_CASE("NPC destruction seeds the class DeathDelay timer once",
   CHECK(state.ShipAt(1).death_timer_active <= 0.0F);
   NovaShip_TickDestroyedShipVisualState(state, state.ShipAt(1), 0.63F);
   CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(10.0F));
+}
+
+TEST_CASE("DeathDelay 0/1 reseed loop follows kApplyOriginalBugFixes",
+          "[collision][ship_visual]") {
+  for (const std::int16_t delay : {0, 1}) {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].death_delay_frames = delay;
+    state.scenario.ships[0].destruction_effect_final = 2;
+    state.ShipAt(1).armor_points = -1.0F;
+    state.ShipAt(1).shield_points = 0.0F;
+    REQUIRE(NovaAiShip_IsDestroyed(state.ShipAt(1)));
+
+    for (int tick = 0; tick < 4; ++tick) {
+      NovaShip_TickDestroyedShipVisualState(state, state.ShipAt(1), 0.63F);
+    }
+    if (kApplyOriginalBugFixes) {
+      CHECK(!state.ShipAt(1).is_active);
+    } else {
+      // Faithful reproduction: neither delay clears the (0, 2] finale window.
+      CHECK(state.ShipAt(1).is_active);
+    }
+  }
 }
 
 TEST_CASE("player destruction seeds a tripled death presentation timer",
