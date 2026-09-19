@@ -121,31 +121,41 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
 
   const std::int16_t safe_radius = std::max<std::int16_t>(0, radius);
   if (large && safe_radius > 0) {
-    // These constants are the original DAT_005752b8/.80/.c8/.c0 values:
-    // 0.04, 0.50, 0.25, and 0.16 respectively. 0x004211d0 truncates each
+    // The scatter constants are the original x87 doubles
+    // DAT_005752b8/.80/.c8/.c0 = 0.04, 0.50, 0.25, 0.16. 0x004211d0 computes
+    // each child position as one extended-precision chain (FILD rand;
+    // FADD float impact; FSUB double bias; FSTP float) and truncates each
     // count toward zero (x87 FIST + residual/sign), not round-to-nearest.
-    const int inner_count = static_cast<int>(safe_radius * 0.04F);
-    const int inner_extent = std::max(1, static_cast<int>(safe_radius * 0.50F));
-    const float inner_bias = safe_radius * 0.25F;
+    const double radius_d = static_cast<double>(safe_radius);
+    const int inner_count = static_cast<int>(radius_d * 0.04);
+    const int inner_extent = std::max(1, static_cast<int>(radius_d * 0.50));
+    const double inner_bias = radius_d * 0.25;
     for (int i = 0; i < inner_count; ++i) {
-      NovaEffects_SpawnImpactEffect(
-          state,
-          x + static_cast<float>(RandomBelow(state, inner_extent)) - inner_bias,
-          y + static_cast<float>(RandomBelow(state, inner_extent)) - inner_bias,
-          1,
-          static_cast<std::int16_t>(4 + RandomBelow(state, 8)));
+      // Name the draws so the RNG order (x offset, y offset, variant) is
+      // sequenced, not left to the call's unspecified argument order.
+      const std::int16_t offset_x = RandomBelow(state, inner_extent);
+      const std::int16_t offset_y = RandomBelow(state, inner_extent);
+      const auto variant = static_cast<std::int16_t>(4 + RandomBelow(state, 8));
+      const auto child_x =
+          static_cast<float>(static_cast<double>(x) + offset_x - inner_bias);
+      const auto child_y =
+          static_cast<float>(static_cast<double>(y) + offset_y - inner_bias);
+      NovaEffects_SpawnImpactEffect(state, child_x, child_y, 1, variant);
     }
 
-    const int outer_count = static_cast<int>(safe_radius * 0.16F);
+    const int outer_count = static_cast<int>(radius_d * 0.16);
     const int outer_extent = std::max(1, static_cast<int>(safe_radius));
-    const float outer_bias = safe_radius * 0.50F;
+    const double outer_bias = radius_d * 0.50;
     for (int i = 0; i < outer_count; ++i) {
-      NovaEffects_SpawnImpactEffect(
-          state,
-          x + static_cast<float>(RandomBelow(state, outer_extent)) - outer_bias,
-          y + static_cast<float>(RandomBelow(state, outer_extent)) - outer_bias,
-          0,
-          static_cast<std::int16_t>(8 + RandomBelow(state, 16)));
+      const std::int16_t offset_x = RandomBelow(state, outer_extent);
+      const std::int16_t offset_y = RandomBelow(state, outer_extent);
+      const auto variant =
+          static_cast<std::int16_t>(8 + RandomBelow(state, 16));
+      const auto child_x =
+          static_cast<float>(static_cast<double>(x) + offset_x - outer_bias);
+      const auto child_y =
+          static_cast<float>(static_cast<double>(y) + offset_y - outer_bias);
+      NovaEffects_SpawnImpactEffect(state, child_x, child_y, 0, variant);
     }
   }
 
