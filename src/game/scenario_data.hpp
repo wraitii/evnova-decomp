@@ -329,7 +329,13 @@ struct ShipClass {
   // type", e.g. "Class A"). Drawn under the target-panel name.
   std::string subtitle;
 
-  std::int16_t cargo_holds = 0; // Holds
+  std::int16_t cargo_holds = 0; // Holds (loader stores |Holds|; sign becomes
+                                // allows_mass_expansions)
+  // Ghidra ShipClassDef +0xa40, set by the shp loader (0x004bd3c0): true when
+  // the raw Holds field is >= 0, false when negative. The Bible's "put a
+  // negative sign in front of Holds to prevent purchasing mass expansions"
+  // flag; read only by the outfit buy gate's negative-cargo arm (0x00491950).
+  bool allows_mass_expansions = true;
   std::int16_t base_shield = 0; // Shield
   std::int16_t base_armor = 0;  // Armor
   std::int16_t base_fuel = 0;   // Fuel (100 = 1 jump)

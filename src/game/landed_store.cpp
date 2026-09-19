@@ -591,11 +591,21 @@ bool NovaLanded_CanBuyOutfit(GameState &state,
         return false;
     }
   } else if (has_cargo) {
-    // A negative cargo-space mod (0x00491950) needs the ship class's +0xa40
-    // capability and total mass over the current cargo/junk load.
-    // TODO(decomp): ShipClassDef +0xa40 is not decoded in the port, so the
-    // reduction is currently ungated.
-    (void)cargo_mod;
+    // A negative cargo-space mod (0x00491950) trades cargo space away: it needs
+    // the ship class's +0xa40 "mass expansions allowed" byte (cleared by a
+    // negative raw Holds; ShipClass::allows_mass_expansions) and enough free
+    // cargo, i.e. the player hull's total capacity (no escorts, cf.
+    // Player_ComputeFleetCargoCapacity) minus the player's carried cargo/junk.
+    // Positive cargo mods (Cargo Expansion / Cargo Retool) only need the free
+    // mass checked above.
+    // The original narrows both counts to signed 16 bits before subtracting.
+    const std::int32_t free_cargo =
+        static_cast<std::int16_t>(Ship_ComputeShipTotalCargoCapacity(state)) -
+        static_cast<std::int16_t>(Player_ComputeCargoAndJunkTotal(state));
+    if (cargo_mod < 0 &&
+        (!ship->allows_mass_expansions || free_cargo < -cargo_mod)) {
+      return false;
+    }
   } else if (has_map) {
     if (state.control.map_grant_latch)
       return false;

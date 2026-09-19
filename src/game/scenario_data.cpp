@@ -452,7 +452,14 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 // 0x378).
 [[nodiscard]] ShipClass DecodeShip(std::span<const std::byte> bytes) {
   ShipClass s;
-  s.cargo_holds = ReadBeI16(bytes, 0x00); // Holds
+  // Holds (0x004bd3c0): a negative raw value both decodes to its absolute
+  // capacity and clears the "mass expansions allowed" byte at ShipClassDef
+  // +0xa40 (Bible: negative Holds forbids purchasing mass expansions).
+  s.cargo_holds = ReadBeI16(bytes, 0x00);
+  if (s.cargo_holds < 0) {
+    s.allows_mass_expansions = false;
+    s.cargo_holds = static_cast<std::int16_t>(-s.cargo_holds);
+  }
   s.base_shield = ReadBeI16(bytes, 0x02);
   s.accel = static_cast<float>(ReadBeI16(bytes, 0x04));
   s.speed = static_cast<float>(ReadBeI16(bytes, 0x06));
