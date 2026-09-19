@@ -449,6 +449,13 @@ void SdlPlatform::ApplyCenteredPresentation() {
 
 void SdlPlatform::SetFullscreenPlayfield() { ApplyFullscreenPresentation(); }
 
+void SdlPlatform::ApplyWindowMode(bool windowed) {
+  if (!window_) {
+    return;
+  }
+  SDL_SetWindowFullscreen(window_.get(), !windowed);
+}
+
 void SdlPlatform::SetScaledPlayfield() { ApplyScaledPresentation(); }
 
 void SdlPlatform::SetCenteredPlayfield() { ApplyCenteredPresentation(); }

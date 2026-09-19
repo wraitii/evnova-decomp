@@ -200,7 +200,6 @@ TEST_CASE("Locked quality preferences force the render values") {
   prefs.share_processor_time = false;
   prefs.quicktime_movies = true;
   prefs.smoke_trails = true;
-  prefs.run_in_window = true;
   prefs.ship_animations = false;
   prefs.engine_glows = false;
   prefs.running_lights = false;
@@ -214,7 +213,6 @@ TEST_CASE("Locked quality preferences force the render values") {
   CHECK(prefs.share_processor_time == true);
   CHECK(prefs.quicktime_movies == false); // inverted: 0 = movies on
   CHECK(prefs.smoke_trails == false);     // inverted: 0 = trails on
-  CHECK(prefs.run_in_window == false);
   CHECK(prefs.ship_animations == true);
   CHECK(prefs.engine_glows == true);
   CHECK(prefs.running_lights == true);
@@ -225,6 +223,9 @@ TEST_CASE("Locked quality preferences force the render values") {
   CHECK(prefs.brightness == 3);
   // starmap_show_borders is NOT locked: the map owns it.
   CHECK(prefs.starmap_show_borders == true);
+  // run_in_window is NOT locked either: the port defaults to a window and the
+  // Settings checkbox applies the OS window mode live.
+  CHECK(prefs.run_in_window == true);
 }
 
 TEST_CASE("Original preference file round-trips modeled settings and keys") {

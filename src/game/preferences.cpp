@@ -785,7 +785,7 @@ void NovaPreferences::ResetToDefaults() {
   share_processor_time = true;
   quicktime_movies = false;
   smoke_trails = false;
-  run_in_window = false;
+  run_in_window = true;
   ship_animations = true;
   engine_glows = true;
   running_lights = true;
@@ -805,7 +805,6 @@ void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs) {
   prefs.share_processor_time = true;
   prefs.quicktime_movies = false; // inverted: false = movies "on"
   prefs.smoke_trails = false;     // inverted: false = trails on
-  prefs.run_in_window = false;    // the port always presents the playfield
   prefs.ship_animations = true;
   prefs.engine_glows = true;
   prefs.running_lights = true;
@@ -928,7 +927,6 @@ namespace {
   case 1:  // Share Processor Time
   case 8:  // QuickTime Movies
   case 9:  // Smoke Trails
-  case 10: // Run in a Window
   case 11: // Ship Animations
   case 12: // Engine Glows
   case 13: // Running Lights
@@ -1301,6 +1299,11 @@ bool NovaMenu_RunSettingsDialog(
             break; // Disabled control: ignore the click.
           }
           TogglePref(prefs, *hit);
+          // Run in a Window applies immediately, as the original's
+          // DDIsWindowed toggle did. The source global was DAT_00bec178.
+          if (*hit == 10) {
+            platform.ApplyWindowMode(prefs.run_in_window);
+          }
           if (*hit == 7 && !prefs.intro_music && music.IsPlaying()) {
             music.Stop();
           } else if (*hit == 7 && prefs.intro_music) {

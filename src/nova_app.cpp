@@ -1182,6 +1182,10 @@ int NovaApp_Run(NovaRuntime &runtime) {
   if (!game::NovaPrefs_LoadFromSystemStore(runtime.prefs)) {
     NovaLog::Info("preferences: using original defaults");
   }
+  // Apply the stored window mode before the first frame. The port defaults to
+  // a window; an uncheck of "Run in a Window" switches the OS window to
+  // fullscreen (the original's DDIsWindowed toggle, DAT_00bec178).
+  runtime.platform.ApplyWindowMode(runtime.prefs.run_in_window);
   // Hand the command-query service the now-loaded binding table. Key Settings
   // later edits runtime.prefs.bindings in place, so the install stays current.
   game::NovaInput_InstallCommandBindings(&runtime.prefs.bindings);
