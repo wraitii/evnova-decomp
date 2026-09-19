@@ -906,6 +906,9 @@ void ProbeServer::OnPresent(SDL_Renderer *renderer) {
   if (!running_.load()) {
     return;
   }
+  // Publish the frame boundary before anything else: InjectClick waits on this
+  // to make an injected click ordered against the frame that consumes it.
+  frame_count_.fetch_add(1, std::memory_order_release);
   // Step budget: after the counted frames, latch the pause again.
   int remaining = step_remaining_.load();
   if (remaining > 0 &&
@@ -990,10 +993,28 @@ void ProbeServer::InjectClick(float x, float y) {
   down.button.clicks = 1;
   down.button.x = x;
   down.button.y = y;
-  const std::lock_guard lock(sync_);
-  key_events_.push_back(motion);
-  key_events_.push_back(down);
-  sync_cv_.notify_all();
+  std::uint64_t enqueued_at = 0;
+  {
+    const std::lock_guard lock(sync_);
+    key_events_.push_back(motion);
+    key_events_.push_back(down);
+    // Read the frame counter after enqueuing: the next pump drains these events
+    // into SDL and the consuming modal republishes its UI before the following
+    // boundary, so two boundaries guarantee the click has been seen.
+    enqueued_at = frame_count_.load(std::memory_order_acquire);
+    sync_cv_.notify_all();
+  }
+  // Order clicks at frame granularity. Fire-and-forget clicks let a harness
+  // post a burst (e.g. the store paging loop's Next clicks) that the modal then
+  // drains in a single frame, overshooting the target page, and let the next
+  // step read /probe/ui before the click was consumed. A paused or wedged main
+  // thread still returns after the bounded wait, preserving the old semantics.
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (frame_count_.load(std::memory_order_acquire) < enqueued_at + 2 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
 }
 
 void ProbeServer::PublishUi(std::string window_name,
