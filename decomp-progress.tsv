@@ -601,7 +601,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004756C0	Sprite_ReleasePreparedFramesAndDetachResourceData		0%	
 0x00475740	Sprite_AddFrame	src/game/sprite_world.cpp	80%	Sprite::AddFrame appends a reference-counted SpriteFrameImage to the sprite's frame list (shared_ptr refcount), returning the new index or -1 on null; frame capacity growth mirrors Sprite_AddFrame's array growth
 0x00475800	Sprite_InvokeDrawOrUpdateProc		0%	
-0x00475830	Sprite_SetCurrentFrame		0%	
+0x00475830	Sprite_SetCurrentFrame	src/game/sprite_world.cpp	70%	Sprite::SetCurrentFrame resolves the requested index exactly as the original: negative clamps to 0, otherwise `index % num_frames` (Ghidra 0x00475830 `param_2 % *(int*)(sprite+0x54)`). The wrap (not a clamp) is what fixes the Manticore/Argosy engine glow: their shän glow sheet carries a single FramesPer=36 rotation while the base sheet carries 3/6 rows, so the composed `row*FramesPer + heading` index must fold back to the heading frame; the previous clamp stuck the glow on the last frame (reads as snapping to straight up). Same modulo resolution applied to Sprite::TheFrame and the SpriteAsset DrawSprite overload, which is the actual ship-layer draw path. The per-frame anchor delta/position bookkeeping the original also performs here is realised at draw time in DrawSprite (see 0x00475AF0 row).
 0x00475940	Sprite_SetUpdateCallback		0%	
 0x00475970	Sprite_SetDrawProcValidated		0%	
 0x00475A60	Sprite_SetFrameRange		0%	

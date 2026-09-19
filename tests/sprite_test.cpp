@@ -39,11 +39,78 @@ TEST_CASE("Sprite_AnchorToScreen centres a centred-anchor frame",
   CHECK(p.screen_y == Catch::Approx(400.0F / 2.0F - ay));
 }
 
-// Sprite lifecycle/refcounting: frames are appended, the sprite's presented
-// frame clamps into range, and Release drops the set so the (shared) frame
+// The SpriteAsset DrawSprite overload (the actual ship-layer draw path) must
+// resolve the frame index the way Sprite_SetCurrentFrame does: negative -> 0,
+// otherwise modulo the asset's own frame_count. This is the Manticore/Argosy
+// engine-glow regression: the composed `row*FramesPer + heading` index is
+// larger than the glow's single 36-frame set, and clamping pinned it to the
+// last frame (reading as straight up) instead of wrapping to the heading frame.
+TEST_CASE("asset draw wraps frame index modulo its own frame count",
+          "[sprite][frame-wrap]") {
+  std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface{
+      SDL_CreateSurface(40, 40, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface};
+  REQUIRE(surface);
+  std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer{
+      SDL_CreateSoftwareRenderer(surface.get()), SDL_DestroyRenderer};
+  REQUIRE(renderer);
+
+  const auto make_texture =
+      [&](std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+        std::vector<std::uint8_t> pixels(8 * 8 * 4);
+        for (std::size_t i = 0; i < pixels.size(); i += 4) {
+          pixels[i] = r;
+          pixels[i + 1] = g;
+          pixels[i + 2] = b;
+          pixels[i + 3] = 0xff;
+        }
+        return SdlTexture::Create(renderer.get(), 8, 8, pixels);
+      };
+
+  SpriteAsset asset;
+  asset.tile_width = 8;
+  asset.tile_height = 8;
+  asset.frames.resize(2);
+  asset.frames[0].texture = make_texture(255, 0, 0); // red
+  asset.frames[0].anchor_x = 4.0F;
+  asset.frames[0].anchor_y = 4.0F;
+  asset.frames[1].texture = make_texture(0, 0, 255); // blue
+  asset.frames[1].anchor_x = 4.0F;
+  asset.frames[1].anchor_y = 4.0F;
+  asset.frame_count = 2;
+
+  const auto sample = [&](int frame) {
+    REQUIRE(SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255));
+    REQUIRE(SDL_RenderClear(renderer.get()));
+    DrawSprite(renderer.get(),
+               asset,
+               frame,
+               0.0F,
+               0.0F,
+               0.0F,
+               0.0F,
+               40,
+               40,
+               SpriteDrawOptions{});
+    REQUIRE(SDL_FlushRenderer(renderer.get()));
+    SDL_Color color{};
+    REQUIRE(SDL_ReadSurfacePixel(
+        surface.get(), 20, 20, &color.r, &color.g, &color.b, &color.a));
+    return color;
+  };
+
+  CHECK(sample(0).r == 255);  // frame 0
+  CHECK(sample(1).b == 255);  // frame 1
+  CHECK(sample(2).r == 255);  // 2 % 2 == 0 -> frame 0 (not clamp)
+  CHECK(sample(3).b == 255);  // 3 % 2 == 1 -> frame 1
+  CHECK(sample(-5).r == 255); // negative -> frame 0
+}
+
+// Sprite lifecycle/refcounting: frames are appended, the presented frame
+// index is resolved negative->0 then modulo the frame count
+// (Sprite_SetCurrentFrame), and Release drops the set so the (shared) frame
 // images are freed. Mirrors Sprite_AddFrame / Sprite_SetCurrentFrame /
 // Sprite_Release refcount behaviour.
-TEST_CASE("sprite frame lifecycle appends, clamps and releases",
+TEST_CASE("sprite frame lifecycle appends, wraps and releases",
           "[sprite][lifecycle]") {
   Sprite sprite;
   // A shared frame image kept alive across the sprite and an outer handle, so
@@ -53,12 +120,14 @@ TEST_CASE("sprite frame lifecycle appends, clamps and releases",
   REQUIRE(sprite.AddFrame(shared) == 0);
   REQUIRE(sprite.AddFrame(MetaImage(35, 35)) == 1);
   CHECK(sprite.FrameCount() == 2);
-  CHECK(sprite.TheFrame(-5) == raw); // clamps up to frame 0
+  CHECK(sprite.TheFrame(-5) == raw); // negative clamps up to frame 0
   CHECK(sprite.TheFrame(1) != raw);  // frame 1 is the distinct image
-  CHECK(sprite.TheFrame(99) != raw); // clamps to last frame (1)
+  CHECK(sprite.TheFrame(99) != raw); // 99 % 2 == 1 -> frame 1
 
-  sprite.SetCurrentFrame(42); // clamps to last frame
-  CHECK(sprite.TheFrame(42) != raw);
+  // Sprite_SetCurrentFrame wraps modulo the frame count; 42 % 2 == 0.
+  sprite.SetCurrentFrame(42);
+  CHECK(sprite.TheFrame(42) == raw);
+  CHECK(sprite.TheFrame(43) != raw);
 
   // SetPositionFromCurrentFrameAnchor stores the located position.
   sprite.SetPositionFromCurrentFrameAnchor(120, -40);

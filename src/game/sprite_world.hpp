@@ -176,10 +176,12 @@ public:
   // Sprite_Release 0x00476bd0: releases this sprite, releasing each frame's
   // image refcount; an image reaching zero frees its SDL handle.
   void Release();
-  // Sprite_SetCurrentFrame 0x00475830: makes `index` the presented frame,
-  // clamped to the frame range.
+  // Sprite_SetCurrentFrame 0x00475830: makes `index` the presented frame. A
+  // negative index clamps to 0, otherwise the index is taken modulo the frame
+  // count (so effect layers shorter than the hull wrap onto their own frames).
   void SetCurrentFrame(int index);
-  // The frame image at `index` (clamped), or null when empty.
+  // The frame image at `index`, resolved like SetCurrentFrame (negative -> 0,
+  // otherwise modulo the frame count); null when empty.
   [[nodiscard]] const SpriteFrameImage *TheFrame(int index) const;
   // Sprite_SetPositionFromCurrentFrameAnchor (0x00475af0): stores the world
   // position this sprite's current-frame anchor is aligned to (the position
