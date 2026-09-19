@@ -1248,11 +1248,11 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
       // Shot_UpdateBeamHitQueue (0x0042f270) keeps a mode-0 beam on the owner's
       // current heading (falling back to the queued bearing when there is no
       // live owner) and scans for the nearest active ship inside a narrow
-      // forward cone within BeamLength + ceil(trunc(frame_height*0.66)/2). A
-      // hit truncates the visible endpoint to distance - frame_height*0.2;
+      // forward cone within BeamLength + ceil(trunc(frame_span*0.66)/2). A
+      // hit truncates the visible endpoint to distance - frame_span*0.2;
       // with nothing in reach the beam ends exactly at BeamLength.
-      // frame_height = Sprite_GetShipClassEscortFrameHeight (0x004624c0), a
-      // FULL frame height (bottom - top) with fallback 0x4b = 75; 0.66 and 0.2
+      // frame_span = Sprite_GetShipClassEscortFrameWidth (0x004624c0), the
+      // FULL frame width (right - left) with fallback 0x4b = 75; 0.66 and 0.2
       // are the doubles DAT_005753d0 / DAT_005753d8.
       // The 0.66 (DAT_005753d0) and 0.2 (DAT_005753d8) scales are IEEE
       // doubles; the original multiplies with FMUL double, then the x87 FIST+
@@ -1517,13 +1517,13 @@ void NovaWeapon_TickShots(GameState &state,
     if (trail_raw_call_count > 0 && tick_scale > 0.0F &&
         (prefs == nullptr || !prefs->smoke_trails) &&
         weapon->trail_particle_count > 0) {
-      // Sprite_GetFrameFullHeight(shot->sprite_ref) / 2, rounded up, is the
+      // Sprite_GetFrameFullWidth(shot->sprite_ref) / 2, rounded up, is the
       // rear-edge anchor used by 0x0043609d. A prepared collision mask carries
-      // the exact frame height; otherwise the original's missing/default shot
-      // sprite is represented by its 32px full-height default (half = 16).
+      // the exact frame width; otherwise the original's missing/default shot
+      // sprite is represented by its 32px full-width default (half = 16).
       const float anchor_offset_px =
           weapon->trail_particle_count > 0 && shot.collision_mask.HasMask()
-              ? static_cast<float>((shot.collision_mask.mask->height + 1) / 2)
+              ? static_cast<float>((shot.collision_mask.mask->width + 1) / 2)
               : 16.0F;
       for (int raw_call = 0; raw_call < trail_raw_call_count; ++raw_call) {
         // TODO(decomp(0x00436170)) skipped: ActiveShot does not model the

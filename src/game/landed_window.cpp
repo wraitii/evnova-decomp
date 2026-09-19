@@ -44,28 +44,28 @@ namespace game {
 // Stellar_MaxLandingDistance: the per-axis landing approach envelope for a
 // target stellar. NOT a distinct binary function -- the arrival gate inlines
 // this computation at 0x00458786..0x004587a9, using
-// System_GetCurrentSystemLinkSpriteHeight (0x00462410) and the 1.75 double
+// System_GetCurrentSystemLinkSpriteWidth (0x00462410) and the 1.75 double
 // k_stellar_arrival_envelope_scale_f64 (0x005756a0).
 //
 // Exact return value: a half-extent in pixels. The landing is in range only
 // when BOTH |player.pos_x - stellar.pos_x| AND |player.pos_y - stellar.pos_y|
 // are strictly less than this value (a square envelope, not a radius):
-//   - target_sprite_full_height <= 0 (no prepared ambient sprite): 75 (0x4b).
-//   - otherwise: round(target_sprite_full_height * 1.75), where the input is
-//     the link_a spin set's current-frame full height. If a sprite is prepared
+//   - target_sprite_full_width <= 0 (no prepared ambient sprite): 75 (0x4b).
+//   - otherwise: round(target_sprite_full_width * 1.75), where the input is
+//     the link_a spin set's current-frame full width. If a sprite is prepared
 //     but the link_a set is unavailable,
-//     System_GetCurrentSystemLinkSpriteHeight itself returns 150 (0x96), giving
+//     System_GetCurrentSystemLinkSpriteWidth itself returns 150 (0x96), giving
 //     round(150 * 1.75) = 262.
 // nearbyint mirrors the original x87 FIST (round half to even).
-float Stellar_MaxLandingDistance(std::int16_t target_sprite_full_height) {
+float Stellar_MaxLandingDistance(std::int16_t target_sprite_full_width) {
   constexpr float kNoSpriteAxisRange = 0x4b; // 75
   constexpr double kSpriteRangeScale =
       1.75; // k_stellar_arrival_envelope_scale_f64
-  if (target_sprite_full_height <= 0) {
+  if (target_sprite_full_width <= 0) {
     return kNoSpriteAxisRange;
   }
   return static_cast<float>(std::nearbyint(
-      static_cast<double>(target_sprite_full_height) * kSpriteRangeScale));
+      static_cast<double>(target_sprite_full_width) * kSpriteRangeScale));
 }
 
 // Ghidra 0x004250f0 Player_RefuelShipWithCredits. Arrival auto-refuel for the
@@ -128,7 +128,7 @@ void Player_RefuelShipWithCredits(GameState &state) {
 // ---------------------------------------------------------------------------
 bool Stellar_Dock(GameState &state,
                   LandedContext &ctx,
-                  std::int16_t target_sprite_full_height) {
+                  std::int16_t target_sprite_full_width) {
   ctx.landed = false;
   ctx.denial = LandedDenial::kNone;
   const std::int16_t stellar_id = state.travel.selected_stellar_id;
@@ -159,7 +159,7 @@ bool Stellar_Dock(GameState &state,
   //    unexpired maneuver timer -> too fast.
   constexpr float kApproachVelocityLimit = 0.75F; // g_lit_0p75
   const float arrival_axis_range =
-      Stellar_MaxLandingDistance(target_sprite_full_height);
+      Stellar_MaxLandingDistance(target_sprite_full_width);
   const bool within_envelope =
       std::abs(state.player.pos_x - static_cast<float>(stellar->pos_x)) <
           arrival_axis_range &&

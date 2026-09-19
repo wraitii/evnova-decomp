@@ -905,10 +905,10 @@ enum class LandCommandResult {
   kBlockedFrame,
 };
 
-// Ghidra 0x00462410 System_GetCurrentSystemLinkSpriteHeight (landing use): the
-// landing envelope reads Sprite_GetFrameFullHeight (0x00462390) on the target's
-// link_a spin set, i.e. the full frame height (bottom - top of the sprite's
-// placed bounds +0x20/-+0x1c). The gate (Stellar_HandleStellarEntryAndExit
+// Ghidra 0x00462410 System_GetCurrentSystemLinkSpriteWidth (landing use): the
+// landing envelope reads Sprite_GetFrameFullWidth (0x00462390) on the target's
+// link_a spin set, i.e. the full frame width (right - left of the sprite's
+// placed bounds +0x20/+0x1c). The gate (Stellar_HandleStellarEntryAndExit
 // 0x00458e33/0x00458f7d) applies a two-tier fallback before this runs:
 //   - the stellar's ambient sprite (StellarDef+0x0) not prepared -> the gate
 //     uses 0x4b (75) directly, without calling this;
@@ -919,10 +919,10 @@ enum class LandCommandResult {
 // spin set resolves" (link_b when active, else link_a). Returns 0 only for
 // the first tier; the 0x96 tier returns 150 so the envelope becomes
 // round(150 * 1.75) = 262 as in the original.
-std::int16_t StellarArrivalSpriteFullHeight(SdlPlatform &platform,
-                                            SpaceflightView &view,
-                                            const GameState &state,
-                                            std::int16_t stellar_id) {
+std::int16_t StellarArrivalSpriteFullWidth(SdlPlatform &platform,
+                                           SpaceflightView &view,
+                                           const GameState &state,
+                                           std::int16_t stellar_id) {
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   if (stellar == nullptr) {
     return 0;
@@ -936,10 +936,10 @@ std::int16_t StellarArrivalSpriteFullHeight(SdlPlatform &platform,
   const SpriteAsset *displayed = view.sprite_store().Spin(
       platform.renderer(), static_cast<std::uint16_t>(displayed_link + 1000));
   if (displayed == nullptr || displayed->frames.empty() ||
-      displayed->tile_height <= 0) {
+      displayed->tile_width <= 0) {
     return 0;
   }
-  // Tier 2: System_GetCurrentSystemLinkSpriteHeight on link_a.
+  // Tier 2: System_GetCurrentSystemLinkSpriteWidth on link_a.
   if (stellar->link_a_id < 0 || stellar->link_a_id > 0xff ||
       stellar->system_id != state.player.current_system_id) {
     NovaLog::Info("stellar {} link half-span fallback 0x96: link_a_id={}, "
@@ -953,14 +953,14 @@ std::int16_t StellarArrivalSpriteFullHeight(SdlPlatform &platform,
   const SpriteAsset *spin = view.sprite_store().Spin(
       platform.renderer(),
       static_cast<std::uint16_t>(stellar->link_a_id + 1000));
-  if (spin == nullptr || spin->frames.empty() || spin->tile_height <= 0) {
+  if (spin == nullptr || spin->frames.empty() || spin->tile_width <= 0) {
     NovaLog::Info("stellar {} link_a spin set {} unavailable; half-span "
                   "fallback 0x96",
                   stellar_id,
                   stellar->link_a_id + 1000);
     return 0x96;
   }
-  return static_cast<std::int16_t>(spin->tile_height);
+  return static_cast<std::int16_t>(spin->tile_width);
 }
 
 // Ghidra 0x0044aa70 PlayerTick_LandCommandDispatch (0x00451f8f ->
@@ -989,7 +989,7 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
       state.travel_reticle_pulse = 256.0F;
     }
   }
-  const std::int16_t target_sprite_full_height = StellarArrivalSpriteFullHeight(
+  const std::int16_t target_sprite_full_width = StellarArrivalSpriteFullWidth(
       platform, view, state, state.travel.selected_stellar_id);
   // A freshly selected stellar has not been approached yet. The original's
   // travel-arm branch (0x00459160) initialises g_travel_engage_timer and
@@ -1022,7 +1022,7 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
       return LandCommandResult::kContinue;
     }
     const float arrival_axis_range =
-        Stellar_MaxLandingDistance(target_sprite_full_height);
+        Stellar_MaxLandingDistance(target_sprite_full_width);
     const bool within_envelope =
         std::abs(state.player.pos_x - static_cast<float>(target->pos_x)) <
             arrival_axis_range &&
@@ -1090,7 +1090,7 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
     return LandCommandResult::kBlockedFrame;
   }
   LandedContext ctx;
-  if (Stellar_Dock(state, ctx, target_sprite_full_height)) {
+  if (Stellar_Dock(state, ctx, target_sprite_full_width)) {
     NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
                   ctx.stellar_id);
     // Mission resolution (Mission_TickReactionSlotsForTravelInteraction
@@ -1340,7 +1340,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   HudRenderer hud;
   hud.Install(platform, state);
   // The radar resolves stellar blip sizes through the view's sprite store
-  // (Sprite_GetFrameFullHeight on each loaded spin set).
+  // (Sprite_GetFrameFullWidth on each loaded spin set).
   hud.AttachSpriteStore(&view.sprite_store());
 
   // Preload the complete gameplay sound handle table before the first frame.
@@ -1563,7 +1563,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         if (const auto resolved = FlightAutomationController::ResolveStellar(
                 state, request->target)) {
           envelope = Stellar_MaxLandingDistance(
-              StellarArrivalSpriteFullHeight(platform, view, state, *resolved));
+              StellarArrivalSpriteFullWidth(platform, view, state, *resolved));
         }
         (void)automation.LandAt(
             state, request->target, host_now_ms, request->timeout_ms, envelope);

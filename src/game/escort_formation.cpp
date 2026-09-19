@@ -34,7 +34,7 @@ constexpr float kFormationRadiusMaxPx = 60.0F; // 0x3c
 constexpr std::int16_t kLeaderSpanFallback =
     0x40; // leader invalid-class default
 constexpr std::int16_t kFollowerSpanFallback =
-    0x4b; // Sprite_GetShipClassEscortFrameHeight
+    0x4b; // Sprite_GetShipClassEscortFrameWidth
 // System_RebuildInitialNpcAndMissionPopulation (0x0041af90) escort scatter.
 constexpr float kScatterDistanceStart = 45.0F;      // FLOAT_0057524c
 constexpr float kScatterDistanceStep = 1.165F;      // DOUBLE_00575250
@@ -51,7 +51,7 @@ int RoundHeadingDeg(const Ship &ship) {
   return ((deg % 360) + 360) % 360;
 }
 
-// Sprite_GetShipClassEscortFrameHeight (0x004624c0): the ship-class sprite
+// Sprite_GetShipClassEscortFrameWidth (0x004624c0): the ship-class sprite
 // span used to size wedge spacing. The original resolves
 // ShipClassDef.base_sprite_clone_source_ship_class (+0xa08), which the
 // sh\x8an loader writes to the clone-source class; clone classes share the
@@ -59,8 +59,8 @@ int RoundHeadingDeg(const Ship &ship) {
 // for clones). Divergence: non-clone classes read clone source 0 (class 0's
 // sprite) in the original when the field defaults to zero; the port always
 // uses the class's own span. TODO(decomp) if a scenario shows spacing drift.
-// Like Sprite_GetFrameFullHeight, this returns the FULL frame height (see
-// Ghidra 0x004624c0/0x00462390; the "frame width" wording here was a misread),
+// Like Sprite_GetFrameFullWidth, this returns the FULL frame width (see
+// Ghidra 0x004624c0/0x00462390),
 // fallback 0x4b = 75.
 // Cached per class id: the scenario resource set is fixed for the process
 // lifetime, and this runs per follower per frame.

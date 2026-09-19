@@ -246,7 +246,7 @@ private:
   SpriteStore sprite_store_;
 
 public:
-  // Radar blip sizing reads the stellar spin sets (Sprite_GetFrameFullHeight
+  // Radar blip sizing reads the stellar spin sets (Sprite_GetFrameFullWidth
   // 0x00462390 on the loaded set); the HUD renderer gets read access here.
   [[nodiscard]] SpriteStore &sprite_store() { return sprite_store_; }
 

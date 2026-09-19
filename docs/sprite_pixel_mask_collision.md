@@ -49,20 +49,21 @@ stellar arms are now reimplemented; only the freeflight-object scoop remains.
 `Ship_HandleSpritePairCollision` (0x004374f0) deliberately falls back to the
 cheap bounding circle:
 
-- `Sprite_TestBoundingCircleOverlap` (0x00475be0): `half = (bottom - top) / 2`,
+- `Sprite_TestBoundingCircleOverlap` (0x00475be0): `half = (right - left) / 2`
+  (the full frame WIDTH, `Sprite_GetFrameFullWidth`), reused on both axes;
   frame centre = `(left + half, top + half)`, and a **strict** `<` on squared
   distance against `(halfA + halfB)^2`.
 - The circle is used when the average frame tick scale is at/above
-  `_DAT_005754c8` (2.0) **or** `Sprite_GetFrameFullHeight` returns `< 0x21`.
-- `Sprite_GetFrameFullHeight` (0x00462390) actually returns the **full** frame
-  height (`bottom - top`), default `0x20`. It is also the blast span source in
+  `_DAT_005754c8` (2.0) **or** `Sprite_GetFrameFullWidth` returns `< 0x21`.
+- `Sprite_GetFrameFullWidth` (0x00462390) actually returns the **full** frame
+  width (`right - left`), default `0x20`. It is also the blast span source in
   `Shot_ResolveCollisions` (`blast_radius + span * 0.333`).
 - The asteroid callback (0x00436f70) has no such threshold: it always uses the
   pixel-mask test.
 
 The clean-room reproduces this decision: `ShipContactUsesPixelMask`
 (`src/game/collision.cpp`) selects the mask iff
-`GameState::last_frame_tick_scale < 2.0` **and** the target ship mask height
+`GameState::last_frame_tick_scale < 2.0` **and** the target ship mask width
 `> 0x20`; asteroids always use a resolved mask. `last_frame_tick_scale` is the
 port's stand-in for `g_avg_frame_tick_scale` (0x00735448), re-asserted at the
 top of `NovaFrame_TickSystems` and in `NovaWeapon_TickShots` (normalized 30 Hz
@@ -94,9 +95,9 @@ ship/asteroid sheets: `SpriteFrame_CreateFromRect` (0x00476400) zeroes
 top-left is `world - (half_a, half_b)`:
 
 - `Ship_UpdateVisualState` (0x00428340) and `Asteroid_UpdateSprites`
-  (0x00436910) pass `(ceil(height/2), ceil(width/2))` — the two span helpers
-  are used on the opposite axes.
-- `Shot_HandleShot` (0x00435830) passes `ceil(height/2)` on both axes.
+  (0x00436910) pass `(ceil(width/2), ceil(height/2))` — the full width on x,
+  the full height on y.
+- `Shot_HandleShot` (0x00435830) passes `ceil(width/2)` on both axes.
 
 For the shipped square frames (24x24 shuttle hull, 50x50 asteroids) this is the
 frame centre. `BindEntityMask` sets these effective anchors from the decoded
@@ -138,15 +139,15 @@ mask dimensions, so the non-square case is represented too.
 
 - Circle fallback uses a strict `<`, so a contact exactly at the sum of the
   half-spans is a miss.
-- `Sprite_GetFrameFullHeight` returns the full frame height despite the name, and
-  ship/asteroid placement uses it on the x axis and
-  `Sprite_GetFrameFullWidth` (full width) on the y axis.
+- `Sprite_GetFrameFullWidth` returns the full frame width and ship/asteroid
+  placement uses it on the x axis; `Sprite_GetFrameFullHeight` returns the full
+  frame height and is used on the y axis.
 - The mask is chosen only when `g_avg_frame_tick_scale < 2.0` and the target
-  ship's frame height is `> 0x20`; both boundaries are reproduced (tests in
+  ship's frame width is `> 0x20`; both boundaries are reproduced (tests in
   `tests/sprite_mask_test.cpp`).
 - The effective collision anchor is the pre-subtracted half-span described
   above, not a class-defined centre of mass: the ship/asteroid sheet frames
-  carry a zero anchor and the callers subtract `(height/2, width/2)`.
+  carry a zero anchor and the callers subtract `(width/2, height/2)`.
 - Ship masks cover the base hull only, not the engine-glow / weapon overlays.
 
 ### Stellar callers (ported)
@@ -176,7 +177,8 @@ tests the prepared frames directly:
   call it, so the sprite the player sees and the collision mask can never
   select different zones. A single animation state drives both.
 - **Anchor.** Stellar placement pre-subtracts the same
-  `(ceil(height/2), ceil(width/2))` half-span as ships/asteroids (`swapped_axes`).
+  `(ceil(width/2), ceil(height/2))` half-span as ships/asteroids
+  (`BindEntityMask`'s non-shot placement).
 
 #### Fatal stellar crash (0x0043aed0)
 

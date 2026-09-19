@@ -125,16 +125,16 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
   if (RandomBelow(state, roll_bound) != 0) {
     return;
   }
-  // Original: round(Sprite_GetFrameFullHeight(ship) *
+  // Original: round(Sprite_GetFrameFullWidth(ship) *
   // g_death_puff_offset_scale_f64 (0.25, 0x00575330)). Use the decoded sh\x8an
-  // BaseYSize for the class; fall back to the collision envelope only for
+  // BaseXSize for the class; fall back to the collision envelope only for
   // unit/test states whose ship table has no sprite descriptor. 0x00428340
   // truncates both spans toward zero (x87 FIST + residual/sign correction).
-  const int sprite_height =
-      cls->base_y_size > 0
-          ? static_cast<int>(cls->base_y_size)
+  const int sprite_width =
+      cls->base_x_size > 0
+          ? static_cast<int>(cls->base_x_size)
           : static_cast<int>(std::max(0.0F, ship.collision_radius_px) * 2.0F);
-  int extent = static_cast<int>(static_cast<float>(sprite_height) * 0.25F);
+  int extent = static_cast<int>(static_cast<float>(sprite_width) * 0.25F);
   if (extent < 1) {
     extent = 1;
   }

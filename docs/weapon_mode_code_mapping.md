@@ -111,10 +111,10 @@ stores no coordinates. Source = owner position + owner turret-exit offset (now m
 `weapon_detail::ApplyTurretSpreadVelocity`, applied at queue time and every tick).
 
 - **Mode 0 (fixed beam)** keeps the owner's current heading, even when a target slot was recorded. It scans for the
-  nearest eligible ship within `BeamLength + ceil(trunc(frame_height*0.66)/2)` and inside a
-  forward cone of `trunc(frame_height*0.66)*10/32` degrees (frame_height = `Sprite_GetShipClassEscortFrameHeight`
-  0x004624c0, a full frame height, fallback 0x4b=75). A hit truncates the endpoint to `trunc(distance -
-  frame_height*0.2)`; nothing in reach ends at exactly `BeamLength`. The 0.66 and 0.2 scales are the doubles
+  nearest eligible ship within `BeamLength + ceil(trunc(frame_span*0.66)/2)` and inside a
+  forward cone of `trunc(frame_span*0.66)*10/32` degrees (frame_span =
+  `Sprite_GetShipClassEscortFrameWidth` 0x004624c0 returns the full frame width, fallback 0x4b=75). A hit
+  truncates the endpoint to `trunc(distance - frame_span*0.2)`; nothing in reach ends at exactly `BeamLength`. The 0.66 and 0.2 scales are the doubles
   DAT_005753d0 / DAT_005753d8; all three conversions use the x87 FIST truncation idiom, not round-to-nearest. A valid
   contact near the outer reach can truncate to longer than `BeamLength` (e.g. 120 px target -> 105 px beam); the original
   does not re-clamp to `BeamLength`.

@@ -226,7 +226,7 @@ shipped window layout is `docs/reference/boarding.jpg`.
   `Boarding_ResetShipAndAttackersAfterBoarding` port, and the capture-decision
   dialog + swap (see `docs/player_ship_swap.md`).
 - Range gate uses the `sh\x8an` descriptor loaded at `ship_class_id + 0x80`;
-  `Sprite_GetFrameFullHeight`/`Width` return the FULL frame spans (bounds
+  `Sprite_GetFrameFullWidth`/`FullHeight` return the FULL frame spans (bounds
   subtraction, default 0x20), so the gate is half the full frame per axis.
 - `NovaAi_UpdateBehavior0x03CaptureVariant` (ship_ai.cpp) ports 0x004038b0 end
   to end (0x16 guard, disabled-ship scan, acquire/travel ladder,

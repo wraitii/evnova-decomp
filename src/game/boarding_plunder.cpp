@@ -445,7 +445,7 @@ void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
 
 // The board command's proximity gate compares per-axis position deltas with
 // half the target's current sprite frame spans
-// (Sprite_GetFrameFullHeight / Sprite_GetFrameFullWidth in the original).
+// (Sprite_GetFrameFullWidth / Sprite_GetFrameFullHeight in the original).
 // Those helpers return the FULL frame span (a bounds subtraction, like the
 // reticle's use in SpaceflightView; their "HalfSpan" names are misleading),
 // and default to 0x20 when sprite data is missing. The port reads the same
@@ -453,8 +453,8 @@ void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
 // (ship_class_id + 0x80); ships without a decodable descriptor fall back to
 // the original's 32px default.
 struct BoardRangeSpan {
-  float full_x = 32.0F; // Sprite_GetFrameFullHeight fallback 0x20
-  float full_y = 32.0F; // Sprite_GetFrameFullWidth fallback 0x20
+  float full_x = 32.0F; // Sprite_GetFrameFullWidth fallback 0x20
+  float full_y = 32.0F; // Sprite_GetFrameFullHeight fallback 0x20
 };
 
 [[nodiscard]] BoardRangeSpan TargetFrameSpan(const Ship &target) {

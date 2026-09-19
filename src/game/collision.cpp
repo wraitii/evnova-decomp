@@ -62,9 +62,9 @@ constexpr float kDisableArmorPinFractionCap0x10 = 0.1F;
 
 // Asteroid debris particle constants from Asteroid_SpawnDestructionPackage
 // (0x00462550): speed DAT_00575740 = 0.2 px/tick, speed scatter 0x28, lifetime
-// [0xf0, 0x1e0], and position scatter = sprite frame height / 3. Every shipped
+// [0xf0, 0x1e0], and position scatter = sprite frame width / 3. Every shipped
 // asteroid spin set (800..815) is 50x50, so the original's
-// Sprite_GetFrameFullHeight(*asteroid)/3 reduces to 16
+// Sprite_GetFrameFullWidth(*asteroid)/3 reduces to 16
 // (AsteroidState.collision_radius_px records the 25 px half-span).
 constexpr float kAsteroidDebrisParticleSpeed = 0.2F;
 constexpr std::int16_t kAsteroidDebrisParticleScatter = 0x28;
@@ -283,36 +283,38 @@ void ApplyWeaponOnHitEffects(
 // before Sprite_SetPositionFromCurrentFrameAnchor, whose stored frame anchor is
 // (0,0) for the multi-frame ship/asteroid sheets
 // (SpriteFrame_CreateFromRect 0x00476400 zeroes +0x2a/+0x2c). The effective
-// collision-frame top-left is therefore world - (half_a, half_b), where ship
-// and asteroid callers pass (ceil(height/2), ceil(width/2)) -- the two span
-// helpers are swapped in Ship_UpdateVisualState (0x00428340) and
-// Asteroid_UpdateSprites (0x00436910) -- and Shot_HandleShot (0x00435830)
-// passes ceil(height/2) on both axes. Square frames reduce to the frame centre.
-// `swapped_axes` selects the ship/asteroid (true) or shot (false) pair.
+// collision-frame top-left is therefore world - (half_x, half_y). Ship,
+// asteroid, freeflight-object and stellar callers subtract the current frame's
+// FULL WIDTH/2 (Sprite_GetFrameFullWidth 0x00462390) from x and FULL HEIGHT/2
+// (Sprite_GetFrameFullHeight 0x004623D0) from y (Ship_UpdateVisualState
+// 0x00428340, Asteroid_UpdateSprites 0x00436910); Shot_HandleShot (0x00435830)
+// subtracts the full WIDTH/2 on BOTH axes. Square frames reduce to the frame
+// centre. `width_on_both_axes` selects the ship/asteroid/etc (false) or shot
+// (true) placement.
 void BindEntityMask(CollisionMaskBinding &binding,
                     const SpriteMask *mask,
                     int frame,
-                    bool swapped_axes) {
+                    bool width_on_both_axes) {
   if (mask == nullptr || mask->Empty()) {
     return;
   }
-  const float half_height = static_cast<float>((mask->height + 1) / 2);
   const float half_width = static_cast<float>((mask->width + 1) / 2);
+  const float half_height = static_cast<float>((mask->height + 1) / 2);
   binding.mask = mask;
-  binding.anchor_x = half_height;
-  binding.anchor_y = swapped_axes ? half_width : half_height;
+  binding.anchor_x = half_width;
+  binding.anchor_y = width_on_both_axes ? half_width : half_height;
   binding.frame = frame;
 }
 
 // k_pixel_collision_frame_scale_threshold_f64 (0x005754c8) and the
-// Sprite_GetFrameFullHeight (0x00462390) boundary.
+// Sprite_GetFrameFullWidth (0x00462390) boundary.
 // Ship_HandleSpritePairCollision (0x004374f0) uses the opaque mask only when
-// `g_avg_frame_tick_scale < 2.0` AND the target ship sprite's full frame height
+// `g_avg_frame_tick_scale < 2.0` AND the target ship sprite's full frame WIDTH
 // is > 0x20; otherwise it deliberately uses the bounding circle.
 // `g_avg_frame_tick_scale` is the normalized 30 Hz simulation scale; the port's
 // equivalent is GameState::last_frame_tick_scale.
 constexpr float kPixelMaskFrameScaleThreshold = 2.0F; // 0x005754c8
-constexpr int kPixelMaskFrameHeightThreshold = 0x20;
+constexpr int kPixelMaskFrameWidthThreshold = 0x20;
 
 [[nodiscard]] bool ShipContactUsesPixelMask(const GameState &state,
                                             const Ship &target) {
@@ -322,7 +324,7 @@ constexpr int kPixelMaskFrameHeightThreshold = 0x20;
   if (!target.collision_mask.HasMask()) {
     return false;
   }
-  return target.collision_mask.mask->height > kPixelMaskFrameHeightThreshold;
+  return target.collision_mask.mask->width > kPixelMaskFrameWidthThreshold;
 }
 
 // Resolves each live entity's current-frame pixel mask from the non-SDL mask
@@ -368,7 +370,7 @@ void RefreshCollisionMasks(GameState &state) {
     BindEntityMask(ship.collision_mask,
                    store.Sheet(ship_class->base_image_id, frame),
                    frame,
-                   /*swapped_axes=*/true);
+                   /*width_on_both_axes=*/false);
   }
 
   for (ActiveShot &shot : state.active_shots) {
@@ -394,7 +396,7 @@ void RefreshCollisionMasks(GameState &state) {
     BindEntityMask(shot.collision_mask,
                    store.Spin(spin_id, frame),
                    frame,
-                   /*swapped_axes=*/false);
+                   /*width_on_both_axes=*/true);
   }
 
   for (AsteroidState &asteroid : state.asteroid_pool) {
@@ -418,7 +420,7 @@ void RefreshCollisionMasks(GameState &state) {
     BindEntityMask(asteroid.collision_mask,
                    store.Spin(spin_id, frame),
                    frame,
-                   /*swapped_axes=*/true);
+                   /*width_on_both_axes=*/false);
   }
 
   // Freeflight objects: the mining-scoop arm of Ship_HandleSpritePairCollision
@@ -443,7 +445,7 @@ void RefreshCollisionMasks(GameState &state) {
     BindEntityMask(object.collision_mask,
                    store.Spin(spin_id, frame),
                    frame,
-                   /*swapped_axes=*/true);
+                   /*width_on_both_axes=*/false);
   }
 
   // Stellar ambient sprites: Ghidra Stellar_UpdateStellarSprites (0x0042cd10)
@@ -478,7 +480,7 @@ void RefreshCollisionMasks(GameState &state) {
       BindEntityMask(stellar->collision_mask,
                      store.Spin(spin_id, frame),
                      frame,
-                     /*swapped_axes=*/true);
+                     /*width_on_both_axes=*/false);
     }
   }
 }

@@ -278,7 +278,7 @@ void NovaAi_UpdateShipState(GameState &state,
     const System *sys = CurrentSystem(state);
     const std::int16_t half_span =
         sys ? static_cast<std::int16_t>(sys->pos_x > 0 ? 0x96 : 0x96)
-            : 0x96; // System_GetCurrentSystemLinkSpriteHeight fallback
+            : 0x96; // System_GetCurrentSystemLinkSpriteWidth fallback
                     // (provisional)
     const std::int16_t span_q = static_cast<std::int16_t>(half_span / 4);
     const bool far = std::abs(dx) > span_q || std::abs(dy) > span_q;
