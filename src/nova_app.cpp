@@ -1183,6 +1183,9 @@ int NovaApp_Run(NovaRuntime &runtime) {
   }
   // The original normalizes the on-disk block once during startup too.
   (void)game::NovaPrefs_SaveToSystemStore(runtime.prefs);
+  // Seed the runtime starmap-borders copy: the galaxy map edits GameState and
+  // the .prf holds the preference, synced back at the save points below.
+  runtime.game.starmap_show_borders = runtime.prefs.starmap_show_borders;
   // External probe harness (docs/probe_harness.md): the state reader runs on
   // the main thread at the pump, so it can safely walk the live GameState.
   runtime.platform.probe().SetStateProvider(
@@ -1196,6 +1199,11 @@ int NovaApp_Run(NovaRuntime &runtime) {
     runtime.music.SetPlaybackSuppressed(suppressed);
   });
   NovaGameSession_Run(runtime);
+  // Ghidra NovaGameSession_Run calls NovaPrefs_SaveToDisk on exit; fold in the
+  // runtime starmap-borders toggle so it round-trips even if the player never
+  // reopened the Settings dialog.
+  runtime.prefs.starmap_show_borders = runtime.game.starmap_show_borders;
+  (void)game::NovaPrefs_SaveToSystemStore(runtime.prefs);
   return 0;
 }
 
@@ -1949,6 +1957,9 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // 0xfa3). Edits runtime.prefs in place; OK commits the .prf (deferred) and
     // Esc/Cancel discards. Returns to the main menu either way.
     game::NovaFontCache font_cache;
+    // Fold the runtime starmap-borders toggle into the preference before the
+    // dialog's OK path persists the .prf.
+    runtime.prefs.starmap_show_borders = runtime.game.starmap_show_borders;
     const bool saved = game::NovaMenu_RunSettingsDialog(
         runtime.platform,
         runtime.audio,
