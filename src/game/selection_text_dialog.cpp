@@ -127,12 +127,10 @@ struct ReaderLayout {
   std::string done_caption = "Okay";
 };
 
-// Window bounds + control rects from the real DLOG/DITL, centred on the
-// fullscreen window-coordinate space the docked menu and store windows use
-// (Dialog_CreateFromDlog 0x008730a1 centred on the original's fixed 640x480
-// canvas; the port's docked screen spans the whole window, so centring on
-// logical_playfield_size keeps the reader over the dock's centre).
-[[nodiscard]] ReaderLayout LoadReaderLayout(const SdlPlatform &platform) {
+// Window bounds + control rects from the real DLOG/DITL in authored local
+// coordinates. The platform contains this composition and maps input back to
+// the same local space.
+[[nodiscard]] ReaderLayout LoadReaderLayout() {
   ReaderLayout layout;
   const auto definition = NovaResource_LoadDialogDefinition(kReaderDialogId);
   const auto items =
@@ -145,9 +143,8 @@ struct ReaderLayout {
   }
   const float win_w = static_cast<float>(definition->right - definition->left);
   const float win_h = static_cast<float>(definition->bottom - definition->top);
-  const SDL_FPoint output = platform.logical_playfield_size();
-  const SDL_FPoint origin{(output.x - win_w) / 2.0F, (output.y - win_h) / 2.0F};
-  layout.window = {origin.x, origin.y, win_w, win_h};
+  const SDL_FPoint origin{0.0F, 0.0F};
+  layout.window = {0.0F, 0.0F, win_w, win_h};
   const auto rect = [&](std::size_t index) {
     for (const auto &item : *items) {
       if (item.index == index) {
@@ -218,10 +215,15 @@ void NovaUi_RunTextReaderDialog(
     const std::string &text,
     bool allow_starmap,
     const std::function<void()> &render_background) {
-  ReaderLayout layout = LoadReaderLayout(platform);
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
+  ReaderLayout layout = LoadReaderLayout();
   if (layout.window.w <= 0.0F) {
     return;
   }
+  // Keep the original DLOG canvas: the auto-size arm moves its shortened
+  // window down by 0.3 * shrink, rather than re-centring by half the shrink.
+  const SDL_FPoint authored_size{layout.window.w, layout.window.h};
 
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
@@ -269,11 +271,6 @@ void NovaUi_RunTextReaderDialog(
 
   // Publish the final (post-auto-size) control rects to the probe harness.
   ProbeUiAutoClear probe_ui_guard(platform);
-  platform.PublishProbeUi("text_reader",
-                          {{"window", layout.window},
-                           {"done", layout.done_button},
-                           {"scroll_up", layout.arrow_up},
-                           {"scroll_down", layout.arrow_down}});
 
   const auto draw_frame = [&]() {
     // Deliberate divergence (see docs/dlog_ditl_dialog_format.md): the
@@ -286,8 +283,15 @@ void NovaUi_RunTextReaderDialog(
       SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(platform.renderer());
     }
-    // The reader's DLOG coordinates are window-point space.
-    platform.SetFullscreenPlayfield();
+    platform.SetPlacement(
+        PlaceContained(authored_size, platform.logical_playfield_size()));
+    const Placement &placement = platform.current_placement();
+    platform.PublishProbeUi(
+        "text_reader",
+        {{"window", placement.ToWindowRect(layout.window)},
+         {"done", placement.ToWindowRect(layout.done_button)},
+         {"scroll_up", placement.ToWindowRect(layout.arrow_up)},
+         {"scroll_down", placement.ToWindowRect(layout.arrow_down)}});
     // Window fill is the black space-background colour (PTR_DAT_00575acc),
     // matching the opaque black text panel below.
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);

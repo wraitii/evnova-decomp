@@ -40,35 +40,31 @@ using starmap_detail::PoliticalOverlay;
 using starmap_detail::StarmapGeometry;
 using starmap_detail::SystemOnMap;
 
-// ---- Window geometry (logical 640x480 playfield) --------------------------
+// ---- Window geometry (native DLOG authoring space) -------------------------
 // The starmap window is the EV Nova DLOG 0x7d0 dialog: a 601x513 frame whose
 // backdrop is the PICT 0x213d "Map" starfield, blitted across the whole window
 // (DAT_007dc73c in NovaUi_RunStarmapWindow 0x004a3aa0). Only the galaxy-graph
 // viewport (DITL item 2 / UiPanel_GetEntryInfo entry 3) is filled opaque with
 // the system-space background colour; the side column (item 5 / entry 6) and
 // the bottom status bar (item 1 / entry 2) render their text straight onto the
-// starfield, separated from the graph by thin rules. The 513-tall window is
-// scaled down uniformly (480/513) to fit the field, like the other dialogs.
+// starfield, separated from the graph by thin rules. The platform contains
+// this native composition as a whole when the output window is smaller.
 constexpr int kStarmapWindowW = 601;
 constexpr int kStarmapWindowH = 513;
-constexpr float kStarmapFitScale =
-    static_cast<float>(kLogicalUiHeight) /
-    static_cast<float>(kStarmapWindowH); // ~0.936
-constexpr float kStarmapWindowX =
-    (640.0F - static_cast<float>(kStarmapWindowW) * kStarmapFitScale) / 2.0F;
+constexpr float kStarmapWindowX = 0.0F;
 constexpr float kStarmapWindowY = 0.0F;
-constexpr float kMapPanelX = kStarmapWindowX + 9.0F * kStarmapFitScale;
-constexpr float kMapPanelY = 8.0F * kStarmapFitScale;
-constexpr float kMapPanelW = 458.0F * kStarmapFitScale;
-constexpr float kMapPanelH = 420.0F * kStarmapFitScale;
-constexpr float kSidePanelX = kStarmapWindowX + 474.0F * kStarmapFitScale;
-constexpr float kSidePanelY = 8.0F * kStarmapFitScale;
-constexpr float kSidePanelW = 120.0F * kStarmapFitScale;
-constexpr float kSidePanelH = 429.0F * kStarmapFitScale;
-constexpr float kBottomBarX = kStarmapWindowX + 8.0F * kStarmapFitScale;
-constexpr float kBottomBarY = 436.0F * kStarmapFitScale;
-constexpr float kBottomBarW = 586.0F * kStarmapFitScale;
-constexpr float kBottomBarH = 42.0F * kStarmapFitScale;
+constexpr float kMapPanelX = 9.0F;
+constexpr float kMapPanelY = 8.0F;
+constexpr float kMapPanelW = 458.0F;
+constexpr float kMapPanelH = 420.0F;
+constexpr float kSidePanelX = 474.0F;
+constexpr float kSidePanelY = 8.0F;
+constexpr float kSidePanelW = 120.0F;
+constexpr float kSidePanelH = 429.0F;
+constexpr float kBottomBarX = 8.0F;
+constexpr float kBottomBarY = 436.0F;
+constexpr float kBottomBarW = 586.0F;
+constexpr float kBottomBarH = 42.0F;
 
 // The bottom button row (DITL items 8,7,9,3,4,0 in left-to-right screen
 // order; 1-based entries 9,8,10,4,5,1). Each is the item rect in the DITL
@@ -78,30 +74,12 @@ struct StarmapButtonRect {
 };
 
 constexpr std::array<StarmapButtonRect, 6> kStarmapButtonRects{{
-    {kStarmapWindowX + 11.0F * kStarmapFitScale,
-     kStarmapWindowY + 483.0F * kStarmapFitScale,
-     130.0F * kStarmapFitScale,
-     25.0F * kStarmapFitScale},
-    {kStarmapWindowX + 155.0F * kStarmapFitScale,
-     kStarmapWindowY + 483.0F * kStarmapFitScale,
-     120.0F * kStarmapFitScale,
-     25.0F * kStarmapFitScale},
-    {kStarmapWindowX + 288.0F * kStarmapFitScale,
-     kStarmapWindowY + 483.0F * kStarmapFitScale,
-     99.0F * kStarmapFitScale,
-     25.0F * kStarmapFitScale},
-    {kStarmapWindowX + 408.0F * kStarmapFitScale,
-     kStarmapWindowY + 483.0F * kStarmapFitScale,
-     25.0F * kStarmapFitScale,
-     25.0F * kStarmapFitScale},
-    {kStarmapWindowX + 438.0F * kStarmapFitScale,
-     kStarmapWindowY + 483.0F * kStarmapFitScale,
-     25.0F * kStarmapFitScale,
-     25.0F * kStarmapFitScale},
-    {kStarmapWindowX + 483.0F * kStarmapFitScale,
-     kStarmapWindowY + 483.0F * kStarmapFitScale,
-     99.0F * kStarmapFitScale,
-     25.0F * kStarmapFitScale},
+    {11.0F, 483.0F, 130.0F, 25.0F},
+    {155.0F, 483.0F, 120.0F, 25.0F},
+    {288.0F, 483.0F, 99.0F, 25.0F},
+    {408.0F, 483.0F, 25.0F, 25.0F},
+    {438.0F, 483.0F, 25.0F, 25.0F},
+    {483.0F, 483.0F, 99.0F, 25.0F},
 }};
 
 // ---- Palette (Ghidra Settings_InitColors 0x004ad7c0 fills the fixed
@@ -317,8 +295,8 @@ StarmapGeometry ResolveStarmapGeometry() {
   StarmapGeometry g;
   g.window = SDL_FRect{kStarmapWindowX,
                        kStarmapWindowY,
-                       static_cast<float>(kStarmapWindowW) * kStarmapFitScale,
-                       static_cast<float>(kStarmapWindowH) * kStarmapFitScale};
+                       static_cast<float>(kStarmapWindowW),
+                       static_cast<float>(kStarmapWindowH)};
   g.map = SDL_FRect{kMapPanelX, kMapPanelY, kMapPanelW, kMapPanelH};
   g.side = SDL_FRect{kSidePanelX, kSidePanelY, kSidePanelW, kSidePanelH};
   g.bar = SDL_FRect{kBottomBarX, kBottomBarY, kBottomBarW, kBottomBarH};
@@ -331,11 +309,10 @@ StarmapGeometry ResolveStarmapGeometry() {
     return g;
   }
   const auto offset_rect = [](const NovaDialogItem &it) {
-    return SDL_FRect{
-        kStarmapWindowX + static_cast<float>(it.left) * kStarmapFitScale,
-        kStarmapWindowY + static_cast<float>(it.top) * kStarmapFitScale,
-        static_cast<float>(it.right - it.left) * kStarmapFitScale,
-        static_cast<float>(it.bottom - it.top) * kStarmapFitScale};
+    return SDL_FRect{kStarmapWindowX + static_cast<float>(it.left),
+                     kStarmapWindowY + static_cast<float>(it.top),
+                     static_cast<float>(it.right - it.left),
+                     static_cast<float>(it.bottom - it.top)};
   };
   const auto valid = [](const NovaDialogItem &it) {
     return it.right > it.left && it.bottom > it.top;
@@ -476,7 +453,8 @@ void DrawChrome(SdlPlatform &platform,
   SDL_SetRenderDrawColor(
       renderer, kColorBlack.r, kColorBlack.g, kColorBlack.b, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(
+      PlaceContained({601.0F, 513.0F}, platform.logical_playfield_size()));
 
   // The original fills the window with the background colour, then blits the
   // starfield PICT across the whole frame (0x004a5240).
@@ -516,7 +494,8 @@ void DrawLiveChrome(SdlPlatform &platform,
                     HudRenderer &hud) {
   SDL_Renderer *renderer = platform.renderer();
   view.DrawGameFrame(platform, state, hud);
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(
+      PlaceContained({601.0F, 513.0F}, platform.logical_playfield_size()));
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &geometry.window);
   }
@@ -724,7 +703,7 @@ void DrawSidePanels(SdlPlatform &platform,
                     const StarmapStrings &strings,
                     std::int16_t selected_id,
                     const std::string *search_query) {
-  const float s = kStarmapFitScale;
+  const float s = 1.0F;
   const SDL_FRect &side = geometry.side;
   const SDL_FRect &bar = geometry.bar;
   const bool valid_id =
@@ -1314,6 +1293,8 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
                                     std::int16_t preselected_system_id,
                                     SpaceflightView *flight_view,
                                     HudRenderer *hud) {
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
   if (state.scenario.systems.empty()) {
     NovaLog::Warn("starmap opened with no scenario system table; closing");
     return StarmapResult{};

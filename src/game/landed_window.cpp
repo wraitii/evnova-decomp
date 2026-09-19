@@ -471,13 +471,10 @@ namespace {
 using PanelRect = SDL_FRect;
 
 [[nodiscard]] PanelRect DockedPanel(const SdlPlatform &platform) {
-  const SDL_FPoint output = platform.logical_playfield_size();
+  (void)platform;
   constexpr float kDockedWidth = 618.0F;
   constexpr float kDockedHeight = 517.0F;
-  return {(output.x - kDockedWidth) / 2.0F,
-          (output.y - kDockedHeight) / 2.0F,
-          kDockedWidth,
-          kDockedHeight};
+  return {0.0F, 0.0F, kDockedWidth, kDockedHeight};
 }
 
 // Fallback button columns (DITL-left-column values) used when the dialog
@@ -812,7 +809,7 @@ void DrawLandedMenu(SdlPlatform &platform,
                          static_cast<std::uint8_t>(bg & 0xffU),
                          SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
-  platform.SetFullscreenPlayfield();
+  platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
   // Flight HUD behind the docked dialog. Ghidra 0x00491f30
   // NovaUi_RunTravelDestinationInteractionLoop redraws the gameplay viewport,
   // the stellar radar panel (NovaUi_DrawStellarRadarPanel 0x0045d600) and the
@@ -824,6 +821,11 @@ void DrawLandedMenu(SdlPlatform &platform,
   if (hud != nullptr) {
     hud->Draw(platform, state, /*force_empty_radar=*/true);
   }
+  // The Spaceport DLOG is authored at 618x517. Keep the flight HUD in
+  // window-space, then contain only the fixed docked composition so it stays
+  // native-sized on large windows and shrinks coherently on small ones.
+  platform.SetPlacement(
+      PlaceContained({panel.w, panel.h}, platform.logical_playfield_size()));
   if (destination_art != nullptr) {
     const SDL_FRect backdrop_rect = layout.from_ditl ? layout.window : panel;
     SDL_RenderTexture(renderer, destination_art, nullptr, &backdrop_rect);
@@ -1074,6 +1076,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                 LandedContext &ctx,
                                 const NovaPreferences &prefs,
                                 HudRenderer &hud) {
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
   ProbeUiAutoClear probe_ui(platform);
   platform.probe().AutomationObservedDocked();
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
@@ -1212,7 +1216,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   // The docked panel is the native 618x517 Spaceport dialog, centred in the
   // unrestricted window coordinate space. Set the presentation before asking
   // for the window dimensions used by the DLOG/DITL layout.
-  platform.SetFullscreenPlayfield();
+  platform.SetPlacement(
+      PlaceContained({618.0F, 517.0F}, platform.logical_playfield_size()));
   const SDL_FRect panel = DockedPanel(platform);
 
   // Lay out the docked screen from the real Spaceport DLOG/DITL 0x3e8
@@ -1257,11 +1262,17 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                                     "mission_bbs",
                                                     "bar"};
   const auto publish_probe_controls = [&] {
+    const Placement placement =
+        PlaceContained({panel.w, panel.h}, platform.logical_playfield_size());
+    const auto window_rect = [&placement](SDL_FRect rect) {
+      return placement.ToWindowRect(rect);
+    };
     std::vector<std::pair<std::string, SDL_FRect>> probe_controls{
-        {"window", panel}};
+        {"window", window_rect(panel)}};
     for (const auto &button : button_rects) {
       if (button.slot < kProbeNames.size()) {
-        probe_controls.emplace_back(kProbeNames[button.slot], button.rect);
+        probe_controls.emplace_back(kProbeNames[button.slot],
+                                    window_rect(button.rect));
       }
     }
     platform.PublishProbeUi("spaceport", std::move(probe_controls));
@@ -1352,7 +1363,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
 
   // Keep mouse coordinates in the same unrestricted window space as the
   // native-size DLOG/DITL geometry, even if the previous context was flight.
-  platform.SetFullscreenPlayfield();
+  platform.SetPlacement(
+      PlaceContained({618.0F, 517.0F}, platform.logical_playfield_size()));
 
   // Mission offers with AvailLoc 3 pop as the player docks: the Spaceport
   // loop (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30) sets
@@ -1432,6 +1444,10 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                    layout,
                    button_rects,
                    hovered);
+    // DrawLandedMenu temporarily restores window-space for the HUD. Input and
+    // semantic hit rectangles resume the native Spaceport placement.
+    platform.SetPlacement(
+        PlaceContained({panel.w, panel.h}, platform.logical_playfield_size()));
     platform.Present();
 
     // Poll discrete raw keys for the modal (dedicated channel, so it never

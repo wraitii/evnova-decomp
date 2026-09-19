@@ -1,9 +1,8 @@
 # Display and UI scaling (design note)
 
-Status: **options note, not implemented.** The current build has no user-facing
-scale setting. This note records the axes a future scale feature could take,
-how each maps onto the port's existing presentation model, and the open
-decisions. It is a design note, not reconstructed original behaviour.
+Status: **placement model implemented; user-facing scale settings remain design
+options.** Section 1 describes the port. Later sections record future scaling
+choices, not reconstructed original behaviour.
 
 For the original dialog geometry see `docs/dlog_ditl_dialog_format.md`; for the
 port's modal compositing rules see its §7. The CE's experimental scaling (the
@@ -12,30 +11,46 @@ Ambrosia code, and the port does not model it.
 
 ## 1. Current presentation model
 
-The port keeps a **640x480 logical content canvas** for its static art screens
-(the splash, main menu and intro - called "fixed screens" in `SdlPlatform`
-because their backdrop is a fixed-size picture that gets upscaled). It lets the
-window be larger. That 640x480 is a port layout choice, not a game-wide
-floor: Nova's native art is authored for a **1024x768** canvas (main-menu
-background, the 194x767 cockpit strip) and the original refuses to launch below
-an **800x600** screen (`EVNova.ini` S38; the beta history mentions centering on
-"screens 800x600 or smaller"). Free flight and several modals already draw in
-window-point space and routinely exceed 640x480. `SdlPlatform`
-(`src/sdl_platform.hpp` / `sdl_platform.cpp`) selects one of these policies per
-frame:
+Each screen owns its authored dimensions and chooses an explicit `Placement`.
+Its `dst` is a content box in window points; `scale` maps authored coordinates
+into that box. `ToWindow` and `ToAuthored` are the corresponding forward and
+inverse mappings. There is no global 640x480 canvas or presentation mode.
 
-| policy | used by | mapping |
+| content | authored size | default placement |
 |---|---|---|
-| `kScaledPlayfield` | splash, main menu, intro | 640x480 canvas letterboxed uniformly up to the window (SDL logical presentation) |
-| `kCenteredPlayfield` | docked/landed screens, starmap, some in-flight modals | 640x480 canvas at native window-point size, integer-centred, black bars |
-| `kFullscreenPlayfield` | free flight (`spaceflight_view`) and several flight modals | 1 logical unit = 1 window point, world extends to the whole window; HUD chrome stays fixed size |
-| `ApplyWindowPointDrawing` | `ui_dialog` modal runtime | 1 logical unit = 1 window point, no logical presentation; modals composite over the presented frame at 1:1 |
+| main menu / intro composition | 1024x768 | contained, centred, capped at 1x |
+| startup / loading picture | decoded picture size (stock 832x624 / 369x558) | contained, centred, capped at 1x |
+| landed spaceport panel | 618x517 | contained, centred, capped at 1x |
+| fixed dialogs | actual DLOG or composition dimensions | contained, centred, capped at 1x |
+| free-flight world | current window size | identity in window points; larger windows show more world |
 
-`WindowPixelDensity()` (`SDL_GetWindowPixelDensity`) multiplies the SDL render
-scale in the fullscreen/centred/point modes, so on a HiDPI display one logical
-unit is one window *point* (2+ backing pixels). `text_raster_scale()` uses the
-same density (and the letterbox factor for `kScaled`) so text is rasterised at
-the destination resolution and then drawn at its logical size.
+`PlaceContained` uses `min(1, window_width/authored_width,
+window_height/authored_height)`. Fixed screens clear their margins to black.
+The menu's button coordinates are native 1024x768 coordinates, as specified by
+the Bible's `Button1x & y` fields; art no longer passes through a 640x480 fit.
+Missing splash/menu PICTs leave black with an error log; missing menu button
+sheets retain basic clickable button rectangles.
+
+Native 1x means **one window point per authored unit**, not one backing pixel.
+`SdlPlatform` applies `placement.scale * WindowPixelDensity()` to drawing and
+text rasterisation. Raster pictures therefore still scale on HiDPI displays.
+`playfield_window_rect()` reports the active placement's `dst`;
+`logical_playfield_size()` continues to report window dimensions for free
+flight. Mouse input is mapped through the active placement. Probe UI rectangles
+are published in window points using the same forward mapping.
+
+Placement scopes restore the previous transform. A modal captures its
+background content box before selecting its own placement; background callbacks
+draw without presenting. Resizing recomputes placement from its rule and authored
+dimensions, rather than reusing a stale destination rectangle. Existing
+640-space compositions can retain their local coordinates without making 640
+a platform-wide rule.
+
+Dialog containment uses the available window, even when its background panel
+is smaller than the dialog. SDL's viewport is integral and affected by render
+scale, so the platform canonicalises destination bounds to that viewport and
+uses the same bounds for drawing, input, and probes. The text reader retains
+its original 0.3-times-shrink vertical offset inside its authored DLOG canvas.
 
 **Reference fixed metrics the port currently hard-codes** (and which a GUI scale
 would have to move):
@@ -55,32 +70,30 @@ hacks.
 
 ## 2. Why scale
 
-The original targets a 1024x768 native canvas and requires an 800x600 screen
-minimum; the port's static art screens use a 640x480 logical canvas. On a
-1440p/4K display the port's `kFullscreen` gameplay maps one logical unit to one
-window point, so a 32px ship sprite and the 194px HUD strip are physically small
-and text is hard to read. Those art screens already upscale (`kScaled`); free
-flight does not.
+The original targets a 1024x768 native menu and requires an 800x600 screen
+minimum. The port defaults to native window-point sizing. Users with large
+displays may want larger ships, HUD chrome, or reading windows independently
+of how much world the window reveals. HiDPI rasterisation improves text detail
+but does not enlarge its size in window points.
 
 ## 3. Axis A — full-game scale
 
-Multiply the renderer scale for the extending world (i.e. `ApplyWindowPointDrawing`
-uses `density * s`), so **world, HUD and all text grow together**. The window
+Give the extending world a placement with scale `s` and authored visible extent
+`window_size / s`, so **world, HUD and all text grow together**. The window
 shows proportionally less of the system (or the window must grow to compensate).
 
-* Cheapest to implement: one multiplier in the presentation helpers; SDL then
-  maps input coordinates consistently, so most hit-testing needs no change.
+* The placement owns both the draw transform and inverse mouse mapping.
 * Must be reflected in `logical_playfield_size()`, `playfield_window_rect()`,
   `text_raster_scale()`, the probe's published geometry, and any place that
   converts window points to logical units by hand.
-* Applies naturally to all four policies; for `kScaled` it is an extra factor
-  on top of the letterbox mapping.
+* Fixed screens need an explicit choice of requested scale and containment cap;
+  the default native-size cap must not silently defeat a user-selected scale.
 * This is the "everything is bigger" mode; it does **not** solve wanting a
   bigger HUD *and* a wider world at the same time.
 
 ## 4. Axis B — GUI scale (CE `ui_scale` equivalent)
 
-Scale **only the HUD chrome and dialogs**, leaving the world at `kFullscreen`
+Scale **only the HUD chrome and dialogs**, leaving the world in `PlaceWindow`
 1:1 (so the same amount of world fits, but the UI is legible). This is what the
 CE's `ui_scale` does and is the closest thing to a reference.
 
@@ -88,19 +101,16 @@ Would require:
 
 * scaling the metrics in §1 (status-bar strip, grid cells/thumbs, list pitch)
   and the HUD text offsets that are currently raw constants;
-* scaling DLOG window size/centring and DITL item rects (`Dialog_CreateFromDlog`
-  is `0x008730A1`; the port path is `ui_dialog.cpp` `CenterDialogInPlayfield`
-  plus the item layout);
-* a mouse remap from the scaled draw space back to layout space (CE
-  `FUN_008734E5`), or drawing the scaled HUD/dialogs through a separate SDL
-  logical-presentation sub-rect so SDL maps input for us;
+* selecting a scaled placement for DLOG windows (`Dialog_CreateFromDlog`
+  is `0x008730A1`), retaining their authored DITL geometry;
+* selecting the HUD placement for its draw and input passes, using
+  `ToAuthored` for hit-tests and `ToWindow` for probe rectangles;
 * deciding whether dialogs follow the GUI scale or the full-game scale when
   both are on (precedence rule).
 
-Blocking inconsistency to resolve first: the port's modals do not share one
-presentation — some use `kCenteredPlayfield`, some `ApplyWindowPointDrawing`,
-some `kFullscreenPlayfield` after re-rendering the world (see §1). A GUI scale
-needs a single, documented coordinate rule for modal windows.
+The shared placement model provides the coordinate mechanism. HUD/world
+ownership, clipping, scale precedence, and user settings still need explicit
+design; adding a multiplier to the renderer alone is insufficient.
 
 ## 5. Axis C — mission-dialog scale
 
@@ -115,24 +125,19 @@ as-is.
 This is the least invasive axis because those windows already parse their DLOG
 at runtime. `LayoutMissionInfo` and `NovaMission_RunOfferWindow`
 (`docked_mission_dialog.cpp`) derive the frame from `right-left`/`bottom-top`
-and each control rect from its item offsets, so a scale applied to
-`win_w`/`win_h` and to each item's `left/top/right/bottom` propagates through
-the stored `SDL_FRect`s and hit-tests follow for free. Remaining work:
+and each control rect from its item offsets. Enlarging the whole authored
+composition through its placement preserves relative geometry and maps input
+back to those same coordinates. Remaining choices:
 
-* scale the text constants (`kMissionListFontSize` / `kMissionInfoFontSize` =
-  `9.0F`) and the list row pitch (base height 8 × the 1.5 double = 12);
-* keep the `WrapDescriptionLines` / `LineHeight` reflow and the scroll extent in
-  scaled units;
-* scale the offer window's scroll-arrow offsets (the text view's content
-  translation) with the same factor.
+* choose whole-window enlargement versus larger text with reflow;
+* for whole-window enlargement, retain authored text sizes and row pitches and
+  let `text_raster_scale()` provide destination-resolution glyphs;
+* for text-only enlargement, recompute wrapping, row pitch, scroll extent, and
+  arrow positions together.
 
-These modals draw in window-point space (`SetFullscreenPlayfield` /
-`ApplyWindowPointDrawing`), so no extra coordinate mapping is needed. Drawing
-the window larger than the authored DLOG also means the backdrop art must
-follow: `0x3f4` stretches one frame PICT into the frame rect (already an
-`SDL_RenderTexture`), while the `0x3f8` offer window composites top/bottom art
-strips and would need them anchored to the scaled frame (the CE's
-`scaleAndShiftRect_bottom` does the same).
+Frame art, controls, and input must use the same dialog placement. Resizing the
+authored layout instead of scaling it requires re-anchoring the offer window's
+top/bottom strips (the CE's `scaleAndShiftRect_bottom` does this).
 
 The CE's `ui_scale` bundles these windows into the global GUI scale; this axis
 deliberately separates them so mission readability can be tuned on its own.
@@ -154,9 +159,9 @@ deliberately separates them so mission readability can be tuned on its own.
    scale up (A) by default?
 2. Do we want CE parity (`ui_scale` = B, from `ddraw.ini`) or a port-native
    setting with separate A/B/C factors?
-3. Normalise modal presentation (§4) before attempting B, or special-case the
-   modal set?
+3. How should user-selected enlargement interact with containment in small
+   windows, and which scale takes precedence when A, B, and C overlap?
 4. Keep C scoped to the mission offer/info dialogs, or generalise it to any
    DLOG-based text window once the mechanism exists?
 5. How do probe screenshots/geometry and the `text_raster_scale` contract stay
-   correct under each mode?
+   correct for independently scaled world, HUD, and modal placements?

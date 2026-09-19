@@ -67,8 +67,7 @@ struct TradeCenterLayout {
 // addresses it: UiPanel_GetEntryInfo entry N is DITL item N-1 (see
 // docs/dlog_ditl_dialog_format.md section 4). The frame is the DLOG bounds,
 // centred on the logical playfield.
-[[nodiscard]] std::optional<TradeCenterLayout>
-LayoutTradeCenter(const SdlPlatform &platform) {
+[[nodiscard]] std::optional<TradeCenterLayout> LayoutTradeCenter() {
   const auto definition = NovaResource_LoadDialogDefinition(0x3e9);
   const auto items =
       definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
@@ -81,9 +80,7 @@ LayoutTradeCenter(const SdlPlatform &platform) {
 
   const float width = static_cast<float>(definition->right - definition->left);
   const float height = static_cast<float>(definition->bottom - definition->top);
-  const SDL_FPoint output = platform.logical_playfield_size();
-  const SDL_FPoint origin{(output.x - width) / 2.0F,
-                          (output.y - height) / 2.0F};
+  const SDL_FPoint origin{0.0F, 0.0F};
   TradeCenterLayout layout;
   layout.frame = {origin.x, origin.y, width, height};
   const auto item_rect = [origin](const NovaDialogItem &item) {
@@ -166,22 +163,18 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
                            NovaRgbColor list_background,
                            NovaRgbColor list_hilite) {
   SDL_Renderer *renderer = platform.renderer();
-  const SDL_FPoint output = platform.logical_playfield_size();
   if (render_background) {
     render_background();
   } else {
-    platform.SetFullscreenPlayfield();
+    platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
     if (backdrop != nullptr) {
-      float width = 0.0F;
-      float height = 0.0F;
-      SDL_GetTextureSize(backdrop, &width, &height);
-      const SDL_FRect dst{
-          (output.x - width) / 2.0F, (output.y - height) / 2.0F, width, height};
-      SDL_RenderTexture(renderer, backdrop, nullptr, &dst);
+      DrawContainedPict(platform, backdrop);
     }
   }
+  platform.SetPlacement(PlaceContained({layout.frame.w, layout.frame.h},
+                                       platform.logical_playfield_size()));
   if (frame != nullptr) {
     SDL_RenderTexture(renderer, frame, nullptr, &layout.frame);
   }
@@ -414,6 +407,8 @@ RunTradeCenterDialog(SdlPlatform &platform,
                      GameState &state,
                      std::int16_t stellar_id,
                      const std::function<void()> &render_background) {
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
   TradeCenterSession session = NovaTradeCenter_OpenSession(state, stellar_id);
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
   auto frame = LoadPictTexture(
@@ -436,7 +431,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
   const auto render_trade_background = [&]() {
-    const auto layout = LayoutTradeCenter(platform);
+    const auto layout = LayoutTradeCenter();
     if (!layout) {
       if (render_background) {
         render_background();
@@ -496,25 +491,29 @@ RunTradeCenterDialog(SdlPlatform &platform,
     if (static_cast<std::int32_t>(state.tick_60hz - recheck_at) >= 0) {
       (void)run_mission_offer();
     }
-    const auto layout = LayoutTradeCenter(platform);
+    const auto layout = LayoutTradeCenter();
     if (!layout) {
       return LandedExit::kServiceComplete;
     }
     // Publish the commodity rows as named rects (for `click`) and as
     // label/value items (for price assertions). Rows stay index-addressable
     // even when their price is 0.
+    const Placement trade_placement = platform.current_placement();
+    const auto probe_rect = [&trade_placement](SDL_FRect rect) {
+      return trade_placement.ToWindowRect(rect);
+    };
     std::vector<ProbeNamedRect> probe_controls{
-        {"window", layout->frame},
+        {"window", probe_rect(layout->frame)},
         // The original's STR# caption is "Done". Keep the older semantic
         // alias for existing probes.
-        {"done", layout->leave},
-        {"leave", layout->leave},
-        {"buy", layout->buy},
-        {"sell", layout->sell}};
+        {"done", probe_rect(layout->leave)},
+        {"leave", probe_rect(layout->leave)},
+        {"buy", probe_rect(layout->buy)},
+        {"sell", probe_rect(layout->sell)}};
     for (std::size_t i = 0; i < kTradeCenterRowCount; ++i) {
       ProbeNamedRect row;
       row.name = "trade.row." + std::to_string(i);
-      row.rect = layout->rows[i];
+      row.rect = probe_rect(layout->rows[i]);
       row.has_value = true;
       row.selected = static_cast<std::int16_t>(i) == session.selected;
       row.label = NovaTradeCenter_RowName(state, session, static_cast<int>(i));

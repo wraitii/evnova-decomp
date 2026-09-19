@@ -2355,7 +2355,7 @@ void SpaceflightView::DrawGameFrame(SdlPlatform &platform,
   // The free-flight world extends: draw 1:1 across the whole (possibly larger)
   // window with no centre-clipping. Modal windows re-assert their own
   // presentation after this, so set the fullscreen viewport here every frame.
-  platform.SetFullscreenPlayfield();
+  platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
   Draw(platform, state);
   // HUD overlays the extending world at fixed, unscaled size (the project's
   // resolution policy: more window = more system shown, NOT a bigger HUD).

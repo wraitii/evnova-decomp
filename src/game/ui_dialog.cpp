@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
-#include <cmath>
 
 namespace game {
 
@@ -40,16 +39,6 @@ constexpr SDL_Color kSelectionText{255, 255, 255, 255};
 constexpr float kDialogFontSize = 12.0F;
 // Popup entry height the original's popup drawer uses (0x14 units).
 constexpr float kPopupRowHeight = 20.0F;
-
-// Centres a win_w x win_h dialog inside the playfield's on-screen rect
-// (window points), truncating the half-offsets like Dialog_CreateFromDlog.
-[[nodiscard]] SDL_FRect
-CenterDialogInPlayfield(const SDL_FRect &playfield, float win_w, float win_h) {
-  return SDL_FRect{playfield.x + std::truncf((playfield.w - win_w) * 0.5F),
-                   playfield.y + std::truncf((playfield.h - win_h) * 0.5F),
-                   win_w,
-                   win_h};
-}
 
 void FrameRect(SDL_Renderer *renderer, const SDL_FRect &box) {
   SDL_SetRenderDrawColor(renderer,
@@ -123,25 +112,12 @@ UiWindow_CreateFromDialogResource(SdlPlatform &platform,
   window.items = std::move(*items);
   window.state.resize(window.items.size());
 
-  // DIVERGENCE: the original switches to the dialog's owner draw context and
-  // blits a dedicated window surface over the playfield
-  // (DrawContext_SaveAndSetOwnerContext / DrawContext_BlitClippedRect); the
-  // background under a modal is whatever that surface machinery last left.
-  // The port re-renders the active screen every frame via the run loop's
-  // render_background callback and draws the dialog straight onto the renderer
-  // at 1:1 window scale centred inside the playfield's on-screen rect (the
-  // active screen's logical presentation would upscale the dialog ~2x and
-  // smear the 1px control frames). The active screen re-asserts its own
-  // presentation on its next frame.
-  platform.ApplyWindowPointDrawing();
-
-  // Dialog_CreateFromDlog 0x008730a1: centre on the 640x480 logical playfield,
-  // truncating the half-offsets (here: inside the playfield's on-screen rect,
-  // window points).
+  // Keep controls in the original window-local space. The interaction frame
+  // places this surface over the current background without mutating the
+  // renderer merely to load a resource.
   const float win_w = static_cast<float>(definition->right - definition->left);
   const float win_h = static_cast<float>(definition->bottom - definition->top);
-  window.window_rect =
-      CenterDialogInPlayfield(platform.playfield_window_rect(), win_w, win_h);
+  window.window_rect = {0.0F, 0.0F, win_w, win_h};
 
   // Type-7 popups seed their entries from the MENU resource named in the DITL
   // tail; runtime-filled popups (e.g. MENU 0x1f5 "Character") arrive empty and
@@ -590,19 +566,17 @@ void UiWindow_RunInteractionLoop(
     short *code_out,
     const std::function<void()> &render_background) {
   *code_out = -1;
-  // Keep the screen under the dialog alive: the callback redraws the active
-  // screen under its own presentation, then we switch to the 1:1 compositing
-  // state on top (re-asserted every frame; a window resize makes the platform
-  // re-apply the underlying screen's presentation) and keep the dialog
-  // centred in the playfield's on-screen rect.
+  // DIVERGENCE: redraw the preserved background instead of compositing the
+  // original's dedicated window surfaces. Drawing and input share one local
+  // placement; the background transform is restored when this frame exits.
   if (render_background) {
     render_background();
   }
-  platform.ApplyWindowPointDrawing();
-  window.window_rect = CenterDialogInPlayfield(
-      platform.playfield_window_rect(),
-      static_cast<float>(window.definition.right - window.definition.left),
-      static_cast<float>(window.definition.bottom - window.definition.top));
+  const Placement background = platform.current_placement();
+  const SdlPlatform::ScopedPlacement dialog_placement(
+      platform,
+      PlaceCenteredIn(background,
+                      {window.window_rect.w, window.window_rect.h}));
 
   // Publish the dialog's buttons to the probe harness (window-point rects,
   // named by their Pascal titles: "ok", "cancel", ...). Single generic site
@@ -612,7 +586,9 @@ void UiWindow_RunInteractionLoop(
   // render_background and make a one-shot trigger read miss the layout.
   {
     std::vector<std::pair<std::string, SDL_FRect>> named_rects;
-    named_rects.emplace_back("window", window.window_rect);
+    named_rects.emplace_back(
+        "window",
+        platform.current_placement().ToWindowRect(window.window_rect));
     for (std::size_t row = 1; row <= window.items.size(); ++row) {
       const auto &item = window.items[row - 1];
       if (item.type != 4) {
@@ -626,7 +602,8 @@ void UiWindow_RunInteractionLoop(
         name = "button_" + std::to_string(row);
       }
       named_rects.emplace_back(std::move(name),
-                               ItemRect(item, window.window_rect));
+                               platform.current_placement().ToWindowRect(
+                                   ItemRect(item, window.window_rect)));
     }
     platform.PublishProbeUi(
         "ui_dialog_ditl_" +
@@ -639,7 +616,7 @@ void UiWindow_RunInteractionLoop(
   // arrives mid-frame is hit-tested at its own position, not the previous
   // frame's cursor. Required for the external probe harness
   // (docs/probe_harness.md), whose injected clicks always land mid-frame.
-  const SDL_FPoint mouse = platform.mouse_window_point();
+  const SDL_FPoint mouse = platform.mouse_position();
   auto activate = [&](std::size_t row) { *code_out = static_cast<short>(row); };
 
   // A click outside an expanded popup collapses it without activating.
@@ -659,7 +636,7 @@ void UiWindow_RunInteractionLoop(
       // docs/probe_harness.md): the down event updates the platform's tracked
       // window point before this case runs, so re-sample here instead of
       // trusting the frame-start sample.
-      const SDL_FPoint click = platform.mouse_window_point();
+      const SDL_FPoint click = platform.mouse_position();
       // An expanded popup consumes the whole click: selecting an entry,
       // re-clicking the control, or clicking anywhere else all just close it.
       // (Without this, clicks landing on the dropdown area would fall through

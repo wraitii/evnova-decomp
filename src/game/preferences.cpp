@@ -34,7 +34,8 @@ namespace {
 // ---------------------------------------------------------------------------
 // Preferences dialog (Ghidra Menu_RunSettingsDialog, 0x00488650).
 //
-// DLOG 0xfa3 is a 336x296 window centred at (152,92) on the 640x480 playfield.
+// DLOG 0xfa3 is a 336x296 local composition; its placement centres it in the
+// active window.
 // Its DITL carries the option checkboxes, the two slider stacks, the OK and
 // Key Settings buttons, and the label/value boxes. Item ordinals (1-based)
 // and the direction of each toggle are documented in
@@ -123,6 +124,7 @@ void DrawOwningScreen(SdlPlatform &platform,
   if (render_background) {
     render_background();
   } else {
+    platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
   }
@@ -165,9 +167,8 @@ void DrawOwningScreen(SdlPlatform &platform,
 // (FUN_008730a1) integer arithmetic.
 [[nodiscard]] SDL_FRect
 CenterWindowOnPanel(const SDL_FRect &panel, float win_w, float win_h) {
-  const float x = panel.x + std::truncf((panel.w - win_w) / 2.0F);
-  const float y = panel.y + std::truncf((panel.h - win_h) / 2.0F);
-  return SDL_FRect{x, y, win_w, win_h};
+  (void)panel;
+  return SDL_FRect{0.0F, 0.0F, win_w, win_h};
 }
 
 // Draws the 17x17 checkbox and label used by UiWindow_Draw. The original uses
@@ -643,7 +644,8 @@ void DrawKeySettingsDialog(SdlPlatform &platform,
                            const std::function<void()> &render_background) {
   SDL_Renderer *const renderer = platform.renderer();
   DrawOwningScreen(platform, render_background);
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
+                                       platform.logical_playfield_size()));
 
   const auto &window = layout.window;
   // UiWindow_Draw clears and frames the complete DLOG surface before calling
@@ -1064,7 +1066,8 @@ void DrawSettingsDialog(SdlPlatform &platform,
                         const std::function<void()> &render_background) {
   SDL_Renderer *renderer = platform.renderer();
   DrawOwningScreen(platform, render_background);
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
+                                       platform.logical_playfield_size()));
   if (!layout.from_ditl) {
     return;
   }
@@ -1218,6 +1221,8 @@ bool NovaMenu_RunSettingsDialog(
     NovaFontCache &font_cache,
     NovaPreferences &prefs,
     const std::function<void()> &render_background) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
   (void)audio;
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   SettingsLayout layout = BuildSettingsLayout(panel);
@@ -1230,6 +1235,8 @@ bool NovaMenu_RunSettingsDialog(
   const SettingsArtwork artwork = LoadSettingsArtwork(platform);
 
   while (!platform.quit_requested()) {
+    platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
+                                         platform.logical_playfield_size()));
     const SDL_FPoint mouse = platform.mouse_position();
     const auto hover = HitTestControl(layout, mouse.x, mouse.y);
     DrawSettingsDialog(
@@ -1329,6 +1336,8 @@ bool NovaMenu_RunKeySettingsDialog(
     NovaFontCache &font_cache,
     NovaPreferences &prefs,
     const std::function<void()> &render_background) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   const KeySettingsLayout layout = BuildKeySettingsLayout(panel);
   if (!layout.from_ditl ||

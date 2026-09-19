@@ -10,8 +10,15 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "probe_server.hpp"
+#include "util/placement.hpp"
+
+void ApplyPlacementToRenderer(SDL_Renderer *renderer,
+                              const Placement &placement,
+                              float pixel_density);
 
 // Key a modal text/input dialog can act on. The menu's command channel only
 // reports a fixed action-key set, so dialogs read raw editable keys through a
@@ -305,10 +312,6 @@ public:
 
   void ClearProbeUi() { probe_.ClearUi(); }
 
-  // The current window->content presentation policy for this frame. See
-  // SetCenteredPlayfield / SetScaledPlayfield / SetFullscreenPlayfield.
-  enum class Presentation { kCentered, kScaled, kFullscreen };
-
   // The full window size in logical draw coordinates. World/spaceflight
   // drawing queries this to extend to the
   // (possibly larger) window; it is independent of whether fixed screens are
@@ -320,63 +323,55 @@ public:
   // resulting texture at its unchanged logical size.
   [[nodiscard]] float text_raster_scale() const;
 
-  // Resolution-extension helpers. The game renders onto a logical 640x480
-  // content canvas (the original's 1024x768 surface scaled to its window); the
-  // window itself has a 1024x768 minimum. Each presentation policy maps that
-  // content to the window differently:
-  //
-  //  * SetScaledPlayfield()  -- fixed screens (main menu, splash, intro) are
-  //    uniformly upscaled to fill the window (letterbox for aspect) via SDL's
-  //    logical presentation. This is the "scale a few things up" default; at
-  //    the 1024x768 minimum it is ~1:1 with the 1024-native art.
-  //  * SetCenteredPlayfield()-- the docked/landed screen stays at native 1:1
-  //    size, centred in the window with black bars on every side. Retina
-  //    backing pixels increase detail without changing its physical size.
-  //  * SetFullscreenPlayfield() -- the free-flight world spans the whole
-  //    window in window-coordinate units (no clipping / fixed logical size),
-  //    so larger windows show more of the system; HUD chrome stays fixed.
-  //
-  // SDL_RenderCoordinatesFromWindow reports the mouse in content coordinates
-  // (viewport-relative / through the logical rect) when the corresponding
-  // presentation is active, so hit-tests stay correct in all three modes.
-  void SetCenteredPlayfield();
-  void SetScaledPlayfield();
-  void SetFullscreenPlayfield();
+  [[nodiscard]] const Placement &current_placement() const {
+    return placement_;
+  }
+
+  void SetPlacement(Placement placement);
+  void PushPlacement(const Placement &placement);
+  void PopPlacement();
+
+  class ScopedPlacement {
+  public:
+    ScopedPlacement(SdlPlatform &platform, const Placement &placement)
+        : platform_(&platform) {
+      platform_->PushPlacement(placement);
+    }
+
+    ~ScopedPlacement() {
+      if (platform_ != nullptr) {
+        platform_->PopPlacement();
+      }
+    }
+
+    ScopedPlacement(const ScopedPlacement &) = delete;
+    ScopedPlacement &operator=(const ScopedPlacement &) = delete;
+
+    ScopedPlacement(ScopedPlacement &&other) noexcept
+        : platform_(std::exchange(other.platform_, nullptr)) {}
+
+    ScopedPlacement &operator=(ScopedPlacement &&) = delete;
+
+  private:
+    SdlPlatform *platform_;
+  };
 
   // Applies the "Run in a Window" preference (NovaPreferences::run_in_window)
   // to the OS window. windowed=true keeps the normal resizable window;
   // windowed=false switches SDL to exclusive fullscreen. Idempotent and safe
   // to call at startup and every time the Settings checkbox is toggled. This
-  // is independent of the draw presentation (the *Playfield helpers above).
+  // is independent of the active authored placement.
   void ApplyWindowMode(bool windowed);
 
-  // Raw mouse position in window coordinates (SDL window points), unmapped by
-  // any presentation transform. The dialog runtime composites over the last
-  // presented frame and draws at 1:1 window scale, so it maps the mouse
-  // against the playfield's on-screen rect itself instead of relying on the
-  // active presentation's coordinate mapping.
+  // Raw mouse position in window coordinates (SDL window points).
   [[nodiscard]] SDL_FPoint mouse_window_point() const;
 
-  // Where the 640x480 logical content canvas currently sits on the window, in
-  // window points (letterboxed dst rect in the scaled presentation, the
-  // integer-centred panel in the centred one, the whole window in fullscreen).
+  // Where the current authored content sits on the window, in window points.
   [[nodiscard]] SDL_FRect playfield_window_rect() const;
 
-  // Transient drawing mode for modal windows that composite over the last
-  // presented frame: logical presentation disabled, no viewport, 1 drawing
-  // unit = 1 window point. Unlike the Set*Playfield modes this leaves
-  // presentation_ (and therefore playfield_window_rect) untouched, so the
-  // caller keeps seeing the underlying screen's geometry; the next
-  // Set*Playfield call from the active screen restores its own state.
-  void ApplyWindowPointDrawing();
-
 private:
-  // The 640x480 logical content canvas shared by the fixed screens. This is
-  // scaled up to the window in kScaled presentation and clipped centred in
-  // kCentered; the extending world ignores it and tracks the window size.
-  void ApplyCenteredPresentation();
-  void ApplyScaledPresentation();
-  void ApplyFullscreenPresentation();
+  void ApplyPlacement();
+  void RefreshPlacementAfterResize();
 
   [[nodiscard]] float WindowPixelDensity() const;
 
@@ -406,7 +401,8 @@ private:
   bool sdl_initialized_ = false;
   bool quit_requested_ = false;
   ProbeServer probe_;
-  Presentation presentation_ = Presentation::kFullscreen;
+  Placement placement_{};
+  std::vector<Placement> placement_stack_;
   SDL_FPoint mouse_position_{};
   SDL_FPoint mouse_window_point_{};
   std::unique_ptr<SDL_Window, WindowDeleter> window_;
