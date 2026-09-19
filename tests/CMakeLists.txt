@@ -64,7 +64,8 @@ if(EVNOVA_ENABLE_PCH)
 endif()
 
 if(MSVC)
-    target_compile_options(evnova_tests PRIVATE /W4 /permissive-)
+    # Tests exercise the same fixed-width game fields as the runtime.
+    target_compile_options(evnova_tests PRIVATE /W4 /permissive- /wd4244 /wd4267)
     if(EVNOVA_WARNINGS_AS_ERRORS)
         target_compile_options(evnova_tests PRIVATE /WX)
     endif()

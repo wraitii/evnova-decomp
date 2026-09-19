@@ -108,7 +108,8 @@ endif()
 
 target_compile_features(evnova_runtime PUBLIC cxx_std_23)
 if(MSVC)
-    target_compile_options(evnova_runtime PRIVATE /W4 /permissive-)
+    # Original fixed-width game fields intentionally narrow arithmetic values.
+    target_compile_options(evnova_runtime PRIVATE /W4 /permissive- /wd4244 /wd4267)
     if(EVNOVA_WARNINGS_AS_ERRORS)
         target_compile_options(evnova_runtime PRIVATE /WX)
     endif()
@@ -131,3 +132,6 @@ endif()
 
 add_executable(evnova main.cpp)
 target_link_libraries(evnova PRIVATE evnova_runtime)
+if(MSVC)
+    target_compile_options(evnova PRIVATE /wd4244 /wd4267)
+endif()
