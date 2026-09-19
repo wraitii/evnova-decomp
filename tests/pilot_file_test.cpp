@@ -334,6 +334,36 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(collected.pers_grudge_flags[3] == 1);
 }
 
+TEST_CASE("retired crön slots persist as inactive and stay retired") {
+  game::GameState state;
+  state.scenario.cron_events.resize(6);
+  state.scenario.cron_events[5].present = true;
+  // A slot that has finished: is_active is false, but deactivation leaves the
+  // counters non-negative, which PilotFileApply would read back as active.
+  state.cron_event_states[5].is_active = false;
+  state.cron_event_states[5].duration_counter = 0;
+  state.cron_event_states[5].holdoff_counter = 0;
+
+  const PilotFile record = PilotFileCollectFromState(state);
+  // Ghidra 0x004c7dd0 writes the 0xffff sentinel pair for an inactive slot.
+  CHECK(record.cron_duration_counters[5] == -1);
+  CHECK(record.cron_holdoff_counters[5] == -1);
+
+  const auto bytes = PilotFileSerialize(record, record.jump_dest_stellar);
+  PilotFile loaded;
+  const auto err = PilotFileDeserialize(bytes, loaded);
+  REQUIRE(
+      (err == PilotLoadError::kOk || err == PilotLoadError::kRepairsApplied));
+  CHECK(loaded.cron_duration_counters[5] == -1);
+  CHECK(loaded.cron_holdoff_counters[5] == -1);
+
+  game::GameState restored;
+  restored.scenario.cron_events.resize(6);
+  restored.scenario.cron_events[5].present = true;
+  PilotFileApply(loaded, restored);
+  CHECK_FALSE(restored.cron_event_states[5].is_active);
+}
+
 TEST_CASE("new-pilot stellar reset derives domination from flags 0x20") {
   game::GameState state;
   state.scenario.stellars.resize(3);
