@@ -171,15 +171,15 @@ struct LandedContext {
 // Stellar_MaxLandingDistance: per-axis half-extent of the normal-arrival
 // envelope for a target stellar (Stellar_HandleStellarEntryAndExit 0x00457580
 // gate, inlined at 0x00458786..0x004587a9). Returns 75 (0x4b) when
-// target_sprite_full_height <= 0 (no prepared sprite), else
-// round(target_sprite_full_height * 1.75) with the 1.75 double
+// target_sprite_full_width <= 0 (no prepared sprite), else
+// round(target_sprite_full_width * 1.75) with the 1.75 double
 // k_stellar_arrival_envelope_scale_f64 (0x005756a0). The landing is in range
 // only when BOTH axis deltas are strictly less than this value (a square
-// envelope, not a radius). The input is Sprite_GetFrameFullHeight on the
-// link_a spin set (full frame height); the 250/0xfa check belongs to the
+// envelope, not a radius). The input is Sprite_GetFrameFullWidth on the
+// link_a spin set (full frame width); the 250/0xfa check belongs to the
 // starmap travel-arm branch (0x00459369), not this normal dock gate.
 [[nodiscard]] float
-Stellar_MaxLandingDistance(std::int16_t target_sprite_full_height);
+Stellar_MaxLandingDistance(std::int16_t target_sprite_full_width);
 
 // Ghidra 0x004250f0 Player_RefuelShipWithCredits. Arrival auto-refuel for the
 // auto-refueller outfit (ModType 19): when the player owns one, rounds fuel
@@ -204,19 +204,22 @@ void Player_RefuelShipWithCredits(GameState &state);
 // Stellar_Launch.
 [[nodiscard]] bool Stellar_Dock(GameState &state,
                                 LandedContext &ctx,
-                                std::int16_t target_sprite_full_height = 0);
+                                std::int16_t target_sprite_full_width = 0);
 
 // Ghidra 0x00455e10 Stellar_RunDockAndLaunchSequence, launch tail (0x00455f99..
 // 0x00456268): runs when the destination-interaction loop returns, i.e. on
-// leaving the dock. Zeroes velocity and repositions the ship at the stellar
-// centre, refills shields and armor to the effective maxima, runs the single
+// leaving the dock. Zeroes velocity and repositions the ship at the queued
+// travel stellar (ai_secondary_target_slot, which a docked M may have
+// repointed at the destination system's first nav, unless a docked N latched
+// g_skip_player_reposition_once), refills shields and armor to the effective
+// maxima, runs the single
 // daily world tick (0x00456033 -- so the Spaceport's mission gate sees the
 // pre-landing date), jitters/rerolls the persisted stat modifiers, saves the
 // pilot, rolls a random launch heading, resets the travel selection, and
 // wipes the transient shot pool. The caller then shows the departure overlay
 // (0x00456323, NovaHud_ShowLaunchDepartureMessage) and resyncs its frame
 // clock (the original zeroes g_avg_frame_tick_scale at 0x00456174).
-void Stellar_Launch(GameState &state, std::int16_t stellar_id);
+void Stellar_Launch(GameState &state);
 
 // Refuels the player ship toward its effective fuel capacity. Mirrors the
 // landed fuel service: the player pays a per-unit price for the fuel added,
