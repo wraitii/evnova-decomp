@@ -33,6 +33,15 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
                          GameState &state,
                          const NovaPreferences &prefs);
 
+// Ghidra 0x0045c7a0 NovaUi_MarkTravelAndStatusPanelsDirty. Arms every player
+// command edge latch (GameState::command_latches plus the escort panel, cloak
+// and route-map zoom latches) so a key held across a modal or mode transition
+// must be released and re-pressed before its command fires. Named for the
+// original's misnomer (it is not a panel-dirty helper). Called from the launch
+// tail (0x00456128) and at flight-loop entry in place of the original's command
+// flush.
+void NovaUi_MarkTravelAndStatusPanelsDirty(GameState &state);
+
 // Ship-class movement stats derived from the raw resource as the original
 // loader (NovaData_LoadScenarioResourceTables 0x004bd3c0) derives
 // ShipClassDef.base_turn_rate_deg / base_speed / accel(0x3c):

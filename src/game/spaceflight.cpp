@@ -587,37 +587,23 @@ void NovaFrame_TickSystems(GameState &state,
 // 0x00451954 and must be decomposed from valid internal entries.
 // ---------------------------------------------------------------------------
 
-struct PlayerTravelSelectionLatches {
-  bool target_cycle_was_held = false;
-  bool destination_cycle_was_held = false;
-  // Shared clear-target edge latch (Ghidra g_playerClearTargetCommandLatch).
-  // The primary-ship-target arm and the travel-target arm both use it, so a
-  // slot-8+arm press that also holds slot 0xc does not clear the travel
-  // selection (matching 0x0044b7f6 / 0x0044ddb5).
-  bool clear_target_was_held = false;
-  std::int16_t prev_travel_stellar = -1;
-};
-
-struct PlayerShipTargetLatches {
-  bool ship_cycle_was_held = false;
-  bool nearest_was_held = false;
-};
-
 // Ghidra Ship_HandlePlayerShipCore synthetic CFG: travel-selection commands
 // 0x0044B7C4 -> 0x0044BAFE. The wider 0x0044B7C4 -> 0x0044BC1E umbrella
 // absorbs reordered mouse/route-map blocks and is not used. Handles the Tab
 // stellar cycle, the clear-target command (slot 8 / slot 0xc), the Backslash
-// destination-system cycle and the H hyperspace-mode arm.
+// destination-system cycle and the H hyperspace-mode arm. The edge latches live
+// in GameState::command_latches so NovaUi_MarkTravelAndStatusPanelsDirty can
+// re-arm them across a modal/mode boundary.
 void PlayerTick_TravelSelectionCommands(GameState &state,
                                         const FlightInput &input,
-                                        bool arm_modifier_held,
-                                        PlayerTravelSelectionLatches &l) {
+                                        bool arm_modifier_held) {
+  PlayerCommandLatches &latches = state.command_latches;
   const bool target_cycle =
       input.cycle_target_next || input.cycle_target_previous;
-  if (target_cycle && !l.target_cycle_was_held) {
+  if (target_cycle && !latches.target_cycle_was_held) {
     NovaTargeting_CyclePlayerStellarTarget(state, input.cycle_target_next);
   }
-  l.target_cycle_was_held = target_cycle;
+  latches.target_cycle_was_held = target_cycle;
   // Clear-target command (Ghidra 0x0044B7C4 primary-ship arm +
   // 0x0044DDD5 travel arm, sharing g_playerClearTargetCommandLatch).
   //   slot 8 + arm modifier -> clear the primary ship target
@@ -631,8 +617,8 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
   // The shared latch means slot 8+arm+slot 0xc clears only the ship target.
   const bool clear_command = input.clear_target;
   const bool hyperspace_command = input.hyperspace_mode;
-  if (clear_command && arm_modifier_held && !l.clear_target_was_held) {
-    l.clear_target_was_held = true;
+  if (clear_command && arm_modifier_held && !latches.clear_target_was_held) {
+    latches.clear_target_was_held = true;
     if (state.player.primary_target_ship_slot != -1) {
       state.pending_ui_sounds.push_back({1, 1});
       state.player.primary_target_ship_slot = -1;
@@ -641,8 +627,8 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
   const bool travel_clear =
       (clear_command && !arm_modifier_held) || hyperspace_command;
   if (travel_clear && state.player.ai_station_hold_timer <= 0.0F) {
-    if (!l.clear_target_was_held) {
-      l.clear_target_was_held = true;
+    if (!latches.clear_target_was_held) {
+      latches.clear_target_was_held = true;
       // 0x0044ddce queues transition cue 1.
       state.pending_ui_sounds.push_back({1, 1});
       state.travel.selected_stellar_id = -1;
@@ -671,7 +657,7 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
   } else {
     // 0x0044b8b2: the shared latch releases once neither arm is active, and
     // also when the station-hold gate blocks the travel clear.
-    l.clear_target_was_held = false;
+    latches.clear_target_was_held = false;
   }
   // Destination-SYSTEM cycling (Backslash / Shift+Backslash): rotate the
   // next-jump destination through the systems directly linked to the current
@@ -682,7 +668,7 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
   // jump -- that stays on the 'j' travel key (NovaTravel_Tick).
   const bool destination_cycle =
       input.cycle_destination_next || input.cycle_destination_previous;
-  if (destination_cycle && !l.destination_cycle_was_held) {
+  if (destination_cycle && !latches.destination_cycle_was_held) {
     const std::int16_t dest =
         NovaTravel_CycleDestinationSystem(state, input.cycle_destination_next);
     // Ghidra 0x0044b8ab: the core refreshes the route-map overlay after the
@@ -696,16 +682,15 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
       NovaLog::Info("backslash: no travelable destination from this system");
     }
   }
-  l.destination_cycle_was_held = destination_cycle;
+  latches.destination_cycle_was_held = destination_cycle;
 }
 
 // Ghidra Ship_HandlePlayerShipCore disjoint ship-target command blocks. The
 // nearest-target command is the clean synthetic CFG 0x0044BE15 -> 0x0044BEB7;
 // the backquote cycle is embedded in the reordered mouse/target envelope.
 // Per-frame validation remains a separate earlier call at 0x0044ADA1.
-void PlayerTick_ShipTargetCommands(GameState &state,
-                                   const FlightInput &input,
-                                   PlayerShipTargetLatches &l) {
+void PlayerTick_ShipTargetCommands(GameState &state, const FlightInput &input) {
+  PlayerCommandLatches &latches = state.command_latches;
   // Ship-target cycling: backquote (`) / Shift+backquote, with the
   // combat-relevant-only modifier (Alt or 'k'). Mirrors the original's
   // Ship_HandlePlayerShip cycle-target block (0x0044b120): a no-op result or
@@ -713,7 +698,7 @@ void PlayerTick_ShipTargetCommands(GameState &state,
   // the reticle pulse is re-armed at 256.0 (0x43800000).
   const bool ship_cycle =
       input.cycle_ship_target_next || input.cycle_ship_target_previous;
-  if (ship_cycle && !l.ship_cycle_was_held) {
+  if (ship_cycle && !latches.ship_cycle_was_held) {
     const std::int16_t next = input.cycle_ship_target_next
                                   ? NovaTargeting_FindNextPlayerCycleTarget(
                                         state,
@@ -733,14 +718,14 @@ void PlayerTick_ShipTargetCommands(GameState &state,
       state.ship_reticle_pulse = 256.0F;
     }
   }
-  l.ship_cycle_was_held = ship_cycle;
+  latches.ship_cycle_was_held = ship_cycle;
   // "Target nearest" command: 'o' selects the nearest hostile combat target
   // (Ship_SelectNearestHostileCombatTarget 0x00462bd0), Alt+'o' the nearest
   // engaged target (0x00462850). A miss (-1) leaves the current target
   // untouched; a new slot re-arms the reticle pulse.
   const bool nearest_pressed =
       input.select_nearest_hostile || input.select_nearest_engaged;
-  if (nearest_pressed && !l.nearest_was_held) {
+  if (nearest_pressed && !latches.nearest_target_was_held) {
     const std::int16_t slot =
         input.select_nearest_hostile
             ? NovaTargeting_SelectNearestHostileCombatTarget(state)
@@ -750,8 +735,54 @@ void PlayerTick_ShipTargetCommands(GameState &state,
       state.ship_reticle_pulse = 256.0F;
     }
   }
-  l.nearest_was_held = nearest_pressed;
+  latches.nearest_target_was_held = nearest_pressed;
 }
+
+} // namespace
+
+// Ghidra 0x0045c7a0 NovaUi_MarkTravelAndStatusPanelsDirty. The name is a
+// misnomer: it does not mark panels dirty, it sets every player-command edge
+// latch (the 0x007cab35..0x007cab53 swath) so a key held across a modal or mode
+// transition must be released and re-pressed before its command fires again.
+// Original call sites: the launch tail (0x00456128), Ship_HandlePlayerShipCore
+// modal arms (0x0044afa9/0x0044bd2d/0x00451c41/0x00451daa),
+// Ship_HandlePlayerTargetActionCommand (0x004549fd..), the hypergate/wormhole
+// transfers, the boarding/plunder window and the escort-management window. The
+// port wires the launch tail, the flight-loop entry, the starmap, mission
+// computer, mission-ship interaction, ship-comm, destination-interaction,
+// boarding/plunder, Player Info and hypergate-map returns; the wormhole path
+// has no blocking modal.
+void NovaUi_MarkTravelAndStatusPanelsDirty(GameState &state) {
+  PlayerCommandLatches &latches = state.command_latches;
+  latches.target_cycle_was_held = true;
+  latches.destination_cycle_was_held = true;
+  latches.clear_target_was_held = true;
+  latches.ship_cycle_was_held = true;
+  latches.nearest_target_was_held = true;
+  latches.secondary_cycle_was_held = true;
+  latches.clear_secondary_was_held = true;
+  latches.starmap_was_held = true;
+  latches.mission_info_was_held = true;
+  latches.land_was_held = true;
+  latches.dismiss_was_held = true;
+  latches.target_action_was_held = true;
+  latches.board_was_held = true;
+  latches.return_to_menu_was_held = true;
+  // g_playerDisableSurrenderCommandLatch (cloak toggle) and
+  // g_playerRouteMapZoomCommandLatch. The original also arms
+  // g_playerFpsToggleCommandLatch and the not-yet-modelled
+  // DAT_007cab38/3b/3c/3d/3e/3f/40/41/43/49 slots; those commands have no port
+  // consumer to swallow.
+  state.cloak_command_latch = 1;
+  state.route_map.zoom_command_latch = true;
+  // g_target_category_key_latch[5] / g_escort_command_key_latch[4] /
+  // DAT_007cab49 (the escort panel toggle); the original arms all three.
+  state.escort.select_key_latch.fill(1);
+  state.escort.order_key_latch.fill(1);
+  state.escort.panel_toggle_latch = 1;
+}
+
+namespace {
 
 // Ghidra Ship_HandlePlayerShipCore navigation region
 // PlayerTick_MouseTargetAndControlCommands 0x0044E019. Route-map clicks first
@@ -1055,6 +1086,10 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
       if (map.exit == StarmapExit::kQuit) {
         return LandCommandResult::kQuit;
       }
+      // Stellar_EnterHypergate's map return (0x00456480) arms the player
+      // command latches like an ordinary starmap return, so a held Escape must
+      // be released before it can re-fire.
+      NovaUi_MarkTravelAndStatusPanelsDirty(state);
       destination = NovaTravel_ResolveHypergateDestination(
           state, source, map.destination_system_id);
       if (destination < 0) {
@@ -1538,22 +1573,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // (the original accumulates _g_avg_frame_time_ms).
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
   std::uint64_t prev_tick_ms = state.gameplay_now_ms;
-  PlayerTravelSelectionLatches travel_selection_latches;
-  travel_selection_latches.prev_travel_stellar =
-      state.travel.selected_stellar_id;
-  PlayerShipTargetLatches ship_target_latches;
-  // Secondary-weapon command edges (PlayerTick_WeaponCommands): the cycle is
-  // edge-resolved against g_playerSecondaryCycleCommandLatch semantics (set
-  // on execution, cleared on release); the clear-selection arm is already
-  // single-shot but stays consistent with the same was-held pattern.
-  bool secondary_cycle_was_held = false;
-  bool clear_secondary_was_held = false;
-  bool starmap_was_held = false;
-  bool mission_info_was_held = false;
-  bool land_was_held = false;
-  bool dismiss_was_held = false;
-  bool target_action_was_held = false;
-  bool board_was_held = false;
+  // Player command edge latches (Ghidra 0x007cab35..0x007cab53). They live on
+  // GameState so NovaUi_MarkTravelAndStatusPanelsDirty re-arms them at modal
+  // and mode boundaries; the loop seeds the travel-selection tracker from the
+  // current selection.
+  state.command_latches.prev_travel_stellar = state.travel.selected_stellar_id;
+  // The original's flight-loop entry calls NovaInputQueue_FlushAllCommands
+  // twice (0x00417600), so a command key held across the intro/menu transition
+  // is not active on the first frame. The port cannot clear SDL's live
+  // keyboard state, so it arms every latch here instead: a held key must be
+  // released and re-pressed before its command fires.
+  NovaUi_MarkTravelAndStatusPanelsDirty(state);
   // Gameplay time freezes while a blocking modal owns the loop (the original's
   // g_gameplay_time_frozen around interaction windows); every modal return
   // site calls resync_frame_clock() so the wall-clock gap is never integrated
@@ -1781,11 +1811,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           probe_json_escape(automation_status.target) + "\",\"detail\":\"" +
           probe_json_escape(automation_status.detail) + "\"}");
       // The original's cancel/skip command (binding slot 0x17, default Escape)
-      // returns to the menu. Resolved through the persisted binding table so a
-      // rebound key is honoured (PollFlightInput no longer latches raw Escape).
-      if (binding_held(0x17)) {
-        returning_to_menu = true;
-        break;
+      // returns to the menu, edge-latched through DAT_007cab53 (0x00417b7e):
+      // fire once on the leading edge, then clear once the bound key is
+      // released. NovaUi_MarkTravelAndStatusPanelsDirty re-arms the latch at
+      // the launch tail (0x00456128) and at flight-loop entry, so an Escape
+      // held across the dock launch (or the intro skip) does not immediately
+      // re-fire here and bounce straight back to the menu.
+      const bool cancel_held = binding_held(0x17);
+      if (cancel_held) {
+        if (!state.command_latches.return_to_menu_was_held) {
+          state.command_latches.return_to_menu_was_held = true;
+          returning_to_menu = true;
+          break;
+        }
+      } else {
+        state.command_latches.return_to_menu_was_held = false;
       }
       // PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240): death
       // bookkeeping, disabled damping, disabled auto-repair, the periodic
@@ -1856,9 +1896,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // their grey neighbour ring without waiting for the next system entry.
       NovaSystem_RebuildDiscoveredLatch(state);
       if (!player_tick_consumed) {
-        PlayerTick_TravelSelectionCommands(
-            state, input, arm_modifier_held, travel_selection_latches);
-        PlayerTick_ShipTargetCommands(state, input, ship_target_latches);
+        PlayerTick_TravelSelectionCommands(state, input, arm_modifier_held);
+        PlayerTick_ShipTargetCommands(state, input);
       }
       // Route-map overlay zoom + auto-dismiss (Ghidra 0x0045216e /
       // 0x0042f23e, the PlayerTick_AuxiliaryCommands zoom block). Zoom keys
@@ -1880,17 +1919,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       if (!player_tick_consumed) {
         PlayerTick_MouseTargetAndControlCommands(platform, view, state, input);
       }
-      const bool land_pressed =
-          !player_tick_consumed && input.land && !land_was_held;
-      const bool target_action_pressed = !player_tick_consumed &&
-                                         input.target_action &&
-                                         !target_action_was_held;
-      const bool board_pressed =
-          !player_tick_consumed && input.board && !board_was_held;
+      const bool land_pressed = !player_tick_consumed && input.land &&
+                                !state.command_latches.land_was_held;
+      const bool target_action_pressed =
+          !player_tick_consumed && input.target_action &&
+          !state.command_latches.target_action_was_held;
+      const bool board_pressed = !player_tick_consumed && input.board &&
+                                 !state.command_latches.board_was_held;
       if (!player_tick_consumed) {
-        land_was_held = input.land;
-        target_action_was_held = input.target_action;
-        board_was_held = input.board;
+        state.command_latches.land_was_held = input.land;
+        state.command_latches.target_action_was_held = input.target_action;
+        state.command_latches.board_was_held = input.board;
       }
       // The original's movement values are per simulation tick. Its normal
       // cadence is 30 Hz; using a 60 Hz SDL render loop without this conversion
@@ -1916,9 +1955,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // (the original returns from the player core before the weapon block).
       if (!player_tick_consumed && !state.travel.engaging) {
         const bool cycle_secondary =
-            input.cycle_secondary && !secondary_cycle_was_held;
+            input.cycle_secondary &&
+            !state.command_latches.secondary_cycle_was_held;
         const bool clear_secondary =
-            input.clear_secondary && !clear_secondary_was_held;
+            input.clear_secondary &&
+            !state.command_latches.clear_secondary_was_held;
         NovaWeapon_TickPlayerWeaponCommands(
             state,
             {.fire_primary_held = input.fire,
@@ -1927,16 +1968,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
              .cycle_secondary_backwards = input.cycle_secondary_backwards,
              .clear_secondary = clear_secondary},
             frame_time_ms / kOriginalTickMs);
-        secondary_cycle_was_held = input.cycle_secondary;
-        clear_secondary_was_held = input.clear_secondary;
+        state.command_latches.secondary_cycle_was_held = input.cycle_secondary;
+        state.command_latches.clear_secondary_was_held = input.clear_secondary;
         // HUD/panel dismiss (Ghidra 0x00450ae7 auxiliary block): the rising
         // edge of binding slot 6 clears the transient HUD overlay message and
         // the route-map overlay, and closes the Escort Commands panel (the
         // original sets local_265, consumed at 0x004529a8). The port routes
         // the panel close through EscortCommandState::close_pending so the
         // escort tick below performs the same clear.
-        const bool dismiss_pressed = input.dismiss && !dismiss_was_held;
-        dismiss_was_held = input.dismiss;
+        const bool dismiss_pressed =
+            input.dismiss && !state.command_latches.dismiss_was_held;
+        state.command_latches.dismiss_was_held = input.dismiss;
         if (dismiss_pressed) {
           NovaHud_ClearOverlayMessage(state);
           state.route_map.overlay_visible = false;
@@ -2221,8 +2263,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // systems). Gated while a jump is engaged (the original fire-restricts
       // the player through the brake, hold and zoom).
       const bool starmap_held = input.starmap;
-      if (!player_tick_consumed && starmap_held && !starmap_was_held &&
-          !state.travel.engaging) {
+      if (!player_tick_consumed && starmap_held &&
+          !state.command_latches.starmap_was_held && !state.travel.engaging) {
         const StarmapResult map_result =
             NovaStarmap_RunWindow(platform, state, -1, &view, &hud);
         if (map_result.exit == StarmapExit::kQuit) {
@@ -2239,14 +2281,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                             map_result.destination_system_id);
         }
         // Refresh the travel reticle after the map may have re-selected the
-        // travel stellar (the original re-arms the travel pulse on map return
-        // via NovaUi_MarkTravelAndStatusPanelsDirty).
+        // travel stellar. The original re-arms every command edge latch on map
+        // return (NovaUi_MarkTravelAndStatusPanelsDirty), so a held Escape
+        // (or map key) must be released before it re-fires.
+        NovaUi_MarkTravelAndStatusPanelsDirty(state);
         state.travel_reticle_pulse = 256.0F;
         // The map blocked the loop; freeze gameplay time across it.
         resync_frame_clock();
       }
       if (!player_tick_consumed) {
-        starmap_was_held = starmap_held;
+        state.command_latches.starmap_was_held = starmap_held;
       }
       // Active-missions command ('i', edge-triggered; gameplay command 0x28):
       // Ship_HandlePlayerShipCore 0x0044aa70 counts the non-invisible active
@@ -2261,7 +2305,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // by the disabled check.
       const bool mission_info_held = input.mission_info;
       if (!player_tick_consumed && mission_info_held &&
-          !mission_info_was_held &&
+          !state.command_latches.mission_info_was_held &&
           state.player.ai_station_hold_timer <= 0.0F &&
           state.player.timed_action_counter <= 0 &&
           state.player.death_timer_active <= 0.0F &&
@@ -2286,12 +2330,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         } else {
           NovaMission_RunMissionInfoWindow(platform, audio, state, view, hud);
           // The mission-computer window blocked the loop; freeze gameplay time
-          // across it.
+          // across it, and swallow the held info/close keys (the original arms
+          // the command latches on the modal return).
+          NovaUi_MarkTravelAndStatusPanelsDirty(state);
           resync_frame_clock();
         }
       }
       if (!player_tick_consumed) {
-        mission_info_was_held = mission_info_held;
+        state.command_latches.mission_info_was_held = mission_info_held;
       }
       // No per-frame stellar auto-seed: the original only sets
       // ai_secondary_target_slot from explicit commands (the land command's
@@ -2303,13 +2349,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // ai_secondary_target_slot is assigned a fresh stellar).
       if (!player_tick_consumed &&
           state.travel.selected_stellar_id !=
-              travel_selection_latches.prev_travel_stellar) {
+              state.command_latches.prev_travel_stellar) {
         state.travel_reticle_pulse = 256.0F;
         // A fresh selection restarts the landing/docking approach
         // (Stellar_HandleStellarEntryAndExit 0x0045937c re-arms the timer for
         // the new ai_secondary_target_slot).
         state.travel.engage_timer = -1;
-        travel_selection_latches.prev_travel_stellar =
+        state.command_latches.prev_travel_stellar =
             state.travel.selected_stellar_id;
       }
       // Normal arrival (Return) is independent of target action: the original
@@ -2419,12 +2465,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                       static_cast<std::uint32_t>(state.gameplay_now_ms));
                 }
                 // The mission interaction modal blocked the loop; freeze game
-                // time across it.
+                // time across it, and swallow the held interaction/cancel keys
+                // (the original arms the player command latches on return).
+                NovaUi_MarkTravelAndStatusPanelsDirty(state);
                 resync_frame_clock();
               } else {
                 (void)NovaShipComm_RunShipDialog(
                     platform, state, ship_target, view, hud);
-                // The comm dialog blocked the loop; freeze gameplay time.
+                // The comm dialog blocked the loop; freeze gameplay time and
+                // swallow the held hail/cancel keys.
+                NovaUi_MarkTravelAndStatusPanelsDirty(state);
                 resync_frame_clock();
               }
             }
@@ -2438,7 +2488,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             break;
           }
           // The destination-interaction window blocked the loop; freeze
-          // gameplay time across it.
+          // gameplay time across it and swallow the held target/cancel keys.
+          NovaUi_MarkTravelAndStatusPanelsDirty(state);
           resync_frame_clock();
         } else {
           NovaLog::Info("target-action: selected stellar cannot open its "
@@ -2457,7 +2508,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         if (returning_to_menu) {
           break;
         }
-        // The boarding/plunder modal blocked the loop; freeze gameplay time.
+        // The boarding/plunder modal blocked the loop; freeze gameplay time
+        // and swallow the held board/cancel keys.
+        NovaUi_MarkTravelAndStatusPanelsDirty(state);
         resync_frame_clock();
       }
       // Self-destruct + cloak commands (Ghidra 0x0044aa70
@@ -2506,6 +2559,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             Player_RedistributeFleetCargoOverflow(
                 state, /*jettison_all=*/true, now_ms);
           }
+          // Swallow the held info/close keys so the key that closed the
+          // window must be released before it re-fires.
+          NovaUi_MarkTravelAndStatusPanelsDirty(state);
           resync_frame_clock();
         }
         PlayerTick_InteractionCloakAndStatus(

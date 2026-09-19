@@ -323,9 +323,11 @@ void Stellar_Launch(GameState &state) {
   // 0x0045612d: the docked visit is over; M/N no longer take the transition
   // arm.
   state.system_transition_active = false;
-  // 0x00456128: NovaUi_MarkTravelAndStatusPanelsDirty swallows every player
-  // command edge latch; the port edge-resolves commands per frame instead
-  // (TODO(decomp(0x0045c7a0)) skipped).
+  // 0x00456128: swallow every player command edge latch so the Escape that
+  // left the dock (still held when flight resumes) must be released and
+  // re-pressed before it returns to the menu. NovaUi_MarkTravelAndStatusPanels-
+  // Dirty also arms the escort/cloak/zoom latches, matching the original.
+  NovaUi_MarkTravelAndStatusPanelsDirty(state);
   // 0x00456158: travel-selection and engage-timer reset.
   state.travel.selected_stellar_id = -1;
   state.travel.selected_stellar_is_manual = false;

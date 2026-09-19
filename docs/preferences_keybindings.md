@@ -57,8 +57,9 @@ callers pass `g_player_key_bindings[slot]` (the key code) as the `command_id`
 argument to the probe (visible throughout `Ship_HandlePlayerShipControl`, e.g.
 `NovaInput_IsCommandActiveWithGameplayGuards(g_player_key_bindings[0x13])`).
 `DAT_0086e098` is a 128-entry (0x80) **key-state snapshot** indexed by key code
-whose bit0 is the per-frame "is this key down" flag; the probe just reads that
-bit. So the pipeline is: WM_key msg → `g_player_key_bindings` (persistent cmd→key)
+whose bit0 is the key-down/held flag (set on `WM_KEYDOWN`, cleared on
+`WM_KEYUP`, and zeroed wholesale by `NovaInputQueue_FlushAllCommands`
+0x004b68d0); the probe just reads that bit. So the pipeline is: WM_key msg → `g_player_key_bindings` (persistent cmd→key)
 → per-frame key-state poll of `DAT_0086e098` → `FUN_004f1900` bit probe. The
 key-state poll writers that xref `DAT_0086e098` are the raw window-message
 handler `FUN_004d7330` and `Platform_WindowMessageInit` (0x004d7a80).
@@ -304,6 +305,24 @@ counterpart for.
 and the Player Info close key all read their persisted binding slot (0x17 and
 0x19) instead of raw Escape / P. `SdlPlatform::PollFlightInput` no longer
 latches a bare Escape.
+
+**Edge-latch swallow across transitions.** The held bit alone would let a key
+held across a transition re-fire immediately: leaving the Spaceport with Esc
+still down, or skipping the intro with Esc, would otherwise bounce straight
+back to the menu. The original guards command edges with the latch block
+`0x007cab35..0x007cab53`, and `NovaUi_MarkTravelAndStatusPanelsDirty`
+(`0x0045c7a0`, misleadingly named — it marks no panels dirty) sets every latch
+so the key must be released and pressed again. It runs from the launch tail
+(`0x00456128`), several player modal arms, the hypergate/wormhole transfers,
+the boarding/plunder window and the escort-management window;
+`Frame_SpaceflightLoop` also flushes the command state at entry
+(`NovaInputQueue_FlushAllCommands`). The port keeps the latches in
+`GameState::command_latches`, calls the same swallow from `Stellar_Launch`
+(0x00456128), at `NovaFrame_SpaceflightLoop` entry and after the starmap,
+hypergate-map, mission-computer, mission-ship interaction, ship-comm (escort
+management), destination-interaction, boarding/plunder and Player Info modals
+return, and edge-resolves the cancel command (slot `0x17`) through
+`DAT_007cab53` rather than the raw held bit.
 
 Open: whether `g_hyperspace_effects` keeps the CE raw-input-lock behaviour or is
 purely the effect toggle.

@@ -10,6 +10,7 @@
 #include "game/ship_ai.hpp"
 #include "game/ship_spawn.hpp"
 #include "game/ship_visual.hpp"
+#include "game/spaceflight.hpp"
 #include "game/travel.hpp"
 #include "game/weapon.hpp"
 
@@ -864,6 +865,49 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   CHECK(state.player.heading < 6.2831855F);
   // 0x00456158: the travel selection resets on launch.
   CHECK(state.travel.selected_stellar_id == -1);
+  // 0x00456128: the launch tail swallows the held launch/cancel command edge
+  // latches so the key that left the dock must be released before it re-fires.
+  CHECK(state.command_latches.return_to_menu_was_held);
+  CHECK(state.command_latches.land_was_held);
+}
+
+// Ghidra 0x0045c7a0 NovaUi_MarkTravelAndStatusPanelsDirty: arms every player
+// command edge latch so a key held across a modal/mode boundary must be
+// released and re-pressed. Regression for the dock-launch bounce (holding Esc
+// undocked, then the still-held key immediately re-fired the menu exit).
+TEST_CASE("MarkTravelAndStatusPanelsDirty swallows held command latches",
+          "[spaceflight][input]") {
+  game::GameState state;
+  state.command_latches.land_was_held = false;
+  state.command_latches.return_to_menu_was_held = false;
+  state.cloak_command_latch = 0;
+  state.route_map.zoom_command_latch = false;
+
+  game::NovaUi_MarkTravelAndStatusPanelsDirty(state);
+
+  CHECK(state.command_latches.target_cycle_was_held);
+  CHECK(state.command_latches.destination_cycle_was_held);
+  CHECK(state.command_latches.clear_target_was_held);
+  CHECK(state.command_latches.ship_cycle_was_held);
+  CHECK(state.command_latches.nearest_target_was_held);
+  CHECK(state.command_latches.secondary_cycle_was_held);
+  CHECK(state.command_latches.clear_secondary_was_held);
+  CHECK(state.command_latches.starmap_was_held);
+  CHECK(state.command_latches.mission_info_was_held);
+  CHECK(state.command_latches.land_was_held);
+  CHECK(state.command_latches.dismiss_was_held);
+  CHECK(state.command_latches.target_action_was_held);
+  CHECK(state.command_latches.board_was_held);
+  CHECK(state.command_latches.return_to_menu_was_held);
+  CHECK(state.cloak_command_latch == 1);
+  CHECK(state.route_map.zoom_command_latch);
+  for (const std::uint8_t latch : state.escort.select_key_latch) {
+    CHECK(latch == 1);
+  }
+  for (const std::uint8_t latch : state.escort.order_key_latch) {
+    CHECK(latch == 1);
+  }
+  CHECK(state.escort.panel_toggle_latch == 1);
 }
 
 // NovaUi_RunOutfitterInteractionLoop (0x0048ea70) clears the active weapon
