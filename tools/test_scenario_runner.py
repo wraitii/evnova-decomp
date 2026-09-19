@@ -165,6 +165,64 @@ class FakeProbe:
         return b""
 
 
+class UiProbe:
+    """Fake probe whose /probe/ui returns one fixed snapshot."""
+
+    def __init__(self, ui: dict[str, object]) -> None:
+        self.ui = ui
+        self.gets: list[str] = []
+
+    def get(self, path: str) -> object:
+        self.gets.append(path)
+        if path == "/probe/ui":
+            return self.ui
+        raise AssertionError(f"unexpected GET {path}")
+
+    def post(self, path: str, payload: dict[str, object]) -> object:
+        raise AssertionError(f"unexpected POST {path} {payload}")
+
+    def screenshot(self) -> bytes:
+        return b""
+
+
+class WaitAnyTest(unittest.TestCase):
+    def _context(self, probe: object) -> runner.RunContext:
+        return runner.RunContext(
+            probe=probe,
+            artifacts=Path("artifacts"),
+            base_dir=Path("."),
+            stack=(),
+        )
+
+    def test_expect_any_matches_second_alternative(self) -> None:
+        probe = UiProbe({"window": "ui_dialog_ditl_3001"})
+        step = {
+            "action": "wait",
+            "expect_any": [
+                {"ui.window": "ui_dialog_ditl_3002"},
+                {"ui.window": "ui_dialog_ditl_3001"},
+            ],
+        }
+        runner.run_step(self._context(probe), step, 1000, "1")
+
+    def test_expect_and_expect_any_are_mutually_exclusive(self) -> None:
+        probe = UiProbe({"window": "ui_dialog_ditl_3001"})
+        step = {
+            "action": "wait",
+            "expect": {"ui.window": "ui_dialog_ditl_3001"},
+            "expect_any": [{"ui.window": "ui_dialog_ditl_3001"}],
+        }
+        with self.assertRaises(runner.ScenarioError):
+            runner.run_step(self._context(probe), step, 1000, "1")
+
+    def test_expect_any_rejects_bad_shape(self) -> None:
+        probe = UiProbe({"window": "ui_dialog_ditl_3001"})
+        for bad in ([], [None], [{}], "nope"):
+            step = {"action": "wait", "expect_any": bad}
+            with self.assertRaises(runner.ScenarioError):
+                runner.run_step(self._context(probe), step, 1000, "1")
+
+
 class CallIntegrationTest(unittest.TestCase):
     def setUp(self) -> None:
         runner.clear_scenario_cache()

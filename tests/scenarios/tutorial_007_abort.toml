@@ -12,59 +12,16 @@ scenario = "fragments/new_pilot"
 
 [[steps]]
 action = "validate_state"
-expect = { "state.game_active" = true, "state.system" = "Tichel", "state.ship_class" = "Shuttle", "state.active_missions" = 0 }
-matches = { "state.pilot" = ".+" }
+expect = { "state.game_active" = true, "state.ship_class" = "Shuttle", "state.active_missions" = 0 }
+matches = { "state.pilot" = ".+", "state.system" = "Kania|Fomalhaut|Porto Rillia|Moonrise" }
 
+# Accept Barry's Tutorial 001 and reach Sol from wherever the random `.Trader`
+# start system placed the pilot. Each branch lands at that system's Federation
+# spaceport, accepts mission 251 (template 123) and jumps to Sol; once in Sol
+# the sequence below is identical for every start.
 [[steps]]
-action = "command"
-cmd = "land_at"
-target = "Viking"
-timeout_ms = 180000
-
-[[steps]]
-action = "wait"
-expect = { "automation.phase" = "complete", "ui.window" = "mission_offer" }
-timeout_ms = 180000
-
-[[steps]]
-action = "click"
-element = "accept"
-
-[[steps]]
-action = "wait"
-expect = { "missions.missions.0.template_id" = 123 }
-
-[[steps]]
-action = "validate_state"
-expect = { "missions.missions.0.template_id" = 123, "missions.missions.0.return_stellar" = "Earth", "missions.missions.0.failed" = false }
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "text_reader" }
-
-[[steps]]
-action = "click"
-element = "done"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "spaceport" }
-
-[[steps]]
-action = "click"
-element = "launch"
-
-# The controller moves out of the center gate; gameplay owns the jump itself.
-[[steps]]
-action = "command"
-cmd = "jump_to"
-target = "Sol"
-timeout_ms = 180000
-
-[[steps]]
-action = "wait"
-expect = { "automation.phase" = "complete", "state.system" = "Sol" }
-timeout_ms = 180000
+action = "call"
+scenario = "fragments/tutorial_reach_sol"
 
 [[steps]]
 action = "validate_state"

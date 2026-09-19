@@ -78,7 +78,10 @@ Steps use observable waits plus input-only `click`, `key`, `hold`, and
 an SDL event (the modal-loop channel), while `hold` sets/releases virtual held
 keys (the flight channel) and is required for held flight commands such as the
 missions panel (key `I`), which read `PollFlightInput` state rather than SDL
-events. `validate_state` performs
+events. A `wait` normally takes `expect`; `expect_any` (a non-empty array of
+non-empty tables) instead completes as soon as any one alternative holds,
+which lets a route branch on which modal the game opened next without racing a
+one-shot `trigger` check. `validate_state` performs
 immediate exact (`expect`) and full-regex
 (`matches`) assertions on dotted probe paths; numeric path components index
 arrays. `screenshot` writes BMP checkpoints below `build/scenario-results/`.
