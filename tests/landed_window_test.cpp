@@ -1079,6 +1079,63 @@ TEST_CASE("Outfitter gate enforces fighter-bay capacity",
   mutable_viper->availability_expr = saved_availability;
 }
 
+// NovaLanded_CanBuyOutfit (0x00491950) negative-cargo arm: an outfit that
+// trades cargo space away (ModType 2 with ModVal < 0) is purchasable only when
+// the player hull's own free cargo covers the reduction. Mass Expansion (0xbe,
+// ModVal -15) and Mass Retool (0xc0, ModVal -12) are the stock cases; their
+// purchase mass is negative, so the free-mass gate deliberately skips them.
+TEST_CASE("Outfitter gate enforces free cargo for negative cargo mods",
+          "[landed_store][outfitter][cargo]") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.ship_class_id = 0; // the starter Shuttle, Holds 10
+  state.player.credits = 5'000'000;
+  state.inventory.cargo_bins.fill(0);
+  state.inventory.junk_counts.fill(0);
+
+  const game::Outfit *mass_expansion = state.scenario.Outfit(0xbe);
+  const game::Outfit *mass_retool = state.scenario.Outfit(0xc0);
+  REQUIRE(mass_expansion != nullptr);
+  REQUIRE(mass_retool != nullptr);
+  REQUIRE(mass_expansion->mod_type ==
+          static_cast<std::int16_t>(game::OutfitEffect::kCargoSpace));
+  REQUIRE(mass_expansion->mod_val == -15);
+  REQUIRE(mass_retool->mod_val == -12);
+
+  // Shuttle Holds 10: the 15-ton Mass Expansion does not fit, and neither
+  // does the cheaper 12-ton Mass Retool once cargo is aboard.
+  CHECK(game::Ship_ComputeShipTotalCargoCapacity(state) == 10);
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xbe));
+  state.inventory.cargo_bins[0] = 1; // free cargo 9
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xc0));
+  state.inventory.cargo_bins[0] = 0;
+
+  // A Cargo Expansion adds 10 holds (capacity 20); the Mass Expansion now fits
+  // while the 12-ton Mass Retool still does, and a 15-ton load closes both.
+  state.inventory.outfit_owned_count[0xbd - 0x80] = 1;
+  CHECK(game::Ship_ComputeShipTotalCargoCapacity(state) == 20);
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xbe));
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xc0));
+  state.inventory.cargo_bins[0] = 5; // free cargo 15, exactly the Mass Exp cost
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xbe));
+  state.inventory.cargo_bins[0] = 6; // free cargo 14 < 15
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xbe));
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xc0)); // 14 >= 12
+  state.inventory.cargo_bins[0] = 9;                       // free cargo 11 < 12
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xc0));
+  state.inventory.cargo_bins[0] = 0;
+
+  // The +0xa40 flag (ShipClass::allows_mass_expansions) closes the arm even
+  // with ample free cargo: a negative raw Holds clears it in the loader.
+  auto *shuttle = const_cast<game::ShipClass *>(state.scenario.Ship(0x80));
+  REQUIRE(shuttle != nullptr);
+  shuttle->allows_mass_expansions = false;
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xbe));
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xc0));
+  shuttle->allows_mass_expansions = true;
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0xbe));
+}
+
 // NovaLanded_CanBuyOutfit (0x00491950) step 5: RequireGovt scopes an
 // outfit's Require bits to one of four government-keyed outfit-id bands. The
 // helper is a direct port of the decompiled band chain.
