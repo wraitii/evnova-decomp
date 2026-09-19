@@ -1,7 +1,6 @@
-Bugs and odd behaviour of the original Nova, plus items to verify. Keep entries
-succinct (one line); put addresses, evidence and port behaviour at the
-`BUGFIX(original)`/`TODO` site in `src/`. Corrected bugs go through
-`kApplyOriginalBugFixes` in `src/game/compatibility.hpp`.
+Bugs and odd behaviour of the original Nova, plus items to verify.
+Keep entries succinct; put addresses, evidence and port behaviour at the `BUGFIX(original)`/`TODO` site in `src/`.
+Corrected bugs go through `kApplyOriginalBugFixes` in `src/game/compatibility.hpp`.
 
 ## Stuff that needs verifying with an original Nova copy
 
@@ -21,14 +20,14 @@ Per the discord.
 
 * (fixed) **Weapons using another weapon as ammunition produce incorrect free-mass figures** in the ship-info dialog. 
 * (fixed+reworked) **Government borders are clipped to a fixed 512×512 map area**, breaking larger custom map layouts. 
-* **Small asteroids disappear at high resolutions** unless their sprites are padded to roughly 100×100. 
-* **`FragCount = 1` produces zero fragments**, despite the documented formula implying exactly one. 
+* (fixed) **Small asteroids disappear at high resolutions** unless their sprites are padded to roughly 100×100. Fixed in `SpaceflightView::WrapAsteroids`: the port derives the keep-alive window from the largest loaded asteroid frame span instead of the record's own span and wraps records in world space, so the original's despawn/ring-refill miss cannot recur. Not routed through `kApplyOriginalBugFixes` (renderer-structural divergence, no per-record `Sprite`); see the `BUGFIX(original)` note at the site. 
+* (fixed) **`FragCount = 1` produces zero fragments**, despite the documented formula implying exactly one. Fixed via `kApplyOriginalBugFixes` in `Asteroid_SpawnDestructionPackage` (0x00462550): keep the original roll and raise the floor baseline to one (`BUGFIX(original)`). 
 * (fixed) **One-way system links become reciprocal** — linking A→B also permits B→A. 
 * (fixed) **`Mxxx` behaves like `Nxxx`** instead of positioning the player at the first stellar/system center. 
 * (fixed) **`DeathDelay` 0 or 1 leaves an immortal ghost sprite** after a ship explodes. 
-* (fixed) **Zero inherent shields break escape-pod ejection** — the replacement ship can immediately explode after ejecting. The mechanism is the post-respawn armor refill at `0x0044d83f`, which calls `Ship_ComputeShipMaxShieldPoints`: a fresh class with `max_shield == 0` returns with 0 armor and is destroyed on the next tick. Shield outfits are cleared before the refill (`ClearNonPersistentOutfits`), so they did not help. Fixed via `kApplyOriginalBugFixes` in `PlayerTick_TimedActionTransition` (`BUGFIX(original)`).  
-* (fixed) **Rank discounts do not apply to outfits**, despite the rank field being documented as affecting ships and outfits. The original computed the scaled price at every outfit site (`0x0048ea70` buy/sell, `0x00490c70` display, `0x00491950` eligibility) but discarded the result, charging the unscaled `Outfit_ComputeOutfitPurchasePrice`; fixed via `kApplyOriginalBugFixes` in `NovaLanded_OutfitPrice` (`BUGFIX(original)`). 
-* **Auto-aborted missions can omit their legal-status reward** even when configured to pay on auto-abort. 
+* (fixed) **Zero inherent shields break escape-pod ejection** — the replacement ship can immediately explode after ejecting. Fixed in `PlayerTick_TimedActionTransition`: the post-respawn armor refill uses the max-armor value.
+* (fixed) **Rank discounts do not apply to outfits**, despite the rank field being documented as affecting ships and outfits. Fixed in `NovaLanded_OutfitPrice`: charge the rank price. Tech-level bug remains active.
+* (fixed) **Auto-aborted missions omitted their competing-government reputation reward.** Fixed in `Mission_ResolveMisnSlot`: run the `CompGovt`/`CompReward` walk for missions flagged pay-on-auto-abort (`Flags2 0x0002`) or reversal-on-abort (`Flags 0x0040`).
 * **“Attack Enemy Spobs/Stellars” AI does not work correctly**; later testing reproduced the problem, although the poster still noted some uncertainty about AI setup.  
 * **Windows startup music filename is hard-coded** to `Nova Music.mp3` rather than respecting STR# 130 like the Mac version. 
 * **Volume labels cannot be replaced through STR# 136**, despite older versions supporting it. 
@@ -123,7 +122,7 @@ Per the discord.
 * **DESC 4544 has incorrectly escaped/mismatched quotation markup.** 
 * **DESC 9307 has missing quotation marks.** 
 * **DESC 9368 says “as you make her way over.”** 
-* **Stock asteroid sprites are too small to survive the high-resolution asteroid engine bug** and need padding. 
+* **Stock asteroid sprites are too small to survive the high-resolution asteroid engine bug** and need padding. Not needed in the port, which sizes the asteroid keep-alive window from the largest loaded frame span rather than each record's own sprite. 
 * **The Vell-os area-map data is configured so it only works every three days**; changing the cron setup makes it work daily. 
 * **Flower of Spring, Summer Bloom and Winter Tempest retain beam decay values that trigger the engine's broken decay behaviour.** 
 * **Auroran Cruiser and Thunderforge have garbage `moviefile` fields**, which can crash WinNova when they are selected in the shipyard. 

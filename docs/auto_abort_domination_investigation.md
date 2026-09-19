@@ -178,3 +178,68 @@ practical than screenshots.
 - Optional: a `tests/mission_test.cpp` case that drives the auto-abort arm with
   a `CompGovt`/`CompReward` mission and asserts the record change under the
   bug-fix policy.
+
+## Resolution (closed)
+
+The investigation is complete; the fix landed as an opt-in `BUGFIX(original)`.
+
+**Open questions answered**
+
+1. **Player-facing?** Yes. The offer text is a `dësc` loaded as
+   `mission_def + 4000` (`NovaMission_RunOfferWindow`), not the mïsn's
+   `BriefText` (which is 0 for the whole family). The 16 avoid missions map
+   one-to-one to `dësc` 4486–4501 ("As soon as you land, you see a squad …").
+   `AvailLoc 3` offers them in the spaceport dialog.
+2. **What activates them?** `OnDominate` (`b61xx`) / `OnDestroy` (`b62xx`) of a
+   stellar in the matching government group; the bit is global, so once set
+   the mission is offered at any stellar of that government (per `AvailStel`),
+   not only the dominated one. `b9812` (set by mission 197 "Learn About
+   Vell-os") permanently retires the family.
+3. **Hostile?** The fleet düdes carry the dominated government (Fed 0,
+   Rebellion 13, Polaris 2 / Nil'kemorya 19, Auroran 1, Pirate 9, Wild Geese
+   16, independent for 628/629) with `AI 3`–`4`, so they spawn as hostiles.
+4. **Positive same-faction `CompReward`?** It is the *success* value; on abort
+   `Flags 0x0040` reverses it (`CompReward * -5`, exact-government systems).
+   The sign is not a data error.
+5. **Outfit 348?** "Bureau Bomb Outfit", `ModType 0x2f`, `ModVal 3220` = its
+   Called Desc. Only 614/615 grant it (via `G348`); 616–629 only clear the bit.
+6. **Eamon direction.** Boarding a hostile Eamon links mission 909; it is
+   `ShipGoal -1`, so it auto-aborts on the first tick. The rank payload
+   (`K152 L138`) carries the plot consequence; the −200 `CompReward` is the
+   reputation half.
+
+**Corrections to the original note**
+
+- The family is **16** missions, not 14: 628/629 "Avoid Bounty Hunters"
+  (düde 150, `b6106`/`b6206`, 5% random, `CompGovt -1`, `CompReward 1`).
+- Only 614/615 run `G348 !b61xx`; the rest run `!b61xx` (and `!b61xx b9812` in
+  `OnShipDone`).
+- `CompReward` was applied to **none** of them: all are `Flags 0x0001`, so
+  `Mission_ResolveMisnSlot` (0x00447d90) resolves them and never ran the walk.
+- `Flags 0x0040` was dead for them: its reversal lived only in the manual
+  mission-computer abort (0x00446150), unreachable with `CanAbort 0`.
+- The fleet restore (`System_RebuildInitialNpcAndMissionPopulation` 0x0041af90,
+  port `NovaSystem_RestoreMissionFleets`) also calls `Mission_ResolveMisnSlot`
+  for any restored `Flags 0x0001` mission, so the Avoid missions resolve on
+  launch / system entry without the player finishing the destroy goal.
+
+**Decision: Option B, narrowed to the abort-flag opt-ins**
+
+Apply the walk on auto-abort only when the mission declares an auto-abort
+consequence with either documented flag: `Flags2 0x0002` (pay on auto-abort)
+or `Flags 0x0040` (reversal on abort). `0x0040` selects the manual `-5x`
+reversal (exact-government systems); otherwise the normal success walk runs.
+That covers every stock auto-abort `CompReward`: the Refuel Trader missions
+(+2 Civvies) and Eamon (−200 Wild Geese) via `Flags2 0x0002`, and the 16 Avoid
+missions via `Flags 0x0040`. It leaves the Thunderforge cron step (747, neither
+flag) inert. Gated by `kApplyOriginalBugFixes`; with it off the original
+omission is reproduced. The observation that `0x0040` alone did not grant the
+reward (it only fed the manual mission-computer abort) is what makes the
+omission a bug rather than a deliberate "manual-only" feature.
+
+Implementation: `ApplyCompetingGovernmentReputation` in `src/game/mission.cpp`
+is shared by `Mission_ResolveMissionSuccess` and the opt-in arm of
+`Mission_ResolveMisnSlot`; the `0x00447D90` tracker row, `mission.hpp`, and
+`docs/known_original_bugs.md` are updated. Test:
+`tests/mission_test.cpp` "auto-abort applies the competing-government reward
+under the fix policy".
