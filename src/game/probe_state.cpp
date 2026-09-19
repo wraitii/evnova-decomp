@@ -152,6 +152,10 @@ std::string ProbeState_Snapshot(const GameState &state,
       }
     }
     j.num("active_missions", active_missions);
+    // Aggregate career score (Ghidra g_player_combat_rating_points). Exposed so
+    // routes can gate on it, e.g. the pirate-hunt loop in
+    // tests/scenarios/tutorial_to_combat_rating.toml.
+    j.num("combat_rating", state.player_combat_rating_points);
     j.boolean("travel_engaging", state.travel.engaging);
     return j.done();
   }
@@ -177,6 +181,7 @@ std::string ProbeState_Snapshot(const GameState &state,
     j.num("max_armor", state.cached_stats.max_armor_points);
     j.num("fuel_capacity", state.cached_stats.fuel_capacity);
     j.num("primary_target_ship_slot", state.player.primary_target_ship_slot);
+    j.num("combat_rating", state.player_combat_rating_points);
     j.num("current_system_id", system_id);
     return j.done();
   }

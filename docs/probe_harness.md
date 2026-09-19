@@ -56,7 +56,7 @@ build stays portable. Configure explicitly with
 | `POST /probe/command` | Execution commands plus semantic `land_at`, `jump_to`, `destroy_ship`, `trade`, and `cancel_automation` |
 | `GET /probe/automation` | Current optional flight-automation goal, phase, target, and failure detail |
 | `POST /probe/key` | `{"key":"I"}` tap; `{"key":"I","down":true\|false}` hold/release (modal-loop channel, synthetic `SDL_Event`s) |
-| `POST /probe/click` | `{"element":"accept"}` clicks the named rect published by the active modal; `{"x":553,"y":508}` clicks raw window points (motion + button-down pair) |
+| `POST /probe/click` | `{"element":"accept"}` clicks the named rect published by the active modal; `{"x":553,"y":508}` clicks raw window points (motion + button-down pair). Blocks for two frame boundaries so the modal has consumed the click and re-published `/probe/ui` before the response returns |
 | `POST /probe/hold` | `{"keys":["W","SPACE"],"down":true}` virtual held keys merged into `PollFlightInput` (flight channel — `SDL_GetKeyboardState` cannot see injected events) |
 
 Unknown queries/paths return `400`/`404` with a hint. Requests that need the
@@ -231,7 +231,15 @@ the 640x480 canvas rect — so a harness can convert backing-store screenshots
 (the BMPs are physical pixels = window points x display density) to window
 points exactly instead of guessing the density. `POST /probe/click
 {"element":…}` resolves the rect center and clicks it (`409` with a hint if
-the element isn't published). New modals should publish their controls too —
+the element isn't published). The click is frame-synchronous: the handler
+waits for two `Present()` boundaries after enqueuing, so the receiving modal
+has drained the injected event and republished its layout before the call
+returns. Scenarios can therefore click Next and immediately re-read the page
+instead of racing a burst of clicks that the store would otherwise drain in a
+single frame (or reading `ui.window` before a store close was processed). A
+paused or unresponsive main thread times out of the wait after one second and
+returns with the old fire-and-forget semantics. New modals should publish
+their controls too —
 it is 3–5 lines next to the layout struct plus one `ProbeUiAutoClear` guard,
 and doubles as documentation of the dialog's controls.
 

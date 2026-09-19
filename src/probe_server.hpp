@@ -197,6 +197,11 @@ private:
   std::deque<std::packaged_task<std::string()>> jobs_;
   std::deque<SDL_Event> key_events_;
 
+  // Monotonic presentation counter, incremented at every SdlPlatform::Present.
+  // /probe/click waits for it to advance so an injected click is ordered
+  // against the frame that consumes it (see InjectClick).
+  std::atomic<std::uint64_t> frame_count_{0};
+
   // Frame mailbox: the latest captured frame, encoded as a complete BMP.
   std::mutex frame_mutex_;
   std::condition_variable frame_cv_;
