@@ -23,7 +23,6 @@ class SdlPlatform;
 namespace game {
 
 struct GameState;
-struct NovaPreferences;
 class SpaceflightView;
 
 // Ghidra 0x0049c050 NovaUi_BuildPlayerSpecialInteractionStrings: the three
@@ -61,7 +60,6 @@ struct PlayerInfoWindowResult {
 NovaPlayerInfo_RunWindow(SdlPlatform &platform,
                          GameState &state,
                          SpaceflightView &view,
-                         HudRenderer &hud,
-                         const NovaPreferences &prefs);
+                         HudRenderer &hud);
 
 } // namespace game

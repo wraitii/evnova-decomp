@@ -5,6 +5,7 @@
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
 #include "../util/geometry.hpp"
+#include "command_input.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "landed_window.hpp"
@@ -15,7 +16,6 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <optional>
 
@@ -26,6 +26,11 @@ using evnova::util::Contains;
 namespace {
 
 constexpr std::uint16_t kReaderDialogId = 0xbbb;
+
+// Command slot 9: the one rebindable galaxy-map command (default M), the same
+// slot the flight loop reads. The original reader callback (0x00499440) raises
+// action 4 from it.
+constexpr std::size_t kStarmapCommand = 0x09;
 
 // Shared selection-dialog text metrics: the reader's text view uses the
 // shared Geneva-9 screen font (DAT_00735684/86, set in 0x004b0c20) with the
@@ -355,7 +360,7 @@ void NovaUi_RunTextReaderDialog(
   };
 
   draw_frame();
-  bool starmap_requested = false;
+  bool starmap_command_was_held = false;
   while (!platform.quit_requested()) {
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
       if (input->key == TextKey::escape || input->key == TextKey::enter) {
@@ -381,15 +386,6 @@ void NovaUi_RunTextReaderDialog(
         }
         continue;
       }
-      if (input->key == TextKey::character) {
-        // Port stand-in for the original's starmap key binding (binding 9 ->
-        // action 4 in NovaUi_PollTravelScriptAction).
-        const char key = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(input->character)));
-        if (key == 'm') {
-          starmap_requested = true;
-        }
-      }
       if (input->key == TextKey::physical) {
         // Port convenience: DIK arrows scroll (the original scrolls only via
         // the arrow buttons).
@@ -400,14 +396,17 @@ void NovaUi_RunTextReaderDialog(
         }
       }
     }
-    // Action 4: the starmap window when allow_starmap is set (the mission
-    // brief passes it). The original also preselects the mission's
-    // destination system when flags carry 0x100 and restores the flight-scene
-    // travel state afterwards; TODO(decomp) skipped for the preselect.
-    if (allow_starmap && starmap_requested) {
+    // Action 4: the map command (slot 9, default M) opens the starmap when
+    // allow_starmap is set (the mission brief passes it). Edge-triggered so
+    // the map does not reopen while the key stays held. TODO(decomp) skipped:
+    // the original saves/restores the player ai_secondary_target_slot and
+    // travel_transfer_mode around the map.
+    const bool starmap_command_held =
+        NovaInput_IsCommandActive(platform, kStarmapCommand);
+    if (allow_starmap && starmap_command_held && !starmap_command_was_held) {
       (void)NovaStarmap_RunWindow(platform, state);
-      starmap_requested = false;
     }
+    starmap_command_was_held = starmap_command_held;
     draw_frame();
     platform.PaceFrame();
   }

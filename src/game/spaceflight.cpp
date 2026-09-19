@@ -7,6 +7,7 @@
 #include "asteroid.hpp"
 #include "boarding_plunder.hpp"
 #include "collision.hpp"
+#include "command_input.hpp"
 #include "docked_dialog.hpp"
 #include "escort_commands.hpp"
 #include "escort_formation.hpp"
@@ -1598,10 +1599,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // while the simulation stubs do not, and the same snapshot feeds the
     // travel/jump channel. Movement integrates into PlayerShip.
     FlightInput frame_input = platform.PollFlightInput();
-    const auto binding_held = [&](std::size_t command) {
-      const std::uint16_t key = prefs.bindings.cmd_to_key[command];
-      return key != 0xff && key != 0xffff &&
-             platform.IsOriginalKeyCodeHeld(key);
+    // Persisted key lookups go through the shared command service so the
+    // flight loop and the modal dialogs resolve rebinds identically.
+    const auto binding_held = [&platform](std::size_t command) {
+      return NovaInput_IsCommandActive(platform, command);
     };
     // Shared modifier pair (Left/Right Shift, DIK 0x2a/0x36) for the backward
     // cycling commands and the eject arm-modifier pair (0x38/0x6f = Alt).
@@ -2496,7 +2497,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         // this block is TODO(decomp).
         if (held(binding_key[0x19])) {
           const PlayerInfoWindowResult info_result =
-              NovaPlayerInfo_RunWindow(platform, state, view, hud, prefs);
+              NovaPlayerInfo_RunWindow(platform, state, view, hud);
           // The original runs Player_RedistributeFleetCargoOverflow(1) inside
           // the window loop when the Cargo page's Jettison action is confirmed
           // (0x00499c10); the port surfaces the confirmation and applies it

@@ -101,8 +101,9 @@ void NovaUi_DrawScrollArrow(SdlPlatform &platform,
 // passes).
 //
 // Modal actions: Done closes (the original's action 1); 5/6 scroll the view
-// +/-10 px; action 4 opens the starmap when `allow_starmap` is set (the port
-// keys it to 'm' in place of the original's key binding); Esc/Enter also
+// +/-10 px; action 4 opens the starmap when `allow_starmap` is set, polled
+// from the rebindable map command (slot 9, default M) the original's callback
+// (0x00499440) tests. Esc/Enter also
 // close (port divergence, the original exits only via Done).
 // `render_background` re-renders the preserved underlying screen (docked
 // menu, flight view, ...) each frame so the modal just layers its window on

@@ -4,6 +4,7 @@
 #include "../util/format.hpp"
 #include "boarding_plunder.hpp"
 #include "brgr_archive.hpp"
+#include "command_input.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -12,7 +13,6 @@
 #include "outfit.hpp"
 #include "pict_image.hpp"
 #include "pict_texture.hpp"
-#include "preferences.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
@@ -872,12 +872,8 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
 PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
                                                 GameState &state,
                                                 SpaceflightView &view,
-                                                HudRenderer &hud,
-                                                const NovaPreferences &prefs) {
+                                                HudRenderer &hud) {
   PlayerInfoWindowResult result;
-  // g_player_key_bindings[0x19] (default P, DIK 0x19): a still-held bound key
-  // closes the window once released.
-  const std::uint16_t close_key = prefs.bindings.cmd_to_key[0x19];
 
   // Guards: the original returns when a modal is already up (BOOL_007354a8),
   // the station-hold timer is not exactly +0.0, or the death timer exceeds
@@ -1161,9 +1157,9 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
         }
       }
     }
-    // g_player_key_bindings[0x19] (default P, DIK 0x19) still held closes,
-    // as in the dispatch callback's drain arm.
-    if (close_key == 0xffff || !platform.IsOriginalKeyCodeHeld(close_key)) {
+    // g_player_key_bindings[0x19] (default P, DIK 0x19) closes after a
+    // release-then-press, as in the dispatch callback's drain arm.
+    if (!NovaInput_IsCommandActive(platform, 0x19)) {
       special_key_released = true;
     } else if (special_key_released) {
       close = true;
