@@ -115,9 +115,10 @@ specific display order. Shadow offset → source command id (from the decomp):
 `bd0→[0x18]`(AB), `bd2→[7]`, `bd4→[0xc]`(H), `bd6→[0xd]`, `bd8→[0xe]`(J),
 `bda→[8]`, `bdc→[4]`, `bde→[5]`, `be0→[2]`(fire), `be2→[3]`, `be4→[0]`,
 `be6→[1]`, `be8→[0xa]`, `bea→[0xb]`, `bec→[0x2a]`(E), `bee→[0x30]`,
-`bf0→[0x31]`, `bf2→[0x32]`, `bf4→[0x33]`, `bf6→[0x17]`(mouse), `bf8→[6]`,
-`bfa→[0x10]`(B), `bfc→[0xf]`(K), `bfe→[0x11]`(X), `c00→[0x12]`(zoom),
-`c02→[0x29]`(U), `c04→[9]`(M), `c06→[0x19]`(P), `c08→[0x28]`(I), `c0a→[0x34]`(F12).
+`bf0→[0x31]`, `bf2→[0x32]`, `bf4→[0x33]`, `bf6→[0x17]`(cancel/skip),
+`bf8→[6]`, `bfa→[0x10]`(B), `bfc→[0xf]`(K), `bfe→[0x11]`(X),
+`c00→[0x12]`(self-destruct), `c02→[0x29]`(U), `c04→[9]`(M),
+`c06→[0x19]`(P), `c08→[0x28]`(I), `c0a→[0x34]`(F12).
 So the Key Settings dialog's first four rows are fwd/rev/(turn R)/(turn L);
 row order follows this exact permutation, not command-id order. Note the
 .persisted control block is actually **36** shorts (SaveToDisk writes 6 per
@@ -273,8 +274,36 @@ the executable.
 `NovaPreferences` (on `NovaRuntime`) defaults from `NovaPrefs_ResetToDefaults`
 and loads/saves the `.prf` layout in the SDL preference directory; legacy flags,
 sensitivity and two opaque trailing shorts are unmodeled.
-`src/game/preferences.{hpp,cpp}` owns the struct and the two dialogs;
-`src/game/key_bindings.{hpp,cpp}` owns the binding table and `NovaCommand_*`
-probes (resolved through `SdlPlatform::IsOriginalKeyCodeHeld`). Open: whether
-`g_hyperspace_effects` keeps the CE raw-input-lock behaviour or is purely the
-effect toggle.
+`src/game/preferences.{hpp,cpp}` owns both the struct and the binding table
+(`game::KeyBindings`, the port of `g_player_key_bindings`); the gameplay
+`binding_held(slot)` lookups resolve through
+`SdlPlatform::IsOriginalKeyCodeHeld`. There is no `src/game/key_bindings.*`.
+
+**Locked quality preferences.** The port has no reason to honour a 2002
+fill-rate downgrade, so the Settings dialog draws the following controls
+light-grey/disabled and `NovaPrefs_ApplyLockedPreferences` forces their stored
+values on load (a legacy `.prf` cannot re-enable a downgrade): Share Processor
+Time (`true`), QuickTime Movies (`false`, inverted), Smoke Trails (`false`,
+inverted), Run in a Window (`false`; the port always presents the playfield),
+Ship Animations, Engine Glows, Running Lights, Weapon Effects, Parallax
+Starfield, Hyperspace Effects (`false`, inverted), Check For Updates (`true`),
+and the Brightness slider (`3`). Intro Music, Sound Volume and Ambient Sounds
+stay live. `starmap_show_borders` is **not** locked: the in-game galaxy map's
+Show/Hide Borders button toggles it, `GameState::starmap_show_borders` carries
+the runtime value, and `nova_app.cpp` seeds it from the `.prf` at startup and
+syncs it back at the save points. The port defaults it **ON** (the original's
+overlay was slow/buggy and defaulted OFF), while still persisting the choice at
+`.prf +0x76`. Brightness and Engine/Running-Lights/Weapon layer gates are the
+remaining fidelity gaps: the original applies these through
+`g_render_brightness_lut` and the class sprite-load gates
+(`ShipClass_LoadShipClassVisualAndLaunchData` 0x004b4ee0 checks
+`g_nova_control_bits[0xf]/[0x11]/[0x10]`), which the SDL renderer has no
+counterpart for.
+
+**Bindings now threaded through.** The intro skip, the in-flight exit/cancel,
+and the Player Info close key all read their persisted binding slot (0x17 and
+0x19) instead of raw Escape / P. `SdlPlatform::PollFlightInput` no longer
+latches a bare Escape.
+
+Open: whether `g_hyperspace_effects` keeps the CE raw-input-lock behaviour or is
+purely the effect toggle.

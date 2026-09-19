@@ -100,6 +100,14 @@ constexpr SDL_Color kControlFill{136, 136, 136, 255};
 constexpr SDL_Color kControlShadow{58, 58, 58, 255};
 constexpr SDL_Color kControlText{0, 0, 0, 255};
 constexpr SDL_Color kControlSelectedText{255, 255, 255, 255};
+// Locked controls are drawn light grey (a port addition: the original has no
+// disabled state because these preferences were live toggles).
+constexpr SDL_Color kControlDisabledFill{205, 205, 205, 255};
+constexpr SDL_Color kControlDisabledHighlight{222, 222, 222, 255};
+constexpr SDL_Color kControlDisabledShadow{150, 150, 150, 255};
+constexpr SDL_Color kControlDisabledText{160, 160, 160, 255};
+// Tint applied to the PICT slider arrows when their control is locked.
+constexpr std::uint8_t kDisabledArrowTint = 150;
 
 constexpr std::uint16_t kSoundArrowDownPict = 0x0087;
 constexpr std::uint16_t kSoundArrowUpPict = 0x0086;
@@ -167,20 +175,21 @@ void DrawCheckBox(SdlPlatform &platform,
                   NovaFontCache &font_cache,
                   const SDL_FRect &box,
                   std::string_view label,
-                  bool checked) {
+                  bool checked,
+                  bool disabled) {
   SDL_Renderer *renderer = platform.renderer();
+  const SDL_Color fill = disabled ? kControlDisabledFill : kControlFill;
+  const SDL_Color highlight =
+      disabled ? kControlDisabledHighlight : kControlHighlight;
+  const SDL_Color shadow = disabled ? kControlDisabledShadow : kControlShadow;
+  const SDL_Color text = disabled ? kControlDisabledText : kControlText;
+  const SDL_Color check =
+      disabled ? kControlDisabledText : kControlSelectedText;
   const SDL_FRect glyph{box.x, box.y, 17.0F, 17.0F};
-  SDL_SetRenderDrawColor(renderer,
-                         kControlFill.r,
-                         kControlFill.g,
-                         kControlFill.b,
-                         SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &glyph);
-  SDL_SetRenderDrawColor(renderer,
-                         kControlHighlight.r,
-                         kControlHighlight.g,
-                         kControlHighlight.b,
-                         SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(
+      renderer, highlight.r, highlight.g, highlight.b, SDL_ALPHA_OPAQUE);
   SDL_RenderLine(renderer,
                  glyph.x + 1.0F,
                  glyph.y + 1.0F,
@@ -191,11 +200,8 @@ void DrawCheckBox(SdlPlatform &platform,
                  glyph.y + 1.0F,
                  glyph.x + 1.0F,
                  glyph.y + glyph.h - 1.0F);
-  SDL_SetRenderDrawColor(renderer,
-                         kControlShadow.r,
-                         kControlShadow.g,
-                         kControlShadow.b,
-                         SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(
+      renderer, shadow.r, shadow.g, shadow.b, SDL_ALPHA_OPAQUE);
   SDL_RenderLine(renderer,
                  glyph.x + glyph.w - 2.0F,
                  glyph.y + glyph.h - 2.0F,
@@ -213,19 +219,12 @@ void DrawCheckBox(SdlPlatform &platform,
                          SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &glyph);
   if (checked) {
-    SDL_SetRenderDrawColor(renderer,
-                           kControlFill.r,
-                           kControlFill.g,
-                           kControlFill.b,
-                           SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, SDL_ALPHA_OPAQUE);
     const SDL_FRect inner{
         glyph.x + 2.0F, glyph.y + 2.0F, glyph.w - 4.0F, glyph.h - 4.0F};
     SDL_RenderFillRect(renderer, &inner);
-    SDL_SetRenderDrawColor(renderer,
-                           kControlSelectedText.r,
-                           kControlSelectedText.g,
-                           kControlSelectedText.b,
-                           SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(
+        renderer, check.r, check.g, check.b, SDL_ALPHA_OPAQUE);
     SDL_RenderLine(renderer,
                    glyph.x + 3.0F,
                    glyph.y + 6.0F,
@@ -243,7 +242,7 @@ void DrawCheckBox(SdlPlatform &platform,
                 NovaFontFamily::kGeneva,
                 12.0F,
                 kNovaFontStyleRegular,
-                kControlText,
+                text,
                 box.x + 20.0F,
                 baseline,
                 label);
@@ -254,7 +253,8 @@ void DrawCheckBox(SdlPlatform &platform,
 void DrawSliderArrow(SdlPlatform &platform,
                      NovaFontCache &,
                      const SDL_FRect &box,
-                     bool up) {
+                     bool up,
+                     bool disabled) {
   const float cx = box.x + box.w / 2.0F;
   const float cy = box.y + box.h / 2.0F;
   const float base = 4.0F; // halfwidth of the triangle base
@@ -262,11 +262,9 @@ void DrawSliderArrow(SdlPlatform &platform,
   const float top_y = up ? cy - h / 2.0F : cy + h / 2.0F;
   // Fill the triangle as horizontal strips, thinnest at the tip, widest at the
   // base.
-  SDL_SetRenderDrawColor(platform.renderer(),
-                         kControlText.r,
-                         kControlText.g,
-                         kControlText.b,
-                         SDL_ALPHA_OPAQUE);
+  const SDL_Color arrow = disabled ? kControlDisabledText : kControlText;
+  SDL_SetRenderDrawColor(
+      platform.renderer(), arrow.r, arrow.g, arrow.b, SDL_ALPHA_OPAQUE);
   const int rows = 4;
   for (int i = 0; i < rows; ++i) {
     const float t =
@@ -794,6 +792,12 @@ void DrawKeySettingsDialog(SdlPlatform &platform,
 
 } // namespace
 
+// Ghidra String_ExpandControlCode (0x004f1990): expose the anonymous-namespace
+// KeyCodeName lookup for the flight-tutorial hint composition.
+std::string NovaPrefs_KeyCodeDisplayName(std::uint16_t key_code) {
+  return KeyCodeName(key_code);
+}
+
 // Ghidra 0x004b4400 NovaPrefs_ResetKeyBindings.
 void KeyBindings::ResetToDefaults() {
   // Values exactly as NovaPrefs_ResetKeyBindings (0x004b4400) writes them.
@@ -836,7 +840,26 @@ void NovaPreferences::ResetToDefaults() {
   ambient_sounds = true;
   hyperspace_effects = false;
   check_for_updates = true;
-  starmap_show_borders = false;
+  starmap_show_borders = true;
+  NovaPrefs_ApplyLockedPreferences(*this);
+}
+
+// Grabs the quality/graphics preferences the port always renders. Kept in one
+// place so the Settings dialog's disabled controls, the .prf load path, and the
+// defaults cannot drift apart (see the header contract).
+void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs) {
+  prefs.share_processor_time = true;
+  prefs.quicktime_movies = false; // inverted: false = movies "on"
+  prefs.smoke_trails = false;     // inverted: false = trails on
+  prefs.run_in_window = false;    // the port always presents the playfield
+  prefs.ship_animations = true;
+  prefs.engine_glows = true;
+  prefs.running_lights = true;
+  prefs.weapon_effects = true;
+  prefs.parallax_starfield = true;
+  prefs.hyperspace_effects = false; // inverted: false = effects on
+  prefs.check_for_updates = true;
+  prefs.brightness = 3;
 }
 
 // Ghidra 0x004c7400 NovaPrefs_LoadOrInit.
@@ -876,6 +899,8 @@ bool NovaPrefs_LoadFromFile(const std::filesystem::path &path,
   if (loaded.brightness > 6) {
     loaded.brightness = 3;
   }
+  // Locked quality/graphics fields ignore whatever the stored .prf held.
+  NovaPrefs_ApplyLockedPreferences(loaded);
   prefs = loaded;
   return true;
 }
@@ -940,6 +965,34 @@ bool NovaPrefs_SaveToSystemStore(const NovaPreferences &prefs) {
 }
 
 namespace {
+
+// Whether a checkbox item is one of the locked quality/graphics preferences.
+// The Settings dialog draws these disabled and ignores clicks on them. Uses
+// the 0-based DITL item index.
+[[nodiscard]] bool SettingsCheckboxLocked(std::size_t index) {
+  switch (index) {
+  case 1:  // Share Processor Time
+  case 8:  // QuickTime Movies
+  case 9:  // Smoke Trails
+  case 10: // Run in a Window
+  case 11: // Ship Animations
+  case 12: // Engine Glows
+  case 13: // Running Lights
+  case 14: // Weapon Effects
+  case 17: // Parallax Starfield
+  case 20: // Hyperspace Effects
+  case 21: // Check For Updates
+    return true;
+  default:
+    return false;
+  }
+}
+
+// The brightness label/value and its two arrows are locked at the default;
+// the sound slider stays live.
+[[nodiscard]] bool SettingsSliderLocked(std::size_t index) {
+  return index == 22 || index == 23 || index == 24 || index == 25;
+}
 
 // Whether a checkbox item should be drawn checked, honouring each toggle's
 // inverted-ness (a box is checked when the feature is ON, which for the
@@ -1124,7 +1177,8 @@ void DrawSettingsDialog(SdlPlatform &platform,
                    font_cache,
                    rect,
                    item.title,
-                   CheckboxChecked(prefs, item.index));
+                   CheckboxChecked(prefs, item.index),
+                   SettingsCheckboxLocked(item.index));
       break;
     case 4: // push button (OK / Key Settings)
       DrawButton(platform,
@@ -1134,16 +1188,30 @@ void DrawSettingsDialog(SdlPlatform &platform,
                  hover && *hover == item.index);
       break;
     case 0x40: // slider arrow (upper cell = up, lower = down)
+    {
+      const bool disabled = SettingsSliderLocked(item.index);
       if (const auto *texture = item.index == 6 || item.index == 25
                                     ? artwork.arrow_up.get()
                                     : artwork.arrow_down.get();
           texture != nullptr) {
-        SDL_RenderTexture(renderer, texture->get(), nullptr, &rect);
+        SDL_Texture *const tex = texture->get();
+        if (disabled) {
+          SDL_SetTextureColorMod(
+              tex, kDisabledArrowTint, kDisabledArrowTint, kDisabledArrowTint);
+        }
+        SDL_RenderTexture(renderer, tex, nullptr, &rect);
+        if (disabled) {
+          SDL_SetTextureColorMod(tex, 255, 255, 255);
+        }
       } else {
-        DrawSliderArrow(
-            platform, font_cache, rect, item.index == 6 || item.index == 25);
+        DrawSliderArrow(platform,
+                        font_cache,
+                        rect,
+                        item.index == 6 || item.index == 25,
+                        disabled);
       }
       break;
+    }
     case 0x08: // static value/label text
       if (item.index == 4) {
         NovaText_Draw(platform,
@@ -1163,17 +1231,20 @@ void DrawSettingsDialog(SdlPlatform &platform,
                       NovaFontFamily::kGeneva,
                       12.0F,
                       kNovaFontStyleRegular,
-                      kControlText,
+                      kControlDisabledText,
                       rect.x + 4.0F,
                       rect.y + rect.h / 2.0F + 4.0F,
                       std::to_string(prefs.brightness));
       } else {
+        const SDL_Color text = SettingsSliderLocked(item.index)
+                                   ? kControlDisabledText
+                                   : kControlText;
         NovaText_Draw(platform,
                       font_cache,
                       NovaFontFamily::kGeneva,
                       12.0F,
                       kNovaFontStyleRegular,
-                      kControlText,
+                      text,
                       rect.x + 4.0F,
                       rect.y + rect.h / 2.0F + 4.0F,
                       item.title);
@@ -1260,18 +1331,22 @@ bool NovaMenu_RunSettingsDialog(
           audio.SetMasterVolume(
               NovaAudio_EffectGainFromPreference(prefs.sound_volume));
           break;
-        case 24: // brightness down
-          prefs.brightness = std::max<std::int32_t>(0, prefs.brightness - 1);
-          break;
-        case 25: // brightness up
-          prefs.brightness = std::min<std::int32_t>(6, prefs.brightness + 1);
+        case 24: // brightness down (locked)
+        case 25: // brightness up (locked)
+          if (SettingsSliderLocked(*hit)) {
+            break; // Disabled control: ignore the click.
+          }
+          if (*hit == 24) {
+            prefs.brightness = std::max<std::int32_t>(0, prefs.brightness - 1);
+          } else {
+            prefs.brightness = std::min<std::int32_t>(6, prefs.brightness + 1);
+          }
           break;
         default:
-          TogglePref(prefs, *hit);
-          if (*hit == 10) {
-            NovaLog::Warn("Run in a window toggle stored but not applied until "
-                          "SdlPlatform gains a windowed-mode switch");
+          if (SettingsCheckboxLocked(*hit)) {
+            break; // Disabled control: ignore the click.
           }
+          TogglePref(prefs, *hit);
           if (*hit == 7 && !prefs.intro_music && music.IsPlaying()) {
             music.Stop();
           } else if (*hit == 7 && prefs.intro_music) {

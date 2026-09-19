@@ -170,11 +170,10 @@ struct FlightInput {
   // targeted or the Alt arm modifier is held, until aligned.
   bool face_target = false;
   // Edge latches from drained SDL events the loop otherwise could not see
-  // (PollFlightInput owns the event drain). escape_pressed latches a bare
-  // Escape keydown (the unported pause-menu exit's stand-in); primary_clicked
-  // latches a left mouse press with the current render-coordinate cursor
-  // position, used for click-to-target ship picking.
-  bool escape_pressed = false;
+  // (PollFlightInput owns the event drain). primary_clicked latches a left
+  // mouse press with the current render-coordinate cursor position, used for
+  // click-to-target ship picking. The flight-exit/cancel command is polled
+  // through the persisted binding table (slot 0x17), not a raw Escape latch.
   bool primary_clicked = false;
   float mouse_x = 0.0F;
   float mouse_y = 0.0F;

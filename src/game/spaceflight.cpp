@@ -1674,9 +1674,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           published_phase + "\",\"target\":\"" +
           probe_json_escape(automation_status.target) + "\",\"detail\":\"" +
           probe_json_escape(automation_status.detail) + "\"}");
-      // Escape/'q' are latched by PollFlightInput (it owns the SDL event drain
-      // the old PollTextEvent-based check relied on); return to the menu.
-      if (input.escape_pressed) {
+      // The original's cancel/skip command (binding slot 0x17, default Escape)
+      // returns to the menu. Resolved through the persisted binding table so a
+      // rebound key is honoured (PollFlightInput no longer latches raw Escape).
+      if (binding_held(0x17)) {
         returning_to_menu = true;
         break;
       }
@@ -2387,7 +2388,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         // this block is TODO(decomp).
         if (held(binding_key[0x19])) {
           const PlayerInfoWindowResult info_result =
-              NovaPlayerInfo_RunWindow(platform, state, view, hud);
+              NovaPlayerInfo_RunWindow(platform, state, view, hud, prefs);
           // The original runs Player_RedistributeFleetCargoOverflow(1) inside
           // the window loop when the Cargo page's Jettison action is confirmed
           // (0x00499c10); the port surfaces the confirmation and applies it
@@ -2523,7 +2524,7 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   // skip result already gates (a stub of) the intro text-reader dialog
   // internally, so its return value needs no action here.
   if (!state.intro_played) {
-    (void)NovaIntroCinematic_Run(platform, audio, state);
+    (void)NovaIntroCinematic_Run(platform, audio, state, prefs);
     // Ghidra: g_intro_played = 0x01, the latch IntroCinematic_SetupFrames/
     // Game_ResetNewGameState clear on a new pilot (see new_pilot_flow.cpp).
     state.intro_played = true;
