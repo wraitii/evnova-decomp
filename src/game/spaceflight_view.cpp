@@ -2360,16 +2360,19 @@ void SpaceflightView::DrawGameFrame(SdlPlatform &platform,
   // HUD overlays the extending world at fixed, unscaled size (the project's
   // resolution policy: more window = more system shown, NOT a bigger HUD).
   hud.Draw(platform, state);
-  // Hyperspace fire flash: a full-screen white frame at the jump moment (the
-  // original's centered effect 0x32 queued at engage, the 'boom' flash).
-  // Drawn topmost so it also whites out the HUD, then fades over the next few
-  // frames as the loop decays screen_flash_intensity.
+  // Hyperspace flash: a full-screen frame at the jump moment (the original's
+  // centered effect 0x32 queued at engage, the 'boom' flash) plus the Mac
+  // progressive fade-in during the hold. White by default; the CE build forces
+  // black when `hyperspace_effects` is off (0x00872384). Drawn topmost so it
+  // also whites/blacks out the HUD, then fades as the loop decays
+  // screen_flash_intensity.
   if (state.screen_flash_intensity > 0.0F) {
     SDL_Renderer *const renderer = platform.renderer();
     const std::uint8_t a = static_cast<std::uint8_t>(
         std::clamp(state.screen_flash_intensity, 0.0F, 1.0F) * 255.0F);
+    const std::uint8_t v = state.screen_flash_black ? 0 : 255;
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, a);
+    SDL_SetRenderDrawColor(renderer, v, v, v, a);
     SDL_RenderFillRect(renderer, nullptr);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
   }

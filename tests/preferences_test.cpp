@@ -176,6 +176,19 @@ TEST_CASE("Sound preference uses the original mixer level scale") {
   CHECK(game::NovaAudio_EffectGainFromPreference(33) == 1.0F);
 }
 
+TEST_CASE("Hyperspace effect preference selects the flash colour") {
+  game::NovaPreferences prefs;
+  prefs.ResetToDefaults();
+  // Default raw byte 0 = effects on = white (0x00872384 applies the requested
+  // white when g_hyperspace_effects is zero).
+  CHECK_FALSE(game::NovaPrefs_HyperspaceFlashIsBlack(prefs));
+  // The Settings checkbox is inverted, so a checked "Hyperspace Effects" maps
+  // to the raw byte 0; turning the option off stores a non-zero byte, which
+  // the CE colour setter turns into black.
+  prefs.hyperspace_effects = true;
+  CHECK(game::NovaPrefs_HyperspaceFlashIsBlack(prefs));
+}
+
 TEST_CASE("Original preference file round-trips modeled settings and keys") {
   const auto path = std::filesystem::temp_directory_path() /
                     "evnova_preferences_round_trip.prf";
