@@ -343,6 +343,13 @@ public:
   void SetScaledPlayfield();
   void SetFullscreenPlayfield();
 
+  // Applies the "Run in a Window" preference (NovaPreferences::run_in_window)
+  // to the OS window. windowed=true keeps the normal resizable window;
+  // windowed=false switches SDL to exclusive fullscreen. Idempotent and safe
+  // to call at startup and every time the Settings checkbox is toggled. This
+  // is independent of the draw presentation (the *Playfield helpers above).
+  void ApplyWindowMode(bool windowed);
+
   // Raw mouse position in window coordinates (SDL window points), unmapped by
   // any presentation transform. The dialog runtime composites over the last
   // presented frame and draws at 1:1 window scale, so it maps the mouse

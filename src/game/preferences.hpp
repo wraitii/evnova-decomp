@@ -72,7 +72,9 @@ struct NovaPreferences {
   // Ghidra g_pref_smoke_trails (inverted flag: 0 = smoke trails on).
   bool smoke_trails = false;
   // Ghidra DAT_00bec178 (run in a window), toggled live via the window mode.
-  bool run_in_window = false;
+  // The port defaults to a window (the original defaulted to fullscreen); the
+  // checkbox is live and applies the OS window mode through SdlPlatform.
+  bool run_in_window = true;
   // Ghidra g_pref_ship_animations.
   bool ship_animations = true;
   // Ghidra g_pref_engine_glows.
@@ -109,11 +111,12 @@ struct NovaPreferences {
 // Settings dialog shows them disabled and a legacy .prf cannot turn them off;
 // call this after NovaPrefs_LoadFromFile (and it is applied by
 // ResetToDefaults). Locked: share_processor_time=true, quicktime_movies=false,
-// smoke_trails=false, run_in_window=false, ship_animations=true,
+// smoke_trails=false, ship_animations=true,
 // engine_glows=true, running_lights=true, weapon_effects=true,
 // parallax_starfield=true, hyperspace_effects=false, check_for_updates=true,
 // brightness=3.
-// starmap_show_borders is NOT locked (the map toggles it).
+// starmap_show_borders is NOT locked (the map toggles it), and neither is
+// run_in_window: it defaults ON and the Settings checkbox applies it live.
 void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs);
 
 // Ghidra 0x00872384 DrawContext_SetHyperspaceFlashColor.

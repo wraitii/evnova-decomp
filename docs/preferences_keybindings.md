@@ -285,16 +285,21 @@ fill-rate downgrade, so the Settings dialog draws the following controls
 light-grey/disabled and `NovaPrefs_ApplyLockedPreferences` forces their stored
 values on load (a legacy `.prf` cannot re-enable a downgrade): Share Processor
 Time (`true`), QuickTime Movies (`false`, inverted), Smoke Trails (`false`,
-inverted), Run in a Window (`false`; the port always presents the playfield),
-Ship Animations, Engine Glows, Running Lights, Weapon Effects, Parallax
-Starfield, Hyperspace Effects (`false`, inverted), Check For Updates (`true`),
-and the Brightness slider (`3`). Intro Music, Sound Volume and Ambient Sounds
-stay live. `starmap_show_borders` is **not** locked: the in-game galaxy map's
-Show/Hide Borders button toggles it, `GameState::starmap_show_borders` carries
-the runtime value, and `nova_app.cpp` seeds it from the `.prf` at startup and
-syncs it back at the save points. The port defaults it **ON** (the original's
-overlay was slow/buggy and defaulted OFF), while still persisting the choice at
-`.prf +0x76`. Brightness and Engine/Running-Lights/Weapon layer gates are the
+inverted), Ship Animations, Engine Glows, Running Lights, Weapon Effects,
+Parallax Starfield, Hyperspace Effects (`false`, inverted), Check For Updates
+(`true`), and the Brightness slider (`3`). Intro Music, Sound Volume and
+Ambient Sounds stay live. `starmap_show_borders` is **not** locked: the in-game
+galaxy map's Show/Hide Borders button toggles it,
+`GameState::starmap_show_borders` carries the runtime value, and `nova_app.cpp`
+seeds it from the `.prf` at startup and syncs it back at the save points. The
+port defaults it **ON** (the original's overlay was slow/buggy and defaulted
+OFF), while still persisting the choice at `.prf +0x76`. **Run in a Window** is
+also not locked: the port defaults `run_in_window` **ON** (the original
+defaulted to fullscreen), the live checkbox drives
+`SdlPlatform::ApplyWindowMode` (`SDL_SetWindowFullscreen`), and the same call
+runs once at startup. It is not part of the `.prf` payload, matching the
+original's `DAT_00bec178`.
+Brightness and Engine/Running-Lights/Weapon layer gates are the
 remaining fidelity gaps: the original applies these through
 `g_render_brightness_lut` and the class sprite-load gates
 (`ShipClass_LoadShipClassVisualAndLaunchData` 0x004b4ee0 checks
