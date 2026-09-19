@@ -286,18 +286,20 @@ void Stellar_Launch(GameState &state) {
   // interaction loop -- the Spaceport's mission gate therefore saw the
   // pre-landing date when failing overdue deadlines.
   Mission_TickDailyWorldUpdate(state);
-  // 0x00456038: the persisted stat-modifier jitter/reroll pair
-  // (Frame_JitterPlayerStatModifiers 0x00431480 /
-  // Frame_RerollPlayerStatModifiers 0x00431500).
+  // 0x00456038: the persisted stat-modifier random walk
+  // (Frame_JitterPlayerStatModifiers 0x00431480). The second-pair reroll
+  // (Frame_RerollPlayerStatModifiers 0x00431500) is NOT part of the launch
+  // tail -- its only call site is the in-flight jump arrival at 0x0044fa15.
   NovaFrame_JitterPlayerStatModifiers(state);
-  NovaFrame_RerollPlayerStatModifiers(state);
-  // 0x004560a0: an inline duplicate of
-  // Mission_RefreshActiveMissionSpawnState (0x00448910) refreshes delayed
-  // mission arrivals and auxiliary-fleet state at launch.
-  Mission_RefreshActiveMissionSpawnState(state);
   // 0x00456060..0x0045609b: discovery booking at level 2 (slot + current
-  // system), visibility rebuild and region events.
+  // system), visibility rebuild and region events. The original runs this
+  // BEFORE the mission rearm loop, so that loop observes the refreshed
+  // discovery state.
   NovaSystem_OnSystemEntered(state, state.player.current_system_id, 2);
+  // 0x004560a0: the launch inlines only the per-mission tail of
+  // Mission_RefreshActiveMissionSpawnState (0x00448910) -- it does NOT run
+  // that function's ShipStart-1 delayed-arrival head.
+  Mission_RearmActiveMissionTimers(state);
   // 0x00456103: launch autosave, with ship->ai_secondary_target_slot as the
   // restore point (block1 +0x00). That is already the 0-based g_stellar_defs
   // index; a docked M/N may have overwritten it (destination nav / -1). Tests

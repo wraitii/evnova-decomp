@@ -206,10 +206,11 @@ bool Frame_ShouldTriggerAutoRepairTick(GameState &state) {
 
 // Jump-arrival call site note: the in-flight jump-arrival block of
 // Ship_HandlePlayerShipCore (PlayerTick_SystemTransitionAndArrival
-// 0x0044f660) also runs Frame_JitterPlayerStatModifiers + Frame_RerollPlayer-
-// StatModifiers at 0x0044fb39, after the escort travel-day daily passes. The
-// port's jump-arrival does not run them yet (see the TODO in the loop's
-// just_completed block).
+// 0x0044f660) runs Frame_JitterPlayerStatModifiers + Frame_RerollPlayerStat-
+// Modifiers at 0x0044fa10/0x0044fa15, right before its
+// Mission_RefreshActiveMissionSpawnState call. PlayerTick_JumpArrivalBlock in
+// spaceflight.cpp now invokes both there. The launch tail invokes the jitter
+// only.
 
 // Ghidra PlayerTick_StatusAndOutfitEvents sub-branch 0x0044ab50: on death with
 // a carried bomb, open the escape-pod selection dialog (first owned outfit
@@ -377,9 +378,10 @@ void DetonateCarriedBomb(GameState &state) {
 
 // Jump-arrival call-site note for the pair below: the in-flight jump-arrival
 // block of Ship_HandlePlayerShipCore (PlayerTick_SystemTransitionAndArrival
-// 0x0044f660) also runs both functions at 0x0044fb39, after the escort
-// travel-day daily passes. The port's jump-arrival does not run them yet
-// (see the TODO in the loop's just_completed block).
+// 0x0044f660) runs both functions at 0x0044fa10/0x0044fa15, before its
+// Mission_RefreshActiveMissionSpawnState call. PlayerTick_JumpArrivalBlock in
+// spaceflight.cpp now invokes both there; the launch tail invokes the jitter
+// only.
 
 // Ghidra 0x00431480 Frame_JitterPlayerStatModifiers. The two-step jitter and
 // the [85,115] clamp are branch-faithful (NovaRandom_Range(3): 0 -> -1,

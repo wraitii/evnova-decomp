@@ -839,9 +839,9 @@ void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
 // re-init, the vacant-ship sweep, escort adoption + mission-fleet restoration
 // inside the -999 station-hold window, offering rerolls, the scattered NPC
 // population and the arrival ambush, then the target/selection reset. The
-// entering-system arrival message and the escort travel-day daily tick +
-// stat-modifier reroll (0x0044fb2d/0x0044fb39) of the original slice are
-// TODO(decomp) inside.
+// entering-system arrival message and the escort travel-day daily tick
+// (0x0044fb2d) of the original slice remain TODO(decomp) inside; the
+// stat-modifier jitter/reroll pair now runs here (0x0044fa10/0x0044fa15).
 void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
                                  SpaceflightView &view,
                                  HudRenderer &hud,
@@ -880,6 +880,11 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   // attached ship is pushed ~892 px behind and flung forward at 50 px/tick
   // -- escorts stream in behind the jumping player.
   state.player.ai_station_hold_timer = -999.0F;
+  // Ghidra 0x0044fa10/0x0044fa15: the arrival random-walks the first stat
+  // modifier pair and rerolls the second before the mission spawn refresh
+  // (travel-day world ticks already ran in FireJump).
+  NovaFrame_JitterPlayerStatModifiers(state);
+  NovaFrame_RerollPlayerStatModifiers(state);
   // Ghidra 0x0044fa1a: after the travel-day/stat refresh and before population
   // restoration, arm ShipStart-1 mission fleets for their delayed jump-in.
   Mission_RefreshActiveMissionSpawnState(state);
@@ -892,9 +897,6 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   // AndLanding 0x00458802: roll 1..100 per definition, then re-evaluate
   // the mission lists).
   Mission_RerollOfferingRolls(state);
-  // TODO(decomp(0x0044fb39)): Frame_JitterPlayerStatModifiers and
-  // Frame_RerollPlayerStatModifiers remain unported. Travel-day world ticks
-  // run in FireJump before this arrival refresh.
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
   // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of
   // Stellar_HandleStellarEntryAndExit's system-transition slice, after the
