@@ -1,5 +1,6 @@
 #include "landed_store.hpp"
 
+#include "compatibility.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "log.hpp"
@@ -458,9 +459,28 @@ std::int32_t NovaLanded_ScaledStorePrice(std::int32_t base_price,
   if (base_price <= 0)
     return 0;
   std::int32_t value = base_price;
-  // The original only guards the upper bound (signed item/stellar tech < 6)
+  // The original only guards the upper bound (signed item/stellar tech <= 5)
   // and item_tech < stellar_tech; there is no lower-bound test, so a negative
   // item tech still takes the discount/surcharge path.
+  //
+  // POSSIBLE-BUG(original): the `<= 5` bound also disables this markdown at
+  // every shipped stellar whose base TechLevel is 6 or 7 (Earth, Spacedock
+  // I-V, New England, Rebel I/II, Harbor) and for the whole 6-7 ship band (in
+  // Nova this function only prices ships/trade-ins; outfits never reach it --
+  // see the BUGFIX in NovaLanded_OutfitPrice), and it is not the check one
+  // would use merely to exclude the sentinel techs (999/9999/32767).
+  // Confirmed in the disassembly: 0x0049d65a CMP AX,5 and 0x0049d662 CMP BX,5
+  // are both signed JG, with no clamping of param_4.
+  //
+  // This is not a Nova-era slip: the identical function sits in both earlier
+  // games (EV Override 1.0.2 PPC 0x413ac, EV 1.0.5 PPC 0x4a914 -- same
+  // `100 - 3*(stellar - item)` and the same "tech > 5 -> skip",
+  // "item < stellar" and "base > 99" guards), so it is a straight inherited
+  // bug. EV's stock spob data stays at TechLevel 5, but Override already ships
+  // tech-6/7 worlds, so the cap was live there and simply went unremarked.
+  // Left faithful for now to preserve original behaviour -- the bound (or,
+  // arguably, the whole tech-level markdown) should come out only as a
+  // deliberate Nova gameplay decision, not as a decomp correction.
   if (item_tech < 6 && stellar_tech < 6 && item_tech < stellar_tech &&
       base_price > 99) {
     value = static_cast<std::int32_t>(
@@ -482,8 +502,30 @@ std::int32_t NovaLanded_OutfitPrice(const GameState &state,
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
   if (stellar == nullptr || outfit == nullptr || ship == nullptr)
     return 0;
-  // Outfitter prices use DAT_007d4bbc (the same rank scale; see
-  // NovaLanded_RankPriceScale).
+  // The original's outfit display (0x00490c70), buy-eligibility (0x00491950)
+  // and buy/sell loops (0x0048ea70) all call Outfit_ComputeScaledPurchasePrice
+  // with DAT_007d4bbc and then DISCARD the result, pricing the unit with the
+  // unscaled Outfit_ComputeOutfitPurchasePrice instead. The rank PriceMod thus
+  // never reaches outfits, even though the ränk resource documents it as
+  // modifying "items and ships" and the shipyard applies it. The Carbon/PPC
+  // build is blunter still: _ApplyPriceAndTechnologyFlux is reached only from
+  // the shipyard (_CalcShipCanBuy / _ShipyardDialogUpdate / _DoShipyardDialog)
+  // while the outfit sites use _AdjustedItemCost, the compiler having removed
+  // the discarded calls outright.
+  //
+  // Nova introduced this discard: EV 1.0.5 and EV Override 1.0.2 both charged
+  // the ApplyPriceAndTechnologyFlux result for outfit buy/sell (EVO 0x37ee4 ->
+  // `bl 0x413ac`, credits -= result at 0x38638; EV 0x41518 -> `bl 0x4a914`,
+  // credits -= result at 0x42014), so outfits there did receive the tech
+  // markdown. Losing it in Nova is a regression, not a deliberate design
+  // change, which is what makes this BUGFIX a restore rather than an invention.
+  //
+  // BUGFIX(original): apply the intended scaled price (rank scale, plus the
+  // same tech rule the shipyard already uses). The faithful unscaled value is
+  // kept for kApplyOriginalBugFixes == false.
+  if (!kApplyOriginalBugFixes) {
+    return outfit->PurchasePrice(ship->mass_tons);
+  }
   return NovaLanded_ScaledStorePrice(
       outfit->PurchasePrice(ship->mass_tons),
       outfit->tech_level,
@@ -800,9 +842,10 @@ void NovaLanded_CloseOutfitterSession(GameState &state) {
 // InteractionLoop 0x00491f9b..0x00492038). The original seeds both globals to
 // 1.0, then for each active + defined rank whose affiliated government is
 // allied to the landed stellar's government folds in `PriceMod * 0.01`. Both
-// globals receive the exact same product there, and the outfit/shipyard
-// consumers use DAT_007d4bbc for item and trade-in stages and DAT_007d4bc0 for
-// the ship list/hire stages, so one scale covers all of them. Because the
+// globals receive the exact same product there. The shipyard consumers use
+// DAT_007d4bbc for the trade-in stages and DAT_007d4bc0 for the ship list/hire
+// stages; the outfit path passes DAT_007d4bbc but discards the result (see the
+// BUGFIX(original) in NovaLanded_OutfitPrice). Because the
 // landed stellar and the rank set are fixed for the modal's lifetime, the port
 // derives the scale from the destination stellar on demand instead of latching
 // a pair of globals.

@@ -148,7 +148,10 @@ one word per slot); see `docs/pilot_save_file_format.md`.
   uncapped).
 - **Price modifier** — `NovaLanded_RankPriceScale` 0x00491f9b folds
   `PriceMod * 0.01` into `DAT_007d4bbc`/`DAT_007d4bc0` for every active+defined
-  allied rank; consumed by outfit/ship/trade-in/hire prices.
+  allied rank; consumed by ship/trade-in/hire prices and, as a
+  `BUGFIX(original)`, by outfit prices (`NovaLanded_OutfitPrice`). The original
+  outfitter called `Outfit_ComputeScaledPurchasePrice` at all three sites but
+  discarded the result, so rank discounts never reached outfits.
 - **Honors** — `NovaUi_BuildPlayerSpecialInteractionStrings` 0x0049c050 lists
   active+defined rank full names by Weight descending before the 0x2000-flag
   outfits.

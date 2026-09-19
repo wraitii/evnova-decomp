@@ -7,6 +7,7 @@ succinct (one line); put addresses, evidence and port behaviour at the
 
 Behaviour that the disassembly seems to say exist, but I don't remember:
 - Ships with an inherent combat government (Polaris arachnid/scarab/raven, Federation destroyer/carrier, rebel ships) should draw attacks from governments hostile to that inherent gov, even when not directly hostile. (unverified)
+- **Tech-level availability markdown stops at TechLevel 5.** `Outfit_ComputeScaledPurchasePrice` applies the `100 - 3*(stellar - item)` markdown only when both item and stellar TechLevel are `<= 5` (0x0049d65a / 0x0049d662, signed `JG`, no clamping), so no base-tech-6/7 stellar (Earth, Spacedock I-V, New England, Rebel I/II, Harbor) discounts anything, and the whole 6-7 ship/outfit band is excluded. That bound also is not the minimal way to exclude the sentinel techs (999/9999/32767). Confirmed in the decompile; the port reproduces it faithfully for now (see the `POSSIBLE-BUG(original)` note in `NovaLanded_ScaledStorePrice`).
 
 
 ## List of known engine issues
@@ -25,8 +26,8 @@ Per the discord.
 * (fixed) **One-way system links become reciprocal** — linking A→B also permits B→A. 
 * (fixed) **`Mxxx` behaves like `Nxxx`** instead of positioning the player at the first stellar/system center. 
 * (fixed) **`DeathDelay` 0 or 1 leaves an immortal ghost sprite** after a ship explodes. 
-* **Zero inherent shields break escape-pod ejection** — the replacement ship can immediately explode after ejecting. Shield outfits do not prevent it.  
-* **Rank discounts do not apply to outfits**, despite the rank field being documented as affecting ships and outfits. 
+* (fixed) **Zero inherent shields break escape-pod ejection** — the replacement ship can immediately explode after ejecting. The mechanism is the post-respawn armor refill at `0x0044d83f`, which calls `Ship_ComputeShipMaxShieldPoints`: a fresh class with `max_shield == 0` returns with 0 armor and is destroyed on the next tick. Shield outfits are cleared before the refill (`ClearNonPersistentOutfits`), so they did not help. Fixed via `kApplyOriginalBugFixes` in `PlayerTick_TimedActionTransition` (`BUGFIX(original)`).  
+* (fixed) **Rank discounts do not apply to outfits**, despite the rank field being documented as affecting ships and outfits. The original computed the scaled price at every outfit site (`0x0048ea70` buy/sell, `0x00490c70` display, `0x00491950` eligibility) but discarded the result, charging the unscaled `Outfit_ComputeOutfitPurchasePrice`; fixed via `kApplyOriginalBugFixes` in `NovaLanded_OutfitPrice` (`BUGFIX(original)`). 
 * **Auto-aborted missions can omit their legal-status reward** even when configured to pay on auto-abort. 
 * **“Attack Enemy Spobs/Stellars” AI does not work correctly**; later testing reproduced the problem, although the poster still noted some uncertainty about AI setup.  
 * **Windows startup music filename is hard-coded** to `Nova Music.mp3` rather than respecting STR# 130 like the Mac version. 

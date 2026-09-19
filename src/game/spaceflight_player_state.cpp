@@ -5,6 +5,7 @@
 #include "../sdl_platform.hpp"
 #include "boarding_plunder.hpp"
 #include "collision.hpp"
+#include "compatibility.hpp"
 #include "docked_dialog.hpp"
 #include "escort_commands.hpp"
 #include "flight_automation.hpp"
@@ -1151,14 +1152,19 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
   NovaSystem_RebuildDiscoveryState(state, p.current_system_id, 0, 1);
   // TODO(decomp(0x0044d814)) skipped: NovaEffects_QueuedAmbientStarParticles.
 
-  // Meters refill. Original quirk (0x0044d83f, verified: both call sites
-  // target 0x00463550): the ARMOR refill uses Ship_ComputeShipMaxShieldPoints,
-  // so the player returns with armor equal to the max SHIELD value. Preserve.
+  // Meters refill. 0x0044d83f: the original calls
+  // Ship_ComputeShipMaxShieldPoints (0x00463550) for the ARMOR refill too, so
+  // the player returns with armor equal to the max SHIELD value. With
+  // kApplyOriginalBugFixes on, use the armor max instead: a respawn class whose
+  // max shield is 0 (e.g. a modded shuttle with no shield) otherwise returns
+  // with 0 armor and the fresh hull is destroyed on the next tick.
   state.InvalidateDerivedStatCaches();
   const PlayerEffectiveStats refill = Outfit_ComputePlayerEffectiveStats(state);
   p.fuel_points = refill.fuel_capacity;
   p.shield_points = refill.max_shield_points;
-  p.armor_points = refill.max_shield_points;
+  // BUGFIX(original): the armor refill used the max-shield value.
+  p.armor_points = kApplyOriginalBugFixes ? refill.max_armor_points
+                                          : refill.max_shield_points;
   state.cached_stats = refill;
   state.stat_cache_valid = true;
 
