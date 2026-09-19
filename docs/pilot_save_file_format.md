@@ -248,12 +248,24 @@ dialog remains a `TODO(decomp)`.
 
 ## Save trigger points
 
-- New game (`Menu_RunNewGameFlow`) — writes the initial save with the starting
-  travel destination.
-- Travel to a system (`Stellar_RunDockAndLaunchSequence`).
-- From the per-frame player-ship update (`Ship_HandlePlayerShipCore`) — exact
-  cadence/condition not yet isolated (decompile of that routine is too large;
-  check the jump/hyperspace anchors).
+`PilotFile_SaveGame` (0x004c7db0) has exactly five direct call sites:
+
+- New game (`Menu_RunNewGameFlow` 0x0048a747/0x0048a7d2) — writes the initial
+  save with the starting travel destination.
+- The docked visit's launch tail (`Stellar_RunDockAndLaunchSequence`
+  0x00456103) — restore point is the docked stellar (`ship+0x6c`). This runs
+  on **every** exit from the Spaceport loop, including a quit request: the
+  original's `NovaUi_RunTravelDestinationInteractionLoop` leaves on the same
+  quit flag it leaves on Launch, so the tail (daily world tick + autosave)
+  still commits before `NovaMainLoop_Run` tears down. The SDL port reproduces
+  this by running `Stellar_Launch` on `LandedExit::kQuit`.
+- The escape-pod respawn (0x0044da30/0x0044da53, in
+  `PlayerTick_TimedActionTransition` / `Ship_HandlePlayerShipCore`), gated on
+  Strict Play (`g_strict_play`): saves at the new system's first defined
+  NavDef, else slot 0. The port implements this.
+
+There is no hyperspace-arrival save: the jump-arrival block does not call
+`PilotFile_SaveGame`.
 
 ## Serializer and entry points
 

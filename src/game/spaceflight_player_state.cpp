@@ -17,6 +17,7 @@
 #include "mission_script.hpp"
 #include "nova_random.hpp"
 #include "outfit.hpp"
+#include "pilot_file.hpp"
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
 #include "spaceflight_internal.hpp"
@@ -1261,9 +1262,33 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
     state.system_reputation[i] = gov_def != nullptr ? gov_def->initial_rec : 0;
   }
 
-  // Conditional post-respawn auto-save (g_strict_play: save at the first nav
-  // stellar of the new system, else slot 0). TODO(decomp(0x0044da30))
-  // skipped: the autosave preference flag and PilotFileSaveGame wiring.
+  // Conditional post-respawn auto-save (0x0044da30): under Strict Play
+  // (g_strict_play -> state.pilot.strict_play), save at the new system's first
+  // defined nav stellar (NavDef1-16, SystemDef +0x2a), or at slot 0 when it
+  // has none. The original loops the 16 words and takes the first != -1, then
+  // passes the raw value to PilotFile_SaveGame; the port's nav_defs are
+  // 0x80-based resource ids, so rebase at this boundary. Tests and bootstrap
+  // states without a pilot name are skipped, like the launch autosave.
+  if (state.pilot.strict_play) {
+    std::int16_t destination_index = 0;
+    if (const System *sys = state.scenario.System(
+            static_cast<std::int16_t>(p.current_system_id + 0x80))) {
+      for (const std::int16_t nav : sys->nav_defs) {
+        if (nav != -1) {
+          destination_index = PilotFileStellarIndexFromResourceId(nav);
+          break;
+        }
+      }
+    }
+    if (!state.pilot.first_name.empty()) {
+      if (const auto directory = PilotFileSaveDirectory()) {
+        if (!PilotFileSaveGame(*directory, state, destination_index)) {
+          NovaLog::Error("respawn: could not autosave pilot '{}'",
+                         state.pilot.first_name);
+        }
+      }
+    }
+  }
   NovaLog::Info("escape-pod respawn complete: system {}, class {}, ' {}'",
                 p.current_system_id,
                 p.ship_class_id,
