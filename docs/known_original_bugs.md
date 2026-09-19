@@ -11,8 +11,8 @@ Behaviour that the disassembly seems to say exist, but I don't remember:
 
 ## List of known engine issues
 
-Per http://asw.forums.cytheraguides.com/topic/22013/comprehensive-list-of-known-bugs-in-ev-nova/22
-Per http://asw.forums.cytheraguides.com/topic/22191/a-list-of-nova-engine-eccentricities
+Per http://asw.forums.cytheraguides.com/topic/22013/comprehensive-list-of-known-bugs-in-ev-nova/22  
+Per http://asw.forums.cytheraguides.com/topic/22191/a-list-of-nova-engine-eccentricities  
 Per the discord.
 
 
