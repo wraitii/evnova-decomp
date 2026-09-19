@@ -594,6 +594,13 @@ void NovaAi_ApplyControls(GameState &state,
             static_cast<std::int16_t>(target_bearing_deg);
       }
     }
+    // Ghidra 0x00408150 mode-6 call at 0x00409163: after the aim block and
+    // before the turn+15 thrust gate, the original unconditionally arms the
+    // current-primary-target bank (both the straight-bearing and the
+    // predictive branches rejoin at LAB_00409162). Without this a mode-7
+    // (turret) bank is never selected in mode 6, so the direct-fire selector
+    // (whitelist -1/0/6, +1 guided) cannot arm it and the ship never fires.
+    NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
     if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
       ship.ai_forward_thrust_cmd = eff_thrust;
       ship.ai_desired_speed = 0.0F;

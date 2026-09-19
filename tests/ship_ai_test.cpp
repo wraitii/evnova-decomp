@@ -1244,6 +1244,67 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
         Catch::Approx(eff.max_speed_px_per_tick * 1.8F).margin(1e-3F));
 }
 
+// Regression: Ship_ApplyShipAiControls (0x00408150) mode 6 unconditionally
+// calls Weapon_SelectWeaponBankForCurrentTarget (0x0040ce00) at 0x00409163 --
+// after the aim block and before the turn+15 thrust gate -- so the primary
+// target's bank is armed even when the hull only carries turrets. The port
+// omitted that call, leaving a turret-only mode-6 ship (e.g. the Pirate
+// Enterprise "Stolen Tech" mode-7 railgun) with active_weapon_bank_slot == -1:
+// the direct-fire selector (0x0040d470) accepts only modes -1/0/6 (+1 guided)
+// and so can never arm a mode-7/8 bank.
+TEST_CASE("ApplyControls mode 6 arms a turret bank via the current-target "
+          "selector") {
+  GameState state;
+  state.scenario.ships.resize(1);
+  state.scenario.weapons.resize(1);
+  state.scenario.weapons[0].name = "SyntheticTurret";
+  state.scenario.weapons[0].weapon_mode_code = 7;
+  state.scenario.weapons[0].ammo_type = -1; // energy: no secondary counter
+  state.scenario.weapons[0].mass_damage = 10;
+  state.scenario.weapons[0].energy_damage = 10;
+  state.scenario.weapons[0].range_scalar = 1000.0F;
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.current_system_id = 0;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
+  state.player.pers_def_slot = 0x3ff; // bypass the cloak-engagement gate
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -100.0F; // due north of the shooter
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = 0;
+  ship.current_system_id = 0;
+  ship.ai_control_mode = 6;
+  ship.primary_target_ship_slot = 0;
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+  ship.heading = 0.0F; // already on the target bearing
+  ship.armor_points = 100.0F;
+  ship.shield_points = 100.0F;
+  ship.defense_fleet_home_stellar_id = -1;
+  ship.active_weapon_bank_slot = -1;
+  ship.ai_fire_trigger_latch = 0;
+  ship.npc_weapon_count_by_class.fill(0);
+  ship.npc_weapon_secondary_count_by_class.fill(0);
+  ship.npc_weapon_bank_cooldown.fill(0.0F);
+  ship.npc_weapon_count_by_class[0] = 1;
+
+  NovaAi_ApplyControls(state,
+                       ship,
+                       1.0F,
+                       /*now_ms=*/0);
+
+  // The mode-7 bank is armed and the fire latch raised by the current-target
+  // selector; the direct-fire selector would leave both untouched.
+  REQUIRE(ship.active_weapon_bank_slot == 0);
+  CHECK(ship.ai_fire_trigger_latch != 0);
+}
+
 // Ship_ApplyShipAiControls (0x00408150) reaches for the +0xC8DA last
 // lead-fired bank in the mode-6/7/0xe aim blocks: mode 6 leads with the active
 // bank when its weapon mode is {-1,6} and otherwise falls back to +0xC8DA,
