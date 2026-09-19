@@ -1,0 +1,46 @@
+version = 1
+name = "buy-outfit"
+
+[defaults]
+timeout_ms = 180000
+
+# Buy one unit of an outfit from the currently open Outfitter, identifying the
+# grid cell by its /probe/ui `label`. `label` must be the raw item label the
+# store publishes: the outfit's short_name, including any literal `\n`
+# line-break marker (e.g. `Heavy Weapons\nLicense`, written in TOML as
+# `"Heavy Weapons\\nLicense"`). The store wraps those markers into two lines
+# on screen but the probe reports them verbatim.
+#
+# Paging is required: the store sorts by DisplayWeight descending and the
+# heavily weighted weapons/utilities sort ahead of the licences. The nested
+# Next click runs only while the label is not yet on the current page, and the
+# outer loop stops on the same condition, so a label that is already visible
+# on entry is never scrolled past.
+[[params]]
+name = "label"
+
+[[steps]]
+action = "repeat"
+count = 16
+until = { "ui.window" = "outfitter", "ui.items.*.label" = "{{ label }}" }
+
+[[steps.steps]]
+action = "click"
+element = "next"
+trigger = { "ui.window" = "outfitter" }
+trigger_not = { "ui.items.*.label" = "{{ label }}" }
+
+# No trigger on this click: if the label never becomes findable the click
+# times out and the scenario fails instead of silently skipping the purchase.
+[[steps]]
+action = "click"
+where = { label = "{{ label }}" }
+
+[[steps]]
+action = "wait"
+expect = { "ui.items.*.selected" = true, "ui.items.*.label" = "{{ label }}" }
+
+[[steps]]
+action = "click"
+element = "buy"
+trigger = { "ui.items.*.selected" = true, "ui.items.*.label" = "{{ label }}" }

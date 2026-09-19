@@ -1,0 +1,59 @@
+version = 1
+name = "buy-ship"
+
+[defaults]
+timeout_ms = 180000
+
+# Buy the named ship at the currently open Shipyard: page the 4x5 grid until
+# the class is on the current page, select it, press Buy, accept the DLOG
+# 0xbb9 christening dialog, and wait for the Spaceport. `label` is the raw
+# /probe/ui item label the store publishes (the class short_name), so a wrapped
+# name must carry its literal `\n` marker (TOML `"Heavy Shuttle\\n- used -"`).
+#
+# If the sweep reaches the last page without finding the class, the label
+# validation below fails the scenario explicitly instead of timing out in the
+# click. That is the terminal "not offered" error: a caller that wants to
+# advance the day and retry must first probe availability with a non-failing
+# paging loop (a repeat whose `until` is the label) and only then call this.
+[[params]]
+name = "label"
+
+[[steps]]
+action = "repeat"
+count = 16
+until = { "ui.window" = "shipyard", "ui.items.*.label" = "{{ label }}" }
+
+[[steps.steps]]
+action = "click"
+element = "next"
+trigger = { "ui.window" = "shipyard" }
+trigger_not = { "ui.items.*.label" = "{{ label }}" }
+
+[[steps]]
+action = "validate_state"
+expect = { "ui.window" = "shipyard", "ui.items.*.label" = "{{ label }}" }
+
+[[steps]]
+action = "click"
+where = { label = "{{ label }}" }
+
+[[steps]]
+action = "wait"
+expect = { "ui.items.*.selected" = true, "ui.items.*.label" = "{{ label }}" }
+
+[[steps]]
+action = "click"
+element = "buy"
+trigger = { "ui.items.*.selected" = true, "ui.items.*.label" = "{{ label }}" }
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3001" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
