@@ -1688,6 +1688,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       bool player_status_consumed = false;
       if (PlayerTick_StatusAndOutfitEvents(
               state, frame_time_ms / (1000.0F / 30.0F), input.eject)) {
+        // The eject transform arms the one-frame timed-action suppression, but
+        // because the death branch consumed this frame the loop never reaches
+        // the suppression consumer below. Clear it so it cannot also swallow
+        // the next frame's pod movement.
+        state.timed_action_suppress_this_frame = false;
         if (state.game_over_pending) {
           // The original latches DAT_00596d38 during the tick and only exits at
           // the top of the next loop iteration, so the frame that latches

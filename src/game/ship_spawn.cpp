@@ -732,7 +732,7 @@ int NovaDude_SelectShipTypeIndex(const DudeDef &dude,
                                  std::mt19937 &rng) {
   auto present = [&dude, &scenario, ignore_ship_availability](std::size_t i) {
     const std::int16_t class_id = dude.ship_types[i];
-    if (class_id < 0 || class_id >= 0x200) {
+    if (class_id < 0 || class_id >= 0x300) {
       return false;
     }
     const ShipClass *ship_class =

@@ -307,7 +307,7 @@ std::vector<std::int16_t> BuildShipyardIds(const GameState &state,
                                            const ControlExpressionState &expr,
                                            bool hire_mode) {
   std::vector<std::int16_t> ids;
-  for (std::size_t i = 0; i < state.scenario.ships.size() && i < 0x200; ++i) {
+  for (std::size_t i = 0; i < state.scenario.ships.size() && i < 0x300; ++i) {
     const ShipClass &ship = state.scenario.ships[i];
     // 0x00469e90 first applies the per-class daily BuyRandom availability
     // latch. A zero BuyRandom is unconditional: the class is never offered

@@ -79,8 +79,10 @@ struct FlightInput {
   bool clear_secondary = false;
   // Eject command: the arm-modifier pair (0x38/0x6f = Alt) plus binding slot
   // 0x11, whose default is DIK 0x2d = X. Resolved from the persisted binding
-  // table by the spaceflight loop. Only consumed while the player ship is
-  // destroyed and owns an auto-eject outfit.
+  // table by the spaceflight loop. Consumed while the player ship is disabled
+  // or destroyed (Ghidra eject block 0x00451024); a destroyed hull with an
+  // owned auto-eject outfit ejects without the key once the death presentation
+  // is past its gate.
   bool eject = false;
   // Edge-triggered travel engage: 'j' (hyperspace jump toward the nearest
   // available travel point). The original uses a separate travel command

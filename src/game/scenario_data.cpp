@@ -1604,9 +1604,13 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
   std::mt19937 &loader_rng =
       variant_rng != nullptr ? *variant_rng : fallback_variant_rng;
   // The original sizes these tables to the family maximum and zero-fills
-  // missing slots (0x200 ships/outfits, 0x100 weapons). We mirror that so
-  // callers can index directly by id - 0x80.
-  ships.assign(0x200, {});
+  // missing slots. Ships run to class index 0x2ff (resource id 0x37f): the
+  // shïp loader loops 0x300 entries (NovaData_LoadScenarioResourceTables
+  // 0x004bd3c0) and the visual loader covers every class 0..0x2ff
+  // (NovaData_LoadAllShipClassVisualAndLaunchData 0x004aeda0). The 0x200
+  // lower bound this table used to carry truncated the escape pod (0x2ff) and
+  // every other high class. Outfits are 0x200, weapons 0x100.
+  ships.assign(0x300, {});
   outfits.assign(0x200, {});
   weapons.assign(0x100, {});
   stellars.assign(0x600, {});
@@ -1667,7 +1671,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
   // branch: a class whose sh\x8an BaseImageID matches an earlier class's
   // reuses that class's sprites and target portrait).
   std::map<std::uint16_t, std::int16_t> first_class_by_base_image;
-  for (std::int32_t id = 0x80; id <= 0x27f; ++id) {
+  for (std::int32_t id = 0x80; id <= 0x37f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
             scenario::kShipResourceType, static_cast<std::uint16_t>(id))) {
       ShipClass cls = DecodeShip(res->bytes);

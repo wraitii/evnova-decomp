@@ -488,6 +488,36 @@ TEST_CASE("ship-class InherentGovt normalizes to zero-based indexes",
   CHECK(data.GovernmentByIndex(manticore->inherent_attributes_govt) != nullptr);
 }
 
+TEST_CASE("escape pod ship class loads from the shipped data",
+          "[scenario][data][ships]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // Class index 0x2ff (resource id 0x37f) is the escape pod. The shïp table
+  // must be 0x300 entries (the original's loader loops 0..0x2ff); a 0x200
+  // table silently dropped it, so the ejected pod had no class and rendered
+  // as nothing.
+  const ShipClass *pod = data.Ship(0x37f);
+  REQUIRE(pod != nullptr);
+  CHECK(pod->display_name == "Escape Pod");
+  CHECK(pod->base_shield == 0);
+  CHECK(pod->base_armor == 0);
+  CHECK(pod->death_delay_frames == 20);
+  // sh\x8an 0x37f: rl\x91D sheet 1126, a single 36-frame rotation.
+  CHECK(pod->base_image_id == 1126);
+  CHECK(pod->base_set_count == 1);
+  CHECK(pod->frames_per_rotation == 36);
+
+  // The sheet itself decodes to 36 12x12 frames, so the pod is drawable.
+  const auto sheet_data = NovaResource_Load(kResourceTypeRleSheet16, 1126);
+  REQUIRE(sheet_data.has_value());
+  const auto sheet = RleSpriteSheet_Decode16(*sheet_data);
+  REQUIRE(sheet.has_value());
+  CHECK(sheet->width == 12);
+  CHECK(sheet->height == 12);
+  CHECK(sheet->frames.size() == 36);
+}
+
 TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships",
           "[scenario][ships][brgr]") {
   // The starter Shuttle is ship class id 0x80; its sh\x8an descriptor and the

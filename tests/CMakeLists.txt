@@ -35,6 +35,7 @@ add_executable(evnova_tests
     ship_ai_test.cpp
     ship_spawn_test.cpp
     ship_visual_test.cpp
+    spaceflight_player_state_test.cpp
     smoke_test.cpp
     sprite_test.cpp
     sprite_mask_test.cpp
