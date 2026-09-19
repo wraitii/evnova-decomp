@@ -48,32 +48,44 @@ void NovaWeapon_InitShipWeaponBursts(GameState &state, Ship &ship) {
   }
 }
 
-// Ghidra Weapon_InitShipWeaponBanksFromShipClass-side initializer plus the
-// ship-class stock-loadout copy shared by the NPC spawn/AI paths
-// (ship_ai.cpp EnsureNpcWeaponBanks). The original's per-class default
-// weapon_ammo/secondary 0x100-entry tables collapse here to the flat
-// bank = weapon id - 0x80 model used by the fire path.
+// The ship-class default_weapon_ammo/secondary 0x100-entry tables collapse
+// here to the flat bank = weapon id - 0x80 model used by the fire path. This
+// only overwrites the two per-bank count tables; the caller owns the cached
+// loadout marker and any cooldown/burst reset. Shared by the NPC bank
+// initializer and Ship_ResetShipToDefaultCombatState's refill arm, whose
+// original form (0x0041e240) copies just these two tables.
+void NovaWeapon_CopyShipClassStockBanks(const GameState &state, Ship &ship) {
+  ship.npc_weapon_count_by_class.fill(0);
+  ship.npc_weapon_secondary_count_by_class.fill(0);
+  const ShipClass *cls = ShipClassFor(state, ship);
+  if (cls == nullptr) {
+    return;
+  }
+  for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
+    if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
+      continue;
+    }
+    const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
+    ship.npc_weapon_count_by_class[bank] =
+        std::max<std::int16_t>(stock.count, 0);
+    // -1 is the original unlimited-secondary sentinel.
+    ship.npc_weapon_secondary_count_by_class[bank] = stock.ammo_load;
+  }
+}
+
+// Ghidra Weapon_InitShipWeaponBanksFromShipClass-side initializer used by the
+// NPC spawn/AI paths (ship_ai.cpp EnsureNpcWeaponBanks): copies the class
+// stock into the per-bank counters, clears the cooldown/burst state, and
+// preloads burst cooldowns (Weapon_InitShipWeaponBursts 0x00413810).
 void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
   if (ship.ship_instance_id == 0 ||
       ship.npc_weapon_banks_ship_class == ship.ship_class_id) {
     return;
   }
-  ship.npc_weapon_count_by_class.fill(0);
-  ship.npc_weapon_secondary_count_by_class.fill(0);
   ship.npc_weapon_bank_cooldown.fill(0.0F);
   ship.npc_weapon_bank_burst_counter.fill(0);
-  const ShipClass *cls = ShipClassFor(state, ship);
-  if (cls != nullptr) {
-    for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
-      if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
-        continue;
-      }
-      const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-      ship.npc_weapon_count_by_class[bank] =
-          std::max<std::int16_t>(stock.count, 0);
-      // -1 is the original unlimited-secondary sentinel.
-      ship.npc_weapon_secondary_count_by_class[bank] = stock.ammo_load;
-    }
+  NovaWeapon_CopyShipClassStockBanks(state, ship);
+  if (ShipClassFor(state, ship) != nullptr) {
     NovaWeapon_InitShipWeaponBursts(state, ship);
   }
   ship.npc_weapon_banks_ship_class = ship.ship_class_id;
