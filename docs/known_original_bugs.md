@@ -11,7 +11,7 @@ Behaviour that the disassembly seems to say exist, but I don't remember:
 
 ## List of known engine issues
 
-Per http://asw.forums.cytheraguides.com/topic/22013/comprehensive-list-of-known-bugs-in-ev-nova/22?page=2
+Per http://asw.forums.cytheraguides.com/topic/22013/comprehensive-list-of-known-bugs-in-ev-nova/22
 Per http://asw.forums.cytheraguides.com/topic/22191/a-list-of-nova-engine-eccentricities
 Per the discord.
 
@@ -36,7 +36,7 @@ Per the discord.
 * (confirmed, unfixed) **Beam collision detection has holes** — a beam never tests its segment against a hull. `Shot_UpdateBeamHitQueue` (0x0042f270) accepts a candidate only when its **center** is inside a per-ship forward sector (half-angle `trunc(frame_span*0.66)*10/32` deg, reach `BeamLength + ceil(trunc(frame_span*0.66)/2)`), picks the nearest accepted center, then truncates the endpoint to `distance - 0.2*frame_span`. `frame_span` is the sprite's full width (for square tiles, its longest dimension), so the sector's lateral tolerance `d*tan(cone)` is narrower than the hull at close range (the beam visibly passes through the side of the ship) and wider at long range (phantom hits whose endpoint lies in empty space); elongated hulls are sized by their length and over-hit edge-on. No occlusion or time-of-flight, so a near ship can be skipped while a farther one is hit. Reproduced faithfully by `NovaWeapon_TickBeamHitQueue` (`src/game/weapon_shots.cpp`); not routed through `kApplyOriginalBugFixes`. 
 * **Finite auxiliary mission ships disappear after save/quit/reload** before the mission is completed. 
 * **RLE colour runs ignore colouring, transparency and murk.** 
-* **The starfield ignores murk.** 
+* (left in, seems on purpose) **The starfield ignores murk.**
 * **Carried fighters ignore configured exit points** and always launch from the carrier's center. 
 * **Player turn rates are quantized to multiples of 10** despite finer values being displayed; AI ships are not affected. 
 * **IFF jamming creates inconsistent spob interaction** — landing can remain forbidden even though hailing treats the spob as friendly, making normal bribery unavailable. 
