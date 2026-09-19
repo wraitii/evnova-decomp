@@ -117,7 +117,7 @@ jobs:
         run: cmake --preset release -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
 
       - name: Build
-        run: cmake --build --preset release --parallel
+        run: cmake --build --preset release --parallel -- -k 0
 
       # Tests share a few deliberately fixed temporary paths, so keep the
       # single Catch2 process serial. Archive-backed cases require local data.
