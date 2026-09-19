@@ -340,12 +340,21 @@ Cruiser exposes this visibly: its Fusion Pulse Battery (ExitType 1) is
   RunningLights` is called beside the cloak-fade slice in `Stub_HandleShips`
   (NPCs) and after the player's destruction slice in Frame_TickSystems scope 10.
 
-Rendering: the light/weapon sheets share the base rotation grid
+Rendering: the light/weapon sheets normally share the base rotation grid
 (`frames_per_rotation * base_set_count`) and are drawn over the hull/glow at
-the same composed frame index. The original writes `round(intensity)` into the
-Sprite's RGB tint channels at brightness 32 and draws them through
-`BlitPixel_TintRgb15Span` (0x004736c0), whose brightness-32 branch computes
-`dst + src*intensity/32` — i.e. additive. The port passes
+the same composed frame index. That index is **not** clamped per sheet: the
+original's `Sprite_SetCurrentFrame` (0x00475830) stores `index % num_frames`
+(negative -> 0), so a layer whose sheet has fewer sets than the hull wraps back
+onto its own rotation frames. This matters for the engine glow of the Manticore
+(base 3x36, glow 1x36) and Argosy (base 6x36, glow 1x36): the composed
+`row * FramesPer + heading_frame` index must fold to `heading_frame`. Clamping
+instead (the port's earlier `std::clamp`) pinned the glow to its last frame,
+which reads as the glow snapping to straight up whenever the row was non-zero.
+The port's `Sprite::SetCurrentFrame`/`TheFrame` and the `SpriteAsset`
+`DrawSprite` overload now mirror the modulo resolution. The original writes
+`round(intensity)` into the Sprite's RGB tint channels at brightness 32 and
+draws them through `BlitPixel_TintRgb15Span` (0x004736c0), whose brightness-32
+branch computes `dst + src*intensity/32` — i.e. additive. The port passes
 `SpriteDrawOptions.additive` (SDL_BLENDMODE_ADD) with `alpha_mod =
 intensity/32` for the engine glow, running lights and weapon effects alike.
 Visibility gates match the original: the light layer hides at intensity <= 1.0,

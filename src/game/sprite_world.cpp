@@ -124,8 +124,18 @@ void Sprite::SetCurrentFrame(int index) {
     current_frame_ = 0;
     return;
   }
-  // Ghidra Sprite_SetCurrentFrame clamps to the live frame range.
-  current_frame_ = std::clamp(index, 0, FrameCount() - 1);
+  // Ghidra Sprite_SetCurrentFrame (0x00475830): a negative index clamps to
+  // frame 0, then the index is taken modulo the sprite's own frame count.
+  // Wrapping (not clamping) matters for effect layers whose sheet has fewer
+  // sets than the hull: the Manticore/Argosy engine glow carries one 36-frame
+  // rotation while the base sheet carries 3 or 6 rows, so the composed
+  // `row * FramesPer + heading` index must fold back onto the heading frame
+  // rather than stick on the last frame (which reads as the glow snapping to
+  // straight up).
+  if (index < 0) {
+    index = 0;
+  }
+  current_frame_ = index % FrameCount();
 }
 
 void Sprite::SetPositionFromCurrentFrameAnchor(std::int16_t world_x,
@@ -142,8 +152,12 @@ const SpriteFrameImage *Sprite::TheFrame(int index) const {
   if (frames_.empty()) {
     return nullptr;
   }
-  const int clamped = std::clamp(index, 0, FrameCount() - 1);
-  return frames_[static_cast<std::size_t>(clamped)].get();
+  // Same index resolution as Sprite_SetCurrentFrame (0x00475830): negative ->
+  // frame 0, otherwise modulo the frame count.
+  if (index < 0) {
+    index = 0;
+  }
+  return frames_[static_cast<std::size_t>(index % FrameCount())].get();
 }
 
 // Ghidra 0x00475f70 Sprite_AssignSpriteSet.
@@ -568,8 +582,12 @@ void DrawSprite(SDL_Renderer *renderer,
   if (asset.frames.empty()) {
     return;
   }
-  const int clamped = std::clamp(frame, 0, asset.frame_count - 1);
-  const SpriteFrame &sf = asset.frames[static_cast<std::size_t>(clamped)];
+  // Sprite_SetCurrentFrame (0x00475830) resolves a requested index as
+  // `index % num_frames` (negative -> 0). A sheet shorter than the hull's row
+  // count (the Manticore/Argosy one-set engine glow) must wrap onto its own
+  // rotation frames instead of clamping onto the last frame.
+  const int resolved = frame < 0 ? 0 : frame % std::max(1, asset.frame_count);
+  const SpriteFrame &sf = asset.frames[static_cast<std::size_t>(resolved)];
   const SdlTexture *texture =
       opts.white_silhouette ? sf.white_silhouette.get() : sf.texture.get();
   if (texture == nullptr) {
