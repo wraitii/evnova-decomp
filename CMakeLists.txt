@@ -7,6 +7,12 @@ project(EscapeVelocityNova
 
 option(EVNOVA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(EVNOVA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation when available" ON)
+# Precompiled header of frequently-included standard/third-party headers
+# (src/nova_pch.hpp, tests/pch.hpp). A -ftime-trace survey showed libc++ headers
+# dominate frontend time across all TUs; this cuts measured clean-build wall time
+# by ~36%. Rebuild without it (-DEVNOVA_ENABLE_PCH=OFF) to check for missing
+# includes, since the PCH supplies them implicitly to every TU.
+option(EVNOVA_ENABLE_PCH "Precompile shared standard/third-party headers" ON)
 
 # External probe/control harness (EVN_PROBE=1, docs/probe_harness.md). Its
 # transport is a raw POSIX socket server, so it compiles everywhere except

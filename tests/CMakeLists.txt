@@ -50,6 +50,16 @@ target_link_libraries(evnova_tests PRIVATE Catch2::Catch2WithMain evnova_runtime
 
 target_compile_features(evnova_tests PRIVATE cxx_std_23)
 
+if(EVNOVA_ENABLE_PCH)
+    # clang-tidy runs its own frontend and ignores the PCH, so skip it there.
+    if(NOT CMAKE_CXX_CLANG_TIDY)
+        target_precompile_headers(evnova_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/pch.hpp")
+    else()
+        message(STATUS "EVNOVA_ENABLE_PCH ignored: clang-tidy is enabled")
+    endif()
+endif()
+
 if(MSVC)
     target_compile_options(evnova_tests PRIVATE /W4 /permissive-)
     if(EVNOVA_WARNINGS_AS_ERRORS)
