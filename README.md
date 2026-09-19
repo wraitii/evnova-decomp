@@ -2,7 +2,7 @@
 
 C++23 reimplementation project for the *Escape Velocity Nova* engine. The original game data and reverse-engineering artefacts remain local and are intentionally not versioned.
 
-The reimplementation is based on the Windows Community Edition, since that's the latest patch for Nova.  
+The reimplementation is based on the [Windows Community Edition](https://escape-velocity.games), since that's the latest patch for Nova.  
 One exception: the hyperjump animation mimics the original Mac behaviour with fade-in/out.
 
 ## Scope
