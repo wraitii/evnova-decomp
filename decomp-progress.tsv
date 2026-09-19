@@ -2046,8 +2046,8 @@ address	name	impl_file	reimpl_pct	comment
 0x008726F9	FUN_008726f9		0%	
 0x008727A1	Registry_RegisterAppFileAssociations		0%	
 0x0087293E	Resource_LoadPixPatAsImage	src/pixpat_image.cpp	100%	PixPat decoder: validates patType 1, the PixMap rowBytes flag (0xc000==0x8000), bounds, zero resolution words and depth 1/2/4/8, unpacks MSB-first colour indices with a masked rowBytes stride, and maps the inline ColorTable (count entries, index at +0, RGB low byte at +3/+5/+7) into a 256-colour palette. src/pixpat_image.cpp Resource_LoadPixPatAsImage reproduces it and emits RGBA.
-0x00872DC0	FUN_00872dc0		0%	
-0x00872E7E	Settings_LoadUiScale		0%	
+0x00872DC0	NovaUi_ScaleRectInPlace		0%	CE ui_scale helper: multiplies a QuickDraw rect's four shorts by g_ui_scale with x87 half-up rounding. No-op at scale 1.0; port has no ui_scale model.
+0x00872E7E	Settings_LoadUiScale		0%	CE-only experimental UI scaling (CE src/scale-dlog.c, added 2023-10): reads ddraw.ini [EV Nova] ui_scale (default 1.0, 0 coerced to 1.0), sets g_ui_scale/_is_non_default and rescales five base UI metrics. Unported; the port has no ddraw.ini reader and fixes the HUD strip at 0xC2.
 0x00873065	DrawContext_StoreScaledValue		0%	
 0x008730A1	Dialog_CreateFromDlog	src/game/landed_window.cpp	30%	Reads the DLOG (window bounds + linked DITL id; reimplemented as NovaResource_LoadDialogDefinition) and centres the window on screen (reimplemented as NovaDialogWindow_Layout); ui-scale path not yet reimplemented
 0x00873187	FUN_00873187		0%	

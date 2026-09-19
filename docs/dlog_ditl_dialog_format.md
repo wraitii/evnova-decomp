@@ -197,6 +197,9 @@ robust way to find the "real" window content is:
 
 ## 7. How the recompilation consumes this
 
+For how these fixed layouts relate to a future display scale (world vs GUI vs
+reading text), see `docs/display_scaling.md`.
+
 `src/game/ship_comm_dialog.cpp` hard-codes the DITL `0x03ef` rects as layout
 constants rather than re-parsing the DITL each frame (fast, cheap, deterministic):
 

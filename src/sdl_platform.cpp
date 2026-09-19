@@ -529,7 +529,7 @@ void SdlPlatform::PumpProbe() {
 }
 
 // DIVERGENCE(original): the original's x2 mode is toggled by the key named in
-// EVNova.ini [EV Nova] key_x2mode, default "0x14" = VK_CAPITAL (Caps Lock)
+// ddraw.ini [EV Nova] key_x2mode, default "0x14" = VK_CAPITAL (Caps Lock)
 // (Settings_LoadIniAndPrefs 0x00872310; Settings_PollKeyX2Mode 0x00872375
 // forwards the code to GetKeyState and the caller tests the low/toggle bit).
 // Engaged x2 doubles the per-frame simulation cadence rather than the wall

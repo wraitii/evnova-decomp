@@ -250,25 +250,31 @@ initialization; the normalized block is written at startup and at the original
 Preferences and Key Settings commit points. Decomp-only settings that have no
 slot in the original payload are planned for a sibling `EV Nova Extra Prefs`
 INI so the `.prf` stays byte-compatible and the shipped game never reads them
-(format TODO).
+(format TODO); the display scale options are one candidate named in
+`docs/display_scaling.md`.
 
-## EVNova.ini settings outside the `.prf` preferences
+## `ddraw.ini` settings outside the `.prf` preferences
 
-The Windows profile settings are read from `[EV Nova]` and are separate from
-the per-resolution `<render_width>EV Nova Prefs.prf` state:
+The Windows profile settings are read from `[EV Nova]` in `ddraw.ini` and are
+separate from the per-resolution `<render_width>EV Nova Prefs.prf` state. The
+profile path is built in `WinMain` (`0x00871450`) with
+`_makepath(&DAT_00890020, drive, dir, "ddraw", ".ini")`; the `[130]`-keyed
+`EVNova.ini` read by `IniConfig_GetSectionString` is a different file (the
+config/resource-string table):
 
 | key | reader | default / effect |
 |---|---|---|
 | `game_width` | `FUN_008721fc` | `0` means use the primary system metric; otherwise selects the requested game/display width before `VideoMode_ApplySnapshot`. |
 | `game_height` | `FUN_008721fc` | `0` means use the primary system metric; otherwise selects the requested game/display height. |
 | `key_x2mode` | `Settings_LoadIniAndPrefs` (`0x00872310`) | default string `0x14` (parsed with base autodetection, i.e. key code 20 / Caps Lock); `Settings_PollKeyX2Mode` polls that key each frame. |
-| `ui_scale` | `Settings_LoadUiScale` (`0x00872e7e`) | default `1.0`; zero is coerced to `1.0`, and non-default values rescale the base display dimensions and font setup. |
+| `ui_scale` | `Settings_LoadUiScale` (`0x00872e7e`) | default `1.0`; zero is coerced to `1.0`, and non-default values rescale the base display dimensions and font setup. CE-only experimental UI scaling (CE `src/scale-dlog.c`), not present in the original game. |
 
 These four values do not appear in the `.prf` payload and are not controls in
-the Preferences dialog. The checked-in `EV Nova/EVNova.ini` is the extracted
-numeric-section resource/string file and does not contain a live `[EV Nova]`
-profile section; the table above is the runtime reader contract recovered from
-the executable.
+the Preferences dialog. The checked-in `EV Nova/ddraw.ini` is the cnc-ddraw
+configuration shipped with the CE and carries the live `[EV Nova]` profile
+section; the checked-in `EV Nova/EVNova.ini` is the separate extracted
+numeric-section resource/string file. The table above is the runtime reader
+contract recovered from the executable.
 
 ## Port
 

@@ -392,7 +392,7 @@ private:
   void PumpProbe();
 
   // DIVERGENCE(original): temporary test hook that maps the original x2 mode
-  // toggle key (Caps Lock by default; EVNova.ini key_x2mode, default 0x14 =
+  // toggle key (Caps Lock by default; ddraw.ini key_x2mode, default 0x14 =
   // VK_CAPITAL) onto the probe speed multiplier. See the definition.
   void ServiceX2SpeedDivergence();
 
