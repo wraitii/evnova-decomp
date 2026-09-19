@@ -125,10 +125,10 @@ extern bool PlayerTick_FaceTargetCommand(GameState &state,
 // carried-bomb countdown/detonation. Must run before the flight input pass each
 // frame (the
 // original dispatches it ahead of the manual-flight block). `eject_command`
-// carries the eject key state for the destroyed-ship escape-pod block
-// (synthetic CFG 0x00451024 -> 0x00451630). Returns true when death/inactive
-// bookkeeping consumed the player tick; the caller must skip timed actions
-// and every later player-command region for that frame.
+// carries the eject key state for the escape-pod block (Ghidra 0x00451024;
+// reachable while the hull is disabled or destroyed). Returns true when
+// death/inactive bookkeeping consumed the player tick; the caller must skip
+// timed actions and every later player-command region for that frame.
 extern bool PlayerTick_StatusAndOutfitEvents(GameState &state,
                                              float elapsed_ticks,
                                              bool eject_command);

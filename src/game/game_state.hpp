@@ -23,6 +23,14 @@
 
 namespace game {
 
+// The escape-pod ship class: zero-based index 0x2ff (resource ship id 0x37f).
+// Shared by the eject transform (RunPlayerEjectTransform) and the
+// Ship_UpdateVisualState destruction exemption (Ghidra 0x00428b5c), because the
+// pod is a structurally 0-shield/0-armor hull that Ship_IsShipDestroyed
+// reports as destroyed from birth; the engine must not run the seed/debris/
+// finale presentation for it.
+inline constexpr std::int16_t kEscapePodShipClassIndex = 0x2ff;
+
 // Ghidra g_system_reputation (0x00733bc8): a per-system int16 global that
 // tracks the player's standing with each system. Negative values push factions
 // hostile; the destination-interaction dialog compares a target stellar's
@@ -1341,8 +1349,12 @@ struct GameState {
   // /hire_random). Rerolled to rand(100)+1 each game-day. The shipyard buy
   // list offers a class while limit_roll <= buy_random; the hire lane gates
   // on the threshold pair (hire lane itself is TODO(decomp)).
-  std::array<std::int16_t, 0x200> ship_class_limit_rolls{};
-  std::array<std::int16_t, 0x200> ship_class_threshold_rolls{};
+  // Per-class daily availability rolls (Ghidra g_ship_class_* tables). The
+  // ship class table is 0x300 entries (0..0x2ff); the escape pod and other
+  // high classes live in 0x200..0x2ff, so these must match or the reroll loop
+  // overruns them.
+  std::array<std::int16_t, 0x300> ship_class_limit_rolls{};
+  std::array<std::int16_t, 0x300> ship_class_threshold_rolls{};
   // Ghidra DAT_00774ae2: the context the interaction walk last ran in.
   std::int16_t mission_interaction_context = 0;
   // Ghidra DAT_0077430e: the ship instance currently speaking a mission-ship

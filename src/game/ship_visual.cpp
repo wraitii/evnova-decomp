@@ -199,6 +199,14 @@ void NovaShip_TickDestroyedShipVisualStateRawCall(GameState &state,
   if (!NovaAiShip_IsDestroyed(ship)) {
     return;
   }
+  // Ghidra 0x00428b5c: a destroyed hull whose class is the 0x2ff escape pod
+  // skips the seed/debris/finale and falls through to the normal sprite
+  // presentation. The pod's class is 0-shield/0-armor, so Ship_IsShipDestroyed
+  // is true from birth; without this exemption the pod seeds the death timer
+  // and explodes immediately. Faithful port, not a BUGFIX(original).
+  if (ship.ship_class_id == kEscapePodShipClassIndex) {
+    return;
+  }
   // The original reseeds the presentation whenever death_timer_active <= 0.
   // The port-side latch makes that ownership explicit across relaunches: the
   // time-adjusted scheduler can drive an already-owned timer below zero, which

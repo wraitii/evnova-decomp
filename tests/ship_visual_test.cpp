@@ -360,4 +360,53 @@ TEST_CASE("the alt overlay cycles at AnimDelay", "[ship][visual][sprite]") {
   CHECK(ship.alternate_sprite_cycle_index == 0);
 }
 
+TEST_CASE("destroyed escape pod skips the destruction presentation",
+          "[ship][visual][destruction]") {
+  GameState state;
+  // The escape pod is class index 0x2ff (resource ship id 0x37f); the raw call
+  // resolves ship_class_id + 0x80, so size the table past that index.
+  state.scenario.ships.assign(0x300, ShipClass{});
+  ShipClass pod;
+  pod.base_shield = 0;
+  pod.base_armor = 0;
+  pod.death_delay_frames = 20;
+  state.scenario.ships[kEscapePodShipClassIndex] = pod;
+
+  Ship ship;
+  ship.is_active = true;
+  ship.ship_class_id = kEscapePodShipClassIndex;
+  ship.shield_points = 0.0F;
+  ship.armor_points = 0.0F; // Ship_IsShipDestroyed is true from birth.
+  ship.death_timer_active = -1.0F;
+  ship.death_timer_seeded = false;
+
+  // Ghidra 0x00428b5c: destroyed class-0x2ff hulls fall through to normal
+  // sprite presentation instead of seeding the death timer and exploding.
+  NovaShip_TickDestroyedShipVisualStateRawCall(state, ship);
+  CHECK(ship.death_timer_seeded == false);
+  CHECK(ship.death_timer_active == Catch::Approx(-1.0F));
+  CHECK(ship.is_active);
+}
+
+TEST_CASE("destroyed non-pod hull seeds the destruction timer",
+          "[ship][visual][destruction]") {
+  GameState state;
+  ShipClass cls;
+  cls.death_delay_frames = 20;
+  SetShipClass(state, cls);
+
+  Ship ship;
+  ship.is_active = true;
+  ship.ship_instance_id = 1; // NPC: no player 3x death-timer scale.
+  ship.ship_class_id = 0;
+  ship.armor_points = 0.0F;
+  ship.death_timer_active = -1.0F;
+  ship.death_timer_seeded = false;
+
+  NovaShip_TickDestroyedShipVisualStateRawCall(state, ship);
+  CHECK(ship.death_timer_seeded);
+  CHECK(ship.death_timer_active == Catch::Approx(20.0F));
+  CHECK(ship.is_active);
+}
+
 } // namespace game

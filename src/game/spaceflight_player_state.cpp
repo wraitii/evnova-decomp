@@ -421,9 +421,8 @@ constexpr std::int16_t kEscapePodOutfitModType =
 // ammo_type - 0x80 and must set shïp Flags 0x8000 (escape ship type).
 constexpr std::int16_t kBayWeaponModeCode = 99;
 constexpr std::uint16_t kEscapeShipClassFlag = 0x8000;
-// The escape pod ship class: decompile constant 0x2ff is the zero-based index
-// (ship id 0x37f).
-constexpr std::int16_t kEscapePodShipClassIndex = 0x2ff;
+// The escape-pod ship class (kEscapePodShipClassIndex) is shared from
+// game_state.hpp; the eject transform and ship_visual.cpp both key off it.
 // The escape-pod flight arms the blocking timed action for 0x15e ticks.
 constexpr std::int16_t kEscapePodTimedActionTicks = 0x15e;
 // Eject gate: the death presentation must be at least half spent
@@ -887,6 +886,42 @@ void RunPlayerEjectTransform(GameState &state) {
   state.timed_action_suppress_this_frame = true;
 }
 
+// Ghidra 0x00451024 eject block. The original runs it when the player is
+// disabled OR destroyed. A destroyed hull with an owned auto-eject outfit
+// ejects automatically once the death presentation is at least half spent (or
+// within 30 ticks of ending); otherwise the arm-modifier + binding pair
+// (0x38/0x6f + slot 0x11, Alt+X) is the manual request, which also works on a
+// disabled (not destroyed) hull. An owned escape-pod outfit or ejectable launch
+// bay is then required. Returns true when the transform ran.
+bool TryRunPlayerEjectTransform(GameState &state,
+                                bool eject_command,
+                                bool destroyed,
+                                bool disabled) {
+  if (!destroyed && !disabled) {
+    return false;
+  }
+  bool auto_eject_ready = false;
+  if (destroyed) {
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+    const float death_delay =
+        cls != nullptr ? static_cast<float>(cls->death_delay_frames) : 0.0F;
+    if (state.player.death_timer_active <=
+            death_delay * kEjectDeathDelayScale ||
+        state.player.death_timer_active <= kEjectArmHoldTicks) {
+      auto_eject_ready = Outfit_HasAutoEjectOutfit(state);
+    }
+  }
+  if (!eject_command && !auto_eject_ready) {
+    return false;
+  }
+  if (!Outfit_HasEscapePodOrLaunchBay(state)) {
+    return false;
+  }
+  RunPlayerEjectTransform(state);
+  return true;
+}
+
 } // namespace
 
 // Ghidra 0x0044B240 PlayerTick_StatusAndOutfitEvents, internal label of
@@ -919,23 +954,25 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
                  RawSpaceflightCallTicks(elapsed_ticks));
     p.vel_x *= restricted_damp;
     p.vel_y *= restricted_damp;
-    // PlayerTick eject block (0x004510b9..0x00453910): while the death
-    // presentation runs, the eject command (0x38/0x6f arm pair + binding
-    // slot 0x11) with an owned auto-eject outfit transforms the player into
-    // the escape pod or a carried bay fighter. Allowed once the presentation
-    // is at least half spent (or within 30 ticks of ending).
-    if (eject_command && Outfit_HasAutoEjectOutfit(state) &&
-        Outfit_HasEscapePodOrLaunchBay(state)) {
-      const ShipClass *cls = state.scenario.Ship(
-          static_cast<std::int16_t>(p.ship_class_id + 0x80));
-      const float death_delay =
-          cls != nullptr ? static_cast<float>(cls->death_delay_frames) : 0.0F;
-      if (p.death_timer_active <= death_delay * kEjectDeathDelayScale ||
-          p.death_timer_active <= kEjectArmHoldTicks) {
-        RunPlayerEjectTransform(state);
-        return true;
-      }
+    // While an escape-pod timed action is armed the original reaches the
+    // timed-action block at 0x0044d490 (before the death/eject block at
+    // 0x00451024) and returns from the player core. Do not consume the frame
+    // here: return false so the spaceflight loop runs
+    // PlayerTick_TimedActionTransition, moving the pod and decrementing the
+    // countdown. The pod is structurally 0-shield/0-armor, so
+    // NovaAiShip_IsDestroyed is true for its whole 0x15e-tick flight.
+    if (p.timed_action_counter > 0) {
+      return false;
     }
+    // PlayerTick eject block (0x004510b9..0x00453910): an owned auto-eject
+    // outfit ejects automatically once the death presentation is at least half
+    // spent (or within 30 ticks of ending); Alt+X ejects manually. The
+    // transform replaces the player with the escape pod or a carried bay
+    // fighter.
+    (void)TryRunPlayerEjectTransform(state,
+                                     eject_command,
+                                     /*destroyed=*/true,
+                                     /*disabled=*/false);
     // Ship_UpdateVisualState, called immediately after the core, replays the
     // raw-call timer decrement together with its discrete Explode1 RNG pass.
     return true;
@@ -1052,6 +1089,18 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
         DetonateCarriedBomb(state);
       }
     }
+  }
+
+  // Ghidra 0x00451024: a disabled (not destroyed) hull ejects manually with
+  // the Alt+X arm pair once it owns an escape pod / launch bay. The destroyed
+  // case is handled at the top of this function, where auto-eject also
+  // applies. `fire_restricted` is the original's prologue-computed
+  // Ship_IsShipDisabled flag, so it is not re-evaluated after auto-repair.
+  if (fire_restricted && TryRunPlayerEjectTransform(state,
+                                                    eject_command,
+                                                    /*destroyed=*/false,
+                                                    /*disabled=*/true)) {
+    return true;
   }
   return false;
 }

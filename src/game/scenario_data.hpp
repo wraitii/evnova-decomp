@@ -315,7 +315,7 @@ struct ShipDefaultWeaponBank {
 inline constexpr std::int16_t kShipClassNonexistentTechLevel =
     static_cast<std::int16_t>(0xd8f1);
 
-// Ghidra ShipClassDef (g_ship_class_defs, 0x200 entries indexed by ship id
+// Ghidra ShipClassDef (g_ship_class_defs, 0x300 entries indexed by ship id
 // minus 0x80). Only the fields the reimplementation needs so far are carried;
 // the Bible documents the full set.
 struct ShipClass {
