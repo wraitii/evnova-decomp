@@ -1142,6 +1142,111 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
   return LandCommandResult::kContinue;
 }
 
+// Ghidra 0x00451f8f PlayerTick_FlightTutorialHints (synthetic CFG 0x00451f8f ->
+// [0x004520ea]): the fresh-pilot flight tutorial, emitted once a second
+// (g_spaceflight_frame_counter % 60 == 0) while the hint state is below 2.
+//  -3: near a landing stellar, the "Welcome to Nova ..." welcome (STR# 0x7d2
+//      0x16 docking / 0x17 landing lead + stellar name + 0x18 + the land key
+//      name + 0x19), then state = -2.
+//  -1: after the first launch, the "hyperspace to another system" hint
+//      (0x1a + map key + 0x1b + jump key + 0x1c), then state = 0.
+//  -2/0/1/2: hyperspace-range hints. Inside the 2,000,000 px^2 "not yet far
+//      enough" radius with state <= 0, show 0x1e and latch state = 1; once
+//      latched, beyond 10,000,000 px^2 show 0x1f and latch state = 2.
+// The range hints are suppressed while the player ship is disabled
+// (Ship_IsShipDisabled, stock local_251); the welcome/hyperspace hints are
+// not. Each cue queues transition-sound slot 4 and uses a 0x200-tick overlay.
+// Key names come from String_ExpandControlCode (0x004f1990); an unbound slot
+// expands to the empty string, matching the original's map miss.
+void TickFlightTutorialHints(GameState &state, const NovaPreferences &prefs) {
+  if (state.travel.travel_hint_state >= 2 ||
+      state.spaceflight_frame_counter % 60 != 0) {
+    return;
+  }
+  const float dist_sq = state.player.pos_x * state.player.pos_x +
+                        state.player.pos_y * state.player.pos_y;
+  const bool disabled = NovaAiShip_IsDisabled(state, state.player);
+  const auto load = [](std::uint16_t entry) {
+    return NovaHud_LoadStringEntry(0x7d2, entry).value_or(std::string{});
+  };
+  const auto binding_name = [&](std::size_t slot) {
+    const std::uint16_t key = prefs.bindings.cmd_to_key[slot];
+    if (key == 0xff || key == 0xffff) {
+      return std::string{};
+    }
+    return NovaPrefs_KeyCodeDisplayName(key);
+  };
+
+  if (state.travel.travel_hint_state == -3) {
+    const std::string docking = load(0x16);
+    const std::string landing = load(0x17);
+    if (!docking.empty() && !landing.empty()) {
+      const std::int16_t nearest =
+          NovaTargeting_FindNearestAvailableTravelStellar(state);
+      if (nearest != -1) {
+        state.pending_ui_sounds.push_back({4, 1});
+        const Stellar *stellar = state.scenario.Stellar(nearest);
+        const bool is_station =
+            stellar != nullptr && (stellar->flags & 0x10U) != 0U;
+        std::string msg = is_station ? docking : landing;
+        msg += " ";
+        if (stellar != nullptr) {
+          msg += stellar->name;
+        }
+        msg += " ";
+        msg += load(0x18);
+        msg += binding_name(5); // Land command.
+        msg += load(0x19);
+        NovaHud_ShowOverlayMessage(
+            state, std::move(msg), static_cast<std::uint64_t>(0x200U));
+      }
+    }
+    state.travel.travel_hint_state = -2;
+  }
+
+  if (state.travel.travel_hint_state == -1) {
+    const std::string intro = load(0x1a);
+    if (!intro.empty()) {
+      const std::int16_t nearest =
+          NovaTargeting_FindNearestAvailableTravelStellar(state);
+      if (nearest != -1) {
+        state.pending_ui_sounds.push_back({4, 1});
+        std::string msg = intro;
+        msg += binding_name(9); // Starmap command.
+        msg += load(0x1b);
+        msg += binding_name(0x0e); // Travel/jump command.
+        msg += load(0x1c);
+        NovaHud_ShowOverlayMessage(
+            state, std::move(msg), static_cast<std::uint64_t>(0x200U));
+      }
+    }
+    state.travel.travel_hint_state = 0;
+  }
+
+  constexpr float kNotYetFarEnoughSq = 2000000.0F; // 0x00575650
+  constexpr float kSafeRangeSq = 10000000.0F;      // 0x00575658
+  if (dist_sq <= kNotYetFarEnoughSq || state.travel.travel_hint_state > 0) {
+    if (dist_sq > kSafeRangeSq && state.travel.travel_hint_state == 1 &&
+        !disabled) {
+      const std::string text = load(0x1f);
+      if (!text.empty()) {
+        state.pending_ui_sounds.push_back({4, 1});
+        NovaHud_ShowOverlayMessage(
+            state, text, static_cast<std::uint64_t>(0x200U));
+        state.travel.travel_hint_state = 2;
+      }
+    }
+  } else if (!disabled) {
+    const std::string text = load(0x1e);
+    if (!text.empty()) {
+      state.pending_ui_sounds.push_back({4, 1});
+      NovaHud_ShowOverlayMessage(
+          state, text, static_cast<std::uint64_t>(0x200U));
+      state.travel.travel_hint_state = 1;
+    }
+  }
+}
+
 // Ghidra 0x0044aa70 self-destruct block (0x00451954 -> 0x00451b91, internal
 // label of the PlayerTick_InteractionCloakAndStatus umbrella). The command is
 // the 0x38/0x6f arm-modifier pair (the port reads both Alt scancodes, as the
@@ -2030,6 +2135,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             input.travel,
             frame_time_ms,
             audio.CountActiveByKey(game::kHyperspaceWarpUpSoundKey) > 0);
+        // Fresh-pilot flight tutorial (Ship_HandlePlayerShipCore 0x00451f8f):
+        // runs on the player tick independently of the land/jump commands.
+        TickFlightTutorialHints(state, prefs);
       }
       // The original dispatches the hyperspace command before the manual-flight
       // region. A newly engaged jump therefore owns this frame immediately;
@@ -2492,6 +2600,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 }
 
 } // namespace
+
+// External test seam for the fresh-pilot flight tutorial (Ghidra 0x00451f8f).
+// TickFlightTutorialHints lives in the anonymous namespace above; this wrapper
+// exposes it to unit tests.
+void PlayerTick_FlightTutorialHints(GameState &state,
+                                    const NovaPreferences &prefs) {
+  TickFlightTutorialHints(state, prefs);
+}
 
 // External test seam into the per-ship simulation pass (Ghidra scope 4/5 of
 // Frame_TickSystems 0x004186b0 -> Ship_HandleShip 0x00433050). Stub_HandleShips

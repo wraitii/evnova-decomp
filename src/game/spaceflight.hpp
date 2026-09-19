@@ -133,6 +133,16 @@ extern bool PlayerTick_StatusAndOutfitEvents(GameState &state,
                                              float elapsed_ticks,
                                              bool eject_command);
 
+// Ghidra 0x00451f8f PlayerTick_FlightTutorialHints (synthetic CFG 0x00451f8f ->
+// [0x004520ea]): the fresh-pilot welcome/hyperspace/range tutorial, emitted
+// once a second (state.spaceflight_frame_counter % 60 == 0) while
+// TravelState::travel_hint_state is below 2. Must run on every player tick
+// independently of the land/jump commands; fills the HUD overlay and the
+// transition-sound queue. `prefs` supplies the land/map/jump key display
+// names embedded in the welcome text.
+extern void PlayerTick_FlightTutorialHints(GameState &state,
+                                           const NovaPreferences &prefs);
+
 // Ghidra 0x00431480 Frame_JitterPlayerStatModifiers: random-walks the first
 // two persisted player stat modifiers (state.player_stat_modifier_pct[0]/[1],
 // the DAT_007353f6/f8 pair) by +-1 with 2-in-3 probability, clamped to
