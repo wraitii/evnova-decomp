@@ -48,11 +48,17 @@ jobs:
         with:
           arch: x64
 
+      - name: Restore pinned vcpkg environment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg"
+
       - name: Install Linux SDL build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
+            autoconf autoconf-archive automake libtool \
             libegl1-mesa-dev libibus-1.0-dev libwayland-dev libx11-dev \
             libxext-dev libxft-dev libxkbcommon-dev
 
@@ -74,7 +80,8 @@ jobs:
         run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 
       - name: Restore vcpkg binary cache
-        uses: actions/cache@v4
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
           path: .vcpkg-binary-cache
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
@@ -88,6 +95,13 @@ jobs:
       - name: Install manifest dependencies
         shell: bash
         run: ./vcpkg/vcpkg install --x-manifest-root=. --triplet "${{ matrix.triplet }}"
+
+      - name: Save vcpkg binary cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-binary-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
 
       - name: Add vcpkg DLLs to the Windows test path
         if: runner.os == 'Windows'
