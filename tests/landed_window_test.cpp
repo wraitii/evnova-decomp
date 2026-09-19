@@ -845,7 +845,7 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
 
   // Launch tail (0x00455f99..0x00456268): reposition + velocity kill,
   // shield/armor refill to the effective maxima, daily world tick.
-  game::Stellar_Launch(state, ctx.stellar_id);
+  game::Stellar_Launch(state);
   CHECK(state.player.pos_x == 123.0F);
   CHECK(state.player.pos_y == -456.0F);
   CHECK(state.player.vel_x == 0.0F);
@@ -915,7 +915,7 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
     CHECK_FALSE(state.ShipAt(slot).is_active);
   }
 
-  game::Stellar_Launch(state, kRautherStellar);
+  game::Stellar_Launch(state);
 
   bool found_derelict = false;
   for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
@@ -958,7 +958,7 @@ TEST_CASE("derelict spawns at launch after a pre-accept arrival population") {
       game::Mission_ActivateAtSlot(state, kTutorial006Index, kRautherStellar));
   REQUIRE(state.control.bits.test(9208));
 
-  game::Stellar_Launch(state, kRautherStellar);
+  game::Stellar_Launch(state);
 
   bool found_derelict = false;
   for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {

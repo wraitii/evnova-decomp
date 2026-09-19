@@ -1115,7 +1115,7 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
       // velocity/position reset, shield/armor refill, the daily world
       // tick, stat-modifier jitter/reroll, autosave, random launch
       // heading, travel-selection reset and the shot wipe.
-      Stellar_Launch(state, ctx.stellar_id);
+      Stellar_Launch(state);
       // The docked modal advances the probe's virtual frame clock. Refresh
       // the snapshot before arming the departure overlay so its deadline is
       // relative to the actual launch instant rather than modal entry.

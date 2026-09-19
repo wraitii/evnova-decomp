@@ -225,6 +225,14 @@ bool Stellar_Dock(GameState &state,
 
   ctx.stellar_id = stellar_id;
   ctx.landed = true;
+  // Stellar_RunDockAndLaunchSequence entry (0x00455e19/0x00455e20): bracket the
+  // docked visit, clear the one-shot reposition latch, and record the 0-based
+  // landing stellar. M may repoint ai_secondary_target_slot at the destination
+  // system's first nav and the launch tail reads it back.
+  state.system_transition_active = true;
+  state.skip_player_reposition_once = false;
+  state.player.ai_secondary_target_slot =
+      PilotFileStellarIndexFromResourceId(stellar_id);
   // The landing transition raises the no-asteroids latch
   // (Stellar_HandleStellarEntryAndExit 0x00457580 sets DAT_00596d2c = 1), so
   // the docked view hides the drifting field; the launch tail re-initialises
@@ -246,16 +254,24 @@ bool Stellar_Dock(GameState &state,
 // resyncs its frame clock (the original zeroes g_avg_frame_tick_scale at
 // 0x00456174).
 // ---------------------------------------------------------------------------
-void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
+void Stellar_Launch(GameState &state) {
   // 0x00455f99/0x0045600b: velocity and speed kill. The original zeroes the
   // velocity once more after the reposition; one pass is equivalent.
   state.player.vel_x = 0.0F;
   state.player.vel_y = 0.0F;
   state.player.speed = 0.0F;
-  // 0x00455fa6: reposition at the stellar centre unless the jump-arrival path
-  // staged g_skip_player_reposition_once (0x00449bda). The port's hypergate
-  // arrival never chains straight into this tail, so it always repositions.
-  if (const auto *stellar = state.scenario.Stellar(stellar_id)) {
+  // 0x00455fa6: snap to the queued travel stellar (ai_secondary_target_slot,
+  // which a docked M may have repointed at the destination system's first nav)
+  // unless a docked N latched g_skip_player_reposition_once (0x00449bda). The
+  // no-stellar fallback is the in-system origin (0,0), not System::pos_x.
+  if (state.skip_player_reposition_once) {
+    state.skip_player_reposition_once = false;
+  } else if (state.player.ai_secondary_target_slot < 0) {
+    state.player.pos_x = 0.0F;
+    state.player.pos_y = 0.0F;
+  } else if (const auto *stellar =
+                 state.scenario.Stellar(static_cast<std::int16_t>(
+                     state.player.ai_secondary_target_slot + 0x80))) {
     state.player.pos_x = static_cast<float>(stellar->pos_x);
     state.player.pos_y = static_cast<float>(stellar->pos_y);
   }
@@ -282,19 +298,15 @@ void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
   // 0x00456060..0x0045609b: discovery booking at level 2 (slot + current
   // system), visibility rebuild and region events.
   NovaSystem_OnSystemEntered(state, state.player.current_system_id, 2);
-  // 0x00456103: launch autosave, with the docked stellar as the restore point
-  // (block1 +0x00). The original passes ship->ai_secondary_target_slot, a
-  // 0-based g_stellar_defs index; stellar_id here is the port's 0x80-based
-  // resource id, so rebase before saving (the loader reads the word back as
-  // an index, so a raw resource id would land the player on the wrong stellar
-  // or at 0,0 when that slot is undefined). Tests and incomplete bootstrap
-  // states have no pilot name; the original entry point is likewise only
-  // reachable for an active pilot.
+  // 0x00456103: launch autosave, with ship->ai_secondary_target_slot as the
+  // restore point (block1 +0x00). That is already the 0-based g_stellar_defs
+  // index; a docked M/N may have overwritten it (destination nav / -1). Tests
+  // and incomplete bootstrap states have no pilot name; the original entry
+  // point is likewise only reachable for an active pilot.
   if (!state.pilot.first_name.empty()) {
     if (const auto directory = PilotFileSaveDirectory()) {
-      if (!PilotFileSaveGame(*directory,
-                             state,
-                             PilotFileStellarIndexFromResourceId(stellar_id))) {
+      if (!PilotFileSaveGame(
+              *directory, state, state.player.ai_secondary_target_slot)) {
         NovaLog::Error("launch: could not autosave pilot '{}'",
                        state.pilot.first_name);
       }
@@ -308,6 +320,9 @@ void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
     state.player.heading =
         static_cast<float>(heading_roll(state.rng)) * kDegToRad;
   }
+  // 0x0045612d: the docked visit is over; M/N no longer take the transition
+  // arm.
+  state.system_transition_active = false;
   // 0x00456128: NovaUi_MarkTravelAndStatusPanelsDirty swallows every player
   // command edge latch; the port edge-resolves commands per frame instead
   // (TODO(decomp(0x0045c7a0)) skipped).

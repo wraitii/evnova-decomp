@@ -61,7 +61,8 @@ TEST_CASE("mission script executor supports random two-branch choices") {
   CHECK(state.control.ControlBit(7) != state.control.ControlBit(8));
 }
 
-TEST_CASE("mission script movement uses system center and first stellar") {
+TEST_CASE("mission script movement uses the first nav stellar and N keeps "
+          "position") {
   GameState state;
   state.scenario.systems.resize(2);
   state.scenario.stellars.resize(1);
@@ -76,9 +77,48 @@ TEST_CASE("mission script movement uses system center and first stellar") {
   CHECK(state.player.pos_x == 12.0F);
   CHECK(state.player.pos_y == 34.0F);
 
+  // N never touches the position (Ghidra 0x00449bcc..0x00449bda).
   Mission_ExecuteScript(state, "N129");
-  CHECK(state.player.pos_x == 100.0F);
-  CHECK(state.player.pos_y == 200.0F);
+  CHECK(state.player.pos_x == 12.0F);
+  CHECK(state.player.pos_y == 34.0F);
+}
+
+TEST_CASE("docked M queues the first nav and docked N latches the skip") {
+  GameState state;
+  state.scenario.systems.resize(2);
+  state.scenario.stellars.resize(1);
+  state.scenario.systems[1].nav_defs[0] = 0x80;
+  state.scenario.stellars[0].pos_x = 12;
+  state.scenario.stellars[0].pos_y = 34;
+  state.system_transition_active = true;
+  state.player.pos_x = -5.0F;
+  state.player.pos_y = -6.0F;
+
+  // Docked M stashes the 0-based nav index for the launch tail instead of
+  // moving the ship (Ghidra 0x004499e1..0x004499f5).
+  Mission_ExecuteScript(state, "M129");
+  CHECK(state.player.pos_x == -5.0F);
+  CHECK(state.player.pos_y == -6.0F);
+  CHECK(state.player.ai_secondary_target_slot == 0);
+
+  // Docked N clears the target and latches the one-shot launch skip.
+  Mission_ExecuteScript(state, "N129");
+  CHECK(state.player.ai_secondary_target_slot == -1);
+  CHECK(state.skip_player_reposition_once);
+}
+
+TEST_CASE("M into a nav-less system uses the in-system origin") {
+  GameState state;
+  state.scenario.systems.resize(2);
+  state.player.pos_x = 5.0F;
+  state.player.pos_y = 6.0F;
+
+  // BUGFIX(original): with no nav stellar the executable leaves the ship put
+  // (the in-system origin is (0,0), not System::pos_x).
+  Mission_ExecuteScript(state, "M129");
+  CHECK(state.player.current_system_id == 1);
+  CHECK(state.player.pos_x == 0.0F);
+  CHECK(state.player.pos_y == 0.0F);
 }
 
 TEST_CASE(

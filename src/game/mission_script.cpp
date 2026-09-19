@@ -1,6 +1,7 @@
 #include "mission_script.hpp"
 
 #include "brgr_archive.hpp"
+#include "compatibility.hpp"
 #include "hud_overlay.hpp"
 #include "log.hpp"
 #include "mission.hpp"
@@ -101,6 +102,19 @@ ChangePlayerShip(GameState &state, std::int32_t resource_id, char opcode) {
   return true;
 }
 
+// Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine, cases M and N
+// (0x0044997a..0x00449c26). Both clear ai_secondary_target_slot and re-home the
+// player's attached ships. M positions at the destination's first nav stellar
+// when not docked (0x00449a00), or stashes that stellar for the launch tail
+// when docked (0x004499d8..0x004499f5, snapped at 0x00455fa6). N never touches
+// the player position and latches g_skip_player_reposition_once while docked
+// (0x00449bda).
+//
+// BUGFIX(original): the Bible documents M as centring on the first
+// stellar/system centre, but with no NavDef (245 stock systems) the windows
+// build skips the flying reposition entirely, so M behaves like N. Under
+// kApplyOriginalBugFixes the port centres on the in-system origin (0,0); the
+// system's galaxy-map position is a different frame.
 [[nodiscard]] bool
 MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
   if (resource_id < kResourceIdBase || resource_id >= kResourceIdBase + 0x800) {
@@ -114,30 +128,51 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
     return false;
   }
   state.player.current_system_id = system_id;
+  state.player.ai_secondary_target_slot = -1;
   if (opcode == 'M') {
     bool placed = false;
     for (const auto stellar_resource_id : system->nav_defs) {
       if (stellar_resource_id < kResourceIdBase) {
         continue;
       }
-      if (const auto *stellar = state.scenario.Stellar(stellar_resource_id);
-          stellar != nullptr) {
+      const auto *stellar = state.scenario.Stellar(stellar_resource_id);
+      if (stellar == nullptr) {
+        continue;
+      }
+      if (state.system_transition_active) {
+        // Docked: queue the destination's first nav for the launch tail
+        // (0x004499e1..0x004499f5).
+        state.player.ai_secondary_target_slot =
+            static_cast<std::int16_t>(stellar_resource_id - kResourceIdBase);
+      } else {
         state.player.pos_x = static_cast<float>(stellar->pos_x);
         state.player.pos_y = static_cast<float>(stellar->pos_y);
-        placed = true;
-        break;
+        state.player.vel_x = 0.0F;
+        state.player.vel_y = 0.0F;
       }
+      placed = true;
+      break;
     }
-    if (!placed) {
-      state.player.pos_x = static_cast<float>(system->pos_x);
-      state.player.pos_y = static_cast<float>(system->pos_y);
+    if (!placed && kApplyOriginalBugFixes && !state.system_transition_active) {
+      // BUGFIX(original): see the function comment -- no nav stellar left the
+      // executable with no reposition, so patch that residual here.
+      state.player.pos_x = 0.0F;
+      state.player.pos_y = 0.0F;
+      state.player.vel_x = 0.0F;
+      state.player.vel_y = 0.0F;
     }
-  } else {
-    state.player.pos_x = static_cast<float>(system->pos_x);
-    state.player.pos_y = static_cast<float>(system->pos_y);
+  } else if (state.system_transition_active) {
+    // 0x00449bda: docked N suppresses the launch tail's stellar snap.
+    state.skip_player_reposition_once = true;
   }
-  state.player.vel_x = 0.0F;
-  state.player.vel_y = 0.0F;
+  // 0x00449aa5..0x00449ae3: attached ships (squad leader slot 0) re-home to
+  // the player's new system.
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &attached = state.ShipAt(slot);
+    if (attached.is_active && attached.squad_leader_ship_slot == 0) {
+      attached.current_system_id = state.player.current_system_id;
+    }
+  }
   return true;
 }
 

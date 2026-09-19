@@ -1357,6 +1357,18 @@ struct GameState {
   // after the pass). Gates the deadline quick-fail (0x00443c60) and the
   // Mission_ClearMisnSlotAssignments despawn arm (0x00440aa0).
   bool in_travel_scene = false;
+  // Ghidra g_is_system_transition_active (0x007354a9): 1 while the blocking
+  // docked/landing visit owns the world. Set at the start of
+  // Stellar_RunDockAndLaunchSequence (0x00455e19), cleared at 0x0045612d in its
+  // launch tail; never set by a hyperspace jump. The M/N mission-script moves
+  // consult it to decide between repositioning the player immediately and
+  // deferring to the launch tail.
+  bool system_transition_active = false;
+  // Ghidra g_skip_player_reposition_once (0x007cab1a): one-shot latch set by a
+  // docked N mission-script move (0x00449bda) so the launch tail's stellar snap
+  // (0x00455fa6) is skipped. Cleared at dock entry (0x00455e20) and after the
+  // launch tail consumes it (0x00456298). A hyperspace arrival never reads it.
+  bool skip_player_reposition_once = false;
   // Ghidra DAT_00776af4: post-interaction recheck deadline in NovaTime_
   // GetTickCount60Hz ticks (NovaTime_GetTickCount60Hz() + NovaRandom_
   // Range(0x1e) + 0x1e after an offer pass, or +0x0f at Bar entry). The
