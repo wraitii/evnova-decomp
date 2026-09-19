@@ -925,6 +925,13 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
 // allow_guided_mode) scored by mass/energy damage; mode 6 applies a
 // blast-radius placement gate. When nothing was armed and no non-guided bank
 // was seen, retries once with guided handling allowed.
+//
+// Port divergences: the original guards only `target_slot == -1` and then
+// indexes g_ship_states / g_ship_class_defs / g_weapon_defs unguarded; the
+// port's SlotInRange / ShipClassFor / Weapon null checks only change behavior
+// for malformed data. The original also calls the pure Math_SquaredDistance
+// (0x0043b710) at 0x0040d67c and discards the result (FABS + FSTP); the port
+// omits that no-op call.
 void NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(GameState &state,
                                                        Ship &ship,
                                                        bool allow_guided_mode) {
