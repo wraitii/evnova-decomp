@@ -1701,19 +1701,19 @@ struct ImpactEffect {
 // range so callers can index directly; missing/empty resources decode to
 // defaults (the original zero-fills those slots).
 struct ScenarioData {
-  std::vector<ShipClass> ships;  // indexed by ship_id - 0x80
-  std::vector<Outfit> outfits;   // indexed by outfit_id - 0x80
-  std::vector<Weapon> weapons;   // indexed by weapon_id - 0x80
-  std::vector<Stellar> stellars; // indexed by stellar_id - 0x80
-  std::vector<System> systems;   // indexed by system_id - 0x80
+  std::vector<ShipClass> ships;        // indexed by ship_id - 0x80
+  std::vector<game::Outfit> outfits;   // indexed by outfit_id - 0x80
+  std::vector<game::Weapon> weapons;   // indexed by weapon_id - 0x80
+  std::vector<game::Stellar> stellars; // indexed by stellar_id - 0x80
+  std::vector<game::System> systems;   // indexed by system_id - 0x80
   // n\x91bu nebula/region table (g_system_region_trigger_defs): up to 32
   // entries, index = resource id - 0x80; absent ids keep width/height 0
   // (the original zero-fills the trigger rects before probing each id).
-  std::vector<Nebula> nebulae;         // indexed by nebula_id - 0x80
-  std::vector<Government> governments; // indexed by government_id - 0x80
-  std::vector<FleetDef> fleets;        // indexed by fleet_id - 0x80
-  std::vector<DudeDef> dudes;          // indexed by dude_id - 0x80
-  std::vector<MissionDef> missions;    // indexed by mission id - 0x80
+  std::vector<Nebula> nebulae;               // indexed by nebula_id - 0x80
+  std::vector<game::Government> governments; // indexed by government_id - 0x80
+  std::vector<FleetDef> fleets;              // indexed by fleet_id - 0x80
+  std::vector<DudeDef> dudes;                // indexed by dude_id - 0x80
+  std::vector<MissionDef> missions;          // indexed by mission id - 0x80
   // p\x91rs personality table (g_pers_defs): the original keeps 0x400
   // slots, slot i = resource id 0x80 + i (absent resources leave an inactive
   // row). Slot 0x3ff is reserved by the loader for the Shareware Enforcer
@@ -1748,21 +1748,22 @@ struct ScenarioData {
   // and the ship-class inherent-government fields live in this space (the
   // original indexes the def array directly with them). Declared before the
   // Government() member because that member's name shadows the struct type.
-  [[nodiscard]] const struct Government *
+  [[nodiscard]] const game::Government *
   GovernmentByIndex(std::int16_t index) const;
 
   // gh.id 0x80.. lookup for government/faction data.
-  [[nodiscard]] const Government *Government(std::int16_t resource_id) const;
+  [[nodiscard]] const game::Government *
+  Government(std::int16_t resource_id) const;
 
   // gh.id 0x80.. convention: returns the entry for the given resource id, or
   // nullptr when it is outside the loaded range.
   [[nodiscard]] const ShipClass *Ship(std::int16_t resource_id) const;
-  [[nodiscard]] const Outfit *Outfit(std::int16_t resource_id) const;
-  [[nodiscard]] const Weapon *Weapon(std::int16_t resource_id) const;
-  [[nodiscard]] const Stellar *Stellar(std::int16_t resource_id) const;
+  [[nodiscard]] const game::Outfit *Outfit(std::int16_t resource_id) const;
+  [[nodiscard]] const game::Weapon *Weapon(std::int16_t resource_id) const;
+  [[nodiscard]] const game::Stellar *Stellar(std::int16_t resource_id) const;
   // Mutable view for the collision pass to publish per-frame masks/frames.
-  [[nodiscard]] struct Stellar *StellarMutable(std::int16_t resource_id);
-  [[nodiscard]] const System *System(std::int16_t resource_id) const;
+  [[nodiscard]] game::Stellar *StellarMutable(std::int16_t resource_id);
+  [[nodiscard]] const game::System *System(std::int16_t resource_id) const;
   // gh.id 0x80.. lookup for a random-encounter fleet template, or nullptr when
   // outside the loaded range.
   [[nodiscard]] const FleetDef *Fleet(std::int16_t resource_id) const;

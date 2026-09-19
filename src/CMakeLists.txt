@@ -110,6 +110,7 @@ target_compile_features(evnova_runtime PUBLIC cxx_std_23)
 if(MSVC)
     # Original fixed-width game fields intentionally narrow arithmetic values.
     target_compile_options(evnova_runtime PRIVATE /W4 /permissive- /wd4244 /wd4267)
+    target_compile_definitions(evnova_runtime PRIVATE _CRT_SECURE_NO_WARNINGS)
     if(EVNOVA_WARNINGS_AS_ERRORS)
         target_compile_options(evnova_runtime PRIVATE /WX)
     endif()
