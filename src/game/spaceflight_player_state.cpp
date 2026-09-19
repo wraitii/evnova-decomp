@@ -360,7 +360,7 @@ void DetonateCarriedBomb(GameState &state) {
                            0,
                            static_cast<std::int16_t>(roll + max_armor),
                            0,
-                           0xFFFF,
+                           -1,
                            false,
                            false,
                            true,

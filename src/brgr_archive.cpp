@@ -582,13 +582,12 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data) {
     return std::nullopt;
   }
 
-  NovaMainMenuStyle style{
-      .menu_bright = ReadRgb(resource_data, kMenuBrightOffset),
-      .menu_dim = ReadRgb(resource_data, kMenuDimOffset),
-      .grid_bright = ReadRgb(resource_data, kGridBrightOffset),
-      .grid_dim = ReadRgb(resource_data, kGridDimOffset),
-      .menu_font_size = ReadBe16(resource_data, kMenuFontSizeOffset),
-  };
+  NovaMainMenuStyle style{};
+  style.menu_bright = ReadRgb(resource_data, kMenuBrightOffset);
+  style.menu_dim = ReadRgb(resource_data, kMenuDimOffset);
+  style.grid_bright = ReadRgb(resource_data, kGridBrightOffset);
+  style.grid_dim = ReadRgb(resource_data, kGridDimOffset);
+  style.menu_font_size = ReadBe16(resource_data, kMenuFontSizeOffset);
   for (std::size_t index = 0; index < style.button_origins.size(); ++index) {
     const auto offset = kButtonOriginsOffset + index * kButtonOriginSize;
     style.button_origins[index] = NovaMenuPoint{
