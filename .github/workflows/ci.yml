@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_COMMIT: 319504a5326aa870edde46438c5455fa76305a56
+
+jobs:
+  release:
+    name: Release (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-binary-cache,readwrite
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-24.04
+            triplet: x64-linux
+          - name: macOS
+            runner: macos-15
+            triplet: arm64-osx
+          - name: Windows
+            runner: windows-2022
+            triplet: x64-windows
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up the MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Linux SDL build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libegl1-mesa-dev libibus-1.0-dev libwayland-dev libx11-dev \
+            libxext-dev libxft-dev libxkbcommon-dev
+
+      - name: Check out pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_COMMIT }}
+          path: vcpkg
+          fetch-depth: 1
+
+      - name: Bootstrap vcpkg (Unix)
+        if: runner.os != 'Windows'
+        run: ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Bootstrap vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg-binary-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prepare vcpkg binary cache directory
+        shell: bash
+        run: mkdir -p .vcpkg-binary-cache
+
+      - name: Install manifest dependencies
+        shell: bash
+        run: ./vcpkg/vcpkg install --x-manifest-root=. --triplet "${{ matrix.triplet }}"
+
+      - name: Add vcpkg DLLs to the Windows test path
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE 'vcpkg_installed\x64-windows\bin'
+          if (-not (Test-Path $vcpkgBin)) {
+            throw "vcpkg runtime directory was not found: $vcpkgBin"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $vcpkgBin
+
+      - name: Configure
+        run: cmake --preset release -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
+
+      - name: Build
+        run: cmake --build --preset release --parallel
+
+      # Tests share a few deliberately fixed temporary paths, so keep the
+      # single Catch2 process serial. Archive-backed cases require local data.
+      - name: Run hermetic tests
+        shell: bash
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            test_exe="build/release/tests/evnova_tests.exe"
+          else
+            test_exe="build/release/tests/evnova_tests"
+          fi
+          "$test_exe" --filenames-as-tags \
+            '[#collision_test],[#command_input_test],[#flight_automation_test],[#impact_effects_test],[#mission_script_test]~"mission payload context expands Q message text tags",[#movement_test],[#nova_command_test],[#nova_font_test],[#outfit_clamp_test],[#outfit_ionization_test],[#placement_test],[#render_clip_scope_test],[#sdl_audio_test],[#services_buttons_test],[#ship_visual_test],[#spaceflight_player_state_test],[#sprite_test]' \
+            --reporter console --verbosity quiet
