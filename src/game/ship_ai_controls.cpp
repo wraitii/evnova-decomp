@@ -90,10 +90,10 @@ constexpr float kScriptPosYSpan = 80.0F;
 // reduce that override by 1.165 each tick (raw bits 0xC2480000 / 0xBF951EB8).
 constexpr float kMode10ReverseSpeed = -50.0F;
 constexpr float kMode10ReverseThrust = -1.165F;
-// Escort-follow half-span stand-in: Sprite_GetShipClassEscortFrameHeight
-// (0x004624c0) returns the class escort sprite's shot half-span or its 0x4B =
-// 75 px debug fallback; the clean-room sprite tables are not modelled, so the
-// debug fallback stands in (TODO(decomp)).
+// Escort-follow half-span stand-in: Sprite_GetShipClassEscortFrameWidth
+// (0x004624c0) returns the class escort sprite's FULL frame width or its
+// 0x4B = 75 px debug fallback; the clean-room sprite tables are not modelled,
+// so the debug fallback stands in (TODO(decomp)).
 constexpr float kEscortHalfSpanPx = 75.0F;
 
 } // namespace

@@ -67,7 +67,7 @@ RNG order:
   the original converted it to the active surface format, while SDL retains
   RGB24
 * count = `AsteroidDef.field_0x0c` (payload +0x08)
-* position scatter = `Sprite_GetFrameFullHeight(asteroid) / 3`; every shipped
+* position scatter = `Sprite_GetFrameFullWidth(asteroid) / 3`; every shipped
   asteroid set (800..815) is 50x50, so the port uses 16.
 
 ## Port
@@ -122,7 +122,7 @@ count, and blend weight `0x20 - shot sprite intensity`.
 
 The clean-room weapon model decodes the packet and `NovaWeapon_TickShots`
 emits it at the original outer-loop maximum cadence. A resolved collision mask
-provides the shot frame height; an unavailable sprite uses the original
+provides the shot frame width; an unavailable sprite uses the original
 32-pixel default. The port does not yet model per-shot sprite fade intensity,
 so the blend weight remains 0x20. Like the original, the user-facing Smoke
 Trails preference suppresses these point particles.

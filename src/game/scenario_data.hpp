@@ -458,8 +458,8 @@ struct ShipClass {
   std::uint16_t base_image_id = 0;
   // Ghidra sh\x8an +0x06/+0x08 (BaseXSize/BaseYSize): one hull frame's pixel
   // dimensions. Ship_UpdateVisualState (0x00428340) reads the live
-  // Sprite_GetFrameFullHeight for the death debris-puff scatter, so the port
-  // keeps the decoded frame height here (the collision mask exists only while
+  // Sprite_GetFrameFullWidth for the death debris-puff scatter, so the port
+  // keeps the decoded frame width here (the collision mask exists only while
   // a frame is bound).
   std::uint16_t base_x_size = 0;
   std::uint16_t base_y_size = 0;

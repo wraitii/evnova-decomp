@@ -42,13 +42,13 @@ SpriteMask MakeMask(const std::vector<const char *> &rows) {
   return mask;
 }
 
-// A 1-pixel-wide vertical strip of `height` opaque pixels, used to probe the
-// Sprite_GetShotHalfSpan boundary in the mask-vs-circle decision.
-SpriteMask MakeStrip(int height) {
+// A 1-pixel-tall horizontal strip of `width` opaque pixels, used to probe the
+// Sprite_GetFrameFullWidth boundary in the mask-vs-circle decision.
+SpriteMask MakeStrip(int width) {
   SpriteMask mask;
-  mask.width = 1;
-  mask.height = height;
-  mask.opaque.assign(static_cast<std::size_t>(height), 1);
+  mask.width = width;
+  mask.height = 1;
+  mask.opaque.assign(static_cast<std::size_t>(width), 1);
   return mask;
 }
 
@@ -221,7 +221,7 @@ TEST_CASE("pixel mask overlap respects local opaque runs", "[sprite_mask]") {
       bar, 0.0F, 0.0F, 1.0F, 1.0F, bar, 0.0F, 4.0F, 1.0F, 1.0F));
 }
 
-TEST_CASE("bounding circle fallback mirrors half-height radius",
+TEST_CASE("bounding circle fallback mirrors half-width radius",
           "[sprite_mask]") {
   // 9x9 frames: radius 4 each, so centres 7px apart hit and 9px apart miss.
   CHECK(
@@ -231,6 +231,10 @@ TEST_CASE("bounding circle fallback mirrors half-height radius",
   // Strict `<` at exactly the sum of radii (8) is a miss, matching 0x00475be0.
   CHECK_FALSE(
       SpriteMask_TestBoundingCircleOverlap(9, 9, 0.0F, 0.0F, 9, 9, 8.0F, 0.0F));
+  // The radius comes from the WIDTH, never the height: a 9x1 frame still has
+  // radius 4, so 7px apart hits even though the height would give radius 0.
+  CHECK(
+      SpriteMask_TestBoundingCircleOverlap(9, 1, 0.0F, 0.0F, 9, 1, 7.0F, 0.0F));
 }
 
 TEST_CASE("mask overlap honors the frame anchor offset", "[sprite_mask]") {
@@ -246,14 +250,15 @@ TEST_CASE("mask overlap honors the frame anchor offset", "[sprite_mask]") {
 TEST_CASE("ship mask-vs-circle decision follows the original thresholds",
           "[collision]") {
   const SpriteMask shot_dot = MakeMask({"#"});
-  // Ship 2px from the shot: the circle radii overlap, but the 1-px opaque
-  // columns never coincide. Returns true when the circle path produced a hit
-  // (shot consumed), false when the mask path was used (transparent miss).
-  const auto circle_hit = [&](float frame_scale, int ship_height) {
+  // Ship 2px from the shot: the circle radii overlap, but the 33-wide strip's
+  // bounds do not reach the shot, so the mask path misses. Returns true when
+  // the circle path produced a hit (shot consumed), false when the mask path
+  // was used (miss).
+  const auto circle_hit = [&](float frame_scale, int ship_width) {
     GameState state;
     SeedCollisionScenario(state);
     state.last_frame_tick_scale = frame_scale;
-    const SpriteMask strip = MakeStrip(ship_height);
+    const SpriteMask strip = MakeStrip(ship_width);
     Ship &target = state.ShipAt(1);
     target.collision_mask.mask = &strip;
     target.collision_mask.anchor_x = 0.0F;
@@ -268,11 +273,11 @@ TEST_CASE("ship mask-vs-circle decision follows the original thresholds",
     return state.active_shots.empty();
   };
 
-  // scale < 2.0 and height > 0x20 -> pixel mask (miss).
+  // scale < 2.0 and width > 0x20 -> pixel mask (miss).
   CHECK_FALSE(circle_hit(1.99F, 0x21));
   // scale == 2.0 -> circle (hit), matching `2.0 <= scale`.
   CHECK(circle_hit(2.0F, 0x21));
-  // height == 0x20 -> circle (hit), matching `half_span < 0x21`.
+  // width == 0x20 -> circle (hit), matching `span < 0x21`.
   CHECK(circle_hit(1.99F, 0x20));
 }
 
@@ -301,9 +306,9 @@ TEST_CASE("injected mask transparent miss keeps a projectile alive",
           "[collision]") {
   GameState state;
   SeedCollisionScenario(state);
-  // A 33-tall opaque strip on the ship satisfies
+  // A 33-wide opaque strip on the ship satisfies
   // Ship_HandleSpritePairCollision's > 0x20 mask threshold, so the pixel path
-  // is used; the ship sits 2px from the shot so the 1px columns never coincide.
+  // is used; the ship sits 2px from the shot so the bounds never overlap.
   const SpriteMask strip = MakeStrip(0x21);
   const SpriteMask shot_dot = MakeMask({"#"});
   state.ShipAt(1).collision_mask.mask = &strip;

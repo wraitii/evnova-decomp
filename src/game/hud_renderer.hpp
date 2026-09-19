@@ -81,8 +81,8 @@ public:
             bool force_empty_radar = false);
 
   // Non-owning pointer to the spaceflight view's sprite store, used to
-  // resolve each stellar body's spin sprite full height for the radar blip
-  // size tiers (Sprite_GetFrameFullHeight 0x00462390 on the loaded spin set).
+  // resolve each stellar body's spin sprite full width for the radar blip
+  // size tiers (Sprite_GetFrameFullWidth 0x00462390 on the loaded spin set).
   void AttachSpriteStore(const SpriteStore *store) { sprite_store_ = store; }
 
   [[nodiscard]] bool installed() const { return installed_; }

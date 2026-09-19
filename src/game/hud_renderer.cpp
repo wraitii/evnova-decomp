@@ -1189,7 +1189,7 @@ constexpr float kRadarArrowShaftNear = 25.0F;
 constexpr float kRadarArrowShaftFar = 50.0F;
 constexpr float kRadarArrowWingLength = 6.0F;
 constexpr float kRadarArrowWingDeg = 135.0F; // 0x87 bearing offsets
-constexpr std::int16_t kRadarDefaultFrameHeight = 0x20;
+constexpr std::int16_t kRadarDefaultFrameWidth = 0x20;
 // The interference static is one of the ten preloaded 'ppat' resources
 // 128..137 (DAT_00733b7c); DrawContext_TileImageInRect tiles the 64x64 source.
 constexpr std::uint16_t kRadarStaticFirstPpatId = 128;
@@ -1573,18 +1573,18 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
         const bool planet = (st->flags & 0x10U) == 0U &&
                             (st->availability_flags & 0x3000U) == 0U;
         if (planet) {
-          // Disc radius tier from the spin sprite's full frame height
-          // (Sprite_GetFrameFullHeight 0x00462390, default 0x20).
-          std::int16_t frame_height = kRadarDefaultFrameHeight;
+          // Disc radius tier from the spin sprite's full frame width
+          // (Sprite_GetFrameFullWidth 0x00462390, default 0x20).
+          std::int16_t frame_width = kRadarDefaultFrameWidth;
           if (sprite_store_ != nullptr) {
             const SpriteAsset *set = sprite_store_->Spin(
                 renderer, static_cast<std::uint16_t>(st->link_a_id + 1000));
             if (set != nullptr && !set->frames.empty()) {
-              frame_height = static_cast<std::int16_t>(set->tile_height);
+              frame_width = static_cast<std::int16_t>(set->tile_width);
             }
           }
           const int inset =
-              frame_height < 200 ? (frame_height < 90 ? -1 : -2) : -3;
+              frame_width < 200 ? (frame_width < 90 ? -1 : -2) : -3;
           HudPanelRect rect{static_cast<std::int16_t>(bx),
                             static_cast<std::int16_t>(by),
                             static_cast<std::int16_t>(bx),

@@ -92,19 +92,21 @@ bool SpriteMask_TestOverlap(const SpriteMask &a,
 }
 
 bool SpriteMask_TestBoundingCircleOverlap(int a_width,
-                                          int a_height,
+                                          int a_height_ignored,
                                           float a_world_x,
                                           float a_world_y,
                                           int b_width,
-                                          int b_height,
+                                          int b_height_ignored,
                                           float b_world_x,
                                           float b_world_y) {
-  (void)a_width;
-  (void)b_width;
-  // Ghidra (0x00475be0) derives the half-span from the frame height
-  // (bottom - top)/2 and treats the top-left + half-height as the centre.
-  const int a_radius = std::max(0, a_height) / 2;
-  const int b_radius = std::max(0, b_height) / 2;
+  (void)a_height_ignored;
+  (void)b_height_ignored;
+  // Ghidra (0x00475be0) derives the half-span from the frame WIDTH
+  // (right +0x20 - left +0x1c)/2, i.e. Sprite_GetFrameFullWidth/2, and reuses
+  // it on BOTH axes; centre = (left + half, top + half). The frame height is
+  // never read here.
+  const int a_radius = std::max(0, a_width) / 2;
+  const int b_radius = std::max(0, b_width) / 2;
   const int radius = a_radius + b_radius;
   const int dx = static_cast<int>(std::lround(a_world_x - b_world_x));
   const int dy = static_cast<int>(std::lround(a_world_y - b_world_y));

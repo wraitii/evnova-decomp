@@ -98,15 +98,19 @@ SpriteMask_FromRgba(std::span<const std::uint8_t> rgba_pixels,
                                           float b_anchor_y);
 
 // Mirrors Sprite_TestBoundingCircleOverlap (0x00475be0): centre = frame
-// top-left + half height, radius = half height, strict `<` on squared distance.
-// Used as the fallback for entities without a resolved mask and for the small
-// shot half-span case in Ship_HandleSpritePairCollision.
+// top-left + half WIDTH, radius = half WIDTH, strict `<` on squared distance.
+// The original reads the placed-bounds horizontal span (right +0x20 - left
+// +0x1c, Sprite_GetFrameFullWidth 0x00462390) and reuses it on both axes; the
+// frame height is not consulted, so the `*_height_ignored` arguments exist only
+// to pin that quirk in tests. Used as the fallback for entities without a
+// resolved mask and for the small shot span case in
+// Ship_HandleSpritePairCollision.
 [[nodiscard]] bool SpriteMask_TestBoundingCircleOverlap(int a_width,
-                                                        int a_height,
+                                                        int a_height_ignored,
                                                         float a_world_x,
                                                         float a_world_y,
                                                         int b_width,
-                                                        int b_height,
+                                                        int b_height_ignored,
                                                         float b_world_x,
                                                         float b_world_y);
 

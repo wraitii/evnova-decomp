@@ -50,7 +50,7 @@ bool IsHypergateAnimationEngaged(const GameState &state,
                                  const Stellar &stellar,
                                  int current_frame,
                                  int frame_count,
-                                 int frame_height) {
+                                 int frame_width) {
   // Ghidra 0x004159c0 Ship_IsShipInAiState0x15 and 0x00415ad0
   // Stellar_IsShipHeadingToStellarInAiState0x01Or0x14 run inline here.
   if (state.travel.selected_stellar_id == stellar_id &&
@@ -58,7 +58,9 @@ bool IsHypergateAnimationEngaged(const GameState &state,
     return true;
   }
   const int transition = HypergateTransitionFrame(stellar, frame_count);
-  float range = static_cast<float>(frame_height * 2);
+  // 0x0042cd10 (0x0042cf..) sizes the range from Sprite_GetFrameFullWidth
+  // (0x00462390) * 2 and expands it by 1.1 once open (DAT_005753a8).
+  float range = static_cast<float>(frame_width * 2);
   if (current_frame >= transition) {
     range *= 1.1F; // Ghidra DAT_005753a8.
   }
@@ -1408,23 +1410,34 @@ void SpaceflightView::DrawAsteroids(SdlPlatform &platform,
   }
 }
 
-// Ghidra 0x00436910 Asteroid_UpdateSprites (viewport-wrap half). The original
-// positions each record's Sprite via Sprite_SetPositionFromCurrentFrameAnchor,
-// then compares the placed sprite's frame edge (+0x1c/+0x1a) against the
-// viewport plus 32px and teleports a record that has left the screen to the
-// opposite side (2x the largest frame span inside the edge). This port has no
-// per-record Sprite handle, so it reproduces the same world-space test using
-// the largest loaded asteroid frame (the shipped 50x50 tile) and the same
-// thresholds: the anchor sits at dx + half_viewport - frame_width, so the wrap
-// fires at +/- (half_viewport + frame_width + 32) and lands at
-// -/+ (half_viewport + 2*frame_width).
+// Ghidra 0x00436910 Asteroid_UpdateSprites (viewport-cull half). The original
+// places each record via Sprite_SetPositionFromCurrentFrameAnchor (QuickDraw
+// placed bounds: +0x1c left, +0x1a top), then tests the placed left/top against
+// [-(2*frame_extent+0x20), 2*g_viewport_center+0x20] using the record's OWN
+// frame extent. A record that leaves that window has target_pos moved to the
+// opposite side using the largest loaded frame span, then is hidden and
+// DEACTIVATED; Frame_TickSystems refills the quota every tick through
+// Asteroid_Spawn(place_in_ring=1), placing the refill on a ring of radius
+// ~1.5*center_y (see NovaAsteroid_Spawn).
+//
+// DIVERGENCE (documented, deliberate): the clean-room has no per-record Sprite
+// handle and does not model the despawn + ring-refill cycle, so it wraps in
+// world space instead -- teleporting a record past the edge to the opposite
+// side and never deactivating it -- and uses the largest loaded frame span for
+// both the threshold and the teleport distance. The original's negative-side
+// cull extent is 1.5x the record's own span versus 1.0x here, and its
+// positive-side extent is 0.5x versus 1.0x here, so the keep-alive window and
+// refill timing do not match. Consequence: the original's "small asteroids
+// vanish at high resolution" defect (ring refills landing outside the cull
+// window, worked around by padding frames to ~100x100) is masked rather than
+// faithfully reproduced. Plausibly identified; not a faithful port.
 void SpaceflightView::WrapAsteroids(SdlPlatform &platform, GameState &state) {
-  // Ghidra 0x00436910 Asteroid_UpdateSprites wraps a record that left the
+  // Ghidra 0x00436910 Asteroid_UpdateSprites culls a record that left the
   // play area against g_viewport_center_x/y; use the synced half-size rather
   // than recomputing it, so the wrap matches the scatter/spawn centre.
   const float center_x = static_cast<float>(state.viewport_center_x);
   const float center_y = static_cast<float>(state.viewport_center_y);
-  // Sprite_GetFrameFullHeight / Sprite_GetFrameFullWidth return the full
+  // Sprite_GetFrameFullWidth / Sprite_GetFrameFullHeight return the full
   // frame span; the original scans every loaded asteroid set for the maximum.
   int max_span_x = 1;
   int max_span_y = 1;
@@ -1512,7 +1525,7 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
                                       *st,
                                       anim.current_frame,
                                       frame_count,
-                                      set->tile_height);
+                                      set->tile_width);
       NovaStellar_AdvanceAnimationFrame(
           state, *st, frame_count, engaged, frame_time_ms * 0.03F, anim);
     }
@@ -2068,7 +2081,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
 
   // Bracket offset: ceil(max(target frame height, width)/2) + the decaying
   // pulse. Sprite_GetFrameFullWidth / Sprite_GetFrameFullHeight return the
-  // target's full frame height/width, so `full` is max(h, w), then the game
+  // target's full frame width/height, so `full` is max(w, h), then the game
   // halves it rounding up; the pulse term is truncated to whole pixels
   // exactly as the original does. The fallback uses the sheet's native tile
   // size.
