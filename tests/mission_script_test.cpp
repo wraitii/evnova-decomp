@@ -167,15 +167,17 @@ TEST_CASE("mission payload context expands Q message text tags") {
   GameState state;
   state.pilot.first_name = "Jane";
   // Q7022 loads a random "Prodigal Son Replies" entry ("To: Captain <PN>...").
+  // Q stages the composed text in the pending-overlay buffer
+  // (g_pending_overlay_message) instead of showing it; the launch tail shows
+  // and clears it.
   Mission_RunMisnScriptPayload(state, "Q7022", 0);
-  CHECK(state.hud_overlay.active);
-  CHECK(state.hud_overlay.message.find("<PN>") == std::string::npos);
-  CHECK(state.hud_overlay.message.find("Jane") != std::string::npos);
+  CHECK(state.pending_overlay_message.find("<PN>") == std::string::npos);
+  CHECK(state.pending_overlay_message.find("Jane") != std::string::npos);
 
   // Without a payload context (the original's 0xffff) the tag is left intact;
   // only slots 0..15 run the travel-destination expansion pass.
   GameState no_context;
   no_context.pilot.first_name = "Jane";
   Mission_RunMisnScriptPayload(no_context, "Q7022", -1);
-  CHECK(no_context.hud_overlay.message.find("<PN>") != std::string::npos);
+  CHECK(no_context.pending_overlay_message.find("<PN>") != std::string::npos);
 }

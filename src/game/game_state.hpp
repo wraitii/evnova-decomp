@@ -1439,11 +1439,12 @@ struct GameState {
   // sound id, or -1. The original overwrites a single slot, so this is scalar
   // rather than a queue. TODO(decomp): no UI/audio consumer is wired yet.
   std::int16_t pending_transient_sound_id = -1;
-  // Ghidra g_pending_overlay_message (0x007354d0) stages the composed overlay
-  // text; the port instead stores the Q opcode's STR# resource id and shows
-  // the picked entry immediately. TODO(decomp): model the staged buffer.
-  std::int16_t pending_script_message_string_id = -1;
-  bool script_forced_leave_landing = false;
+  // Ghidra g_pending_overlay_message (0x007354d0), a 256-byte Pascal-string
+  // buffer. The mission-script Q opcode composes the message (with mission
+  // tags expanded) and stages it here; the launch tail (Stellar_RunDockAnd-
+  // LaunchSequence 0x00456134) shows it with a 0x1f4-tick duration and clears
+  // the buffer before any departure overlay. Empty means no pending message.
+  std::string pending_overlay_message;
   // Ghidra g_script_mission_context_slot (0x00776b00): the mission slot whose
   // payload script is executing, or -1 when none. Mission_RunMisnScriptPayload
   // sets it around the engine call and the engine's Q case expands mission

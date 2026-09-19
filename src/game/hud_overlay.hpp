@@ -111,6 +111,13 @@ NovaResources_LoadPatchedStringEntry(std::uint16_t fallback_pool,
                                      std::uint16_t entry,
                                      std::uint16_t override_base);
 
+// Ghidra 0x00467cf0 System_ShowSystemEventMessage. Shows a system's scripted
+// event message (SystemDef.Msg / payload +0x68): the sparse `STR ` resource id
+// message_id + 999 when present, else STR# 1000 entry message_id (1-based).
+// Used by the jump-arrival block only when the destination system defines one
+// (field_0x92 != -1), replacing the generic "Entering the <system>" overlay.
+void System_ShowSystemEventMessage(GameState &state, std::int16_t message_id);
+
 // Composes and shows the on-screen HUD overlay for a denied landing request,
 // mirroring the Stellar_HandleStellarEntryAndExit feedback cases (STR# 0x7d2).
 // `denial` is the reason Stellar_Dock reported; `is_station` picks
@@ -127,7 +134,11 @@ void NovaHud_ShowLandingDenial(GameState &state,
 // full-month-name date (Stellar_FormatElapsedTravelTime shape), and ".". Only
 // shown while the flight-hint state is latched at 0x7fff (see
 // TravelState::travel_hint_state); a pre-first-jump landing (< 3) is silent and
-// resets the state to -1.
+// resets the state to -1. A staged mission-script message
+// (GameState::pending_overlay_message) takes priority: the original shows it
+// for 0x1f4 ticks, replays it cached, clears the buffer, and skips the
+// travel-hint state reset entirely (Stellar_RunDockAndLaunchSequence
+// 0x00456134 -> 0x004562f0).
 void NovaHud_ShowLaunchDepartureMessage(GameState &state,
                                         std::int16_t stellar_id);
 

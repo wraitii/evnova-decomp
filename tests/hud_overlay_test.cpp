@@ -100,5 +100,38 @@ TEST_CASE("HUD overlay deadlines use the gameplay clock snapshot",
   CHECK_FALSE(state.hud_overlay.active);
 }
 
+TEST_CASE("system event message shows the STR# 1000 fallback",
+          "[hud_overlay]") {
+  // System_ShowSystemEventMessage (0x00467cf0) looks up sparse `STR ` id
+  // message_id + 999, then falls back to STR# 1000 entry message_id (1-based).
+  // The shipped pool's entry 1 is the Auroran message-buoy warning.
+  GameState state;
+  System_ShowSystemEventMessage(state, 1);
+  REQUIRE(state.hud_overlay.active);
+  CHECK(state.hud_overlay.message.find("Message Buoy") != std::string::npos);
+  CHECK(state.hud_overlay.expiry_ms == 0x1e0ULL * 21ULL);
+
+  // -1 (no Message field) shows nothing, mirroring the arrival branch.
+  GameState no_message;
+  System_ShowSystemEventMessage(no_message, -1);
+  CHECK_FALSE(no_message.hud_overlay.active);
+}
+
+TEST_CASE("staged mission message takes priority over the launch departure",
+          "[hud_overlay]") {
+  GameState state;
+  state.pending_overlay_message = "staged text";
+  state.travel.travel_hint_state = -1;
+  // stellar_id is unused on the pending path.
+  NovaHud_ShowLaunchDepartureMessage(state, -1);
+  CHECK(state.hud_overlay.active);
+  CHECK(state.hud_overlay.message == "staged text");
+  CHECK(state.hud_overlay.expiry_ms == 0x1f4ULL * 21ULL);
+  CHECK(state.pending_overlay_message.empty());
+  // The original jumps to the launch-tail epilogue, so the hint state is left
+  // untouched instead of being reset to -1.
+  CHECK(state.travel.travel_hint_state == -1);
+}
+
 } // namespace
 } // namespace game
