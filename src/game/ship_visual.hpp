@@ -225,7 +225,9 @@ void NovaShip_TickSpriteAnimation(GameState &state,
 // the WeaponDef flags_secondary 0x200 muzzle-flash bit) by the class's
 // weapon_glow_decay_rate (WeapDecay * binary64 0.333), and advances the
 // running-light blink state machine from the class's BlinkMode / BlinkValA..D.
-// The results
+// When the class carries sprite_behavior_flags 0x0040 (Bible: hide running
+// light sprites when the ship is disabled) and the ship is disabled, the
+// blink result is overridden to zero so the layer goes dark. The results
 // (Ship.weapon_sprite_flash_level, Ship.light_intensity, both 0..32) feed the
 // weapon-effects and light sprite layers in the renderer.
 void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,

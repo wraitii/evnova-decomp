@@ -107,6 +107,29 @@ TEST_CASE("running lights steady mode stays at full brightness",
   CHECK(ship.light_intensity == 32.0F);
 }
 
+TEST_CASE("flags 0x40 running lights go dark when disabled", "[ship][visual]") {
+  GameState state;
+  ShipClass cls;
+  cls.light_image_id = 1;
+  cls.blink_mode = -1; // steady full brightness
+  cls.sprite_behavior_flags = 0x0040;
+  SetShipClass(state, cls);
+  // A derelict government is enough to make the hull read as disabled.
+  state.scenario.governments.assign(1, Government{});
+  state.scenario.governments[0].flags_primary = 0x800;
+  Ship ship;
+  ship.ship_class_id = 0;
+  ship.faction_or_government_id = 0;
+
+  NovaShip_TickWeaponSpriteAndRunningLights(state, ship, 1.0F);
+  CHECK(ship.light_intensity == 0.0F);
+
+  // Without the flag the same disabled hull keeps its steady lights.
+  state.scenario.ships[0].sprite_behavior_flags = 0;
+  NovaShip_TickWeaponSpriteAndRunningLights(state, ship, 1.0F);
+  CHECK(ship.light_intensity == 32.0F);
+}
+
 TEST_CASE("running lights triangle pulse ramps to the ceiling",
           "[ship][visual]") {
   GameState state;
