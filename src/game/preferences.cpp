@@ -8,6 +8,7 @@
 #include "../sdl_music.hpp"
 #include "../sdl_platform.hpp"
 #include "../util/geometry.hpp"
+#include "control_bevel.hpp"
 #include "nova_font.hpp"
 #include "ui_dialog.hpp"
 
@@ -183,35 +184,13 @@ void DrawCheckBox(SdlPlatform &platform,
       disabled ? kControlDisabledHighlight : kControlHighlight;
   const SDL_Color shadow = disabled ? kControlDisabledShadow : kControlShadow;
   const SDL_Color text = disabled ? kControlDisabledText : kControlText;
-  const SDL_Color check =
-      disabled ? kControlDisabledText : kControlSelectedText;
+  const SDL_Color check = disabled ? kControlDisabledText : kWindowFill;
   const SDL_FRect glyph{box.x, box.y, 17.0F, 17.0F};
-  SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderFillRect(renderer, &glyph);
-  SDL_SetRenderDrawColor(
-      renderer, highlight.r, highlight.g, highlight.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderLine(renderer,
-                 glyph.x + 1.0F,
-                 glyph.y + 1.0F,
-                 glyph.x + glyph.w - 1.0F,
-                 glyph.y + 1.0F);
-  SDL_RenderLine(renderer,
-                 glyph.x + 1.0F,
-                 glyph.y + 1.0F,
-                 glyph.x + 1.0F,
-                 glyph.y + glyph.h - 1.0F);
-  SDL_SetRenderDrawColor(
-      renderer, shadow.r, shadow.g, shadow.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderLine(renderer,
-                 glyph.x + glyph.w - 2.0F,
-                 glyph.y + glyph.h - 2.0F,
-                 glyph.x + 1.0F,
-                 glyph.y + glyph.h - 1.0F);
-  SDL_RenderLine(renderer,
-                 glyph.x + glyph.w - 2.0F,
-                 glyph.y + glyph.h - 2.0F,
-                 glyph.x + glyph.w - 1.0F,
-                 glyph.y + 1.0F);
+  // Checked state inverts the bevel (dark top/left, light bottom/right),
+  // exactly as UiWindow_Draw 0x004d0d00 does for DITL control types 5/6.
+  const SDL_Color bevel_highlight = checked ? shadow : highlight;
+  const SDL_Color bevel_shadow = checked ? highlight : shadow;
+  DrawControlBevel(renderer, glyph, fill, bevel_highlight, bevel_shadow);
   SDL_SetRenderDrawColor(renderer,
                          kWindowFrame.r,
                          kWindowFrame.g,
@@ -219,22 +198,20 @@ void DrawCheckBox(SdlPlatform &platform,
                          SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &glyph);
   if (checked) {
-    SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, SDL_ALPHA_OPAQUE);
-    const SDL_FRect inner{
-        glyph.x + 2.0F, glyph.y + 2.0F, glyph.w - 4.0F, glyph.h - 4.0F};
-    SDL_RenderFillRect(renderer, &inner);
+    // Checked mark is an X across the glyph square, inset by 3 on each side
+    // (both diagonals; UiWindow_Draw 0x004d0d00).
     SDL_SetRenderDrawColor(
         renderer, check.r, check.g, check.b, SDL_ALPHA_OPAQUE);
     SDL_RenderLine(renderer,
                    glyph.x + 3.0F,
-                   glyph.y + 6.0F,
-                   glyph.x + 6.0F,
-                   glyph.y + 9.0F);
+                   glyph.y + 3.0F,
+                   glyph.x + 14.0F,
+                   glyph.y + 14.0F);
     SDL_RenderLine(renderer,
-                   glyph.x + 6.0F,
-                   glyph.y + 9.0F,
-                   glyph.x + 13.0F,
-                   glyph.y + 3.0F);
+                   glyph.x + 14.0F,
+                   glyph.y + 3.0F,
+                   glyph.x + 3.0F,
+                   glyph.y + 14.0F);
   }
   const float baseline = box.y + box.h / 2.0F + 5.0F;
   NovaText_Draw(platform,
@@ -289,32 +266,9 @@ void DrawButton(SdlPlatform &platform,
                 std::string_view label,
                 bool highlighted) {
   SDL_Renderer *renderer = platform.renderer();
-  SDL_SetRenderDrawColor(renderer,
-                         kControlFill.r,
-                         kControlFill.g,
-                         kControlFill.b,
-                         SDL_ALPHA_OPAQUE);
-  SDL_RenderFillRect(renderer, &box);
   const SDL_Color highlight = highlighted ? kControlShadow : kControlHighlight;
   const SDL_Color shadow = highlighted ? kControlHighlight : kControlShadow;
-  SDL_SetRenderDrawColor(
-      renderer, highlight.r, highlight.g, highlight.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderLine(
-      renderer, box.x + 1.0F, box.y + 1.0F, box.x + box.w - 1.0F, box.y + 1.0F);
-  SDL_RenderLine(
-      renderer, box.x + 1.0F, box.y + 1.0F, box.x + 1.0F, box.y + box.h - 1.0F);
-  SDL_SetRenderDrawColor(
-      renderer, shadow.r, shadow.g, shadow.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderLine(renderer,
-                 box.x + box.w - 2.0F,
-                 box.y + box.h - 2.0F,
-                 box.x + 1.0F,
-                 box.y + box.h - 1.0F);
-  SDL_RenderLine(renderer,
-                 box.x + box.w - 2.0F,
-                 box.y + box.h - 2.0F,
-                 box.x + box.w - 1.0F,
-                 box.y + 1.0F);
+  DrawControlBevel(renderer, box, kControlFill, highlight, shadow);
   SDL_SetRenderDrawColor(renderer,
                          kWindowFrame.r,
                          kWindowFrame.g,

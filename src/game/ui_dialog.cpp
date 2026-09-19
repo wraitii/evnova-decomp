@@ -4,6 +4,7 @@
 #include "../pict_image.hpp"
 #include "../util/geometry.hpp"
 #include "../util/render_clip_scope.hpp"
+#include "control_bevel.hpp"
 #include "landed_window.hpp"
 #include "nova_font.hpp"
 
@@ -48,36 +49,6 @@ CenterDialogInPlayfield(const SDL_FRect &playfield, float win_w, float win_h) {
                    playfield.y + std::truncf((playfield.h - win_h) * 0.5F),
                    win_w,
                    win_h};
-}
-
-// FUN_004d0a50: fills the rect with `fill`, bevels the top/left edges with
-// `highlight` and the bottom/right edges with `shadow`, then the caller frames
-// the rect in the window colour.
-void DrawBevel(SDL_Renderer *renderer,
-               const SDL_FRect &box,
-               const SDL_Color &fill,
-               const SDL_Color &highlight,
-               const SDL_Color &shadow) {
-  SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderFillRect(renderer, &box);
-  SDL_SetRenderDrawColor(
-      renderer, highlight.r, highlight.g, highlight.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderLine(
-      renderer, box.x + 1.0F, box.y + 1.0F, box.x + box.w - 1.0F, box.y + 1.0F);
-  SDL_RenderLine(
-      renderer, box.x + 1.0F, box.y + 1.0F, box.x + 1.0F, box.y + box.h - 1.0F);
-  SDL_SetRenderDrawColor(
-      renderer, shadow.r, shadow.g, shadow.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderLine(renderer,
-                 box.x + box.w - 2.0F,
-                 box.y + box.h - 2.0F,
-                 box.x + 1.0F,
-                 box.y + box.h - 1.0F);
-  SDL_RenderLine(renderer,
-                 box.x + box.w - 2.0F,
-                 box.y + box.h - 2.0F,
-                 box.x + box.w - 1.0F,
-                 box.y + 1.0F);
 }
 
 void FrameRect(SDL_Renderer *renderer, const SDL_FRect &box) {
@@ -288,11 +259,11 @@ void UiWindow_Draw(SdlPlatform &platform,
     switch (item.type) {
     case 4: { // Button
       const bool pressed = entry.value != 0;
-      DrawBevel(renderer,
-                box,
-                pressed ? kBevelPressedFill : kBevelFill,
-                pressed ? kBevelShadow : kBevelHighlight,
-                pressed ? kBevelHighlight : kBevelShadow);
+      DrawControlBevel(renderer,
+                       box,
+                       pressed ? kBevelPressedFill : kBevelFill,
+                       pressed ? kBevelShadow : kBevelHighlight,
+                       pressed ? kBevelHighlight : kBevelShadow);
       FrameRect(renderer, box);
       NovaText_DrawCentered(platform,
                             font_cache,
@@ -312,13 +283,17 @@ void UiWindow_Draw(SdlPlatform &platform,
     case 5:
     case 6: { // Checkbox / radio: 17x17 glyph at the rect's top-left.
       const SDL_FRect glyph{box.x, box.y, 17.0F, 17.0F};
-      DrawBevel(renderer,
-                glyph,
-                kBevelFill,
-                entry.value != 0 ? kBevelShadow : kBevelHighlight,
-                entry.value != 0 ? kBevelHighlight : kBevelShadow);
+      DrawControlBevel(renderer,
+                       glyph,
+                       kBevelFill,
+                       entry.value != 0 ? kBevelShadow : kBevelHighlight,
+                       entry.value != 0 ? kBevelHighlight : kBevelShadow);
       FrameRect(renderer, glyph);
       if (entry.value != 0) {
+        // Checked mark is an X: the two diagonals of the glyph square inset by
+        // 3, drawn in the window fill colour (UiWindow_Draw 0x004d0d00: both
+        // types 5/6 use MoveTo(left+3,top+3)->LineTo(right-3,bottom-3) and
+        // MoveTo(right-3,top+3)->LineTo(left+3,bottom-3), 17x17 rect).
         SDL_SetRenderDrawColor(renderer,
                                kWindowFill.r,
                                kWindowFill.g,
@@ -326,14 +301,14 @@ void UiWindow_Draw(SdlPlatform &platform,
                                SDL_ALPHA_OPAQUE);
         SDL_RenderLine(renderer,
                        glyph.x + 3.0F,
-                       glyph.y + 6.0F,
-                       glyph.x + 6.0F,
-                       glyph.y + 9.0F);
+                       glyph.y + 3.0F,
+                       glyph.x + 14.0F,
+                       glyph.y + 14.0F);
         SDL_RenderLine(renderer,
-                       glyph.x + 6.0F,
-                       glyph.y + 9.0F,
-                       glyph.x + 13.0F,
-                       glyph.y + 3.0F);
+                       glyph.x + 14.0F,
+                       glyph.y + 3.0F,
+                       glyph.x + 3.0F,
+                       glyph.y + 14.0F);
       }
       NovaText_Draw(platform,
                     font_cache,
@@ -382,7 +357,8 @@ void UiWindow_Draw(SdlPlatform &platform,
     }
     case 0x10: { // Edit text
       SDL_FRect inset{box.x - 1.0F, box.y - 1.0F, box.w + 2.0F, box.h + 2.0F};
-      DrawBevel(renderer, inset, kWindowFill, kBevelHighlight, kWindowFill);
+      DrawControlBevel(
+          renderer, inset, kWindowFill, kBevelHighlight, kWindowFill);
       FrameRect(renderer, box);
       // The original passes NovaText_DrawText a clip/format rect of the field
       // inset by 3 on the top/left and 3 in from the right, so typed text,
@@ -467,7 +443,8 @@ void UiWindow_Draw(SdlPlatform &platform,
       break;
     }
     case 7: { // Popup (drawn by the stock dialog callback in the original)
-      DrawBevel(renderer, box, kBevelFill, kBevelHighlight, kBevelShadow);
+      DrawControlBevel(
+          renderer, box, kBevelFill, kBevelHighlight, kBevelShadow);
       FrameRect(renderer, box);
       // Title on the left, current selection right-aligned, arrow at the edge.
       if (!entry.popup_title.empty()) {
