@@ -1432,10 +1432,28 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   }
   const PlayerEffectiveStats &eff = state.cached_stats;
 
+  // Ghidra Ship_HandlePlayerShipCore 0x0044aa70: the keyboard turn, reverse,
+  // thrust and afterburner arms are all gated on the parent's local_251 latch
+  // (`!Ship_IsShipDisabled(p)`) and `ai_station_hold_timer <= 0`. The
+  // face-target auto-turn continuation is NOT gated, so keep
+  // `face_target_armed` as passed and clear only the input latches when the
+  // controls are down; gravity, speed caps and position integration still run.
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, p);
+  const bool controls_disabled =
+      fire_restricted || p.ai_station_hold_timer > 0.0F;
+  FlightInput effective_input = input;
+  if (controls_disabled) {
+    effective_input.turn_left = false;
+    effective_input.turn_right = false;
+    effective_input.thrust = false;
+    effective_input.reverse = false;
+    effective_input.afterburner = false;
+  }
+
   const float fuel_burn = Outfit_GetPlayerAfterburnerFuelBurnRate(state);
-  const bool afterburner_active = input.afterburner && !input.reverse &&
-                                  fuel_burn <= p.fuel_points &&
-                                  fuel_burn > 0.0F;
+  const bool afterburner_active =
+      effective_input.afterburner && !effective_input.reverse &&
+      fuel_burn <= p.fuel_points && fuel_burn > 0.0F;
   // Ghidra's old name g_player_in_gravity_well is misleading: this is the
   // opcode-15 afterburner latch. Stellar_TickStellarGravityPull independently
   // sets g_gravity_pull_active, which disables the afterburner's boosted speed
@@ -1460,7 +1478,7 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
     const float intensity =
         std::min(0.7F, NovaOutfit_GetIonizationIntensity(state, p));
     effective_class.accel *= (1.0F - intensity);
-    if (!input.thrust) {
+    if (!effective_input.thrust) {
       effective_class.turn_rate *= (1.0F - intensity);
     }
   }
@@ -1508,13 +1526,13 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
       (player_class != nullptr &&
        (player_class->flags_secondary & 0x40U) != 0U) ||
       Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener);
-  movement_opts.fire_restricted = NovaAiShip_IsDisabled(state, p);
+  movement_opts.fire_restricted = fire_restricted;
   movement_opts.speed_cap_x = state.player_speed_cap_x;
   movement_opts.speed_cap_y = state.player_speed_cap_y;
   // Capture the applied turn direction (keyboard OR auto-turn) for the bank
   // animation.
   const PlayerMovementStats movement_stats = NovaPlayer_IntegrateMovement(
-      p, input, effective_class, elapsed_ticks, movement_opts);
+      p, effective_input, effective_class, elapsed_ticks, movement_opts);
   if (afterburner_active) {
     p.fuel_points = std::max(0.0F, p.fuel_points - fuel_burn * elapsed_ticks);
   }

@@ -140,7 +140,16 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   const float turn_rad =
       stats.turn_rate_deg_per_tick * kDegToRad * elapsed_ticks;
 
-  ship.engine_thrust = input.thrust && !input.reverse;
+  // Every input-driven control arm below (keyboard turn, reverse, thrust and
+  // the caller's afterburner) is gated on !Ship_IsShipDisabled(player) in the
+  // original (Ship_HandlePlayerShipCore 0x0044aa70: the parent's local_251
+  // latch). The auto-turn continuation (face-target / reverse's desired
+  // heading) is NOT gated -- it lives in the else branch of the local_265
+  // test -- so a disabled hull can still be swung around by the face-target
+  // command, but holding a turn or thrust key does nothing.
+  const bool input_enabled = !opts.fire_restricted;
+
+  ship.engine_thrust = input_enabled && input.thrust && !input.reverse;
 
   // Reverse uses the original's automatic turn-toward-velocity path instead
   // of also applying manual steering in the same tick. The face-target arm
@@ -148,7 +157,7 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   // PlayerTick_TurnInput); when reverse and face-target are held together the
   // original's block ordering is unresolved (TODO(decomp)) and reverse wins
   // here.
-  if (!input.reverse && !opts.face_target_armed) {
+  if (input_enabled && !input.reverse && !opts.face_target_armed) {
     if (input.turn_left && !input.turn_right) {
       ship.heading -= turn_rad;
       stats.turn_dir = -1;
@@ -163,7 +172,7 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
     }
   }
 
-  if (input.reverse) {
+  if (input_enabled && input.reverse) {
     // Ghidra 0x0044e019: the reverse command finds the current velocity's
     // bearing, adds 180 degrees, and calls Ship_TurnShipTowardHeading. It
     // turns the hull around while preserving its velocity; it is not braking.
@@ -191,7 +200,7 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
           ship.heading + std::copysign(turn_rad, delta) + kTwoPi, kTwoPi);
       stats.turn_dir = delta > 0.0F ? 1 : -1;
     }
-  } else if (input.thrust) {
+  } else if (input_enabled && input.thrust) {
     if (opts.inertialess) {
       // Ghidra 0x0044c9ab thrust arm, inertialess variant: thrust
       // accumulates the scalar speed (+0x48), clamped to the effective max

@@ -78,6 +78,51 @@ TEST_CASE("flight turns at the original rounded effective turn rate") {
         Catch::Approx(5.0F * std::numbers::pi_v<float> / 180.0F));
 }
 
+// Ghidra Ship_HandlePlayerShipCore 0x0044aa70: keyboard turn, reverse and
+// thrust are gated on !Ship_IsShipDisabled(player) (the parent's local_251
+// latch). The face-target auto-turn continuation is not gated.
+TEST_CASE("disabled player ignores keyboard turn, thrust and reverse") {
+  game::PlayerMovementOptions opts;
+  opts.fire_restricted = true;
+
+  game::PlayerShip turning;
+  FlightInput turn_input;
+  turn_input.turn_right = true;
+  (void)game::NovaPlayer_IntegrateMovement(
+      turning, turn_input, TestShipClass(), 1.0F, opts);
+  CHECK(turning.heading == Catch::Approx(0.0F));
+
+  game::PlayerShip thrusting;
+  FlightInput thrust_input;
+  thrust_input.thrust = true;
+  (void)game::NovaPlayer_IntegrateMovement(
+      thrusting, thrust_input, TestShipClass(), 1.0F, opts);
+  CHECK(thrusting.vel_y == Catch::Approx(0.0F));
+  CHECK_FALSE(thrusting.engine_thrust);
+
+  game::PlayerShip reversing;
+  reversing.vel_y = -2.0F;
+  FlightInput reverse_input;
+  reverse_input.reverse = true;
+  (void)game::NovaPlayer_IntegrateMovement(
+      reversing, reverse_input, TestShipClass(), 1.0F, opts);
+  CHECK(reversing.heading == Catch::Approx(0.0F));
+  CHECK(reversing.pos_y == Catch::Approx(-2.0F));
+}
+
+TEST_CASE("face-target auto-turn still runs while the player is disabled") {
+  game::PlayerMovementOptions opts;
+  opts.fire_restricted = true;
+  opts.face_target_armed = true;
+  game::PlayerShip ship;
+  ship.ai_desired_heading_deg = 90; // well beyond one 4-degree turn step
+
+  (void)game::NovaPlayer_IntegrateMovement(
+      ship, FlightInput{}, TestShipClass(), 1.0F, opts);
+
+  CHECK(ship.heading > 0.0F);
+}
+
 // --- NPC ship movement (NovaShip_IntegrateNpcMovement; Ghidra Ship_HandleShip
 // movement block) ---
 
