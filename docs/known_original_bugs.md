@@ -33,7 +33,7 @@ Per the discord.
 * **Volume labels cannot be replaced through STR# 136**, despite older versions supporting it. 
 * **Pure-white pixels in `cicn`s become transparent** regardless of the mask. 
 * **Negative `DatePostInc` does not work.** 
-* **Beam collision detection has holes** — beams can visibly pass through substantial portions of a ship. 
+* (confirmed, unfixed) **Beam collision detection has holes** — a beam never tests its segment against a hull. `Shot_UpdateBeamHitQueue` (0x0042f270) accepts a candidate only when its **center** is inside a per-ship forward sector (half-angle `trunc(frame_span*0.66)*10/32` deg, reach `BeamLength + ceil(trunc(frame_span*0.66)/2)`), picks the nearest accepted center, then truncates the endpoint to `distance - 0.2*frame_span`. `frame_span` is the sprite's full width (for square tiles, its longest dimension), so the sector's lateral tolerance `d*tan(cone)` is narrower than the hull at close range (the beam visibly passes through the side of the ship) and wider at long range (phantom hits whose endpoint lies in empty space); elongated hulls are sized by their length and over-hit edge-on. No occlusion or time-of-flight, so a near ship can be skipped while a farther one is hit. Reproduced faithfully by `NovaWeapon_TickBeamHitQueue` (`src/game/weapon_shots.cpp`); not routed through `kApplyOriginalBugFixes`. 
 * **Finite auxiliary mission ships disappear after save/quit/reload** before the mission is completed. 
 * **RLE colour runs ignore colouring, transparency and murk.** 
 * **The starfield ignores murk.** 
@@ -42,7 +42,7 @@ Per the discord.
 * **IFF jamming creates inconsistent spob interaction** — landing can remain forbidden even though hailing treats the spob as friendly, making normal bribery unavailable. 
 * **Multi-ship cargo-retrieval missions mishandle cargo** — the first target gives the full cargo amount, later targets require the same free space but yield 0 tons. 
 * **Nebula image selection chooses a too-small image and scales it up** rather than scaling a slightly oversized image down. 
-* **Max-guns/max-turrets outfit bonuses do not stack.** 
+* (fixed) **Max-guns/max-turrets outfit bonuses do not stack.** The executable added the first ModType-45/46 value once per owning outfit definition, so N copies of one modifier gave its bonus once. Fixed in `Outfit_ClampOwnedCountToCurrentLimits` (0x004656a0) under `kApplyOriginalBugFixes`: scale by the owned count, matching the Bible's per-item "add to max" and ModType 27's explicit per-copy rule. The shipped "Sigma Mount Reinforcement" has `Max` 1, so the bug was latent in the base scenario; the faithful behavior is kept when the policy is off. 
 * **`Hxxx`/probably `Exxx` ship changes omit carried fighters**, leaving the new ship's bays empty; the initial player ship has the same problem. 
 * **Visbit-swapped systems can retain the previous system's map colour and message-buoy string.** 
 * **A brief tractor-beam hit can permanently paralyse an AI ship** until it is hit by the tractor again. 
@@ -50,7 +50,7 @@ Per the discord.
 * **Travel-stellar objectives can complete before required special-ship cargo is collected.** 
 * **Ship trade-in value can disagree between the Extras pane and shipyard.** 
 * **Point-defense beams can reacquire targets outside their normal range.** 
-* **`Gxxx` in an outfit's `OnBuy` prevents the purchased outfit itself from being granted**; `Dxxx` in `OnSell` has the symmetric problem. 
+* (perhaps wanted?) **`Gxxx` in an outfit's `OnBuy` prevents the purchased outfit itself from being granted**; `Dxxx` in `OnSell` has the symmetric problem. 
 * **Cröns contain multiple broken behaviours.** The thread treats this as a family of engine bugs rather than one isolated defect. 
 * **Random mission travel/return stellars can fail when the originating system will change the following day.** 
 * **Dude-specific advice STR# resources sometimes fail to load all entries.** 
@@ -61,7 +61,7 @@ Per the discord.
 * **Pirate AI can make very-low-armour ships effectively invulnerable** because it refuses to destroy targets but cannot disable ships with ≤3 armour. 
 * **Windows hyperspace flash does not build up like the Mac implementation.** 
 * **`DispWeight` does not control mission ordering**; Mac 1.1 presents missions by increasing resource ID instead. 
-* **Economy-at-Work ships can become hostile when the player requests assistance.** 
+* **Economy-at-Work (asteroid miners) ships can become hostile when the player requests assistance.** 
 * **Crön date ranges split day/month and year ranges incorrectly**, so a range such as 1/1/1178–1/1/1179 only fires on two calendar dates rather than throughout the interval. 
 * **Bay-launched fighters receive only 75% of normal damage** while regenerating at the normal rate. 
 * **A shield-breaking hit also applies the weapon's full armour damage**, rather than only the unused portion of the hit. 
