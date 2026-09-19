@@ -1411,8 +1411,11 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
       if (order > 0 && order <= 4) {
         if (auto word = NovaHud_LoadStringEntry(
                 0x7d2, kOrderEntries[static_cast<std::size_t>(order)])) {
-          const float order_width = font.TextWidth(
-              NovaFontFamily::kGeneva, font_size, kNovaFontStyleRegular, *word);
+          const float order_width =
+              static_cast<float>(font.TextWidth(NovaFontFamily::kGeneva,
+                                                font_size,
+                                                kNovaFontStyleRegular,
+                                                *word));
           DrawPanelTextAt(platform,
                           font,
                           font_size,
@@ -1589,10 +1592,10 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
                             static_cast<std::int16_t>(by),
                             static_cast<std::int16_t>(bx),
                             static_cast<std::int16_t>(by)};
-          rect.left += inset;
-          rect.top += inset;
-          rect.right -= inset;
-          rect.bottom -= inset;
+          rect.left = static_cast<std::int16_t>(rect.left + inset);
+          rect.top = static_cast<std::int16_t>(rect.top + inset);
+          rect.right = static_cast<std::int16_t>(rect.right - inset);
+          rect.bottom = static_cast<std::int16_t>(rect.bottom - inset);
           if (IntersectRadarRect(rect, radar)) {
             DrawRadarDisc(renderer, rect);
           }
@@ -1694,19 +1697,19 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
       RadarPolarOffset(bearing, kRadarArrowShaftFar, end_x, end_y);
       SDL_SetRenderDrawColor(renderer, dim.r, dim.g, dim.b, dim.a);
       SDL_RenderLine(renderer,
-                     CeilRadar(start_x),
-                     CeilRadar(start_y),
-                     CeilRadar(end_x),
-                     CeilRadar(end_y));
+                     static_cast<float>(CeilRadar(start_x)),
+                     static_cast<float>(CeilRadar(start_y)),
+                     static_cast<float>(CeilRadar(end_x)),
+                     static_cast<float>(CeilRadar(end_y)));
       for (const float wing : {-kRadarArrowWingDeg, kRadarArrowWingDeg}) {
         float wing_x = end_x;
         float wing_y = end_y;
         RadarPolarOffset(bearing + wing, kRadarArrowWingLength, wing_x, wing_y);
         SDL_RenderLine(renderer,
-                       CeilRadar(end_x),
-                       CeilRadar(end_y),
-                       CeilRadar(wing_x),
-                       CeilRadar(wing_y));
+                       static_cast<float>(CeilRadar(end_x)),
+                       static_cast<float>(CeilRadar(end_y)),
+                       static_cast<float>(CeilRadar(wing_x)),
+                       static_cast<float>(CeilRadar(wing_y)));
       }
       SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
     }

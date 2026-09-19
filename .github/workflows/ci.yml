@@ -58,7 +58,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            autoconf autoconf-archive automake libtool \
+            autoconf autoconf-archive automake libtool libltdl-dev \
             libegl1-mesa-dev libibus-1.0-dev libwayland-dev libx11-dev \
             libxext-dev libxft-dev libxkbcommon-dev
 

@@ -1399,13 +1399,16 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   Mission_TickReactionSlotsForTravelInteraction(
       state,
       ctx.stellar_id,
-      platform.gameplay_ticks_ms(),
+      static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
       [&](const std::string &text) {
         NovaUi_RunTextReaderDialog(
             platform, state, text, false, render_background);
       });
   (void)Mission_TriggerLandingInteractions(
-      state, 3, platform.gameplay_ticks_ms(), [&](std::int16_t mission_def) {
+      state,
+      3,
+      static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
+      [&](std::int16_t mission_def) {
         return NovaMission_RunOfferWindow(
             platform, state, mission_def, ctx.stellar_id, render_background);
       });
