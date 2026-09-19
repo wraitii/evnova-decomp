@@ -779,8 +779,8 @@ struct TravelState {
   std::int16_t pending_payroll_periods = 0;
   // Brake to a near stop, then the stationary warp-up hold (whose tail is the
   // tunnel: the ship accelerates along the jump bearing while the Warp up cue
-  // finishes), then the fire/arrival. The fire hurls the ship 1350 px past
-  // the destination center at max speed and returns control to normal flight
+  // finishes), then the fire/arrival. The fire hurls the ship 1350 px from
+  // the in-system origin at max speed and returns control to normal flight
   // immediately; there is no post-fire tunnel in the new system.
   enum class JumpPhase { kIdle, kBrake, kHold };
   JumpPhase jump_phase = JumpPhase::kIdle;
@@ -820,8 +820,8 @@ struct TravelState {
   // The jump direction in the reimpl's radians heading convention (0 = up,
   // clockwise): the bearing from the departure point toward the destination
   // system center. The brake/hold align the hull onto this bearing for the
-  // zoom thrust, and the arrival spawn is offset from the destination center
-  // along it.
+  // zoom thrust, and the arrival spawn is hurled 1350 px from the in-system
+  // origin (0,0) along the reverse bearing.
   float jump_heading_rad = 0.0F;
 };
 

@@ -747,10 +747,10 @@ TEST_CASE("jump heading uses the linked systems' map vector") {
 }
 
 // The fire lands while the ship is still in the ORIGIN system and hurls it
-// 1350 px from the destination center along the reverse of the jump bearing,
-// moving at max speed along its heading; there is no separate in-tunnel coast
-// phase after the fire.
-TEST_CASE("jump fire hurls the ship 1350 px past the destination center") {
+// 1350 px from the in-system origin (0,0) along the reverse of the jump
+// bearing, moving at max speed along its heading; there is no separate
+// in-tunnel coast phase after the fire.
+TEST_CASE("jump fire hurls the ship 1350 px past the in-system origin") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -774,14 +774,13 @@ TEST_CASE("jump fire hurls the ship 1350 px past the destination center") {
   CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kIdle);
 
   // Arrived at max speed along the heading, exactly 1350 px from the
-  // destination system center (g_hyperspace_engage_velocity_hurl).
+  // in-system origin (0,0), not from the destination's galaxy-map position
+  // (g_hyperspace_engage_velocity_hurl; original zeroes the ship then adds
+  // the polar hurl).
   const float arrival_speed =
       std::hypot(state.player.vel_x, state.player.vel_y);
   CHECK(arrival_speed == Catch::Approx(max_speed).epsilon(0.01F));
-  const auto *dest = state.scenario.System(0x81);
-  REQUIRE(dest != nullptr);
-  const float hurl = std::hypot(state.player.pos_x - dest->pos_x,
-                                state.player.pos_y - dest->pos_y);
+  const float hurl = std::hypot(state.player.pos_x, state.player.pos_y);
   CHECK(hurl == Catch::Approx(1350.0F).epsilon(0.01F));
 }
 

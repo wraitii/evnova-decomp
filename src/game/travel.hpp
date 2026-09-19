@@ -42,7 +42,7 @@
 //     hold passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks) and the
 //     cue has finished (~6.1 s) -- the boom lands as the cue resolves.
 //   fire -- the boom/arrival: full-screen flash + 'Warp out' cue + the
-//     position hurl 1350 px from the destination center along the map
+//     position hurl 1350 px from the in-system origin (0,0) along the map
 //     bearing + 180, velocity reset to max speed along the current heading,
 //     fuel burn + system change. Control returns to normal flight
 //     immediately (no separate post-fire tunnel phase); the ship streaks
@@ -162,8 +162,8 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 //      (g_hyperspace_engage_hold_30hz 0x5755a8); the tunnel ramp schedule is
 //      cue-relative (see (b)/(c) notes in the NovaTravel_Tick docs below).
 //  (d) Fire (0x0044f3d0 area): position hurls 1350 px
-//      (g_hyperspace_engage_velocity_hurl 0x57600) from the destination
-//      center along the map bearing + 180 (the near side), velocity resets to
+//      (g_hyperspace_engage_velocity_hurl 0x57600) from the in-system origin
+//      (0,0) along the map bearing + 180 (the near side), velocity resets to
 //      max speed along the current heading, fuel burns, the system changes
 //      and control returns to normal flight immediately -- the ship streaks
 //      through the new system while coasting.
