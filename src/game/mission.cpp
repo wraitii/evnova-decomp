@@ -1591,6 +1591,18 @@ bool Mission_DoesSystemMatchMissionLocator(const GameState &state,
   return false;
 }
 
+// Per-mission auxiliary-fleet rearm tail shared by both 0x00448910 callers.
+// Kept as one body so the random-walk RNG order matches the original's
+// interleaved head/tail loop in Mission_RefreshActiveMissionSpawnState.
+static void RearmMissionTimers(GameState &state, ActiveMission &mission) {
+  if ((mission.flags_primary & 0x10) != 0) {
+    mission.mission_ship_count_active = mission.mission_ship_count_max;
+  }
+  mission.rearm_roll_clock =
+      static_cast<std::int16_t>(RandomBelow(state, 0x46) + 0x46);
+  mission.mission_fleet_metric_c = 0;
+}
+
 // Ghidra 0x00448910 Mission_RefreshActiveMissionSpawnState.
 void Mission_RefreshActiveMissionSpawnState(GameState &state) {
   for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
@@ -1618,12 +1630,19 @@ void Mission_RefreshActiveMissionSpawnState(GameState &state) {
       }
       mission.goal_count_remaining = 0;
     }
-    if ((mission.flags_primary & 0x10) != 0) {
-      mission.mission_ship_count_active = mission.mission_ship_count_max;
+    RearmMissionTimers(state, mission);
+  }
+}
+
+// Ghidra 0x00455e10 inlined tail at 0x004560a0 (a duplicate of the tail of
+// 0x00448910). The launch tail re-arms every active mission's auxiliary-fleet
+// clock WITHOUT the ShipStart-1 delayed-arrival head above.
+void Mission_RearmActiveMissionTimers(GameState &state) {
+  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
     }
-    mission.rearm_roll_clock =
-        static_cast<std::int16_t>(RandomBelow(state, 0x46) + 0x46);
-    mission.mission_fleet_metric_c = 0;
+    RearmMissionTimers(state, state.active_missions[slot]);
   }
 }
 

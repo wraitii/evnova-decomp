@@ -156,12 +156,13 @@ extern void PlayerTick_FlightTutorialHints(GameState &state,
 // two persisted player stat modifiers (state.player_stat_modifier_pct[0]/[1],
 // the DAT_007353f6/f8 pair) by +-1 with 2-in-3 probability, clamped to
 // [0x55,0x73] = [85,115] percent. Runs at the launch tail (Stellar_TravelTo-
-// System 0x00456038) and the in-flight jump arrival (0x0044fb39).
+// System 0x00456038) and the in-flight jump arrival (0x0044fa10).
 extern void NovaFrame_JitterPlayerStatModifiers(GameState &state);
 
 // Ghidra 0x00431500 Frame_RerollPlayerStatModifiers: rerolls the second pair
 // (state.player_stat_modifier_pct[2]/[3], DAT_007353fa/fc) to
-// rand(0x15)+0x5a = [90,114] percent. Same call sites as the jitter.
+// rand(0x15)+0x5a = [90,114] percent. The in-flight jump arrival only
+// (0x0044fa15); the launch tail does NOT reroll.
 extern void NovaFrame_RerollPlayerStatModifiers(GameState &state);
 
 // Ghidra Ship_HandlePlayerShipCore synthetic region

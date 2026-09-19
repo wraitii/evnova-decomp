@@ -132,6 +132,13 @@ Misn_ResolveVisibleSystemForTravel(const GameState &state,
 // it is not an ordinary per-frame tick.
 void Mission_RefreshActiveMissionSpawnState(GameState &state);
 
+// Tail of 0x00448910 (the per-mission blocks from the flags-0x10 live-count
+// latch onward), which Stellar_RunDockAndLaunchSequence inlines verbatim at
+// 0x004560a0 in its launch tail. The launch deliberately omits the
+// ShipStart-1 delayed-arrival head, so call this rather than the full
+// refresh when reproducing the launch.
+void Mission_RearmActiveMissionTimers(GameState &state);
+
 // Ghidra 0x00448090 NovaResources_EvaluateAvailability (system slice):
 // re-evaluates every system's is_visible from its Visibility NCB, re-homes
 // each nav stellar to the first visible claiming system, and relocates the
