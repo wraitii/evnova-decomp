@@ -707,6 +707,16 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
     // 0 / -1: always on at full brightness.
     ship.light_intensity = 32.0F;
   }
+
+  // Flags 0x0040 (Bible: hide running light sprites when the ship is
+  // disabled) forces the light layer off after the blink state machine has
+  // run, so a disabled hull goes dark regardless of BlinkMode
+  // (Ghidra 0x0042947c tests flags & 0x40, 0x0042948e writes intensity 0).
+  // The renderer's <= 1.0 visibility threshold then hides the layer.
+  if ((cls->sprite_behavior_flags & 0x0040U) != 0U &&
+      NovaAiShip_IsDisabled(state, ship)) {
+    ship.light_intensity = 0.0F;
+  }
 }
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, cloak-fade slice. See the header
