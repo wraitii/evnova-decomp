@@ -343,59 +343,63 @@ void FireJump(GameState &state) {
   player.vel_y = -std::cos(player.heading) * arrival_speed;
   player.speed = arrival_speed;
 
-  // Arrival overlay (0x0044f954 tail): a random "Entering the / Jumping into
-  // the / Arriving in the" lead (STR# 0x7d2 0x2b..0x2d), the system display
-  // name, " system on " (0x30), the formatted arrival date
+  // Arrival overlay (0x0044f954 tail): when the destination system defines an
+  // event message (SystemDef field_0x92 != -1) the original shows it instead
+  // (System_ShowSystemEventMessage); otherwise a random "Entering the /
+  // Jumping into the / Arriving in the" lead (STR# 0x7d2 0x2b..0x2d), the
+  // system display name, " system on " (0x30), the formatted arrival date
   // (Stellar_FormatElapsedTravelTime -> NovaText_FormatDateString full month
-  // names), and the no-nav appendix (0x31). Skipped when the system defines
-  // an event message instead (System_ShowSystemEventMessage, field_0x92 --
-  // TODO(decomp) not modelled).
+  // names), and the no-nav appendix (0x31).
   if (dest_sys != nullptr) {
-    const std::uint16_t lead =
-        0x2b + static_cast<std::uint16_t>(
-                   std::uniform_int_distribution<int>{0, 2}(state.rng));
-    std::string msg;
-    if (const auto text = NovaHud_LoadStringEntry(0x7d2, lead)) {
-      msg = *text;
-    }
-    msg += " ";
-    msg += dest_sys->name;
-    msg += " ";
-    if (const auto text = NovaHud_LoadStringEntry(0x7d2, 0x30)) {
-      msg += *text;
-    }
-    msg += " ";
-    msg += NovaText_FormatDateString(
-        state.date, false, state.date_prefix, state.date_suffix);
-    msg += ".";
-    // 0x31 "No stellar objects present." when the system defines no navs.
-    bool has_navs = false;
-    for (const std::int16_t nav : dest_sys->nav_defs) {
-      if (nav >= 0x80) {
-        has_navs = true;
-        break;
+    if (dest_sys->message_id != -1) {
+      System_ShowSystemEventMessage(state, dest_sys->message_id);
+    } else {
+      const std::uint16_t lead =
+          0x2b + static_cast<std::uint16_t>(
+                     std::uniform_int_distribution<int>{0, 2}(state.rng));
+      std::string msg;
+      if (const auto text = NovaHud_LoadStringEntry(0x7d2, lead)) {
+        msg = *text;
       }
-    }
-    if (!has_navs) {
-      if (const auto text = NovaHud_LoadStringEntry(0x7d2, 0x31)) {
-        msg += " ";
-        msg += *text;
-      }
-    }
-    // Abandoned-fighter tally appendix (0x0044fc62): "  (" + count word +
-    // " " + "fighter abandoned" (count == 1, 0xa4) / "fighters abandoned"
-    // (0xa5) + ")". Note the original's two leading spaces.
-    if (abandoned_fighters > 0) {
-      msg += "  (";
-      msg += FormatArrivalCountWord(abandoned_fighters);
       msg += " ";
-      const std::uint16_t word_id = abandoned_fighters == 1 ? 0xa4 : 0xa5;
-      if (const auto text = NovaHud_LoadStringEntry(0x7d2, word_id)) {
+      msg += dest_sys->name;
+      msg += " ";
+      if (const auto text = NovaHud_LoadStringEntry(0x7d2, 0x30)) {
         msg += *text;
       }
-      msg += ")";
+      msg += " ";
+      msg += NovaText_FormatDateString(
+          state.date, false, state.date_prefix, state.date_suffix);
+      msg += ".";
+      // 0x31 "No stellar objects present." when the system defines no navs.
+      bool has_navs = false;
+      for (const std::int16_t nav : dest_sys->nav_defs) {
+        if (nav >= 0x80) {
+          has_navs = true;
+          break;
+        }
+      }
+      if (!has_navs) {
+        if (const auto text = NovaHud_LoadStringEntry(0x7d2, 0x31)) {
+          msg += " ";
+          msg += *text;
+        }
+      }
+      // Abandoned-fighter tally appendix (0x0044fc62): "  (" + count word +
+      // " " + "fighter abandoned" (count == 1, 0xa4) / "fighters abandoned"
+      // (0xa5) + ")". Note the original's two leading spaces.
+      if (abandoned_fighters > 0) {
+        msg += "  (";
+        msg += FormatArrivalCountWord(abandoned_fighters);
+        msg += " ";
+        const std::uint16_t word_id = abandoned_fighters == 1 ? 0xa4 : 0xa5;
+        if (const auto text = NovaHud_LoadStringEntry(0x7d2, word_id)) {
+          msg += *text;
+        }
+        msg += ")";
+      }
+      NovaHud_ShowOverlayMessage(state, msg, static_cast<std::uint64_t>(0xf0U));
     }
-    NovaHud_ShowOverlayMessage(state, msg, static_cast<std::uint64_t>(0xf0U));
   }
 
   NovaLog::Info("hyperspace jump fired: system id {} (resource {}) after "
@@ -1597,14 +1601,19 @@ void NovaTravel_Tick(GameState &state,
         state, text.value_or(""), 0xfa, 0x00, 0x0c, 0xf0U);
   };
   if (t.starmap_destination_system_id < 0 || t.travel_slot < 0) {
-    overlay_denial(0x1c); // "You have to select a destination before you can
+    // g_pending_overlay_message's DAT_0072edcc (STR# 0x7d2 entry 0x1d, loaded
+    // from the 0x16..0x1f block) shown at 0x0044c1d0 for the fresh-pilot
+    // "select a destination" hint. The previous 0x1c loaded the tutorial
+    // fragment "' to begin your jump."
+    overlay_denial(0x1d); // "You have to select a destination before you can
                           // start a hyperspace jump."
     return;
   }
   if (!NovaTravel_CanStartJump(state)) {
-    // Fuel below one jump: STR# 0x7d2 0x9 "Insufficient energy for
-    // hyperspace jump." (the cached string DAT_0072dccc shown at 0x0044c6b8).
-    overlay_denial(0x9);
+    // Fuel below one jump: STR# 0x7d2 entry 0xa "Insufficient energy for
+    // hyperspace jump." (the cached string DAT_0072dccc shown at 0x0044c6b8;
+    // the 3..0xa loader block maps DAT_0072dccc to entry 0xa).
+    overlay_denial(0xa);
     return;
   }
   const std::size_t slot = static_cast<std::size_t>(t.travel_slot);
@@ -1615,7 +1624,7 @@ void NovaTravel_Tick(GameState &state,
           t.starmap_destination_system_id) {
     // The armed slot no longer resolves to the plotted destination (stale
     // arm after a system change): treat as nothing plotted.
-    overlay_denial(0x1c);
+    overlay_denial(0x1d);
     return;
   }
   // No-jump radius around the SYSTEM CENTER (0x0044c220 loop +

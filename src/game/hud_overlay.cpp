@@ -257,13 +257,23 @@ inline constexpr std::uint16_t kLaunchOn = 0x3c;
 // skipped and the state resets to -1; at 0x7fff (latched by the jump
 // hold-begin 0x0044c561, hyperspace arrival 0x0044f83f and ship resets) the
 // message shows every launch and the state is left latched (the original's
-// JMP LAB_00456158 skips the reset).
-// TODO(decomp) skipped: the original shows the queued-message buffer
-// g_pending_overlay_message (0x007354d0) instead (500 frames) when a pending
-// system/event message was staged at landing; the port does not model that
-// queue yet.
+// JMP LAB_00456158 skips the reset). When a pending overlay message was staged
+// at landing, that buffer is shown instead (0x1f4 ticks) and the travel-hint
+// state is left untouched.
 void NovaHud_ShowLaunchDepartureMessage(GameState &state,
                                         std::int16_t stellar_id) {
+  // Staged mission-script message wins over any departure overlay. The
+  // original checks this buffer first (0x00456134), shows it for 0x1f4 ticks,
+  // replays it cached, clears the first byte, and jumps straight to the launch
+  // tail epilogue (0x00456158), so the travel-hint state is NOT reset.
+  if (!state.pending_overlay_message.empty()) {
+    NovaHud_ShowOverlayMessage(state,
+                               state.pending_overlay_message,
+                               static_cast<std::uint64_t>(0x1f4U));
+    NovaHud_ShowCachedOverlayMessage(state, /*extend=*/true);
+    state.pending_overlay_message.clear();
+    return;
+  }
   if (state.travel.travel_hint_state < 3) {
     state.travel.travel_hint_state = -1;
     return;
@@ -294,6 +304,21 @@ void NovaHud_ShowLaunchDepartureMessage(GameState &state,
   NovaHud_ShowOverlayMessage(state, msg, static_cast<std::uint64_t>(0xf0U));
   // The original re-arms the cached overlay (0x0045646e).
   NovaHud_ShowCachedOverlayMessage(state, /*extend=*/true);
+}
+
+// Ghidra 0x00467cf0 System_ShowSystemEventMessage.
+void System_ShowSystemEventMessage(GameState &state, std::int16_t message_id) {
+  if (message_id < 0) {
+    return;
+  }
+  const auto entry = static_cast<std::uint16_t>(message_id);
+  // Sparse `STR ` id message_id + 999 first, then STR# 1000 entry message_id
+  // (see NovaResources_LoadPatchedStringEntry: override_base is the sparse id
+  // for slot 1). The original's overlay duration is 0x1e0; the shared
+  // g_hud_overlay_text_color tint maps to the port's default overlay colour.
+  const auto text = NovaResources_LoadPatchedStringEntry(1000, entry, 1000);
+  NovaHud_ShowOverlayMessage(
+      state, text.value_or(std::string{}), static_cast<std::uint64_t>(0x1e0U));
 }
 
 } // namespace game

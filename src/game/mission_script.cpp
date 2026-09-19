@@ -441,28 +441,28 @@ void Mission_ExecuteScript(GameState &state,
         }
         break;
       case 'Q': {
-        action = "show message and force leave landing";
-        state.script_forced_leave_landing = true;
-        state.pending_script_message_string_id =
-            operand >= 0 && operand <= 0x7fff
-                ? static_cast<std::int16_t>(operand)
-                : -1;
-        if (state.pending_script_message_string_id >= 0) {
+        action = "stage pending overlay message";
+        // Ghidra 0x00449370 'Q': Resource_LoadRandomStringEntry fills the
+        // 256-byte g_pending_overlay_message buffer (0x007354d0); with a live
+        // payload context slot (0..15) the original then expands mission text
+        // tags through Stellar_BuildTravelDestinationDescription. The message
+        // is NOT shown here -- the launch tail (Stellar_RunDockAndLaunch-
+        // Sequence 0x00456134) shows and clears it. TODO(decomp(0x00440c90))
+        // skipped: the Mission BBS poll callback's staged-message early exit
+        // (g_pending_overlay_message[0] != 0 -> action 7) that force-leaves
+        // the docked BBS after a scripted Q is not modelled.
+        if (operand >= 0 && operand <= 0x7fff) {
           if (auto message = LoadRandomStringListEntry(
-                  state.rng, state.pending_script_message_string_id)) {
-            // Ghidra 0x00449370 'Q': with a live payload context slot (0..15)
-            // the original runs Stellar_BuildTravelDestinationDescription(
-            // '\0', g_script_mission_context_slot) over the loaded message,
-            // expanding its mission text tags.
+                  state.rng, static_cast<std::int32_t>(operand))) {
             const std::int16_t context_slot = state.script_mission_context_slot;
             if (context_slot >= 0 && context_slot < 0x10) {
               *message = Mission_ExpandMissionWildcards(
                   state, *message, false, context_slot);
             }
-            NovaHud_ShowOverlayMessage(state, std::move(*message));
+            state.pending_overlay_message = std::move(*message);
           }
           // Missing STR# data is an asset-loading issue, not a script syntax
-          // failure; the original still leaves the stellar.
+          // failure; the original still stages an empty buffer.
           applied = true;
         }
         break;
