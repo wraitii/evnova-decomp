@@ -47,7 +47,15 @@ root** is the shipped, read-only folder next to the executable (with the
 build and `ctest`) that holds `Nova.rez`, `Nova Files/` and `Nova Plug-ins/`.
 The **support folder** is the per-user writable directory from
 `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`; the port creates its
-`Pilots/` and `Nova Plug-ins/` children on demand.
+`Pilots/` and `Nova Plug-ins/` children on demand. When neither the search nor
+a configured override finds an install, the port shows the startup locate-data
+screen (`src/game/locate_data_dialog.cpp`) on a black background instead of
+falling back to a mock menu: one button opens a native file chooser for
+`EV Nova.exe`. The chosen executable's folder is validated (it must hold
+`Nova.rez` or `Nova Files/`) and persisted as `[paths] install_root` in the
+port-only `EV Nova Extra Prefs.ini` (`game::NovaExtraPrefs`);
+`NovaPaths::SetInstallRootOverride` then makes it take precedence over the
+candidate search on later runs.
 
 Archive precedence, weakest to strongest (later archives shadow earlier ones):
 `Nova.rez` -> install `Nova Files/*.rez` -> install `Nova Plug-ins/*.rez`
@@ -55,7 +63,8 @@ Archive precedence, weakest to strongest (later archives shadow earlier ones):
 support `Nova Plug-ins/*.rez`. `NovaResource_LocateFile` searches the same
 order reversed for media. The support-plugins layer is a port extension (the
 original only had one support folder); total-conversion folder selection via
-argv/`.nplay` is not yet ported.
+argv/`.nplay` is not yet ported. The persisted `install_root` override is a
+port-only convenience for launching from outside an install.
 
 ## Clean-room model
 

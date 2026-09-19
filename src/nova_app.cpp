@@ -3,7 +3,9 @@
 #include "brgr_archive.hpp"
 #include "game/about_dialog.hpp"
 #include "game/command_input.hpp"
+#include "game/extended_prefs.hpp"
 #include "game/hud_overlay.hpp"
+#include "game/locate_data_dialog.hpp"
 #include "game/mission.hpp"
 #include "game/mission_trace.hpp"
 #include "game/new_pilot_flow.hpp"
@@ -18,6 +20,7 @@
 #include "game/travel.hpp"
 #include "game/ui_dialog.hpp"
 #include "log.hpp"
+#include "nova_paths.hpp"
 #include "pict_image.hpp"
 #include "rle_sprite_sheet.hpp"
 #include "util/color.hpp"
@@ -52,22 +55,6 @@ constexpr std::array kMenuEntries{
     MenuEntry{GameModeAction::about_nova, "ABOUT NOVA"},
 };
 
-// The menu art and coordinates are authored in the native 1024x768 canvas.
-// The active Placement maps this canvas to the window without another scale
-// in the draw code.
-constexpr float kFallbackMenuLeft = 83.0F;
-constexpr float kFallbackMenuTop = 381.0F;
-constexpr float kFallbackMenuWidth = 352.0F;
-constexpr float kFallbackMenuHeight = 38.0F;
-constexpr float kFallbackMenuGap = 13.0F;
-constexpr float kFallbackLogoOriginX = 191.0F;
-constexpr float kFallbackLogoOriginY = 162.0F;
-constexpr NovaMenuPoint kFallbackCenterPreviewOrigin{.x = 444, .y = 465};
-constexpr std::array<NovaMenuPoint, 3> kFallbackRowRevealOrigins{
-    NovaMenuPoint{.x = 343, .y = 399},
-    NovaMenuPoint{.x = 337, .y = 462},
-    NovaMenuPoint{.x = 337, .y = 526},
-};
 constexpr std::uint64_t kLoadingSplashDurationMs = 850;
 constexpr std::uint64_t kStartupSplashDurationMs = 1'850;
 // The port paces its staged startup asset loads to match the original's
@@ -102,25 +89,25 @@ constexpr float kMenuFontLogicalSize = 9.0F;
 constexpr SDL_Color kMenuLabelColor{128, 0, 0, SDL_ALPHA_OPAQUE};
 constexpr SDL_Color kMenuValueColor{248, 0, 0, SDL_ALPHA_OPAQUE};
 
+// Menu buttons are placed from the shipped c\x9alr style plus the button's own
+// sprite definition; the startup gate guarantees both are present. Returns an
+// empty rect when they are not, and the callers skip the entry rather than
+// inventing a layout (the old mock fallback was removed with the locate-data
+// screen).
 [[nodiscard]] SDL_FRect MenuRect(const NovaRuntime &runtime,
                                  std::size_t index) {
-  if (index < runtime.main_menu_sprite_definitions.size() &&
-      runtime.main_menu_style && runtime.main_menu_sprite_definitions[index]) {
-    const auto &origin = runtime.main_menu_style->button_origins[index];
-    const auto &sprite = *runtime.main_menu_sprite_definitions[index];
-    return SDL_FRect{
-        static_cast<float>(origin.x),
-        static_cast<float>(origin.y),
-        static_cast<float>(sprite.tile_width),
-        static_cast<float>(sprite.tile_height),
-    };
+  if (!runtime.main_menu_style ||
+      index >= runtime.main_menu_sprite_definitions.size() ||
+      !runtime.main_menu_sprite_definitions[index]) {
+    return SDL_FRect{};
   }
+  const auto &origin = runtime.main_menu_style->button_origins[index];
+  const auto &sprite = *runtime.main_menu_sprite_definitions[index];
   return SDL_FRect{
-      kFallbackMenuLeft,
-      kFallbackMenuTop +
-          static_cast<float>(index) * (kFallbackMenuHeight + kFallbackMenuGap),
-      kFallbackMenuWidth,
-      kFallbackMenuHeight,
+      static_cast<float>(origin.x),
+      static_cast<float>(origin.y),
+      static_cast<float>(sprite.tile_width),
+      static_cast<float>(sprite.tile_height),
   };
 }
 
@@ -1065,6 +1052,36 @@ int NovaApp_Run(NovaRuntime &runtime) {
     });
     runtime.music.SetPlaybackSuppressed(suppressed);
   });
+  // Port-only bootstrap: apply a previously selected install root from the
+  // extended prefs, then ask the player to locate the data when neither that
+  // nor the normal candidate search finds an install. The original always
+  // shipped its data beside the executable; the port can be launched from
+  // anywhere, so it cannot silently fall back to a mock menu (see
+  // game::NovaUi_RunLocateDataDialog).
+  game::NovaExtraPrefs extra_prefs;
+  if (!game::NovaExtraPrefs_LoadFromSystemStore(extra_prefs)) {
+    NovaLog::Info("extra prefs: no 'EV Nova Extra Prefs.ini' yet");
+  }
+  if (extra_prefs.install_root) {
+    NovaPaths::SetInstallRootOverride(extra_prefs.install_root);
+  }
+  if (!NovaPaths::InstallRoot()) {
+    NovaLog::Warn("no EV Nova install root found; asking the player to locate "
+                  "the Community Edition data");
+    const auto located = game::NovaUi_RunLocateDataDialog(runtime.platform);
+    if (!located) {
+      NovaLog::Info("player quit from the locate-data screen");
+      return 0;
+    }
+    NovaPaths::SetInstallRootOverride(*located);
+    extra_prefs.install_root = *located;
+    if (!game::NovaExtraPrefs_SaveToSystemStore(extra_prefs)) {
+      NovaLog::Error("could not persist the selected EV Nova install root; "
+                     "the current session will continue");
+    }
+    NovaLog::Info("using player-selected EV Nova install root '{}'",
+                  located->string());
+  }
   NovaGameSession_Run(runtime);
   // Ghidra NovaGameSession_Run calls NovaPrefs_SaveToDisk on exit; fold in the
   // runtime starmap-borders toggle so it round-trips even if the player never
@@ -1421,28 +1438,20 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
                       &menu_backdrop_rect);
   }
 
-  SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
-
   // Top background animation (sp\x95n 606, PICT 0x1f4a), drawn at c\x9alr
   // +0xe0. Frame_TickTimerDecayAndEffects selects a different random frame on
   // its short animation timer; UpdateMenuEntrance maintains the equivalent
   // no-repeat progression.
-  if (!runtime.main_menu_logo_textures.empty()) {
+  if (!runtime.main_menu_logo_textures.empty() && runtime.main_menu_style) {
     const auto frame = std::min(runtime.menu_top_animation_frame,
                                 runtime.main_menu_logo_textures.size() - 1);
     const auto &logo_texture = runtime.main_menu_logo_textures[frame];
     float logo_width = 0.0F;
     float logo_height = 0.0F;
     SDL_GetTextureSize(logo_texture->get(), &logo_width, &logo_height);
-    const float logo_origin_x = runtime.main_menu_style
-                                    ? runtime.main_menu_style->logo_origin.x
-                                    : kFallbackLogoOriginX;
-    const float logo_origin_y = runtime.main_menu_style
-                                    ? runtime.main_menu_style->logo_origin.y
-                                    : kFallbackLogoOriginY;
     const SDL_FRect logo_destination{
-        logo_origin_x,
-        logo_origin_y,
+        static_cast<float>(runtime.main_menu_style->logo_origin.x),
+        static_cast<float>(runtime.main_menu_style->logo_origin.y),
         logo_width,
         logo_height,
     };
@@ -1457,13 +1466,11 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
        ++row) {
     const auto &textures = runtime.main_menu_row_reveal_textures[row];
     const auto counter = runtime.menu_row_reveal_counters[row];
-    if (counter < 0 || counter >= static_cast<int>(textures.size()) ||
-        textures.empty()) {
+    if (!runtime.main_menu_style || counter < 0 ||
+        counter >= static_cast<int>(textures.size()) || textures.empty()) {
       continue;
     }
-    const auto origin = runtime.main_menu_style
-                            ? runtime.main_menu_style->row_reveal_origins[row]
-                            : kFallbackRowRevealOrigins[row];
+    const auto origin = runtime.main_menu_style->row_reveal_origins[row];
     float width = 0.0F;
     float height = 0.0F;
     SDL_GetTextureSize(
@@ -1498,53 +1505,15 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
         renderer, asset.textures[frame_index]->get(), nullptr, &destination);
   }
 
-  for (std::size_t index = 0; index < kMenuEntries.size(); ++index) {
-    if (!MenuRowRevealed(runtime, index % 3)) {
-      continue;
-    }
-    const auto rect = MenuRect(runtime, index);
-    const bool hovered = runtime.hovered_action == kMenuEntries[index].action;
-    if (runtime.main_menu_sprite_assets[index]) {
-      continue;
-    }
-    if (hovered) {
-      SDL_SetRenderDrawColor(renderer, 39, 99, 151, SDL_ALPHA_OPAQUE);
-      SDL_RenderFillRect(renderer, &rect);
-      SDL_SetRenderDrawColor(renderer, 190, 232, 255, SDL_ALPHA_OPAQUE);
-      SDL_RenderRect(renderer, &rect);
-      SDL_RenderDebugText(renderer, rect.x + 6.0F, rect.y + 8.0F, ">");
-    }
-    const auto menu_color =
-        runtime.main_menu_style
-            ? (hovered ? runtime.main_menu_style->menu_bright
-                       : runtime.main_menu_style->menu_dim)
-            : NovaRgbColor{
-                  .red = static_cast<std::uint8_t>(hovered ? 242 : 154),
-                  .green = static_cast<std::uint8_t>(hovered ? 248 : 200),
-                  .blue = static_cast<std::uint8_t>(hovered ? 255 : 239),
-              };
-    SDL_SetRenderDrawColor(renderer,
-                           menu_color.red,
-                           menu_color.green,
-                           menu_color.blue,
-                           SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer,
-                        rect.x + 22.0F,
-                        rect.y + 8.0F,
-                        kMenuEntries[index].label.data());
-  }
-
   // Center preview (sp\x95n 607): frames 0-5 correspond to the menu actions,
   // frame 6 is idle. The original fades the old frame out before switching.
-  if (runtime.main_menu_center_preview_asset &&
+  if (runtime.main_menu_style && runtime.main_menu_center_preview_asset &&
       !runtime.main_menu_center_preview_asset->textures.empty() &&
       runtime.menu_center_preview_intensity > 0) {
     const auto &asset = *runtime.main_menu_center_preview_asset;
     const auto frame =
         std::min(runtime.menu_center_preview_frame, asset.textures.size() - 1);
-    const auto origin = runtime.main_menu_style
-                            ? runtime.main_menu_style->center_preview_origin
-                            : kFallbackCenterPreviewOrigin;
+    const auto origin = runtime.main_menu_style->center_preview_origin;
     const SDL_FRect destination{
         static_cast<float>(origin.x),
         static_cast<float>(origin.y),

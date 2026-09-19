@@ -101,5 +101,9 @@ ones: `Nova.rez` → `Nova Files/*.rez` → `Nova Plug-ins/*.rez` → support-fo
 `Nova Plug-ins/*.rez`. (A bare `Plug-ins/` is used when the CE-style
 `Nova Plug-ins/` folder is absent.)
 
-So run from inside the install folder, or from the repo root (which holds the
-gitignored `EV Nova/` folder).
+If none of that finds the data, the game shows a **Locate EV Nova.exe** screen
+on a black background. Pick `EV Nova.exe` from your Community Edition folder;
+the chosen folder is validated and remembered as `install_root` in
+`EV Nova Extra Prefs.ini` under the support folder, and is used on later runs.
+The usual way to avoid seeing this screen is to run from inside the install
+folder, or from the repo root (which holds the gitignored `EV Nova/` folder).

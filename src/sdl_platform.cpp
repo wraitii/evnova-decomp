@@ -385,6 +385,51 @@ bool SdlPlatform::ShowOpenPilotFileDialog() {
   return true;
 }
 
+bool SdlPlatform::ShowOpenInstallFileDialog() {
+  {
+    std::scoped_lock lock(open_file_dialog_mutex_);
+    if (open_file_dialog_pending_) {
+      return false;
+    }
+    open_file_dialog_pending_ = true;
+    open_file_dialog_completed_ = false;
+    open_file_dialog_result_ = {};
+  }
+  // No filters: a macOS filter that omits an "all files" entry can grey out
+  // the CE .exe. The install root is the selected executable's folder.
+  const SDL_PropertiesID props = SDL_CreateProperties();
+  if (props == 0) {
+    NovaLog::Warn("file chooser: SDL_CreateProperties failed: {}",
+                  SDL_GetError());
+    std::scoped_lock lock(open_file_dialog_mutex_);
+    open_file_dialog_pending_ = false;
+    return false;
+  }
+  SDL_SetStringProperty(
+      props, SDL_PROP_FILE_DIALOG_TITLE_STRING, "Select EV Nova.exe");
+  SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_ACCEPT_STRING, "Choose");
+  SDL_SetPointerProperty(
+      props, SDL_PROP_FILE_DIALOG_WINDOW_POINTER, window_.get());
+  SDL_ShowFileDialogWithProperties(
+      SDL_FILEDIALOG_OPENFILE,
+      [](void *userdata, const char *const *filelist, int) {
+        auto &platform = *static_cast<SdlPlatform *>(userdata);
+        std::scoped_lock lock(platform.open_file_dialog_mutex_);
+        if (filelist == nullptr) {
+          platform.open_file_dialog_result_.error = SDL_GetError();
+        } else if (*filelist != nullptr) {
+          platform.open_file_dialog_result_.path =
+              std::filesystem::path(*filelist);
+        }
+        platform.open_file_dialog_pending_ = false;
+        platform.open_file_dialog_completed_ = true;
+      },
+      this,
+      props);
+  SDL_DestroyProperties(props);
+  return true;
+}
+
 std::optional<SdlPlatform::OpenFileDialogResult>
 SdlPlatform::PollOpenFileDialogResult() {
   std::scoped_lock lock(open_file_dialog_mutex_);

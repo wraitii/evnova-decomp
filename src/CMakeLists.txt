@@ -22,6 +22,7 @@ add_library(evnova_runtime
     game/intro_cinematic.cpp
     game/landed_window.cpp
     game/landed_store.cpp
+    game/locate_data_dialog.cpp
     game/mission.cpp
     game/mission_script.cpp
     game/mission_text.cpp
@@ -41,6 +42,7 @@ add_library(evnova_runtime
     game/docked_trade_dialog.cpp
     game/escort_commands.cpp
     game/escort_formation.cpp
+    game/extended_prefs.cpp
     game/freeflight_objects.cpp
     game/flight_automation.cpp
     game/negotiation_dialog.cpp

@@ -226,6 +226,12 @@ public:
   // worker thread. Results are copied into platform-owned state and consumed
   // by the main loop through PollOpenFileDialogResult.
   [[nodiscard]] bool ShowOpenPilotFileDialog();
+  // Native file chooser for pointing the game at an EV Nova install. SDL
+  // cannot offer files and folders in one native dialog (the Cocoa folder
+  // picker sets canChooseFiles:NO), so this is an unfiltered file dialog: the
+  // player selects EV Nova.exe and the caller derives the containing folder.
+  // The chosen file comes back through PollOpenFileDialogResult as `path`.
+  [[nodiscard]] bool ShowOpenInstallFileDialog();
   [[nodiscard]] std::optional<OpenFileDialogResult> PollOpenFileDialogResult();
   [[nodiscard]] std::optional<char> PollCommandEvent();
   // Raw editable-key event for modal dialogs. Enter/Escape/Backspace are
