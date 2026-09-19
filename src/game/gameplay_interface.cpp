@@ -113,7 +113,7 @@ HudBar_FuelReserveFill(const HudPanelRect &panel, float fuel, float capacity) {
     return out;
   }
   // sVar7 = (int)(fuel/100) with the FIST residual/sign correction, i.e.
-  // truncation toward zero (docs/x87_truncation_idiom.md), so the reserve mark
+  // truncation toward zero (docs/x87_precision.md), so the reserve mark
   // is floor(fuel/100)*100 tons.
   const int reserve_hundreds =
       static_cast<int>(static_cast<double>(fuel) / 100.0);

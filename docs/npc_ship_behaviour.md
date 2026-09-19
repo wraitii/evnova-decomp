@@ -411,15 +411,6 @@ labels.
   rather than read from the live weapon table. The non-fighter tiers keep the
   reconstructed probe logic; neither tier is gated by `kApplyOriginalBugFixes`.
 
-## Documentation practice
-
-For new evidence, prefer a Ghidra plate comment on the function that owns the
-decision and a field comment for a confirmed offset.  Keep code comments for
-constants whose name clarifies an expression; update this document only when
-the relationship is useful across states or modes.  Mark inferred names and
-unimplemented side effects as **Provisional** / `TODO(decomp)` rather than
-turning this reference back into a roadmap.
-
 ## Primary-target acquisition (`Ship_AcquirePrimaryTargetForShip` 0x0040e020)
 
 `src/game/ship_ai_behaviors.cpp` `NovaAi_AcquirePrimaryTarget` is a partial reconstruction

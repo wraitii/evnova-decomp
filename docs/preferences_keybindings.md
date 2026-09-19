@@ -8,7 +8,7 @@ All addresses are Ghidra DB addresses. Companion to `intro_and_main_menu.md`
 Ground truth: decompilation, DITL item xrefs, and the
 `Ship_HandlePlayerShipControl` decomp (0x0044e019).
 
-## Two dialogs — do not conflate
+## Two dialogs
 
 1. **Preferences / Settings** = `Menu_RunSettingsDialog` (0x00488650), DLOG
    `0xfa3` (25 items). Option toggles + sound volume + brightness sliders + a
@@ -21,8 +21,8 @@ Ground truth: decompilation, DITL item xrefs, and the
 2. **Key Settings** = `Menu_RunKeySettingsDialog` (0x0048b280), DLOG `0xfa2` (37 items) over backdrop PICT `0x8b`. A dedicated
    modal for rebinding the 34 gameplay commands.
    - `Menu_RunKeySettingsDialog` is entered from the Preferences dialog
-     (ordinal 0x10) or, in-game, from `Ship_HandlePlayerShip`? — actually via
-     the `_DAT_00591518` special-interaction command, distinct from the menu.
+     (ordinal 0x10), or in-game via the `_DAT_00591518` special-interaction
+     command.
    - Its own loop draws `Menu_KeySettingsDraw` (0x0048b860) and handles input
      via `Menu_KeySettingsHandleInput` (0x0048b6d0).
    - The PICT is the window backdrop; row highlighting is not a yellow overlay:
@@ -268,38 +268,13 @@ numeric-section resource/string file and does not contain a live `[EV Nova]`
 profile section; the table above is the runtime reader contract recovered from
 the executable.
 
-## Open TODO / work list for the reimplementation
+## Port
 
-1. **Complete:** `Resource_LoadPictAsImage` now decodes the compact 0x99
-   1-bit/color-table PICT 0x8b backdrop, including its row preamble.
-2. **Complete:** `Menu_RunSettingsDialog` is a clean-room modal over DLOG
-   0xfa3 with resource-derived geometry, the custom title-band treatment,
-   native PICT slider arrows, the original white/black surface and grayscale
-   bevels, toggles, sliders, OK/Cancel,
-   and the Key Settings entry point.
-3. **Complete:** `Menu_RunKeySettingsDialog` now renders PICT 0x8b and its 34
-   row cells; click-to-select, physical-key capture, duplicate validation,
-   Set Default, and shadow-copy Cancel/OK behavior are implemented.
-4. **Complete for modeled fields:** `NovaPreferences` lives on `NovaRuntime`,
-   defaults through `NovaPrefs_ResetToDefaults`, and loads/saves the original
-   `.prf` layout in the SDL system preference directory. Legacy flags,
-   sensitivity, and two opaque trailing control shorts remain unmodeled.
-5. **Complete for reconstructed commands:** the spaceflight loop replaces
-   `PollFlightInput`'s event-pump defaults with `FlightInput` values resolved
-   from `KeyBindings` by command id, so movement, weapons, travel, starmap, and
-   other mapped actions use the persisted table. Remaining command ports should
-   likewise use `SdlPlatform::IsOriginalKeyCodeHeld` as they are reconstructed.
-6. **`g_hyperspace_effects`** reuse: decide whether the clean-room keeps the CE
-   raw-input-lock behavior or treats it purely as the effect toggle (prefer the
-   latter, documented divergence).
-
-## Files for the reimplementation
-
-- `src/game/preferences.{hpp,cpp}` (new) — `NovaPreferences` struct, defaults,
-  .prf load/save, and the two dialog modals.
-- `src/game/key_bindings.{hpp,cpp}` (new) — the binding table, names,
-  `NovaCommand_*` active-probe helpers, `NovaInput_PeekActiveCommand`.
-- `src/nova_app.cpp` — swap the `GameModeAction::preferences` Todo branch for a
-  call into the preferences modal.
-- `src/pict_image.cpp` — PICT 0x8b decode support.
-- `src/sdl_platform.{hpp,cpp}` — route `PollFlightInput` through the table.
+`NovaPreferences` (on `NovaRuntime`) defaults from `NovaPrefs_ResetToDefaults`
+and loads/saves the `.prf` layout in the SDL preference directory; legacy flags,
+sensitivity and two opaque trailing shorts are unmodeled.
+`src/game/preferences.{hpp,cpp}` owns the struct and the two dialogs;
+`src/game/key_bindings.{hpp,cpp}` owns the binding table and `NovaCommand_*`
+probes (resolved through `SdlPlatform::IsOriginalKeyCodeHeld`). Open: whether
+`g_hyperspace_effects` keeps the CE raw-input-lock behaviour or is purely the
+effect toggle.

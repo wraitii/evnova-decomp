@@ -157,18 +157,12 @@ the outfitter listing (`Outfit_RebuildAvailableOutfitListForTravelStellar`
 
 ### Provisional fields
 
-The `sp\x9ab` (stellar) decoder still fills only the positively-identified
-header fields and marks the rest provisional in `scenario_data.cpp`. The
-derived runtime fields the original computes at load (purchase mass/price
-recompute from default outfits, control-expression compilation for
-availability/purchase) are not reconstructed yet, and string fields (names,
-availability/on-purchase expressions) come from the resource record name /
-later string blocks rather than the numeric header.
-
-Runtime state derived from owned outfits (effective stats, government policy
-flags, cargo overflow, mining scoop, carried bomb) is rebuilt by
-`Outfit_RecomputeOutfitDerivedState` (0x0046d4b0); see
-`docs/outfit_derived_state.md`.
+The `sp\x9ab` (stellar) decoder fills only the positively-identified header
+fields (rest marked provisional in `scenario_data.cpp`): derived runtime fields
+(purchase mass/price recompute, control-expression compilation) and string
+fields (names, availability/on-purchase expressions) are not reconstructed.
+Owned-outfit derived state is rebuilt by `Outfit_RecomputeOutfitDerivedState`
+(0x0046d4b0); see `docs/outfit_derived_state.md`.
 
 ## New-game flow integration
 

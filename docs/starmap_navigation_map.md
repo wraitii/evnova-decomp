@@ -2,9 +2,7 @@
 
 ## Purpose
 
-The starmap is the in-game galaxy navigation window. In EV Nova the player
-opens it during flight to inspect the explored galaxy, identify reachable
-systems and plan the next hyperspace jump. It is the primary non-HUD binding
+The in-flight galaxy navigation window. It is the primary non-HUD binding
 between the world map (`syst` records) and the jump/travel system.
 
 ## Ghidra touchpoints

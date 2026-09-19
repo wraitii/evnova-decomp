@@ -26,12 +26,10 @@ Buy and Sell both use the single local price (no spread). Plain action moves
 `min(10, affordable/carriable)`; shift opens `NovaUi_RunStoreQuantityPrompt`.
 
 ## Port
-- `src/game/trade_center.{hpp,cpp}`: `JunkDef` decode lives in
-  `scenario_data.{hpp,cpp}`; `TradeCenter_BasePrices`, `Stellar_TradeConnective`,
-  `NovaTradeCenter_OpenSession`, `NovaTradeCenter_Buy/Sell` and the row gates.
-- `src/game/docked_trade_dialog.cpp`: `LayoutTradeCenter` loads the DITL 0x3e9
-  rects at runtime (frame from the DLOG bounds), `DrawTradeCenterScreen` +
-  `RunTradeCenterDialog`, dispatched from `NovaLanded_RunSubWindowDialog`.
+- `src/game/trade_center.{hpp,cpp}` (base prices, session, buy/sell, row gates;
+  `JunkDef` decode in `scenario_data.*`) and `src/game/docked_trade_dialog.cpp`
+  (`LayoutTradeCenter` loads DITL 0x3e9 rects at runtime; draw/run dispatch from
+  `NovaLanded_RunSubWindowDialog`).
 - Row colours come from the `c\x9alr` list palette (`NovaMainMenuStyle` in
   `brgr_archive.{hpp,cpp}`), matching the original's `DAT_0073566a`
   `list_background` / `DAT_00735670` `list_hilite` (shipped: black / dark red

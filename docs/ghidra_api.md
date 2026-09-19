@@ -30,7 +30,7 @@ Query symbols (globals, functions, types) from the decomp. One of name/name_re i
 curl -s "http://127.0.0.1:8166/symbols?name_re=Game%7CInit&limit=20"
 
 # Find symbols in address range
-curl -s "http://127.0.0.1:8166/symbols?name_re=.*&start=0x401000&end=0x402000"
+curl -s "http://127.0.0.1:8166/symbols?start=0x401000&end=0x402000"
 ```
 
 ### GET /functions
@@ -39,7 +39,7 @@ Query function symbols. Like `/symbols`, for functions/methods only.
 
 **Parameters:**
 
-Same as `/symbols`, except both name filters are optional; omit them to list all functions. Address ranges filter function entrypoints.
+Same as /symbols
 
 **Examples:**
 
@@ -57,7 +57,7 @@ Query type definitions (structs, classes, unions). Like `/symbols`, for types.
 
 **Parameters:**
 
-`name`, `name_re`, and `limit` as for `/symbols`; at least one name filter is required. Address ranges are not supported for types.
+Same as /symbols
 
 ## Function Analysis
 
@@ -480,69 +480,107 @@ Get hexdump of bytes in range.
 
 ### GET /operand_search
 
-Find functions containing instructions that use a specific operand value (including memory displacements and immediates).
-Very useful for finding virtual function calls. Useful for working out what struct fields means.
-Do note that ghidra will simply show you all instructions, so for e.g. virtual calls the output may contain unrelated classes so long as they use the same offsets.
-This basic version of the endpoint will list functions, which you can then decompile, or you can use the /disasm or /decomp variants.
+Find instructions that use a specific scalar value, and report **how** each one
+uses it. Results are grouped by containing function, so a function holding a
+dozen sites is listed - and decompiled - once.
+
+`kind` is **required**. Matching is done on the instruction's pcode, not on its
+disassembly text, so `kind=read` means a value genuinely loaded from
+`[base + op]` rather than any line that happens to contain "mov".
+
+- `read` - value loaded from `[base + op]`
+- `write` - value stored to `[base + op]`
+- `call` - indirect call through `[base + op]` (vtable / function pointer)
+- `addr` - address `[base + op]` taken but not dereferenced (LEA)
+- `imm` - `op` appears as a plain immediate, not a displacement (noisy)
+- `any` - all of the above
+
+Combine with commas: `kind=read,write`.
+
+**Note:** this searches a bare offset, so it still finds every struct that
+happens to use it. When you know the type, prefer
+`/struct/{name}/field/{field}/xrefs` below, which resolves the base type.
+
 **Parameters:**
 
-- `op` - operand scalar value to search for (either decimal or 0x-prefixed hex.)
-- `filter?` - regex to filter full instruction text (e.g., `call`, `push`, `lea|mov`). Defaults to `.*`
-- `context_filter?` - regex to filter nearby disassembly context (case-insensitive). Uses `before/after` lines if provided, otherwise defaults to 5/5 for context filtering.
-- `start?` / `end?` - optional inclusive function entrypoint address range to restrict the search to (hex address strings)
+- `op` - operand scalar value to search for (decimal or 0x-prefixed hex)
+- `kind` - required; see above
+- `filter?` - regex further filtering the instruction text
+- `context_filter?` - regex over nearby disassembly (5 lines either side by default)
+- `start?` / `end?` - restrict to functions whose entry point is in this range
+- `limit?` - maximum number of sites, default 400
+- `verbose?` - `true` to print full plate comments rather than their first line
 
 **Examples:**
 
 ```bash
-# Find functions with virtual calls to vtable offset 0x10
-curl -s "http://127.0.0.1:8166/operand_search?op=0x10&filter=call"
+# Who writes field 0xc90a?
+curl -s "http://127.0.0.1:8166/operand_search?op=0xc90a&kind=write"
 
-# Find lea/mov using operand 0x14 (for struct fields)
-curl -s "http://127.0.0.1:8166/operand_search?op=0x14&filter=lea%7cmov"
+# Virtual calls through vtable slot 0x10
+curl -s "http://127.0.0.1:8166/operand_search?op=0x10&kind=call"
 
-# Find push 0x10 only when nearby context mentions vtable-ish loads/calls
-curl -s "http://127.0.0.1:8166/operand_search?op=0x10&filter=push&context_filter=call%7Cmov"
-
-# Restrict to functions with entrypoints in a specific range
-curl -s "http://127.0.0.1:8166/operand_search?op=0x10&start=0x401000&end=0x40ffff"
-```
-
-### GET /operand_search/decomp
-
-Similar to `/operand_search` but returns decompilation context at the actual site.
-
-**Parameters:**
-
-- `op` - operand scalar value to search for (either decimal or 0x-prefixed hex.)
-- `filter?` - regex to filter instructions (e.g., `call`). Defaults to `.*`
-- `context_filter?` - regex to filter nearby disassembly context before decomp output selection
-- `before?`/`after?` - how many lines of context to include.
-- `start?` / `end?` - optional inclusive function entrypoint address range to restrict the search to
-
-**Example:**
-
-```bash
-curl -s "http://127.0.0.1:8166/operand_search/decomp?op=0x10&filter=call&before=8&after=2"
+# Everything, as the endpoint used to behave
+curl -s "http://127.0.0.1:8166/operand_search?op=0x10&kind=any"
 ```
 
 ### GET /operand_search/disasm
 
-Similar to `/operand_search` but returns disassembly context at the actual site.
-This is more reliable than /decomp but less useful. Good sanity check.
+As `/operand_search`, with disassembly context around each site.
+Adds `before?`/`after?` (default 5/0).
+
+### GET /operand_search/decomp
+
+As `/operand_search`, with decompiled context around each site. Each function is
+decompiled once regardless of how many sites it holds.
+Adds `before?`/`after?` (default 4/2).
+
+```bash
+curl -s "http://127.0.0.1:8166/operand_search/decomp?op=0xc90a&kind=read,write"
+```
+
+### GET /struct/{name}/field/{offset|fieldname}/xrefs
+
+Find uses of one **struct field**, resolving the base type rather than matching a
+bare offset. This is the endpoint to reach for when working out what a field
+means.
+
+No decompilation is involved, so it costs about a second on a large program and
+needs no warm cache. It works by propagating the types already in the program
+database - parameter and local signatures, and globals typed as the struct or an
+array of it - forward over raw instruction pcode, flow-sensitively over the CFG.
+Array walks are recovered from the stride even when the array's own symbol is
+untyped: a register scaled by `sizeof(struct)`, or stepped by it in a loop, can
+only be indexing this struct.
+
+The field may be named or given as an offset (decimal or 0x-hex); an offset
+inside a field resolves to the field containing it.
 
 **Parameters:**
 
-- `op` - operand scalar value to search for (either decimal or 0x-prefixed hex.)
-- `filter?` - regex to filter instructions (e.g., `call`). Defaults to `.*`
-- `context_filter?` - regex to filter nearby disassembly context (can match adjacent lines)
-- `before?`/`after?` - how many lines of context to include.
-- `start?` / `end?` - optional inclusive function entrypoint address range to restrict the search to
+- `kind?` - as `/operand_search`, default `read,write,call,addr`
+- `limit?` - maximum number of sites, default 400
+- `include_untyped?` - `true` to also list accesses at the same offset whose base
+  could not be proved to be this struct. Useful as a sanity check, and to catch
+  the residue the analysis misses
+- `debug?` - `true` to report the seeds and per-candidate state, for diagnosing a
+  use that was not attributed
 
-**Example:**
+Each site is reported with its kind and the root the pointer came from
+(`param`, `local`, `array[i]` or `global`).
+
+**Examples:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/operand_search/disasm?op=0x10&before=8&after=2"
+curl -s "http://127.0.0.1:8166/struct/ShipState/field/escort_command_code/xrefs"
+
+# Only the writes - the fastest way to learn what sets a field
+curl -s "http://127.0.0.1:8166/struct/ShipState/field/0xc90a/xrefs?kind=write"
 ```
+
+The same offset means different things in different structs, which is exactly
+what this resolves: `op=0x1c` alone matches over 400 sites program-wide, while
+`ShipState+0x1c` (`pos_y`) has 149 and `ShipClassDef+0x1c` has none.
 
 ## Specialized Read Endpoints
 
@@ -564,7 +602,7 @@ curl -s "http://127.0.0.1:8166/type/MapRegion/xrefs"
 
 ## Write Endpoints
 
-These modify the Ghidra database. Under this project's `AGENTS.md`, all task-related Ghidra changes are preauthorized, including `confirm:true`. Inspect targets and evidence first; API messages requesting user confirmation do not require another approval.
+⚠️ **WARNING:** These modify the Ghidra database. Use with caution and ask before using.
 
 ### POST /symbol/rename
 
@@ -606,7 +644,7 @@ Modify a struct field at a specific offset.
 
 **Body:** `{struct: "MapRegion", offset: 4, name: "id", data_type: "uint32_t", comment: "Region identifier"}`
 
-**Note:** Struct resizing and field conflicts require `confirm:true`, which is preauthorized for this project.
+**Note:** Requires explicit confirmation for dangerous operations (struct resizing, field conflicts).
 
 ### POST /symbol/retype
 
@@ -622,7 +660,7 @@ Add a comment to code or data.
 
 **Body:** `{addr: "0x401234", comment: "Initializes map data", kind: "plate"}`
 
-**Kinds:** `plate` (preferred for functions), `pre` (preferred for globals/data), `post`, `eol` (end of line)
+**Kinds:** `plate` (function header), `pre` (preferred), `post`, `eol` (end of line)
 
 ### POST /function/signature
 
@@ -729,8 +767,8 @@ failed: 14
   - Creating field overlaps
   - Deleting fields
 - Use `/type/{name}/layout` first to verify current state
-- Pass `confirm:true` when required; project authorization already covers it.
+- Ask the user for confirmation.
 
 ### Function Signature Modification Safety
 
-- Inspect the current decompilation and change only intended fields. Signature changes and resets with `confirm:true` are preauthorized.
+- Always ask the user for confirmation.

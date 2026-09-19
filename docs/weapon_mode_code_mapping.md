@@ -43,7 +43,7 @@ In-flight homing is separate and only activates for **mode 1** (`NovaGameplay_Up
 tracks/retargets only when mode==1). So mode-6 rockets do NOT chase after launch; they fly straight along the fired lead.
 The "chasing" missiles are mode 1 homing weapons.
 
-## Homing / seek lock vs jamming (mode 1) — mapped (revised 2024 against 0x00431530/0x0041fd30 disasm+decomp)
+## Homing / seek lock vs jamming (mode 1)
 
 Guided (mode-1) homing shots carry **four independent seek channels** `ShotState.lock_quality_0..3` (+0x38). The four channels
 are the EVN Bible's four jamming types. **At spawn (Shot_SpawnShotFromWeapon):** `lock_quality[ch] = 0` when
@@ -143,7 +143,7 @@ rotation frame (`Weapon_ApplyTurretSpreadVelocity` 0x0046c5c0; near/far scale se
 Thunderhead mount the Thunderhead Lance (weapon 0xa6, ExitType 3): sh\x8an group 3 lateral is `+7/-7/+7/-7`
 (Thunderhead) and `+9/+9/-9/-9` (Pirate), forward `+9`, so the Lance fires from the two side exits alternately.
 
-### Beam port gaps (as of this pass)
+### Beam port gaps
 
 - The mode-0 scan uses the original inline eligibility from 0x0042f270 (ported as `BeamCandidateEligible`): active,
   same system, not the owner, ship_class != 0x2ff, weapon `flags_primary 0x400` == target-class
@@ -154,13 +154,3 @@ Thunderhead mount the Thunderhead Lance (weapon 0xa6, ExitType 3): sh\x8an group
   (Bible Inaccuracy) is not added to the beam bearing per tick.
 - Twin-surface plotters `SWBeams_DrawKinkedBeam` 0x0047AC50 / `SWBeams_DrawBeamWithFlare` 0x0047AFD0 (the
   `Shot_DrawBeamHitQueueForSurface` 0x00438810 `field_0xec != 0` path) are not ported.
-
-## Notes for future RE
-
-- Treat wiki semantics as naming guidance, not absolute truth.
-- If a branch behavior differs from wiki terminology, executable behavior wins and mapping should be updated.
-- Closest code touchpoints:
-  - `NovaGameplay_FireShipWeapons`
-  - `NovaGameplay_SpawnShotFromWeapon`
-  - `NovaGameplay_CanFireWeaponBank`
-  - `NovaGameplay_GetWeaponBurstAttempts`

@@ -73,37 +73,12 @@ etc.), so `+0x30` is the Bible `IntroTextID`, not a stellar travel destination.
 When no pilot block is found, `IntroCinematic_SetupFrames` defaults the field to
 `0x7ffd` (not a valid desc, but `!= -1`, so the reader still opens with empty text).
 
-## Reimplementation status
+## Port status
 
-The starting state fields are now reconstructed by `CharacterTemplate_Read`
-(`src/game/pilot_file.cpp`, the reader half of Ghidra `0x004cd4b0`
-`PilotData_InitializePlayerState`) and applied by `ApplyCharacterTemplate` in
-`src/game/new_pilot_flow.cpp`:
-
-- **Start date** — `+0x134/+0x136/+0x138` are read into `state.date`.
-  `Game_ResetNewGameState`'s clock+250 seed (`SetNewGameDateAndStrings`) runs
-  first as the pre-override fallback, then the template date replaces it, and
-  Step 6 carries `state.date` into the fresh `PilotFile` record before
-  `PilotFileApply` (whose `Fresh()` absent-block default is now `2250/1/1`,
-  matching the original). The main-menu status panel and mission text use the
-  live `state.date`.
-- **DatePrefix / DateSuffix** — `+0x13a`/`+0x14a` are read into
-  `state.date_prefix`/`state.date_suffix`, carried through the record, and
-  passed to `NovaText_FormatDateString` by the mission-text and status-panel
-  sites, so stock dates render with the trailing `" NC"`.
-- **Cash / Kills / reputations / OnStart** — `+0x00` credits (clamped `>= 0`),
-  `+0x1e` combat rating, the `Govt1-4`/`Status1-4` starting legal record (allied
-  systems get `Status`, their enemies `-Status`), and the `+0x32` Pascal
-  `OnStart` control-bit set string (run as `Mission_ExecuteReactionScript`
-  before the initial save) are applied. The random `System1-4` start-system
-  pick is deliberately skipped for now (the flow uses a fixed start system).
-
-Remaining gap:
-
-- **IntroTextID** — stored (renamed from the misnomer `post_intro_dest_id` to
-  `intro_text_desc_id`), but the epilogue is a stub (`RunPostIntroTextStub` in
-  `src/game/intro_cinematic.cpp`) that only logs a TODO: the desc is never loaded or
-  displayed. Stock `.Trader` carries `-1`, so this only affects mod templates.
-
-Progress rows: `0x004CD4B0`, `0x004B4690`, `0x00489D70`, `0x00468450`,
-`0x00468600`, `0x004CD3B0`, `0x0048ADC0`.
+`CharacterTemplate_Read` (`src/game/pilot_file.cpp`) and
+`ApplyCharacterTemplate` (`src/game/new_pilot_flow.cpp`) apply the start date
+(`Game_ResetNewGameState`'s clock+250 seed runs first as fallback), DatePrefix/
+Suffix, cash/kills/legal record and the `OnStart` control-bit string. The random
+`System1-4` pick is deliberately skipped (fixed start system). Remaining gap:
+`IntroTextID` is stored but the epilogue is a stub (`RunPostIntroTextStub`), so
+the desc is never shown (stock `.Trader` is `-1`).

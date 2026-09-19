@@ -18,7 +18,7 @@ External references archived locally:
   blanket two-byte endian swap is not used here (see below).
 - `docs/assets/ResForge/` — the maintained ResForge resource-fork editor.
 
-## Two persistence tiers (don't confuse them)
+## Two persistence tiers
 
 1. **Pilot-save data block** — in-memory resource family `0x63688a72`
    ("pilot" registry), keyed by pilot name. Block size 0x16a (initialized by

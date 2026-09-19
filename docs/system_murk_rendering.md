@@ -7,7 +7,7 @@ It has three visible effects: a distance fog on world sprites, a haze tint on
 the ambient starfield, and a cap on NPC engine glow. There is **no** full-screen
 murk overlay. The `SWParticle` point system (weapon sparks, asteroid debris) is
 left unfogged by the original; the port adds a gated `BUGFIX(original)` for it
-(see below). The starmap `n\x91bu` "nebula" regions are unrelated (they are
+documented with the pool in `docs/weapon_impact_particles.md`. The starmap `n\x91bu` "nebula" regions are unrelated (they are
 map backdrops, see `starmap_render.cpp`).
 
 ## Effective murk
@@ -41,7 +41,7 @@ coordinate before the subtraction; the player position stays float.)
 
 - `g_distance_intensity_scale_const2` (0x005754d0) = `1.2e-05` (binary64).
 - The `ROUND()` markers are the x87 FIST + residual/sign idiom, i.e. truncation
-  toward zero (`docs/x87_truncation_idiom.md`).
+  toward zero (`docs/x87_precision.md`).
 - At 8-bit colour depth the ceiling is 0x18; every SDL texture is 32-bit, so the
   port uses 0x1f.
 - It also copies `SystemDef.space_color` (+0x1f8, RGB555 packed from
@@ -95,28 +95,10 @@ distance_brightness/space_color, so the draw fog applies on top of the cap.
 ## Weapon/impact particles (BUGFIX)
 
 The single-pixel `SWParticle` pool (`SWParticles_DrawParticles` 0x0047bdd0) gets
-no murk treatment at all in the original: no `Frame_UpdateSpriteDistanceIntensity`
-call and no tint, so weapon sparks and asteroid debris read just as bright in a
-murk 100 system as in clear space. The port deliberately diverges here with a
-`BUGFIX(original)` gated on `kApplyOriginalBugFixes`: `DrawSwParticles` scales
-each particle's alpha by `(1 - distance_brightness/32)` using the same
-`Sprite_DistanceBrightness` helper and `fog_murk_`, with `d >= 0x1f` snapping to
-fully faded. Alpha-only dimming is sufficient because particles composite over
-whatever is behind them (there is no opaque silhouette to replace), so no
-colour mix toward `space_color`/`fog_color` is needed. Stars are intentionally
-left as the original (raw-murk tint, no distance fog).
+no murk treatment in the original; the port's gated `BUGFIX(original)` alpha dim
+is documented in `docs/weapon_impact_particles.md`.
 
-## Port implementation and divergences
-
-| Piece | Port site |
-|-------|-----------|
-| Effective murk | `NovaSystem_GetEffectiveMurkPercent` (`src/game/travel.cpp`) |
-| Distance brightness | `Sprite_DistanceBrightness` (`src/game/sprite_world.cpp`) |
-| Fog application | `SpriteDrawOptions.fog_murk` → `DrawSprite`/`BlitFrame` (`src/game/sprite_world.*`) |
-| Per-frame murk | `SpaceflightView::fog_murk_` / `fog_color_`, set in `Draw` (`src/game/spaceflight_view.cpp`) |
-| Star tint | `SpaceflightView::DrawBackground` |
-| NPC glow cap | `NovaShip_TickWeaponSpriteAndRunningLights` (`src/game/ship_visual.cpp`) |
-| Particle alpha dim (BUGFIX) | `SpaceflightView::DrawSwParticles` (`src/game/spaceflight_view.cpp`) |
+## Rendering divergences
 
 **SDL rendering.** The fog mixes toward a *constant* (`space_color`), not toward
 `dst`, so for an opaque sprite it replaces whatever is behind it. The port
@@ -145,7 +127,7 @@ reproduced (SDL_Renderer exposes no custom shader); the port does the mix in
 8-bit, so mid-range fog is at most one 5-bit step brighter than the original.
 The endpoint is exact via the snap. `kApplyOriginalBugFixes` does not apply to
 any of this (ordinary SDL/platform divergences); it only gates the particle
-`BUGFIX(original)` above.
+`BUGFIX(original)` in `docs/weapon_impact_particles.md`.
 
 **Not modelled:** the 8-bit-depth star tint branch. The `space_color` field
 itself is not stored; the fog targets `System::bkgnd_color`, which is what the
