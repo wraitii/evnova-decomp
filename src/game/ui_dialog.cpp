@@ -629,7 +629,10 @@ void UiWindow_RunInteractionLoop(
 
   // Publish the dialog's buttons to the probe harness (window-point rects,
   // named by their Pascal titles: "ok", "cancel", ...). Single generic site
-  // covering every UiWindow dialog; cleared when this interaction returns.
+  // covering every UiWindow dialog. The publishing caller owns the
+  // ProbeUiAutoClear guard for the whole modal (not this per-frame helper):
+  // clearing here each frame would blank /probe/ui during the expensive
+  // render_background and make a one-shot trigger read miss the layout.
   {
     std::vector<std::pair<std::string, SDL_FRect>> named_rects;
     named_rects.emplace_back("window", window.window_rect);
@@ -653,7 +656,6 @@ void UiWindow_RunInteractionLoop(
             std::to_string(window.definition.dialog_item_list_id),
         std::move(named_rects));
   }
-  ProbeUiAutoClear probe_ui_guard(platform);
 
   // Frame-start cursor sample, used for hover-style reads only. Click
   // handling re-samples at event time (see the primary case) so a click that
@@ -827,7 +829,9 @@ bool NovaUi_ShowConfirmDialog(SdlPlatform &platform,
   }
   UiPanel_SetEntryTextPascal(*window, 3, message);
   // The original flushes queued commands and forces the cursor visible before
-  // the loop; the port's interaction loop owns input from here.
+  // the loop; the port's interaction loop owns input from here. The guard
+  // keeps this modal's layout published for as long as it is up.
+  ProbeUiAutoClear probe_ui_guard(platform);
   short code = -1;
   while (!platform.quit_requested() && code != 1 && code != 5) {
     UiWindow_RunInteractionLoop(
@@ -854,6 +858,7 @@ NovaUi_ShowTextEntryDialog(SdlPlatform &platform,
   UiPanel_SetEntryTextPascal(*window, 5, initial_text);
   UiPanel_SetTextEntrySelectionRange(*window, 5, 0, 0xfe);
 
+  ProbeUiAutoClear probe_ui_guard(platform);
   short code = -1;
   bool accepted = false;
   while (!accepted && !platform.quit_requested()) {
