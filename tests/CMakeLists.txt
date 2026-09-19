@@ -4,6 +4,7 @@ add_executable(evnova_tests
     cargo_test.cpp
     cicn_test.cpp
     collision_test.cpp
+    command_input_test.cpp
     contraband_scan_test.cpp
     docked_dialog_test.cpp
     escort_commands_test.cpp

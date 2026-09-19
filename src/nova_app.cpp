@@ -2,6 +2,7 @@
 
 #include "brgr_archive.hpp"
 #include "game/about_dialog.hpp"
+#include "game/command_input.hpp"
 #include "game/hud_overlay.hpp"
 #include "game/mission.hpp"
 #include "game/mission_trace.hpp"
@@ -1181,6 +1182,9 @@ int NovaApp_Run(NovaRuntime &runtime) {
   if (!game::NovaPrefs_LoadFromSystemStore(runtime.prefs)) {
     NovaLog::Info("preferences: using original defaults");
   }
+  // Hand the command-query service the now-loaded binding table. Key Settings
+  // later edits runtime.prefs.bindings in place, so the install stays current.
+  game::NovaInput_InstallCommandBindings(&runtime.prefs.bindings);
   // The original normalizes the on-disk block once during startup too.
   (void)game::NovaPrefs_SaveToSystemStore(runtime.prefs);
   // Seed the runtime starmap-borders copy: the galaxy map edits GameState and

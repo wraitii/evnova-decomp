@@ -10,6 +10,7 @@
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
 #include "../util/color.hpp"
+#include "command_input.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "mission.hpp"
@@ -975,6 +976,10 @@ namespace {
 
 constexpr std::uint16_t kMissionInfoFramePict = 0x2145;
 
+// Command slot 9: the shared rebindable galaxy-map command (default M), the
+// same slot the flight loop and the text reader poll.
+constexpr std::size_t kStarmapCommand = 0x09;
+
 // One active-mission row: the mission's slot and its composed list text.
 struct MissionInfoRow {
   std::int16_t slot = -1;
@@ -1122,7 +1127,9 @@ BuildMissionInfoRows(const GameState &state) {
 // mission list (0x00445dc0), the selected mission's quick-brief text panel
 // (draw 0x00446e00), the Abort/Done button pair (0x004a1520 art + 0x004a13c0
 // hit-test) with the poller's navigation (0x00446770), the starmap action
-// with the selected mission's destination preselect, and the player-abort
+// (poller action 6, raised by command slot 9 — the same rebindable map
+// command as flight and the mission briefing reader — with the selected
+// mission's destination preselect), and the player-abort
 // arm (reputation penalty + Mission_ClearMisnSlotAssignments(slot, 1)).
 // Port conveniences: Esc closes; the open/close/denied cues play through
 // `audio` directly instead of the queued centered-sound channel.
@@ -1418,11 +1425,59 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
   const auto done = [&]() { return rows.empty() && selected < 0; };
 
   bool exit_requested = false;
+  bool starmap_command_was_held = false;
+  // The mission-computer command (slot 0x28, default I) also closes the
+  // window, matching the original poller's key-event test alongside
+  // Esc/Enter.
+  const std::uint16_t mission_info_key = NovaInput_CommandKey(0x28);
+  // Poller action 6: open the map (command slot 9) with the selected mission's
+  // flags-0x100 destination preselected.
+  const auto open_starmap = [&]() {
+    std::int16_t preselect = -1;
+    if (selected >= 0) {
+      const auto &mission = state.active_missions[static_cast<std::size_t>(
+          rows[static_cast<std::size_t>(selected)].slot)];
+      if ((mission.flags_primary & 0x0100) != 0U) {
+        const std::int16_t stellar = mission.travel_stellar_id >= 0
+                                         ? mission.travel_stellar_id
+                                         : mission.return_stellar_id;
+        if (stellar >= 0 && static_cast<std::size_t>(stellar) <
+                                state.scenario.stellars.size()) {
+          preselect = state.scenario.stellars[static_cast<std::size_t>(stellar)]
+                          .system_id;
+        }
+      }
+    }
+    const StarmapResult map_result =
+        NovaStarmap_RunWindow(platform, state, preselect);
+    if (map_result.exit == StarmapExit::kQuit) {
+      exit_requested = true;
+    } else if (map_result.destination_system_id >= 0) {
+      // The map's destination selection is the plotted jump target, the same
+      // end state as opening the map from the flight loop.
+      NovaTravel_PlotStarmapDestination(state,
+                                        map_result.destination_system_id);
+    }
+  };
+
   while (!platform.quit_requested() && !exit_requested) {
     draw_frame();
+    const bool starmap_command_held =
+        NovaInput_IsCommandActive(platform, kStarmapCommand);
+    if (starmap_command_held && !starmap_command_was_held) {
+      open_starmap();
+    }
+    starmap_command_was_held = starmap_command_held;
+    if (exit_requested) {
+      break;
+    }
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
-      // PollSpecialInteractionWindow (0x00446770): Enter/Esc/I close, M opens
-      // the starmap, arrows move the selection.
+      // PollSpecialInteractionWindow (0x00446770): Enter/Esc/I close, arrows
+      // move the selection; the map command is polled above the loop.
+      if (input->key_code != 0xffff && input->key_code == mission_info_key) {
+        exit_requested = true;
+        break;
+      }
       if (input->key == TextKey::escape || input->key == TextKey::enter) {
         exit_requested = true;
         break;
@@ -1471,49 +1526,6 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
           exit_requested = true;
         }
         continue;
-      }
-      if (input->key != TextKey::character) {
-        continue;
-      }
-      const char key = static_cast<char>(
-          std::tolower(static_cast<unsigned char>(input->character)));
-      if (key == 'm') {
-        // Starmap action: preselect the selected mission's destination system
-        // when its flags carry the 0x0100 map arrow (travel stellar first,
-        // else the return stellar).
-        std::int16_t preselect = -1;
-        if (selected >= 0) {
-          const auto &mission = state.active_missions[static_cast<std::size_t>(
-              rows[static_cast<std::size_t>(selected)].slot)];
-          if ((mission.flags_primary & 0x0100) != 0U) {
-            const std::int16_t stellar = mission.travel_stellar_id >= 0
-                                             ? mission.travel_stellar_id
-                                             : mission.return_stellar_id;
-            if (stellar >= 0 && static_cast<std::size_t>(stellar) <
-                                    state.scenario.stellars.size()) {
-              // Active-record stellar ids index the stellar table directly
-              // (g_stellar_defs[...] in the original).
-              preselect =
-                  state.scenario.stellars[static_cast<std::size_t>(stellar)]
-                      .system_id;
-            }
-          }
-        }
-        const StarmapResult map_result =
-            NovaStarmap_RunWindow(platform, state, preselect);
-        if (map_result.exit == StarmapExit::kQuit) {
-          exit_requested = true;
-        } else if (map_result.destination_system_id >= 0) {
-          // The map's destination selection is the plotted jump target, the
-          // same end state as opening the map from the flight loop.
-          NovaTravel_PlotStarmapDestination(state,
-                                            map_result.destination_system_id);
-        }
-        break;
-      }
-      if (key == 'i') {
-        exit_requested = true;
-        break;
       }
     }
     if (done()) {

@@ -40,6 +40,50 @@ Opened from:
   travel: random linked destination, or another unlinked wormhole when every
   HyperLink field is unused.
 
+## The map command (binding slot 9)
+
+There is a single rebindable "galaxy map" command, independent of context. It
+is command id **9** in the per-pilot binding table `g_player_key_bindings`
+(0x005914e6, `short[0x52]`, index == command id), default key code `0x32` (M)
+from `NovaPrefs_ResetKeyBindings` (0x004b4400). Every consumer polls it as
+`NovaInput_IsCommandActiveWithGameplayGuards(g_player_key_bindings[9])`.
+Ghidra prints that load as `g_nova_control_bits[44]` / `._44_2_` because the
+`g_nova_control_bits` label is based 44 bytes below the binding table
+(`0x005914f8 == 0x005914e6 + 2*9`); it is really binding slot 9.
+
+Two sibling commands recur in the same dialogs and are worth not conflating:
+slot **0x19 (25)** opens the player-special-interaction window and slot
+**0x28 (40)** opens the mission computer.
+
+The command is context-sensitive: whichever modal owns the input loop decides
+what the map does. Each dialog dispatches it on a small integer **action
+code** that is local to that dialog's poll callback and run loop — the code is
+not the key binding and not a DITL control id, so it differs per window even
+though the command is the same:
+
+| Context | Poll / dispatch | Map action | Notes |
+|---|---|---|---|
+| In-flight | `Ship_HandlePlayerShip` 0x0044b120 | open (edge) | gated while landing / hyperspacing / dead |
+| Mission initial briefing (text reader) | `Ui_RunTravelSelectionDialog` 0x004982a0 | **4** | only when its `allow_starmap` arg is set |
+| Mission-ship interaction | `NovaUi_PollMissionShipInteractionWindow` 0x00447170 | **4** | |
+| Mission computer (I) | `NovaUi_RunMissionComputerWindow` 0x00446150 | **6** | preselects the selected mission's flags-0x100 destination |
+| Mission BBS | `NovaUi_PollMissionBbsWindow` 0x00440c90 | **6** | |
+| Bar | `NovaUi_RunBarWindow` 0x0047c8e0 | **8** | |
+
+Where the map is opened with a destination preselected, the preselect is the
+highlighted mission's travel stellar (else return stellar) when its
+flags-at-accept carry `0x100`; the text reader does **not** preselect (it just
+saves/restores the player travel state around the map).
+
+**Port status.** The port now resolves the command through a shared service
+(`game::NovaInput_IsCommandActive`, `src/game/command_input.hpp`), installed
+at startup with `&runtime.prefs.bindings`. The flight loop, the text reader
+(`selection_text_dialog.cpp`) and the mission computer
+(`docked_mission_dialog.cpp`) all poll slot 9, so a starmap rebind follows into
+the dialogs. The sibling slot 0x28 is threaded the same way: it opens the
+mission computer from flight and matching the bound key closes it; the Player
+Info close (slot 0x19) uses the same service.
+
 ## Data model
 
 The map is driven by the scenario `syst` table (`ScenarioData.systems`, the
