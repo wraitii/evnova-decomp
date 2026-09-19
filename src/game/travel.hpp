@@ -36,11 +36,12 @@
 //     advances along it by min(progress, 50) px/tick with progress =
 //     elapsed_60hz*multiplier/(364*0.01) - 35/multiplier -- both the elapsed
 //     clock and the 364 duration are 1/60 s ticks (duration = the cue's own
-//     length, snd 128 frames*60/rate), so for a stock ship the ramp starts
+//     length, snd 128 frames*60/rate), so for multiplier=1 the ramp starts
 //     ~2.1 s into the hold and hits the cap at ~5.2 s -- and the engine glow
 //     overdrives +4/tick to 32 (past the normal 24). The fire lands once the
 //     hold passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks) and the
-//     cue has finished (~6.1 s) -- the boom lands as the cue resolves.
+//     cue has finished (6.08 s / multiplier) -- the boom lands as the cue
+//     resolves.
 //   fire -- the boom/arrival: full-screen flash + 'Warp out' cue + the
 //     position hurl 1350 px from the in-system origin (0,0) along the map
 //     bearing + 180, velocity reset to max speed along the current heading,
@@ -50,8 +51,8 @@
 // Known remaining divergences: escort warp-sync and the multi-jump outfit
 // (Stellar_ComputeShipJumpDepth 0x0046cdd0), the multi-hop planned-route jump
 // continuation, and the disabled-in-jump 'hyperspace field collapsed' exit.
-// (The jump_duration_multiplier ramp clock and 'Warp up' cue rate are decoded
-// and applied.)
+// (The jump_duration_multiplier ramp clock and 'Warp up' cue duration scale are
+// decoded; the SDL call applies the multiplier as playback speed.)
 
 #include <cstdint>
 
@@ -151,7 +152,7 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 //      CENTER (Stellar_ComputeTravelRangeSq 0x00465610; denial STR# 0x7d2
 //      0x2a). Engaging clears the stellar selection (the reticle hides, the
 //      nav panel switches to Hyperspace) and starts the brake.
-//  (b) kBrake: while |round(vel)| >= 2 on either axis the ship faces the
+//  (b) kBrake: while |trunc(vel)| >= 2 on either axis the ship faces the
 //      REVERSE of its velocity and retro-thrusts once inside the facing window
 //      max(class turn + 1, 20 deg), damping velocity by
 //      g_jump_turnaround_velocity_damp (0x5755f0, 0.9920) per 30 Hz tick.
@@ -376,6 +377,14 @@ void NovaTravel_Tick(GameState &state,
                      float frame_time_ms,
                      bool warp_up_sound_active = false);
 
+// Advances the hyperspace flash by one render frame according to its mode. The
+// jump-hold build-up (kBuildup) is the pre-trigger state; once the Mac scalar
+// becomes positive, NovaTravel_Tick latches kFadeIn exactly once. kFadeIn and
+// kFadeOut run the Mac 1.5 s display fades, while kInstant keeps the original
+// ~60 ms one-frame fallback (wormhole, disabled-jump collapse). The caller
+// passes the host render-frame delta in milliseconds.
+void NovaTravel_AdvanceScreenFlash(GameState &state, float frame_time_ms);
+
 // Consume the jump's saved travel-day count after rebuilding the arrival
 // fleet. The callback presents the original unpaid-escort dismissal dialog.
 void NovaTravel_ProcessArrivalPayroll(
@@ -401,7 +410,8 @@ void NovaTravel_ProcessArrivalPayroll(
 void NovaTravel_UpdateEngagementProgress(GameState &state);
 
 // ShipClassDef.jump_duration_multiplier for the player's current hull; the
-// ramp clock and the 'Warp up' cue rate (1/multiplier) both use it.
+// ramp clock and the 'Warp up' cue duration scale both use it; the SDL call
+// receives the multiplier as a playback speed.
 [[nodiscard]] float
 NovaTravel_PlayerJumpDurationMultiplier(const GameState &state);
 

@@ -372,7 +372,8 @@ struct ShipClass {
   // Derived by the shp loader from capability_flags (Ghidra 0x004bd3c0):
   // bit0 -> 0.7, else bit1 -> 1.3, else bit2 -> 1.6, else 1.0; all *1.3,
   // floored at 0.5 (the floor never binds; min product 0.91). Scales the
-  // hyperspace ramp clock and the 'Warp up' cue playback rate (1/multiplier).
+  // hyperspace ramp clock and the 'Warp up' cue duration scale. The SDL audio
+  // call receives this value as a playback speed multiplier.
   float jump_duration_multiplier = 1.0F; // ShipClassDef +0x44
   std::uint16_t flags_secondary = 0;     // Flags2
   std::uint16_t availability_flags = 0;  // Flags3

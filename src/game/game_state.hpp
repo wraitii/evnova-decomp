@@ -822,8 +822,8 @@ struct TravelState {
   // the ai_mode_start_time_ms name; see NovaTime_GetTickCount60Hz). Drives
   // the in-tunnel position ramp: progress = elapsed*multiplier
   // /(364*0.01) - 35/multiplier px/tick, capped at 50, applied while the hull
-  // faces the jump bearing (onset ~2.1 s, cap ~5.2 s, boom at the ~6.1 s cue
-  // end for a mult=1 stock ship).
+  // faces the jump bearing (onset ~2.1 s / multiplier, cap ~5.2 s / multiplier,
+  // boom at the 6.08 s / multiplier cue end).
   float tunnel_elapsed_60hz = 0.0F;
   // The jump direction in the reimpl's radians heading convention (0 = up,
   // clockwise): the bearing from the departure point toward the destination
@@ -1279,10 +1279,35 @@ struct GameState {
   // Full-screen flash intensity [0..1] at the hyperspace fire moment (the
   // original's centered effect 0x32 queued via
   // NovaAudio_QueueCenteredSound at jump engage -- the 'boom' white
-  // frame). Set to 1.0 when the boom fires at the jump's arrival, then decayed
-  // by the spaceflight loop; the in-game frame draw overlays a white fullscreen
-  // rect with this alpha. 0 when no flash is active.
+  // frame). During the jump hold it is driven by the Mac progressive fade-in
+  // scalar (see travel.cpp), then set to 1.0 when the boom fires at arrival
+  // and decayed by the spaceflight loop; the in-game frame draw overlays a
+  // fullscreen rect with this alpha. 0 when no flash is active.
   float screen_flash_intensity = 0.0F;
+  // Resolved flash colour: false = white (default), true = black. The CE
+  // build forces black when the raw g_hyperspace_effects byte is non-zero
+  // (0x00872384: g_hyperspace_effects != 0 -> DrawContext rgb (0,0,0), else
+  // the requested white). The stored byte is inverted relative to the options
+  // checkbox (`Hyperspace Effects` reads inverted(hyperspace_effects)), so the
+  // default (false) is effects-on white. The spaceflight loop resolves this
+  // from the preferences so the sim/travel state stays preference-free.
+  bool screen_flash_black = false;
+  // How screen_flash_intensity is currently driven. The render loop samples
+  // this every presentation frame. The Mac fade-in is latched once when the
+  // tunnel scalar crosses its threshold, then advances on the display clock;
+  // it is not re-armed from the 21 ms simulation cadence.
+  enum class ScreenFlashMode {
+    kNone,    // no active flash
+    kBuildup, // jump hold before the Mac _FadeWhiteIn trigger
+    kFadeIn,  // Mac 1.5 s _FadeWhiteIn display fade-in
+    kFadeOut, // Mac 1.5 s _FadeWhiteOut display fade-out
+    kInstant, // one-frame boom/collapse flash, ~60 ms decay
+  };
+  ScreenFlashMode screen_flash_mode = ScreenFlashMode::kNone;
+  // Per-jump latch for the one-shot Mac _FadeWhiteIn request. This is reset
+  // when the stationary jump hold begins; using the mode alone would re-arm
+  // the fade after another flash mode changed it.
+  bool screen_flash_fade_in_started = false;
 
   // Parsed scenario data (ships/outfits/weapons/stellars/systems), loaded once
   // so the gameplay loops can look up classes by id. Empty until a game is

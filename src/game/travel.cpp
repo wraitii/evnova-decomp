@@ -96,8 +96,9 @@ constexpr float kTurnAroundAlignDeg = 20.0F;
 //   - escape_pod_offset / multiplier (0x575568 = 35.0)
 // For a mult=1 stock ship: onset (progress > 0) at tick 127 = 2.12 s into the
 // hold, the min(progress, 50) px/tick cap at tick 309 = 5.16 s, and the fire
-// lands when the cue (staged at rate 1/multiplier) finishes at tick 364 =
-// 6.07 s -- a couple of seconds of stationary alignment, then the
+// lands when the cue (whose duration is 1/multiplier of its base length)
+// finishes at tick 364 = 6.07 s for multiplier 1.0 -- a couple of seconds of
+// stationary alignment, then the
 // acceleration with the glow overdriving, then the boom.
 constexpr float kHyperspaceTickHz = 60.0F;
 constexpr float kJumpDuration60HzTicks =
@@ -112,9 +113,9 @@ constexpr float kJumpProgressOnsetThreshold = 0.0F;
 constexpr float kTunnelSpeedCap = 50.0F; // 0x5755d8 threshold and literal cap
 // ShipClassDef.jump_duration_multiplier (loader:
 // NovaData_LoadScenarioResourceTables 0x004bd3c0, shp pass) is applied per ship
-// class. It scales the tunnel ramp clock and the 'Warp up' cue playback rate
-// (1/multiplier, 0x0046ab00) so the ramp schedule and the cue-gated fire stay
-// aligned.
+// class. It scales the tunnel ramp clock and the 'Warp up' cue duration through
+// 0x0046ab00; SDL receives the multiplier as playback speed so the ramp
+// schedule and cue-gated fire stay aligned.
 
 // The stationary hold must run at least this many 30 Hz ticks before the fire
 // (g_hyperspace_engage_hold_30hz 0x5755a8, float 30.0 -- 30 Hz ticks because
@@ -255,8 +256,11 @@ void FireJump(GameState &state) {
   // Full-screen white flash (the original's centered effect 0x32, the 'boom'
   // white frame) and the 'Warp out' sound (snd 130), latched for the
   // spaceflight loop (which owns SdlAudio) -- the flash and the boom land on
-  // the same frame.
+  // the same frame. The Mac arrival also runs _FadeWhiteOut (a 1.5 s
+  // CoreGraphics display fade) from the hold-end top block; the loop honours
+  // it through screen_flash_mode == kFadeOut.
   state.screen_flash_intensity = 1.0F;
+  state.screen_flash_mode = GameState::ScreenFlashMode::kFadeOut;
   state.warp_out_sound_pending = true;
 
   // Burn the jump's fuel.
@@ -641,7 +645,13 @@ bool NovaTravel_CompleteRestrictedTravel(GameState &state,
           kind == RestrictedTravelKind::kHypergate ? 0x168U : 0xf0U));
   state.warp_out_sound_pending = true;
   state.no_asteroids_latch = true;
+  // White PaintRect at the destination frame. The Mac hypergate then runs the
+  // gated _FadeWhiteOut (1.5 s display fade, 0x63c40); the wormhole instead
+  // resets the starfield, so it keeps the one-frame flash with no fade.
   state.screen_flash_intensity = 1.0F;
+  state.screen_flash_mode = kind == RestrictedTravelKind::kHypergate
+                                ? GameState::ScreenFlashMode::kFadeOut
+                                : GameState::ScreenFlashMode::kInstant;
   state.travel.starmap_route.fill(-1);
   state.travel.starmap_route[0] = destination_system;
   state.travel.travel_slot = -1;
@@ -1243,6 +1253,36 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
   return dest;
 }
 
+// Advances the hyperspace flash by one render frame. kFadeIn and kFadeOut are
+// the Mac 1.5 s _FadeWhiteIn/_FadeWhiteOut display fades. kBuildup is the
+// pre-trigger hold state; the Mac scalar only requests the fade once when it
+// becomes positive. kInstant is the original ~60 ms one-frame fallback for
+// the wormhole and the disabled-jump collapse.
+void NovaTravel_AdvanceScreenFlash(GameState &state, float frame_time_ms) {
+  switch (state.screen_flash_mode) {
+  case GameState::ScreenFlashMode::kFadeIn:
+    state.screen_flash_intensity =
+        std::min(1.0F, state.screen_flash_intensity + frame_time_ms / 1500.0F);
+    break;
+  case GameState::ScreenFlashMode::kFadeOut:
+    state.screen_flash_intensity =
+        std::max(0.0F, state.screen_flash_intensity - frame_time_ms / 1500.0F);
+    break;
+  case GameState::ScreenFlashMode::kInstant:
+    state.screen_flash_intensity =
+        std::max(0.0F, state.screen_flash_intensity - frame_time_ms / 60.0F);
+    break;
+  case GameState::ScreenFlashMode::kNone:
+  case GameState::ScreenFlashMode::kBuildup:
+    break;
+  }
+  if (state.screen_flash_intensity <= 0.0F &&
+      state.screen_flash_mode != GameState::ScreenFlashMode::kBuildup &&
+      state.screen_flash_mode != GameState::ScreenFlashMode::kFadeIn) {
+    state.screen_flash_mode = GameState::ScreenFlashMode::kNone;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Cross-system jump state machine.
 // ---------------------------------------------------------------------------
@@ -1297,7 +1337,12 @@ void NovaTravel_Tick(GameState &state,
         player.vel_y = -std::cos(player.heading) * speed;
         player.speed = speed;
       }
+      // The centered 'boom' effect 0x32 (white flash + Warp out sound). The
+      // Windows build does not fade here; the Mac top block only runs
+      // _FadeWhiteOut once ai_station_hold_timer <= 0, so this abort keeps the
+      // legacy one-frame flash (TODO(decomp): confirm the Mac abort path).
       state.screen_flash_intensity = 1.0F;
+      state.screen_flash_mode = GameState::ScreenFlashMode::kInstant;
       state.warp_out_sound_pending = true;
       state.warp_up_cancel_pending = true;
       t.jump_phase = TravelState::JumpPhase::kIdle;
@@ -1359,12 +1404,12 @@ void NovaTravel_Tick(GameState &state,
       // by g_jump_turnaround_velocity_damp (0x99204) per 30 Hz tick, and once
       // within the facing window (max(class turn + 1, 20) deg -- a gate, not a
       // turn speed) applies effective thrust back along it to stop the ship.
-      // Ends at the original's |round(vel_x)| < 2 && |round(vel_y)| < 2 stop
+      // Ends at the original's |trunc(vel_x)| < 2 && |trunc(vel_y)| < 2 stop
       // test -- the hold begins and the 'Warp up' cue pre-stages there
       // (0x0044c4e9).
       const bool stopped =
-          std::abs(std::round(player.vel_x)) < kStoppedRoundedVel &&
-          std::abs(std::round(player.vel_y)) < kStoppedRoundedVel;
+          std::abs(std::trunc(player.vel_x)) < kStoppedRoundedVel &&
+          std::abs(std::trunc(player.vel_y)) < kStoppedRoundedVel;
       if (!stopped) {
         // Still moving: turn around to face the reverse of the velocity.
         const float vel_heading = std::atan2(player.vel_x, -player.vel_y);
@@ -1407,6 +1452,9 @@ void NovaTravel_Tick(GameState &state,
         // The hold-begin block re-stamps the jump clock (ai_mode_start_time_ms
         // at 0x0044c4e9), so the tunnel schedule runs from here.
         t.tunnel_elapsed_60hz = 0.0F;
+        state.screen_flash_intensity = 0.0F;
+        state.screen_flash_mode = GameState::ScreenFlashMode::kBuildup;
+        state.screen_flash_fade_in_started = false;
         // The hold-begin block also latches the flight-hint state to 0x7fff
         // (Ship_HandlePlayerShipCore 0x0044c561), arming the launch departure
         // message for every landing until a pre-jump landing consumes it.
@@ -1425,6 +1473,25 @@ void NovaTravel_Tick(GameState &state,
       // enter AI state 0x0B, holding formation until the jump fires. They
       // transfer systems at arrival via escort adoption, not here.
       NovaAi_SyncJumpStateToSquad(state, player, state.tick_60hz);
+      // Ghidra 0x00467e60 NoSys_NoOp_00467e60.
+      // Mac progressive white fade-in (the top block of Ship_HandlePlayer-
+      // ShipCore 0x0044aa70; Mac _HandlePlayer ~0x683bf): the tunnel scalar
+      // FLOAT_007354a0 is clamped [0,100], and a positive value requests one
+      // asynchronous 1.5 s _FadeWhiteIn. It is a trigger, not continuously
+      // sampled opacity. The Windows build computes progress * 0.3 - 15
+      // (0x00450601) and calls the stubbed NoSys_NoOp_00467e60, so its build-up
+      // is dead; the port follows the Mac display behaviour unconditionally.
+      const float jump_multiplier =
+          NovaTravel_PlayerJumpDurationMultiplier(state);
+      const float progress = t.tunnel_elapsed_60hz * jump_multiplier /
+                                 (kJumpDuration60HzTicks * kJumpDurationScale) -
+                             kJumpProgressOffset / jump_multiplier;
+      const float fade_trigger = (progress - 55.0F) * 5.0F;
+      if (!state.screen_flash_fade_in_started && fade_trigger > 0.0F) {
+        state.screen_flash_fade_in_started = true;
+        state.screen_flash_intensity = 0.0F;
+        state.screen_flash_mode = GameState::ScreenFlashMode::kFadeIn;
+      }
       // Stationary alignment hold (the hold branch of the disabled
       // window, decompile around 0x0044f3d0): velocity damps by
       // g_hyperspace_slow_phase_velocity_damp (0.98007) per tick, the hull
@@ -1469,12 +1536,13 @@ void NovaTravel_Tick(GameState &state,
       // the heading by min(progress, 50) px/tick -- a direct position step,
       // NOT thrust into vel_x/vel_y (which stay damped near zero) -- and the
       // engine glow overdrives +4/tick up to 32, past the normal-thrust cap of
-      // 24. With the verified 60 Hz tick units the schedule is: ~2.1 s of
+      // 24. With the verified 60 Hz tick units, multiplier=1 has ~2.1 s of
       // stationary alignment while the cue rises, the ramp to the 50 px/tick
-      // cap by ~5.2 s, and the boom when the cue finishes at ~6.1 s.
-      // TODO(decomp): the original also drives the starfield streak visual
-      // from this progress (FLOAT_007354a0 = progress*0.3 - 15.0, clamped
-      // [0,100]); the streak render pass is not reconstructed.
+      // cap by ~5.2 s, and the boom when the cue finishes (6.08 s /
+      // multiplier).
+      // TODO(decomp): the original also has a starfield streak render pass
+      // during the tunnel; its source scalar and exact cadence remain
+      // unresolved here.
       const float heading_deg =
           player.heading * (180.0F / 3.14159265358979323846F);
       const float jump_deg =
@@ -1482,12 +1550,6 @@ void NovaTravel_Tick(GameState &state,
       const float align_delta_deg =
           std::abs(std::remainder(jump_deg - heading_deg, 360.0F));
       if (align_delta_deg <= std::max(class_turn_deg, kTunnelAlignDeg)) {
-        const float jump_multiplier =
-            NovaTravel_PlayerJumpDurationMultiplier(state);
-        const float progress =
-            t.tunnel_elapsed_60hz * jump_multiplier /
-                (kJumpDuration60HzTicks * kJumpDurationScale) -
-            kJumpProgressOffset / jump_multiplier;
         if (progress > 0.0F) {
           const float step = std::min(progress, kTunnelSpeedCap) * ticks;
           player.pos_x += std::sin(player.heading) * step;

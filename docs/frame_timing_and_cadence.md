@@ -209,8 +209,25 @@ These use `g_avg_frame_tick_scale` in the original and should remain on
 | Control-mode-`0x0d` formation-release counter: `Ship_ApplyShipAiControls` (`0x00408150`, increment at `0x00408d67`) adds `1.0` per raw call while an NPC follower waits for its departing leader | Advance by `elapsed_ticks / 0.63`, retaining the pre-increment `> 30` release test |
 | Mission reactions and NPC maintenance (`0x00443760`, `0x0041d6e0`) | Scope 0xb banks normalized elapsed time and replays whole 21 ms original-rate calls, preserving countdown, spawn, and RNG cadence at ~47.62 calls/s |
 | Mission spawn-state refresh (`0x00448910`) | Event-triggered, not a cadence consumer: run on jump arrival, stellar landing, and launch. It arms Bible `ShipStart = 1` arrivals: 30 calls for friendly escort fleets (`ShipGoal = 3`, `ShipBehav = 1`), otherwise 100–199 |
-| HUD overlay duration in `Frame_TickHudOverlayAndRouteMapTimers` (`0x0042f1b0`; formerly misnamed `Frame_UpdateScreenFlashTimers`) | Convert each raw-call countdown unit to 21 ms; cached overlays use the original Chicago 12 face. Route-map deadlines on the 60 Hz clock stay wall-clock based. This function does not update the hyperspace screen flash |
+| HUD overlay duration in `Frame_TickHudOverlayAndRouteMapTimers` (`0x0042f1b0`; formerly misnamed `Frame_UpdateScreenFlashTimers`) | Convert each raw-call countdown unit to 21 ms; cached overlays use the original Chicago 12 face. Route-map deadlines on the 60 Hz clock stay wall-clock based. This function does not update the hyperspace screen flash (see the fade cadence below) |
 | SWParticles (`0x0047c800`) | Bank and replay whole updates at the original 21 ms outer-loop cadence (47.62/s), preserving discrete lifetime/movement ordering without following the display refresh rate |
+
+## Hyperspace white fade cadence
+
+The Mac jump hold computes the tunnel scalar `FLOAT_007354a0` (Windows formula
+`progress * 0.3 - 15` at `0x00450601`; Mac `(progress - 55) * 5`) and requests
+`_FadeWhiteIn` once when it becomes positive, then runs `_FadeWhiteOut` at hold
+end.
+`_FadeWhiteOut` is a 1.5 s `CGDisplayFade`, so the port decays
+`screen_flash_intensity` at `host_frame_time_ms / 1500` while
+`screen_flash_mode == kFadeOut` (ordinary hyperspace fire and the hypergate
+transfer). The wormhole and the disabled-jump collapse have no display fade and
+keep the original one-frame cadence (`host_frame_time_ms / 60`,
+`screen_flash_mode == kInstant`). The hold begins in `kBuildup`; when
+`(progress - 55) * 5` becomes positive, `NovaTravel_Tick` latches one
+`kFadeIn` request and the render loop advances its 1.5 s opacity transition.
+The scalar is a trigger, not continuously sampled alpha, so simulation ticks
+cannot re-arm or sawtooth the display fade.
 
 ## Dirty-gated UI cadence (stellar radar)
 

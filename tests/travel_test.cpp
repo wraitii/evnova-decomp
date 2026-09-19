@@ -653,6 +653,30 @@ TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
   CHECK(state.player.current_system_id == 1);
 }
 
+// The original stop gate uses the x87 FIST correction idiom to truncate each
+// velocity component toward zero. A component below 2 therefore starts the
+// cue even when rounding-to-nearest would produce 2.
+TEST_CASE("jump stop gate truncates velocity before starting Warp up") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_y = -3000.0F;
+  state.player.vel_x = 1.75F;
+  state.player.vel_y = -1.75F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  CHECK(state.travel.warp_up_sound_pending);
+}
+
 TEST_CASE("jump payroll uses fleet travel days after escort restoration",
           "[travel][escort]") {
   GameState state;
@@ -785,9 +809,11 @@ TEST_CASE("jump fire hurls the ship 1350 px past the in-system origin") {
 }
 
 // The fire moment must arm the full-screen flash (the original's centered
-// effect 0x32, the 'boom' white frame). NovaTravel_Tick sets the intensity;
-// the spaceflight loop decays it, so in this tick-only test it stays set.
-TEST_CASE("jump fire arms the screen flash") {
+// effect 0x32, the 'boom' white frame) and the Mac _FadeWhiteOut. The jump
+// hold also drives a progressive build-up (Mac _FadeWhiteIn), so the
+// intensity rises before the boom; NovaTravel_Tick leaves the boom at full and
+// arms the fade-out, which the spaceflight loop decays over 1.5 s.
+TEST_CASE("jump fire arms the screen flash and fade-out") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -810,6 +836,130 @@ TEST_CASE("jump fire arms the screen flash") {
   }
   CHECK(state.travel.just_completed);
   CHECK(flash_armed);
+  CHECK(state.screen_flash_intensity == 1.0F);
+  CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kFadeOut);
+}
+
+// Mac progressive white fade-in during the jump hold: the tunnel scalar
+// FLOAT_007354a0 = (progress - 55) * 5, clamped [0,100], is a one-shot trigger
+// for the 1.5 s _FadeWhiteIn (Ship_HandlePlayerShipCore 0x0044aa70 top block,
+// Mac _HandlePlayer). It is not continuously sampled opacity. The Windows
+// build computes progress * 0.3 - 15 at 0x00450601 and calls the stubbed
+// NoSys_NoOp_00467e60, so its build-up is dead; the port follows the Mac
+// display behaviour unconditionally.
+TEST_CASE(
+    "hyperspace hold starts one-shot screen fade-in at the Mac threshold") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  // Hold the 'Warp up' cue open so the fire cannot land while the fade runs.
+  bool saw_hold = false;
+  bool saw_fade_trigger = false;
+  for (int f = 0; f < 900 && !state.travel.just_completed; ++f) {
+    NovaTravel_Tick(state,
+                    /*travel_input=*/true,
+                    16.67F,
+                    /*warp_up_sound_active=*/true);
+    if (state.travel.jump_phase != game::TravelState::JumpPhase::kHold) {
+      continue;
+    }
+    saw_hold = true;
+    if (state.screen_flash_mode == GameState::ScreenFlashMode::kFadeIn) {
+      saw_fade_trigger = true;
+      break;
+    }
+  }
+  CHECK(saw_hold);
+  CHECK(saw_fade_trigger);
+  CHECK(state.screen_flash_fade_in_started);
+  CHECK(state.screen_flash_intensity == 0.0F);
+
+  // The display fade owns the opacity. A simulation tick after the trigger
+  // must not re-arm or overwrite it.
+  NovaTravel_AdvanceScreenFlash(state, 750.0F);
+  CHECK(state.screen_flash_intensity == Catch::Approx(0.5F));
+  NovaTravel_Tick(state, true, 16.67F, true);
+  CHECK(state.screen_flash_intensity == Catch::Approx(0.5F));
+  CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kFadeIn);
+
+  // Arrival interrupts the incomplete fade-in but still starts from the Mac
+  // full-white endpoint before the 1.5 s reveal.
+  NovaTravel_Tick(state, true, 16.67F, false);
+  CHECK(state.travel.just_completed);
+  CHECK(state.screen_flash_intensity == 1.0F);
+  CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kFadeOut);
+}
+
+// Mac display-fade arming: the hypergate transfer runs _FadeWhiteOut (0x63c40,
+// a 1.5 s CoreGraphics display fade), while the wormhole paints white but
+// resets the starfield instead, so it keeps the one-frame flash.
+TEST_CASE("hypergate arms the fade-out but wormhole only flashes") {
+  const auto make_state = [] {
+    GameState state;
+    state.scenario.systems.resize(2);
+    state.scenario.systems[1].is_visible = true;
+    state.scenario.stellars.resize(1);
+    auto &destination = state.scenario.stellars[0];
+    destination.is_defined = true;
+    destination.system_id = 1;
+    destination.pos_x = 10.0F;
+    destination.pos_y = 20.0F;
+    state.player.current_system_id = 0;
+    state.cached_stats.speed_raw = 1000.0F;
+    return state;
+  };
+
+  GameState hypergate = make_state();
+  REQUIRE(NovaTravel_CompleteRestrictedTravel(
+      hypergate, 0x80, RestrictedTravelKind::kHypergate));
+  CHECK(hypergate.screen_flash_intensity == 1.0F);
+  CHECK(hypergate.screen_flash_mode == GameState::ScreenFlashMode::kFadeOut);
+
+  GameState wormhole = make_state();
+  REQUIRE(NovaTravel_CompleteRestrictedTravel(
+      wormhole, 0x80, RestrictedTravelKind::kWormhole));
+  CHECK(wormhole.screen_flash_intensity == 1.0F);
+  CHECK(wormhole.screen_flash_mode == GameState::ScreenFlashMode::kInstant);
+}
+
+// The render-side flash driver uses the Mac display fade duration for both
+// directions. The pre-trigger kBuildup state remains unchanged until the
+// progress threshold is crossed; kInstant keeps the ~60 ms fallback.
+TEST_CASE("screen flash display fades use Mac durations") {
+  GameState state;
+  state.screen_flash_intensity = 0.5F;
+  state.screen_flash_mode = GameState::ScreenFlashMode::kBuildup;
+  NovaTravel_AdvanceScreenFlash(state, 16.67F);
+  CHECK(state.screen_flash_intensity == 0.5F);
+  CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kBuildup);
+
+  state.screen_flash_intensity = 0.0F;
+  state.screen_flash_mode = GameState::ScreenFlashMode::kFadeIn;
+  NovaTravel_AdvanceScreenFlash(state, 750.0F);
+  CHECK(state.screen_flash_intensity == Catch::Approx(0.5F));
+  NovaTravel_AdvanceScreenFlash(state, 750.0F);
+  CHECK(state.screen_flash_intensity == Catch::Approx(1.0F));
+  CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kFadeIn);
+
+  state.screen_flash_intensity = 1.0F;
+  state.screen_flash_mode = GameState::ScreenFlashMode::kFadeOut;
+  NovaTravel_AdvanceScreenFlash(state, 750.0F);
+  CHECK(state.screen_flash_intensity == Catch::Approx(0.5F));
+  CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kFadeOut);
+
+  state.screen_flash_intensity = 1.0F;
+  state.screen_flash_mode = GameState::ScreenFlashMode::kInstant;
+  NovaTravel_AdvanceScreenFlash(state, 60.0F);
+  CHECK(state.screen_flash_intensity == 0.0F);
+  CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kNone);
 }
 
 // A disabled (fire-restricted) ship cannot ENGAGE a jump: the original's
@@ -879,6 +1029,9 @@ TEST_CASE("disabled mid-jump collapses the field in the same system") {
   CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kIdle);
   CHECK(state.player.current_system_id == system_before);
   CHECK(state.screen_flash_intensity == 1.0F);
+  // The collapse keeps the legacy one-frame flash (the Mac abort's fade is an
+  // open question; see travel.cpp).
+  CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kInstant);
   CHECK(state.warp_out_sound_pending);
   CHECK(state.warp_up_cancel_pending);
   // Exit velocity: min(progress, max speed) along the heading.

@@ -53,6 +53,9 @@ public:
   // sound_key tags the voice for CountActiveByKey (the original counts active
   // instances of a sound handle before retriggering no-stack effects); pass
   // -1 for untagged one-shots.
+  // playback_rate is an SDL speed multiplier: 2.0 plays twice as fast and
+  // halves the voice lifetime. Original Nova descriptors store the reciprocal
+  // duration scale, so callers convert that representation before this API.
   void Play(const NovaSoundData &sound,
             float gain = 1.0F,
             float playback_rate = 1.0F,

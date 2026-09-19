@@ -77,9 +77,11 @@ struct NovaPreferences {
   bool parallax_starfield = true;
   // Ghidra g_pref_ambient_sounds.
   bool ambient_sounds = true;
-  // Ghidra g_hyperspace_effects (inverted flag: 0 = effects on). The CE build
-  // also uses this byte as a raw-input lock; the clean-room keeps it as a pure
-  // effect toggle (documented divergence).
+  // Ghidra g_hyperspace_effects (inverted flag: 0 = effects on). Used by the
+  // hyperspace flash as the CE colour gate: non-zero forces black, otherwise
+  // the requested white is applied (0x00872384). The CE build also uses this
+  // byte as a raw-input lock; the clean-room keeps it as a pure effect toggle
+  // (documented divergence).
   bool hyperspace_effects = false;
   // Ghidra g_pref_check_for_updates (inverted flag: 0 = check for updates).
   bool check_for_updates = true;
@@ -91,6 +93,18 @@ struct NovaPreferences {
   // Populates every field (and the key table) with the original defaults.
   void ResetToDefaults();
 };
+
+// Ghidra 0x00872384 DrawContext_SetHyperspaceFlashColor.
+// Resolves the hyperspace flash colour the CE build applies at the jump and
+// hypergate arrival flashes: the raw g_hyperspace_effects byte non-zero forces
+// black, otherwise the requested white is applied. The stored byte is inverted
+// relative to the Settings checkbox, so the default (false) is effects-on
+// white. The port has no DrawContext; the spaceflight loop resolves this into
+// GameState.screen_flash_black and the view draws the full-screen overlay.
+[[nodiscard]] constexpr bool
+NovaPrefs_HyperspaceFlashIsBlack(const NovaPreferences &prefs) {
+  return prefs.hyperspace_effects;
+}
 
 // Ghidra 0x0046ab60 NovaAudio_UpdateCenteredGainFromPreference.
 // The original first maps the stored preference to an integer mixer level

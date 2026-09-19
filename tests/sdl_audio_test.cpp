@@ -55,3 +55,24 @@ TEST_CASE("suppressed audio retains gameplay-clock voice completion") {
   now_ms = 2100;
   CHECK(audio.CountActiveByKey(128) == 0);
 }
+
+TEST_CASE("playback rate is a speed multiplier for logical voice lifetime") {
+  SdlAudio audio;
+  std::uint64_t now_ms = 100;
+  audio.SetPlaybackSuppressed(true, [&now_ms] { return now_ms; });
+  NovaSoundData sound{1000, 1, std::vector<std::int16_t>(2000)};
+
+  // The source is two seconds at 1x. A 2x playback rate halves that lifetime.
+  audio.Play(sound, 1.0F, 2.0F, 128);
+  now_ms = 1099;
+  CHECK(audio.CountActiveByKey(128) == 1);
+  now_ms = 1100;
+  CHECK(audio.CountActiveByKey(128) == 0);
+
+  // A rate below one extends the lifetime by the reciprocal amount.
+  audio.Play(sound, 1.0F, 0.5F, 129);
+  now_ms = 5099;
+  CHECK(audio.CountActiveByKey(129) == 1);
+  now_ms = 5100;
+  CHECK(audio.CountActiveByKey(129) == 0);
+}

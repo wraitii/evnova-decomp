@@ -1342,6 +1342,12 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // The radar resolves stellar blip sizes through the view's sprite store
   // (Sprite_GetFrameFullWidth on each loaded spin set).
   hud.AttachSpriteStore(&view.sprite_store());
+  // Resolve the hyperspace flash colour from the preference once: the CE
+  // build's 0x00872384 forces black when the raw g_hyperspace_effects byte is
+  // non-zero and applies the requested white otherwise. The raw preference
+  // byte is inverted relative to the Settings checkbox, so the default
+  // (hyperspace_effects == false) is effects-on white. See GameState.
+  state.screen_flash_black = NovaPrefs_HyperspaceFlashIsBlack(prefs);
 
   // Preload the complete gameplay sound handle table before the first frame.
   // The original does this during session setup; limiting the cache to owned
@@ -2061,13 +2067,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         if (state.warp_up_sound.has_value()) {
           // The fire gate in NovaTravel_Tick waits for this voice to finish,
           // and the tunnel ramp schedule is cue-relative, so this rate sets the
-          // whole jump cadence. The original stages the cue at rate
-          // 1.0/jump_duration_multiplier (0x0046ab00: 65536/multiplier
-          // fixed-point; chassis-derived 0.91..2.08 -> rates 0.48..1.1).
+          // whole jump cadence. The original descriptor stores the reciprocal
+          // as a duration scale (0x0046ab00: 65536/multiplier fixed-point),
+          // while SDL's playback_rate is a speed multiplier. Pass the chassis
+          // multiplier directly (0.91..2.08), giving cue duration
+          // base_duration / multiplier.
           audio.Play(*state.warp_up_sound,
                      1.0F,
-                     1.0F /
-                         game::NovaTravel_PlayerJumpDurationMultiplier(state),
+                     game::NovaTravel_PlayerJumpDurationMultiplier(state),
                      game::kHyperspaceWarpUpSoundKey,
                      /*priority_width=*/0x32);
         }
@@ -2475,11 +2482,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         std::max(0.0F, state.ship_reticle_pulse - host_frame_time_ms * 1.8F);
     state.travel_reticle_pulse =
         std::max(0.0F, state.travel_reticle_pulse - host_frame_time_ms * 1.8F);
-    // Decay the hyperspace fire flash: full white at the boom instant, gone
-    // in ~60 ms (a single bright frame, matching the original's one-frame
-    // centered effect 0x32).
-    state.screen_flash_intensity = std::max(
-        0.0F, state.screen_flash_intensity - host_frame_time_ms / 60.0F);
+    // Advance the hyperspace flash at the render cadence. The mode gates the
+    // rate (1.5 s Mac fade-in/fade-out vs ~60 ms one-frame fallback); travel
+    // only latches the hold fade once when its scalar crosses the threshold.
+    NovaTravel_AdvanceScreenFlash(state, host_frame_time_ms);
     platform.PaceFrame();
   }
 }

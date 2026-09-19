@@ -24,7 +24,8 @@ Reverse-engineering + reimplementation note for the government smuggling scan.
   The class `jump_duration_multiplier` is decoded from the shp Flags word by the
   loader (`NovaData_LoadScenarioResourceTables` 0x004bd3c0): bit0 → 0.7, else
   bit1 → 1.3, else bit2 → 1.6, else 1.0; all ×1.3, floored at 0.5. It scales
-  both the ramp clock and the 'Warp up' cue rate (1/multiplier, 0x0046ab00).
+  both the ramp clock and the 'Warp up' cue duration scale (0x0046ab00); the
+  SDL call receives the multiplier as a playback speed.
 
 ## The three arms
 
