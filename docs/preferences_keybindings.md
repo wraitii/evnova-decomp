@@ -243,7 +243,8 @@ Version `0x69`. Reserved slots 0x7e..0x88 are zeroed on save
 The SDL3 port deliberately stores the same 0x8c-byte payload as
 `EV Nova Prefs.prf` in the per-user support folder
 (`NovaPaths::SupportDirectory()` = `SDL_GetPrefPath("Ambrosia Software",
-"EV Nova")`). On macOS this is `~/Library/Application Support/EV Nova/`; SDL
+"EV Nova")`). On macOS this is
+`~/Library/Application Support/Ambrosia Software/EV Nova/`; SDL
 selects the corresponding per-user application-data directory on other
 platforms and creates it when necessary. Loading occurs after SDL platform
 initialization; the normalized block is written at startup and at the original

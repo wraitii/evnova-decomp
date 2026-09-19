@@ -44,7 +44,7 @@ struct UiDialogWindow {
   NovaDialogDefinition definition;
   std::vector<NovaDialogItem> items;
   std::vector<ItemState> state;
-  SDL_FRect window_rect{};     // centred on the 640x480 logical playfield
+  SDL_FRect window_rect{};     // authored dialog-local bounds
   std::size_t focused_row = 0; // 1-based row with keyboard focus (edit texts)
 
   [[nodiscard]] ItemState *Entry(std::size_t row_1based);
@@ -53,10 +53,9 @@ struct UiDialogWindow {
 };
 
 // Ghidra 0x004cf760 UiWindow_CreateFromDialogResource. Loads the DLOG and its
-// DITL through the BRGR archive, centres the window on the logical playfield
-// (truncating half-offsets like Dialog_CreateFromDlog), and seeds control
-// state; type-7 popups load their MENU resource entries when the DITL tail
-// carries one. Returns nullopt when either resource is absent.
+// DITL through the BRGR archive, retains authored window dimensions, and seeds
+// control state; type-7 popups load their MENU resource entries when the DITL
+// tail carries one. Returns nullopt when either resource is absent.
 [[nodiscard]] std::optional<UiDialogWindow>
 UiWindow_CreateFromDialogResource(SdlPlatform &platform,
                                   std::uint16_t dialog_id);
@@ -111,7 +110,7 @@ void UiWindow_Draw(SdlPlatform &platform,
 // Ghidra 0x004cfdd0 UiWindow_RunInteractionLoop: one frame of the modal loop.
 // When `render_background` is set it is invoked first each frame so the screen
 // under the dialog keeps rendering (the port draws the dialog straight onto
-// the renderer; see the creation-site divergence note); otherwise the dialog
+// the renderer; see the interaction-loop divergence note); otherwise the dialog
 // composites over the last presented frame. Pumps text/mouse events, updates
 // control state (edit-text focus/typing, checkbox toggles, popup
 // expand/select), draws, and reports the 1-based ordinal of the activated

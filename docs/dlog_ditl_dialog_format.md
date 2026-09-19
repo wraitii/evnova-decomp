@@ -48,7 +48,8 @@ PICT `0x213f` — the DLOG bounds and the backdrop PICT are the same box.
 
 ## 2. Window centering (`Dialog_CreateFromDlog`)
 
-The dialog is **centred on the current logical playfield** (640×480). The window
+The dialog is **centred on the current display dimensions** (`g_display_width`
+and `g_display_height`, not a hard-coded 640×480 canvas). The window
 top-left is
 
 ```
@@ -57,7 +58,8 @@ top  = (g_display_height - (bottom - top)  height) / 2
 ```
 
 (`_g_ui_scale` multiplies the width/height measures first; the shipped build
-uses 1.0.) So a 423×215 window sits at `(108, 132)` on the 640×480 playfield.
+uses 1.0.) For example, a 423×215 window sits at `(108, 132)` on a 640×480
+display. The port uses explicit per-screen placements instead of these globals.
 
 ## 3. DITL (dialog item list)
 
@@ -205,7 +207,7 @@ constants rather than re-parsing the DITL each frame (fast, cheap, deterministic
 
 ```cpp
 constexpr int kCommFrameWidth = 423;                 // DLOG 0x3ef = PICT 0x213f
-constexpr float kCommWindowX = (640 - kCommFrameWidth) / 2.0F;  // centring
+constexpr float kCommWindowX = 0.0F;                         // local origin
 constexpr SDL_FRect kCommPictureRect{216, 7, 200, 200};          // DITL item 10
 // ... buttons stacked at kCommButtonYClose=181 / YMiddle=153 / YTop=125
 ```
@@ -283,8 +285,8 @@ lambda plus a `Present()` wrapper (as `RunBarDialog` does with
 `draw_bar_contents` / `draw_frame`) and pass the contents-only part.
 
 * In-flight modals (ship-comm, boarding/plunder, the mission-info window
-  0x00446150) call `SpaceflightView::DrawGameFrame` every frame and then draw
-  their window in the centred 640x480 canvas. The flight sim is paused, so
+  0x00446150) call `SpaceflightView::DrawGameFrame` every frame and then select
+  a contained placement for their authored composition. The flight sim is paused, so
   this redraws the same world; stars/animated sprites keep animating, which
   reads better than a frozen frame.
 * Docked modals (Mission BBS 0x3ee, trade/outfit/shipyard stores, the offer
@@ -304,6 +306,14 @@ lambda plus a `Present()` wrapper (as `RunBarDialog` does with
 If you add a new modal, take a `const std::function<void()> &render_background`
 (or `view`/`hud` refs in the flight layer) and re-render — do not capture the
 presented frame (`SDL_RenderReadPixels`); that path letterboxes.
+
+The generic runtime keeps DLOG bounds and DITL controls in window-local authored
+coordinates. After redrawing the background, it captures that placement's
+content box and scopes a centred, downscale-only dialog placement over it.
+The same placement maps mouse points back to authored coordinates and maps
+probe rectangles into window points. Loading a DLOG does not change renderer
+state. The control pass still clips to the authored window bounds, preserving
+the deliberately invisible DITL entries described above.
 
 ## 7.2 Landed store input/art conveniences (deliberate divergences)
 

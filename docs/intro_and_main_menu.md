@@ -58,15 +58,19 @@ All splash/intro/panel compositing shares one offscreen surface:
 
 `NovaUi_PresentLoadingSplashFrame` (0x004ab070)
 - Loading splash shown during blocking startup transitions.
-- Loads PICT resource `0x1fa4`, centers it into the shared offscreen rect `DAT_00597954`, blits
-  to the shared surface `DAT_00597950` and to the render owner, then finishes the blocking
-  transition frame.
+- Loads PICT resource `0x1fa4` (stock size 369x558), centers it at native size in a contained
+  placement, and presents it with black margins when the window is larger.
 
 `NovaUi_PresentStartupSplashFrame` (0x004aaf60)
 - Startup splash shown near the end of game-session init (`NovaUi_ClearMainWindowAndHoldFrame`
   follows the data-table loads).
-- Loads PICT resource `0x83`, centers/blits to the shared surface, then blits the surface to the
-  render-owner rect and commits the frame.
+- Loads PICT resource `0x83` (stock size 832x624), centers it at native size in a contained
+  placement, then commits the frame. A decode failure leaves a black frame and logs an error.
+
+The main menu uses the same placement rule with its native 1024x768 authored canvas. Button,
+status-panel and font coordinates stay in that canvas; the platform maps them to
+window points and maps mouse input back through the active placement. The menu keeps only a
+rectangular button fallback when an RLE button sheet is missing, so the menu remains usable.
 
 ### Startup progress bar
 
@@ -90,6 +94,10 @@ Data source (Bible `cölr`, loaded at `0x004c69ab`):
 - `ProgBright` `+0x66` = bright fill, `ProgDim` `+0x6a` = fill outline, `ProgOutline` `+0x6e` =
   bar outline (shipped: red 255/128 and gray 64).
 - Fill span `DAT_00575a58 = 198.0` reference px.
+
+The port anchors these offsets at the startup picture's authored centre and
+uses the same containment factor for picture and bar. At native scale this
+is the window centre; below the picture's native size both shrink together.
 
 The only progress producer is `NovaData_LoadAllShipClassVisualAndLaunchData` (0x004aeda0), which
 calls `NovaUi_AddProgressAndRedraw(1.0)` once per successfully loaded ship class.
@@ -165,8 +173,9 @@ when a pilot first enters spaceflight (gated on `g_intro_played`).
   written back by the save writer `PilotFile_SaveGameCore`).
 - For each of (up to 4) intro frames: loads/fills the frame PICT (id from
   g_intro_cinematic.source_pict_ids[i]), centers and blits it to the shared offscreen surface
-  `DAT_00597950`, then waits the per-frame duration (g_intro_cinematic.duration_60h_ticks[i],
-  in 1/60s ticks → ms = ticks*60). **Frame ids below 0x80 are rewritten to -1 with duration 0**
+  `DAT_00597950`, then presents the 1024x768 authored composition in a contained placement and
+  waits the per-frame duration (g_intro_cinematic.duration_60h_ticks[i], in 1/60s ticks → ms =
+  ticks*60). **Frame ids below 0x80 are rewritten to -1 with duration 0**
   and valid frames' durations clamp to `[0, 300]` (both in `IntroCinematic_SetupFrames`).
 - Input split (verified against the key-state polling in `Input_PumpAndTestCommand` →
   `FUN_004f1900`, a *level* table, and the delay-free wait loop): Enter (0x1c), Space (0x39)

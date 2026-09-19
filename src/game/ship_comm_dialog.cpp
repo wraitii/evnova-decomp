@@ -48,8 +48,8 @@ constexpr std::uint16_t kEscortManagementFramePict = 0x2141;
 
 // ---- DLOG 0x3ef / DITL 0x3ef geometry -------------------------------------
 // The comm window is 423x215 (DLOG 0x3ef bounds = the backdrop PICT 0x213f,
-// decodes to exactly 423x215), centred on the 640x480 playfield at
-// window-relative (0,0) = top-left of the backdrop. The three context buttons
+// decodes to exactly 423x215), authored at local window-relative (0,0). The
+// active placement centres it in the window. The three context buttons
 // are DITL items 0/1/2 stacked *vertically* on the lower-left (166x26 each at
 // x=21..187, y=125/153/181), NOT a bottom row; the ship portrait is DITL item
 // 10, a 200x200 box on the right (x=216..416, y=7..207); the prompt/status
@@ -59,8 +59,7 @@ constexpr std::uint16_t kEscortManagementFramePict = 0x2141;
 // the shipped window.
 constexpr int kCommFrameWidth = 423;
 constexpr int kCommFrameHeight = 215;
-// Window origin on the 640x480 playfield: the frame is centred (truncated
-// half-offsets, Dialog_CreateFromDlog) in LoadCommFrameLayout below.
+// Window origin is supplied by the active placement in LoadCommFrameLayout.
 // Portrait (DITL item 10): 200x200 on the right side.
 constexpr SDL_FRect kCommPictureRect{216.0F, 7.0F, 200.0F, 200.0F};
 // Prompt/status text panel (DITL item 9) / class+status block (DITL item 11).
@@ -80,7 +79,7 @@ constexpr float kCommButtonYMiddle = 153.0F; // assistance button
 constexpr float kCommButtonYClose = 181.0F;
 
 // One frame's worth of comm-window geometry (DLOG/DITL 0x3ef), mapped into
-// the centred 640x480 playfield canvas. Loaded from the real DITL at runtime
+// the local DLOG composition. Loaded from the real DITL at runtime
 // (going-forward policy, see docs/dlog_ditl_dialog_format.md); the constants
 // above are the fallback used when the resources fail to decode.
 struct CommFrameLayout {
@@ -101,7 +100,7 @@ struct EscortManagementLayout {
 
 [[nodiscard]] EscortManagementLayout LoadEscortManagementLayout() {
   EscortManagementLayout layout;
-  layout.window = {108.0F, 110.0F, 424.0F, 259.0F};
+  layout.window = {0.0F, 0.0F, 424.0F, 259.0F};
   const auto local = [&](float x, float y, float w, float h) {
     return SDL_FRect{layout.window.x + x, layout.window.y + y, w, h};
   };
@@ -124,10 +123,7 @@ struct EscortManagementLayout {
   }
   const float width = static_cast<float>(definition->right - definition->left);
   const float height = static_cast<float>(definition->bottom - definition->top);
-  layout.window = {std::truncf((640.0F - width) * 0.5F),
-                   std::truncf((480.0F - height) * 0.5F),
-                   width,
-                   height};
+  layout.window = {0.0F, 0.0F, width, height};
   for (const auto &item : *items) {
     const SDL_FRect rect{layout.window.x + static_cast<float>(item.left),
                          layout.window.y + static_cast<float>(item.top),
@@ -148,8 +144,8 @@ struct EscortManagementLayout {
 
 [[nodiscard]] CommFrameLayout LoadCommFrameLayout() {
   CommFrameLayout layout;
-  layout.window = {std::truncf((640.0F - kCommFrameWidth) * 0.5F),
-                   std::truncf((480.0F - kCommFrameHeight) * 0.5F),
+  layout.window = {0.0F,
+                   0.0F,
                    static_cast<float>(kCommFrameWidth),
                    static_cast<float>(kCommFrameHeight)};
   const auto local = [&](float x, float y, float w, float h) {
@@ -185,10 +181,7 @@ struct EscortManagementLayout {
   }
   const float width = static_cast<float>(definition->right - definition->left);
   const float height = static_cast<float>(definition->bottom - definition->top);
-  layout.window = {std::truncf((640.0F - width) * 0.5F),
-                   std::truncf((480.0F - height) * 0.5F),
-                   width,
-                   height};
+  layout.window = {0.0F, 0.0F, width, height};
   for (const auto &item : *items) {
     const SDL_FRect rect{layout.window.x + static_cast<float>(item.left),
                          layout.window.y + static_cast<float>(item.top),
@@ -420,11 +413,12 @@ void DrawShipCommDialog(SdlPlatform &platform,
   // so this redraws the same world each frame): the original draws its DLOG
   // over the unmodified gameplay surface.
   view.DrawGameFrame(platform, state, hud);
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(PlaceContained({kCommFrameWidth, kCommFrameHeight},
+                                       platform.logical_playfield_size()));
   (void)panel;
 
   // The comm window frame is the DITL 0x3ef window (the 423x215 PICT 0x213f
-  // backdrop), centred on the 640x480 playfield.
+  // backdrop), centred by the local DLOG placement.
   const SDL_FRect &frame = layout.window;
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &frame);
@@ -741,7 +735,8 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
                                 bool can_sell,
                                 const EscortManagementLayout &layout) {
   view.DrawGameFrame(platform, state, hud);
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
+                                       platform.logical_playfield_size()));
   SDL_Renderer *renderer = platform.renderer();
   constexpr float kScreenFontSize = 9.0F;
   if (backdrop != nullptr) {
@@ -890,6 +885,8 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
                                              Ship &escort,
                                              SpaceflightView &view,
                                              HudRenderer &hud) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
   const ShipClass *ship_class = state.scenario.Ship(
       static_cast<std::int16_t>(escort.ship_class_id + 0x80));
   if (ship_class == nullptr) {
@@ -1036,6 +1033,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                                 std::int16_t ship_slot,
                                 SpaceflightView &view,
                                 HudRenderer &hud) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
   if (ship_slot <= 0 ||
       ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips)) {
@@ -1197,7 +1196,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   const CommFrameLayout layout = LoadCommFrameLayout();
   NovaFontCache font_cache;
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
+                                       platform.logical_playfield_size()));
 
   // Item-11 info block contents (0x0047e470 + 0x0047fb70): the class's Bible
   // CommName (DAT_006bd2cc table), the pers 0x3ff "Ambrosia Mascot"

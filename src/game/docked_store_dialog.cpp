@@ -86,13 +86,10 @@ struct StoreLayout {
   SDL_FRect next{};
 };
 
-[[nodiscard]] StoreLayout LayoutStore(const SdlPlatform &platform,
-                                      bool outfit_store) {
-  const SDL_FPoint output = platform.logical_playfield_size();
+[[nodiscard]] StoreLayout LayoutStore(bool outfit_store) {
   constexpr float kWidth = 765.0F;
   const float height = outfit_store ? 321.0F : 323.0F;
-  const SDL_FPoint origin{std::max(0.0F, (output.x - kWidth) / 2.0F),
-                          std::max(0.0F, (output.y - height) / 2.0F)};
+  const SDL_FPoint origin{0.0F, 0.0F};
   auto at = [origin](SDL_FRect rect) { return OffsetRect(rect, origin); };
 
   StoreLayout layout;
@@ -163,27 +160,23 @@ void DrawStoreBase(SdlPlatform &platform,
                    SDL_Texture *frame,
                    const StoreLayout &layout) {
   SDL_Renderer *renderer = platform.renderer();
-  const SDL_FPoint output = platform.logical_playfield_size();
   if (render_background) {
     // Re-render the preserved docked menu and layer the store window on top
     // (deliberate divergence, see docs/dlog_ditl_dialog_format.md).
     render_background();
   } else {
-    platform.SetFullscreenPlayfield();
+    platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
     if (backdrop != nullptr) {
-      float width = 0.0F;
-      float height = 0.0F;
-      SDL_GetTextureSize(backdrop, &width, &height);
-      const SDL_FRect dst{
-          (output.x - width) / 2.0F, (output.y - height) / 2.0F, width, height};
-      SDL_RenderTexture(renderer, backdrop, nullptr, &dst);
+      DrawContainedPict(platform, backdrop);
     }
   }
   // Ghidra's NovaUi_RedrawOutfitterMenu (0x00490c70) and the analogous
   // shipyard redraw fill and draw their modal window surface, then composite
   // it over the existing travel scene. There is no full-screen dim/scrim.
+  platform.SetPlacement(PlaceContained({layout.frame.w, layout.frame.h},
+                                       platform.logical_playfield_size()));
   if (frame != nullptr) {
     SDL_RenderTexture(renderer, frame, nullptr, &layout.frame);
   }
@@ -654,13 +647,10 @@ struct ShipyardInfoLayout {
   bool custom_picture = false;
 };
 
-[[nodiscard]] ShipyardInfoLayout LayoutShipyardInfo(const SdlPlatform &platform,
-                                                    bool custom_picture) {
-  const SDL_FPoint output = platform.logical_playfield_size();
+[[nodiscard]] ShipyardInfoLayout LayoutShipyardInfo(bool custom_picture) {
   const float width = custom_picture ? 614.0F : 250.0F;
   const float height = custom_picture ? 537.0F : 285.0F;
-  const SDL_FPoint origin{std::max(0.0F, (output.x - width) / 2.0F),
-                          std::max(0.0F, (output.y - height) / 2.0F)};
+  const SDL_FPoint origin{0.0F, 0.0F};
   auto at = [origin](SDL_FRect rect) { return OffsetRect(rect, origin); };
 
   ShipyardInfoLayout layout;
@@ -1120,7 +1110,9 @@ void RenderStoreScreen(SdlPlatform &platform,
                        NovaRgbColor grid_dim,
                        NovaRgbColor grid_bright) {
   const bool outfit_store = session.kind == LandedStoreKind::kOutfitter;
-  const StoreLayout layout = LayoutStore(platform, outfit_store);
+  platform.SetPlacement(PlaceContained({765.0F, outfit_store ? 321.0F : 323.0F},
+                                       platform.logical_playfield_size()));
+  const StoreLayout layout = LayoutStore(outfit_store);
   SDL_Texture *selected_image = StorePreviewTexture(
       platform, state, texture_cache, outfit_store, session.selected_id);
   DrawStoreBase(
@@ -1158,6 +1150,8 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
                            std::string_view selected_description,
                            NovaRgbColor grid_dim,
                            NovaRgbColor grid_bright) {
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
   std::unique_ptr<SdlTexture> custom_picture;
   bool custom = false;
   std::uint16_t backdrop_pict = 0x213a;
@@ -1191,9 +1185,17 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
                       selected_description,
                       grid_dim,
                       grid_bright);
-    const ShipyardInfoLayout layout = LayoutShipyardInfo(platform, custom);
-    platform.PublishProbeUi(
-        "shipyard_info", {{"window", layout.window}, {"done", layout.button}});
+    platform.SetPlacement(
+        PlaceContained({custom ? 614.0F : 250.0F, custom ? 537.0F : 285.0F},
+                       platform.logical_playfield_size()));
+    const ShipyardInfoLayout layout = LayoutShipyardInfo(custom);
+    const Placement detail_placement = platform.current_placement();
+    const auto probe_rect = [&detail_placement](SDL_FRect rect) {
+      return detail_placement.ToWindowRect(rect);
+    };
+    platform.PublishProbeUi("shipyard_info",
+                            {{"window", probe_rect(layout.window)},
+                             {"done", probe_rect(layout.button)}});
     DrawShipyardInfoPanel(platform,
                           font_cache,
                           button_art,
@@ -1409,6 +1411,8 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
                           std::int16_t stellar_id,
                           const std::function<void()> &render_background,
                           bool hire_mode) {
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
   const bool outfit_store = service == LandedService::kOutfit;
   LandedStoreSession session =
       outfit_store
@@ -1546,22 +1550,29 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         static_cast<std::int32_t>(state.tick_60hz - recheck_at) >= 0) {
       (void)run_mission_offer();
     }
-    const StoreLayout layout = LayoutStore(platform, outfit_store);
+    platform.SetPlacement(
+        PlaceContained({765.0F, outfit_store ? 321.0F : 323.0F},
+                       platform.logical_playfield_size()));
+    const StoreLayout layout = LayoutStore(outfit_store);
     // The store windows share one control set; the grid slots are published
     // as label/price items so a harness can find a ship or outfit by name and
     // click its cell without guessing the page layout. Window names
     // distinguish the three screens (the Shipyard and the Bar's Hire Escort
     // action both run this loop).
+    const Placement store_placement = platform.current_placement();
+    const auto probe_rect = [&store_placement](SDL_FRect rect) {
+      return store_placement.ToWindowRect(rect);
+    };
     std::vector<ProbeNamedRect> probe_controls{
         // Both store windows caption this control "Done". Retain "leave" as
         // a compatibility alias.
-        {"window", layout.frame},
-        {"done", layout.leave},
-        {"leave", layout.leave},
-        {"buy", layout.buy},
-        {"sell_or_info", layout.sell_or_info},
-        {"previous", layout.previous},
-        {"next", layout.next}};
+        {"window", probe_rect(layout.frame)},
+        {"done", probe_rect(layout.leave)},
+        {"leave", probe_rect(layout.leave)},
+        {"buy", probe_rect(layout.buy)},
+        {"sell_or_info", probe_rect(layout.sell_or_info)},
+        {"previous", probe_rect(layout.previous)},
+        {"next", probe_rect(layout.next)}};
     for (std::size_t slot = 0; slot < LandedStoreSession::kPageSlots; ++slot) {
       const std::size_t index = session.page_base + slot;
       if (index >= session.available_ids.size()) {
@@ -1570,7 +1581,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       const std::int16_t id = session.available_ids[index];
       ProbeNamedRect cell;
       cell.name = "store.slot." + std::to_string(slot);
-      cell.rect = StoreCell(layout, slot);
+      cell.rect = probe_rect(StoreCell(layout, slot));
       cell.has_value = true;
       cell.selected = id == session.selected_id;
       if (outfit_store) {

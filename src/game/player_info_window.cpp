@@ -873,6 +873,8 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
                                                 GameState &state,
                                                 SpaceflightView &view,
                                                 HudRenderer &hud) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
   PlayerInfoWindowResult result;
 
   // Guards: the original returns when a modal is already up (BOOL_007354a8),
@@ -899,17 +901,14 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
     return result;
   }
 
-  // Dialog_CreateFromDlog 0x008730a1 centres the window on the 640x480
-  // logical playfield, truncating the half-offsets; the DLOG's stored origin
-  // (0x3f9 ships at (40,40)) is ignored.
+  // Dialog_CreateFromDlog 0x008730a1 ignores the DLOG's stored origin (0x3f9
+  // ships at (40,40)); the port keeps the DLOG geometry local and lets its
+  // placement centre the complete composition in the window.
   const float window_w =
       static_cast<float>(definition->right - definition->left);
   const float window_h =
       static_cast<float>(definition->bottom - definition->top);
-  const SDL_FRect window_rect{std::truncf((640.0F - window_w) * 0.5F),
-                              std::truncf((480.0F - window_h) * 0.5F),
-                              window_w,
-                              window_h};
+  const SDL_FRect window_rect{0.0F, 0.0F, window_w, window_h};
 
   auto entry_rect =
       [&items](std::size_t row_1based) -> std::optional<SDL_FRect> {
@@ -962,7 +961,8 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
     // the new bottom edge: entries 1 (Done) and 7 (Jettison) offset down by
     // delta (window-relative), while entry 6 extends its bottom edge by delta;
     // the top tab entries 2..5 stay glued to the window top.
-    window_pos.y -= delta / 2.0F;
+    // The local composition is centred by Placement; only its height grows.
+    window_pos.y = 0.0F;
     window_pos.h += delta;
     view_rect.h += delta;
     strip_rects[kTabClose].y += delta;
@@ -1005,7 +1005,9 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
 
   auto redraw = [&](int strip_hover) {
     view.DrawGameFrame(platform, state, hud);
-    platform.SetCenteredPlayfield();
+    platform.SetPlacement(
+        PlaceContained({window_rect_final.w, window_rect_final.h},
+                       platform.logical_playfield_size()));
     SDL_Renderer *renderer = platform.renderer();
 
     // Window plate + backdrop slices.

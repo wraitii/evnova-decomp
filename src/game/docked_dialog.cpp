@@ -24,6 +24,19 @@
 #include <string_view>
 
 namespace game {
+void DrawContainedPict(SdlPlatform &platform, SDL_Texture *texture) {
+  float width = 0.0F;
+  float height = 0.0F;
+  if (texture == nullptr || !SDL_GetTextureSize(texture, &width, &height)) {
+    return;
+  }
+  const SdlPlatform::ScopedPlacement placement(
+      platform,
+      PlaceContained({width, height}, platform.logical_playfield_size()));
+  const SDL_FRect destination{0.0F, 0.0F, width, height};
+  SDL_RenderTexture(platform.renderer(), texture, nullptr, &destination);
+}
+
 namespace {
 
 // The dim scrim between the docked backdrop and the active dialog window, so
@@ -67,10 +80,9 @@ void DrawSubWindowDialog(SdlPlatform &platform,
                          const SDL_FRect &panel) {
   SDL_Renderer *renderer = platform.renderer();
   if (render_background) {
-    // The callback leaves the renderer in the docked menu's fullscreen
-    // presentation; dim the whole window before switching to the dialog's
-    // centred 640x480 canvas.
+    // Dim the complete window after the owning screen has drawn its content.
     render_background();
+    platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
     const SDL_FPoint output = platform.logical_playfield_size();
     const SDL_FRect output_rect{0.0F, 0.0F, output.x, output.y};
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -81,14 +93,18 @@ void DrawSubWindowDialog(SdlPlatform &platform,
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
   }
-  platform.SetCenteredPlayfield();
   if (render_background == nullptr && backdrop != nullptr) {
-    SDL_RenderTexture(renderer, backdrop, nullptr, &panel);
+    platform.SetPlacement(
+        PlaceContained({618.0F, 517.0F}, platform.logical_playfield_size()));
+    constexpr SDL_FRect background_rect{0.0F, 0.0F, 618.0F, 517.0F};
+    SDL_RenderTexture(renderer, backdrop, nullptr, &background_rect);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, kScrim.r, kScrim.g, kScrim.b, kScrim.a);
-    SDL_RenderFillRect(renderer, &panel);
+    SDL_RenderFillRect(renderer, &background_rect);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
   }
+  platform.SetPlacement(
+      PlaceContained({panel.w, panel.h}, platform.logical_playfield_size()));
 
   if (frame == nullptr) {
     // No frame art: draw a bordered placeholder panel centred on the playfield
@@ -110,7 +126,7 @@ void DrawSubWindowDialog(SdlPlatform &platform,
     return;
   }
 
-  // Centre the frame at its natural size on the 640x480 playfield (nudged up
+  // Centre the frame at its natural size in the authored composition (nudged up
   // a touch so the heading and Leave button below it sit comfortably).
   float frame_w = 0.0F;
   float frame_h = 0.0F;
@@ -206,6 +222,8 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                               LandedService service,
                               std::int16_t stellar_id,
                               const std::function<void()> &render_background) {
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
   if (service == LandedService::kMissionBbs) {
     return RunMissionBbsWindow(platform, state, stellar_id, render_background);
   }
@@ -253,8 +271,16 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                   "button");
   }
   NovaFontCache font_cache;
-  const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
-  platform.SetCenteredPlayfield();
+  SDL_FRect panel{0.0F, 0.0F, 618.0F, 517.0F};
+  if (frame) {
+    float frame_w = 0.0F;
+    float frame_h = 0.0F;
+    SDL_GetTextureSize(frame->get(), &frame_w, &frame_h);
+    panel.w = std::max(panel.w, frame_w);
+    panel.h = std::max(panel.h, frame_h + 96.0F);
+  }
+  platform.SetPlacement(
+      PlaceContained({panel.w, panel.h}, platform.logical_playfield_size()));
 
   while (!platform.quit_requested()) {
     // Draw the dialog frame over the re-layered docked backdrop.

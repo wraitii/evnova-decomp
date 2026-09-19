@@ -52,12 +52,14 @@ constexpr std::array kMenuEntries{
     MenuEntry{GameModeAction::about_nova, "ABOUT NOVA"},
 };
 
-constexpr float kMenuCoordinateScale = 640.0F / 1024.0F;
-constexpr float kFallbackMenuLeft = 52.0F;
-constexpr float kFallbackMenuTop = 238.0F;
-constexpr float kFallbackMenuWidth = 220.0F;
-constexpr float kFallbackMenuHeight = 24.0F;
-constexpr float kFallbackMenuGap = 8.0F;
+// The menu art and coordinates are authored in the native 1024x768 canvas.
+// The active Placement maps this canvas to the window without another scale
+// in the draw code.
+constexpr float kFallbackMenuLeft = 83.0F;
+constexpr float kFallbackMenuTop = 381.0F;
+constexpr float kFallbackMenuWidth = 352.0F;
+constexpr float kFallbackMenuHeight = 38.0F;
+constexpr float kFallbackMenuGap = 13.0F;
 constexpr float kFallbackLogoOriginX = 191.0F;
 constexpr float kFallbackLogoOriginY = 162.0F;
 constexpr NovaMenuPoint kFallbackCenterPreviewOrigin{.x = 444, .y = 465};
@@ -81,10 +83,8 @@ constexpr std::uint64_t kStartupProgressFillMs = 1'200;
 constexpr std::uint64_t kMenuTitleFrameDurationMs = 40;
 constexpr std::uint64_t kMenuRevealFrameDurationMs = 16;
 // Startup loading progress bar (Ghidra 0x004ab1b0/0x004ab3b0/0x004ab3d0). The
-// bar outline comes from c\x9alr in 1024x768 reference coordinates relative to
+// bar outline comes from c\x9alr in native reference coordinates relative to
 // the window center; DAT_00575a58 = 198.0 is the fill span in those pixels.
-constexpr int kProgressBarCenterX = 1024 / 2;
-constexpr int kProgressBarCenterY = 768 / 2;
 constexpr double kProgressBarFillSpan = 198.0;
 // Number of staged startup asset loads that drive the bar. The original's
 // denominator is the 'ship' resource count (NovaData_LoadAllShipClass
@@ -94,9 +94,8 @@ constexpr std::uint8_t kStartupLoadStepCount = 6;
 
 // The original draws menu text with g_main_menu_font_id 3 (Geneva) size 9 in
 // the 1024x768 backdrop space (Ghidra 0x004b32aa NovaData_LoadScenarioResource
-// Tables + 0x004874d5 NovaRender_RedrawAndPresentFrame); the port draws in the
-// 640x480 logical playfield, so the size scales with the 0.625 art factor.
-constexpr float kMenuFontLogicalSize = 9.0F * kMenuCoordinateScale;
+// Tables + 0x004874d5 NovaRender_RedrawAndPresentFrame).
+constexpr float kMenuFontLogicalSize = 9.0F;
 // Menu label/value colours. Ghidra 0x004b3262/0x004b327d seed DAT_0073564c
 // (values, RGB555 triplet 0xffff,0,0) and DAT_00735652 (labels, 0x84d0,0,0);
 // the text engine scales each 5-bit component by 8 (FUN_004bc760).
@@ -110,10 +109,10 @@ constexpr SDL_Color kMenuValueColor{248, 0, 0, SDL_ALPHA_OPAQUE};
     const auto &origin = runtime.main_menu_style->button_origins[index];
     const auto &sprite = *runtime.main_menu_sprite_definitions[index];
     return SDL_FRect{
-        static_cast<float>(origin.x) * kMenuCoordinateScale,
-        static_cast<float>(origin.y) * kMenuCoordinateScale,
-        static_cast<float>(sprite.tile_width) * kMenuCoordinateScale,
-        static_cast<float>(sprite.tile_height) * kMenuCoordinateScale,
+        static_cast<float>(origin.x),
+        static_cast<float>(origin.y),
+        static_cast<float>(sprite.tile_width),
+        static_cast<float>(sprite.tile_height),
     };
   }
   return SDL_FRect{
@@ -221,10 +220,10 @@ LoadPictSpriteFrames(SDL_Renderer *renderer,
 
 // Probe-harness support (docs/probe_harness.md): publish the menu's button
 // rects so /probe/click can target them by intent ("new_pilot",
-// "enter_ship", ...). MenuRect is in the 640x480 logical canvas while
-// /probe/click consumes window points, so map through the scaled
-// presentation's on-screen rect. Only revealed rows are published, matching
-// the hover hit-test's gating. No effect on game behaviour.
+// "enter_ship", ...). MenuRect is in the authored menu canvas while
+// /probe/click consumes window points, so map through the active placement.
+// Only revealed rows are published, matching the hover hit-test's gating.
+// No effect on game behaviour.
 void PublishMainMenuProbeUi(NovaRuntime &runtime) {
   static constexpr std::array<std::string_view, kMenuEntries.size()> kNames{
       "new_pilot",
@@ -233,9 +232,7 @@ void PublishMainMenuProbeUi(NovaRuntime &runtime) {
       "enter_ship",
       "set_prefs",
       "about_nova"};
-  const SDL_FRect playfield = runtime.platform.playfield_window_rect();
-  const float sx = playfield.w / 640.0F;
-  const float sy = playfield.h / 480.0F;
+  const auto &placement = runtime.platform.current_placement();
   std::vector<std::pair<std::string, SDL_FRect>> named;
   for (std::size_t index = 0; index < kMenuEntries.size(); ++index) {
     if (!MenuRowRevealed(runtime, index % 3)) {
@@ -243,10 +240,7 @@ void PublishMainMenuProbeUi(NovaRuntime &runtime) {
     }
     const SDL_FRect rect = MenuRect(runtime, index);
     named.emplace_back(std::string(kNames[index]),
-                       SDL_FRect{playfield.x + rect.x * sx,
-                                 playfield.y + rect.y * sy,
-                                 rect.w * sx,
-                                 rect.h * sy});
+                       placement.ToWindowRect(rect));
   }
   runtime.platform.PublishProbeUi("main_menu", std::move(named));
 }
@@ -278,163 +272,22 @@ void PublishMainMenuProbeUi(NovaRuntime &runtime) {
   return alpha != 0;
 }
 
-void DrawDebugTextCentered(SDL_Renderer *renderer,
-                           float center_x,
-                           float y,
-                           std::string_view text) {
-  constexpr float character_width = 8.0F;
-  const auto text_width = static_cast<float>(text.length()) * character_width;
-  SDL_RenderDebugText(renderer, center_x - text_width / 2.0F, y, text.data());
-}
-
-void DrawMenuBackground(SDL_Renderer *renderer, int width, int height) {
-  SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(renderer);
-
-  for (int band = 0; band < height; band += 4) {
-    const auto blue = static_cast<std::uint8_t>(15 + band * 20 / height);
-    SDL_SetRenderDrawColor(renderer, 3, 10, blue, SDL_ALPHA_OPAQUE);
-    SDL_FRect strip{
-        0.0F, static_cast<float>(band), static_cast<float>(width), 4.0F};
-    SDL_RenderFillRect(renderer, &strip);
-  }
-
-  SDL_SetRenderDrawColor(renderer, 112, 164, 236, SDL_ALPHA_OPAQUE);
-  for (int index = 0; index < 86; ++index) {
-    const auto x = static_cast<float>((index * 137) % width);
-    const auto y = static_cast<float>((index * 79) % height);
-    SDL_RenderPoint(renderer, x, y);
-  }
-}
-
-void DrawPlanet(SDL_Renderer *renderer) {
-  constexpr float center_x = 548.0F;
-  constexpr float center_y = 290.0F;
-  constexpr float radius = 172.0F;
-
-  for (int y = -172; y <= 172; ++y) {
-    const auto half_width =
-        std::sqrt(radius * radius - static_cast<float>(y * y));
-    const auto shade = static_cast<std::uint8_t>(34 + (y + 172) * 28 / 344);
-    SDL_SetRenderDrawColor(renderer,
-                           7,
-                           shade,
-                           static_cast<std::uint8_t>(shade + 34),
-                           SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(renderer,
-                   center_x - half_width,
-                   center_y + static_cast<float>(y),
-                   center_x + half_width,
-                   center_y + static_cast<float>(y));
-  }
-
-  SDL_SetRenderDrawColor(renderer, 86, 171, 215, SDL_ALPHA_OPAQUE);
-  SDL_RenderLine(renderer,
-                 center_x - 150.0F,
-                 center_y - 82.0F,
-                 center_x + 20.0F,
-                 center_y - 120.0F);
-  SDL_RenderLine(renderer,
-                 center_x - 170.0F,
-                 center_y - 20.0F,
-                 center_x + 84.0F,
-                 center_y - 56.0F);
-  SDL_RenderLine(renderer,
-                 center_x - 166.0F,
-                 center_y + 66.0F,
-                 center_x + 110.0F,
-                 center_y + 34.0F);
-}
-
-void DrawHudFrame(SDL_Renderer *renderer) {
-  SDL_SetRenderDrawColor(renderer, 51, 113, 171, SDL_ALPHA_OPAQUE);
-  const SDL_FRect outer{18.0F, 18.0F, 604.0F, 444.0F};
-  SDL_RenderRect(renderer, &outer);
-  const SDL_FRect inner{24.0F, 24.0F, 592.0F, 432.0F};
-  SDL_RenderRect(renderer, &inner);
-
-  SDL_RenderLine(renderer, 32.0F, 206.0F, 282.0F, 206.0F);
-  SDL_RenderLine(renderer, 32.0F, 420.0F, 300.0F, 420.0F);
-  SDL_RenderLine(renderer, 348.0F, 206.0F, 608.0F, 206.0F);
-  SDL_RenderLine(renderer, 348.0F, 420.0F, 608.0F, 420.0F);
-
-  SDL_SetRenderDrawColor(renderer, 89, 166, 223, SDL_ALPHA_OPAQUE);
-  SDL_RenderDebugText(renderer, 40.0F, 34.0F, "NOVA NAVIGATION INTERFACE");
-  SDL_RenderDebugText(renderer, 426.0F, 34.0F, "SYSTEM: MENU");
-  SDL_RenderDebugText(renderer, 40.0F, 438.0F, "SECTOR 000 / LOCAL");
-}
-
-void DrawSplashFrame(SDL_Renderer *renderer,
-                     std::string_view heading,
-                     std::string_view detail,
-                     float progress) {
-  DrawMenuBackground(renderer, 640, 480);
-
-  SDL_SetRenderDrawColor(renderer, 48, 113, 179, SDL_ALPHA_OPAQUE);
-  const SDL_FRect panel{96.0F, 142.0F, 448.0F, 190.0F};
-  SDL_RenderFillRect(renderer, &panel);
-  SDL_SetRenderDrawColor(renderer, 142, 209, 255, SDL_ALPHA_OPAQUE);
-  SDL_RenderRect(renderer, &panel);
-  const SDL_FRect inset{104.0F, 150.0F, 432.0F, 174.0F};
-  SDL_RenderRect(renderer, &inset);
-
-  DrawDebugTextCentered(renderer, 320.0F, 184.0F, heading);
-  SDL_SetRenderDrawColor(renderer, 207, 229, 255, SDL_ALPHA_OPAQUE);
-  DrawDebugTextCentered(renderer, 320.0F, 218.0F, detail);
-
-  SDL_SetRenderDrawColor(renderer, 5, 22, 48, SDL_ALPHA_OPAQUE);
-  const SDL_FRect trough{158.0F, 268.0F, 324.0F, 12.0F};
-  SDL_RenderFillRect(renderer, &trough);
-  SDL_SetRenderDrawColor(renderer, 123, 218, 255, SDL_ALPHA_OPAQUE);
-  const SDL_FRect fill{160.0F, 270.0F, 320.0F * progress, 8.0F};
-  SDL_RenderFillRect(renderer, &fill);
-}
-
-void DrawAmbrosiaStartupSplash(SDL_Renderer *renderer) {
-  // Retained only as a fallback when PICT 0x83 cannot be decoded. The real
-  // asset is a plain 16-bit DirectBitsRect PICT in Nova Titles 1.rez and is
-  // preferred (see NovaUi_PresentStartupSplashFrame).
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(renderer);
-
-  SDL_SetRenderDrawColor(renderer, 18, 36, 72, SDL_ALPHA_OPAQUE);
-  for (int index = 0; index < 28; ++index) {
-    const auto x = static_cast<float>((index * 97 + 41) % 640);
-    const auto y = static_cast<float>((index * 149 + 29) % 480);
-    SDL_RenderPoint(renderer, x, y);
-  }
-
-  SDL_SetRenderDrawColor(renderer, 105, 170, 244, SDL_ALPHA_OPAQUE);
-  constexpr SDL_FRect upper_rule{182.0F, 193.0F, 276.0F, 1.0F};
-  constexpr SDL_FRect lower_rule{182.0F, 288.0F, 276.0F, 1.0F};
-  SDL_RenderFillRect(renderer, &upper_rule);
-  SDL_RenderFillRect(renderer, &lower_rule);
-
-  SDL_SetRenderScale(renderer, 2.0F, 2.0F);
-  SDL_SetRenderDrawColor(renderer, 231, 241, 255, SDL_ALPHA_OPAQUE);
-  DrawDebugTextCentered(renderer, 160.0F, 105.0F, "AMBROSIA");
-  SDL_SetRenderScale(renderer, 1.0F, 1.0F);
-  SDL_SetRenderDrawColor(renderer, 128, 172, 229, SDL_ALPHA_OPAQUE);
-  DrawDebugTextCentered(renderer, 320.0F, 257.0F, "SOFTWARE, INC.");
-}
-
-// Presents a splash PICT scaled uniformly to fit the 640x480 viewport
-// (letterboxed when the aspect differs). The original centers the image at
-// native size and clips overflow; scaling keeps the full artwork visible
-// without distortion.
-void PresentSplashTexture(SDL_Renderer *renderer, SDL_Texture *texture) {
+// Presents fixed artwork at native authored size, centred in a placement whose
+// authored dimensions match the resource. PlaceContained caps the scale at 1x
+// and supplies black margins when the window is larger than the artwork.
+void PresentSplashTexture(NovaRuntime &runtime, SDL_Texture *texture) {
   float width = 0.0F;
   float height = 0.0F;
   SDL_GetTextureSize(texture, &width, &height);
-  const auto scale = std::min(640.0F / width, 480.0F / height);
-  const SDL_FRect destination{(640.0F - width * scale) / 2.0F,
-                              (480.0F - height * scale) / 2.0F,
-                              width * scale,
-                              height * scale};
-  SDL_RenderTexture(renderer, texture, nullptr, &destination);
+  const auto placement = PlaceContained(
+      {width, height}, runtime.platform.logical_playfield_size());
+  SdlPlatform::ScopedPlacement scope(runtime.platform, placement);
+  const SDL_FRect destination{0.0F, 0.0F, width, height};
+  SDL_RenderTexture(
+      runtime.platform.renderer(), texture, nullptr, &destination);
 }
 
-// Reference-space (1024x768) progress-bar rectangle in native QuickDraw field
+// Progress-bar rectangle in native QuickDraw field
 // order. Ghidra copies c\x9alr +0x5e..+0x64 straight into DAT_0085d099 and
 // centers it on the render owner (NovaUi_RunProgressBarReveal 0x004ab1b0).
 struct ProgressBarReferenceRect {
@@ -451,6 +304,14 @@ struct ProgressBarReferenceRect {
   }
 };
 
+[[nodiscard]] SDL_FPoint StartupAuthoredSize(const NovaRuntime &runtime) {
+  SDL_FPoint size{832.0F, 624.0F};
+  if (runtime.startup_splash_texture) {
+    SDL_GetTextureSize(runtime.startup_splash_texture->get(), &size.x, &size.y);
+  }
+  return size;
+}
+
 [[nodiscard]] ProgressBarReferenceRect
 ProgressBarOutline(const NovaRuntime &runtime) {
   // Shipped c\x9alr (Nova Graphics 3, Colors record) fallback: a 200x10 bar.
@@ -464,10 +325,11 @@ ProgressBarOutline(const NovaRuntime &runtime) {
     bottom = runtime.main_menu_style->progress_bar_bottom;
     right = runtime.main_menu_style->progress_bar_right;
   }
-  return ProgressBarReferenceRect{kProgressBarCenterY + top,
-                                  kProgressBarCenterX + left,
-                                  kProgressBarCenterY + bottom,
-                                  kProgressBarCenterX + right};
+  const SDL_FPoint size = StartupAuthoredSize(runtime);
+  const int center_x = static_cast<int>(size.x) / 2;
+  const int center_y = static_cast<int>(size.y) / 2;
+  return ProgressBarReferenceRect{
+      center_y + top, center_x + left, center_y + bottom, center_x + right};
 }
 
 struct ProgressBarPalette {
@@ -490,11 +352,10 @@ struct ProgressBarPalette {
 
 [[nodiscard]] SDL_FRect
 ProgressBarLogicalRect(const ProgressBarReferenceRect &rect) {
-  return SDL_FRect{
-      static_cast<float>(rect.left) * kMenuCoordinateScale,
-      static_cast<float>(rect.top) * kMenuCoordinateScale,
-      static_cast<float>(rect.right - rect.left) * kMenuCoordinateScale,
-      static_cast<float>(rect.bottom - rect.top) * kMenuCoordinateScale};
+  return SDL_FRect{static_cast<float>(rect.left),
+                   static_cast<float>(rect.top),
+                   static_cast<float>(rect.right - rect.left),
+                   static_cast<float>(rect.bottom - rect.top)};
 }
 
 // Staged startup asset loads executed while the progress bar is visible.
@@ -923,14 +784,14 @@ void DrawMenuStatusPanel(NovaRuntime &runtime) {
   SDL_Renderer *const renderer = runtime.platform.renderer();
   auto &font_cache = runtime.font_cache;
   const auto &game = runtime.game;
-  constexpr float kOriginX = 320.0F;
-  constexpr float kOriginY = 240.0F;
-  constexpr float kLeftLabelX = kOriginX - 190.0F * kMenuCoordinateScale;
-  constexpr float kLeftValueX = kOriginX - 185.0F * kMenuCoordinateScale;
-  constexpr float kRightLabelX = kOriginX + 120.0F * kMenuCoordinateScale;
-  constexpr float kRightValueX = kOriginX + 125.0F * kMenuCoordinateScale;
+  constexpr float kOriginX = 512.0F;
+  constexpr float kOriginY = 384.0F;
+  constexpr float kLeftLabelX = kOriginX - 190.0F;
+  constexpr float kLeftValueX = kOriginX - 185.0F;
+  constexpr float kRightLabelX = kOriginX + 120.0F;
+  constexpr float kRightValueX = kOriginX + 125.0F;
   const auto baseline = [&](int offset_1024) {
-    return kOriginY + static_cast<float>(offset_1024) * kMenuCoordinateScale;
+    return kOriginY + static_cast<float>(offset_1024);
   };
 
   // Destroyed-pilot branch: "<name> has been killed" (STR# 0x7d2 0x115); a
@@ -953,8 +814,8 @@ void DrawMenuStatusPanel(NovaRuntime &runtime) {
     }
     DrawMenuTextCentered(runtime.platform,
                          font_cache,
-                         kOriginX - 150.0F * kMenuCoordinateScale,
-                         kOriginX + 150.0F * kMenuCoordinateScale,
+                         kOriginX - 150.0F,
+                         kOriginX + 150.0F,
                          baseline(0x136),
                          line,
                          kMenuLabelColor);
@@ -1079,10 +940,8 @@ void DrawMenuStatusPanel(NovaRuntime &runtime) {
     float width = 0.0F;
     float height = 0.0F;
     SDL_GetTextureSize(runtime.menu_status_portrait->get(), &width, &height);
-    const SDL_FRect destination{kOriginX - width * kMenuCoordinateScale / 2.0F,
-                                baseline(0x118),
-                                width * kMenuCoordinateScale,
-                                height * kMenuCoordinateScale};
+    const SDL_FRect destination{
+        kOriginX - width / 2.0F, baseline(0x118), width, height};
     SDL_RenderTexture(
         renderer, runtime.menu_status_portrait->get(), nullptr, &destination);
   }
@@ -1283,6 +1142,8 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
         return texture;
       }
       NovaLog::Todo("PICT 0x{:04x} failed to decode", resource_id);
+    } else {
+      NovaLog::Error("PICT 0x{:04x} could not be loaded", resource_id);
     }
     return std::unique_ptr<SdlTexture>{};
   };
@@ -1331,13 +1192,8 @@ void NovaMainLoop_Run(NovaRuntime &runtime) {
 
 // Ghidra: 0x00488080 NovaMainLoop_UpdateFrame
 void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
-  // The menu/splash hover tracking below reads platform.mouse_position(),
-  // which SDL reports in the logical 640x480 content coordinates because the
-  // menu uses the upscaled presentation. When the player returns to the menu
-  // the previous (flight) context left the full-window viewport active, so
-  // re-assert the scaled playfield here, before any hit-testing, so mouse
-  // coordinates stay in 640x480 content space.
-  runtime.platform.SetScaledPlayfield();
+  runtime.platform.SetPlacement(PlaceContained(
+      {1024.0F, 768.0F}, runtime.platform.logical_playfield_size()));
 
   if (auto selection = runtime.platform.PollOpenFileDialogResult()) {
     if (!selection->error.empty()) {
@@ -1531,10 +1387,10 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
 // Ghidra: 0x004873b0 NovaRender_RedrawAndPresentFrame
 void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   SDL_Renderer *const renderer = runtime.platform.renderer();
-  // Fixed pre-render screens (menu / splash / intro) are uniformly upscaled to
-  // fill the window via the scaled 640x480 logical presentation, so the 1024-
-  // native art reads at ~1:1 at the 1024x768 minimum.
-  runtime.platform.SetScaledPlayfield();
+  // Main-menu art is authored for the 1024x768 canvas and is contained at
+  // native scale, with black margins in larger windows.
+  runtime.platform.SetPlacement(PlaceContained(
+      {1024.0F, 768.0F}, runtime.platform.logical_playfield_size()));
   if (runtime.startup_phase == StartupPhase::loading_splash) {
     NovaUi_PresentLoadingSplashFrame(runtime);
     runtime.platform.Present();
@@ -1552,18 +1408,17 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
     return;
   }
 
+  // Real title-screen backdrop: the native 1024x768 ship-interior PICT
+  // 0x1f40, drawn directly in the menu's authored placement. A missing PICT
+  // leaves this black clear in place; the loader has already logged the error.
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderClear(renderer);
   if (runtime.main_menu_backdrop_texture) {
-    // Real title-screen backdrop: the 1024x768 ship-interior PICT 0x1f40,
-    // uniformly scaled to the 640x480 viewport (same 4:3 aspect, fills it).
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(renderer);
-    PresentSplashTexture(renderer, runtime.main_menu_backdrop_texture->get());
-  } else {
-    // Fallback when the backdrop PICT cannot be decoded: procedural
-    // starfield + planet + HUD chrome stand in for the ship-interior scene.
-    DrawMenuBackground(renderer, 640, 480);
-    DrawPlanet(renderer);
-    DrawHudFrame(renderer);
+    constexpr SDL_FRect menu_backdrop_rect{0.0F, 0.0F, 1024.0F, 768.0F};
+    SDL_RenderTexture(renderer,
+                      runtime.main_menu_backdrop_texture->get(),
+                      nullptr,
+                      &menu_backdrop_rect);
   }
 
   SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
@@ -1573,7 +1428,6 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   // its short animation timer; UpdateMenuEntrance maintains the equivalent
   // no-repeat progression.
   if (!runtime.main_menu_logo_textures.empty()) {
-    const float logo_scale = kMenuCoordinateScale;
     const auto frame = std::min(runtime.menu_top_animation_frame,
                                 runtime.main_menu_logo_textures.size() - 1);
     const auto &logo_texture = runtime.main_menu_logo_textures[frame];
@@ -1587,17 +1441,13 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
                                     ? runtime.main_menu_style->logo_origin.y
                                     : kFallbackLogoOriginY;
     const SDL_FRect logo_destination{
-        logo_origin_x * logo_scale,
-        logo_origin_y * logo_scale,
-        logo_width * logo_scale,
-        logo_height * logo_scale,
+        logo_origin_x,
+        logo_origin_y,
+        logo_width,
+        logo_height,
     };
     SDL_RenderTexture(
         renderer, logo_texture->get(), nullptr, &logo_destination);
-  } else {
-    DrawDebugTextCentered(
-        renderer, 320.0F, 78.0F, "E S C A P E   V E L O C I T Y");
-    DrawDebugTextCentered(renderer, 320.0F, 102.0F, "N O V A");
   }
 
   // The original entrance does not interpolate the button sprites. It plays
@@ -1619,10 +1469,10 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
     SDL_GetTextureSize(
         textures[static_cast<std::size_t>(counter)]->get(), &width, &height);
     const SDL_FRect destination{
-        static_cast<float>(origin.x) * kMenuCoordinateScale,
-        static_cast<float>(origin.y) * kMenuCoordinateScale,
-        width * kMenuCoordinateScale,
-        height * kMenuCoordinateScale,
+        static_cast<float>(origin.x),
+        static_cast<float>(origin.y),
+        width,
+        height,
     };
     SDL_RenderTexture(renderer,
                       textures[static_cast<std::size_t>(counter)]->get(),
@@ -1696,10 +1546,10 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
                             ? runtime.main_menu_style->center_preview_origin
                             : kFallbackCenterPreviewOrigin;
     const SDL_FRect destination{
-        static_cast<float>(origin.x) * kMenuCoordinateScale,
-        static_cast<float>(origin.y) * kMenuCoordinateScale,
-        static_cast<float>(asset.sheet.width) * kMenuCoordinateScale,
-        static_cast<float>(asset.sheet.height) * kMenuCoordinateScale,
+        static_cast<float>(origin.x),
+        static_cast<float>(origin.y),
+        static_cast<float>(asset.sheet.width),
+        static_cast<float>(asset.sheet.height),
     };
     const auto alpha = static_cast<std::uint8_t>(
         static_cast<unsigned>(runtime.menu_center_preview_intensity) * 255U /
@@ -1731,9 +1581,9 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
       if (auto prompt = game::NovaHud_LoadStringEntry(0x7d2, 0x114)) {
         DrawMenuTextCentered(runtime.platform,
                              runtime.font_cache,
-                             320.0F - 150.0F * kMenuCoordinateScale,
-                             320.0F + 150.0F * kMenuCoordinateScale,
-                             240.0F + 310.0F * kMenuCoordinateScale,
+                             512.0F - 150.0F,
+                             512.0F + 150.0F,
+                             384.0F + 310.0F,
                              *prompt,
                              kMenuLabelColor);
       }
@@ -1753,18 +1603,12 @@ void NovaUi_PresentLoadingSplashFrame(NovaRuntime &runtime) {
     SDL_SetRenderDrawColor(
         runtime.platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(runtime.platform.renderer());
-    PresentSplashTexture(runtime.platform.renderer(),
-                         runtime.loading_splash_texture->get());
+    PresentSplashTexture(runtime, runtime.loading_splash_texture->get());
     return;
   }
-  const auto elapsed_ms =
-      runtime.platform.wall_ticks_ms() - runtime.startup_phase_started_ms;
-  const auto progress = static_cast<float>(elapsed_ms) /
-                        static_cast<float>(kLoadingSplashDurationMs);
-  DrawSplashFrame(runtime.platform.renderer(),
-                  "ESCAPE VELOCITY: NOVA",
-                  "INITIALIZING NAVIGATION SYSTEMS",
-                  progress);
+  SDL_SetRenderDrawColor(
+      runtime.platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderClear(runtime.platform.renderer());
 }
 
 // Ghidra: 0x004aaf60 NovaUi_PresentStartupSplashFrame. The black pre-clear
@@ -1778,11 +1622,12 @@ void NovaUi_PresentStartupSplashFrame(NovaRuntime &runtime) {
     SDL_SetRenderDrawColor(
         runtime.platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(runtime.platform.renderer());
-    PresentSplashTexture(runtime.platform.renderer(),
-                         runtime.startup_splash_texture->get());
+    PresentSplashTexture(runtime, runtime.startup_splash_texture->get());
     return;
   }
-  DrawAmbrosiaStartupSplash(runtime.platform.renderer());
+  SDL_SetRenderDrawColor(
+      runtime.platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderClear(runtime.platform.renderer());
 }
 
 // Ghidra: 0x004ab3a0 NovaUi_ProgressCallbackNoOp. The startup path passes this
@@ -1813,6 +1658,13 @@ void NovaUi_AddProgressAndRedraw(NovaRuntime &runtime, double delta) {
 
 // Ghidra: 0x004ab3d0 NovaUi_RedrawProgressBar
 void NovaUi_RedrawProgressBar(NovaRuntime &runtime) {
+  // The bar's c\x9alr offsets are relative to the same centre as the splash.
+  // Use its containment factor too, so smaller windows do not shrink the bar
+  // through an unrelated menu canvas.
+  const SdlPlatform::ScopedPlacement placement(
+      runtime.platform,
+      PlaceContained(StartupAuthoredSize(runtime),
+                     runtime.platform.logical_playfield_size()));
   const ProgressBarPalette colors = ProgressBarColors(runtime);
   ProgressBarReferenceRect outer = ProgressBarOutline(runtime);
   outer.top += runtime.loading_progress_reveal_inset;

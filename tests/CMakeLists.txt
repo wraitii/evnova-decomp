@@ -25,6 +25,7 @@ add_executable(evnova_tests
     outfit_clamp_test.cpp
     outfit_ionization_test.cpp
     pilot_file_test.cpp
+    placement_test.cpp
     player_info_window_test.cpp
     pixpat_test.cpp
     preferences_test.cpp

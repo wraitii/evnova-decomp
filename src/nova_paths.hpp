@@ -34,7 +34,8 @@ namespace NovaPaths {
 [[nodiscard]] std::optional<std::filesystem::path> InstallRoot();
 
 // Per-user writable support folder, from SDL_GetPrefPath("Ambrosia Software",
-// "EV Nova"). On macOS this is ~/Library/Application Support/EV Nova/. The
+// "EV Nova"). On macOS this is
+// ~/Library/Application Support/Ambrosia Software/EV Nova/. The
 // directory is created on demand; nullopt when it cannot be resolved.
 [[nodiscard]] std::optional<std::filesystem::path> SupportDirectory();
 

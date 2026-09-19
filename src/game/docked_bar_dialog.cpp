@@ -169,6 +169,8 @@ void RunBarNewsWindow(SdlPlatform &platform,
                       const std::string &headline,
                       const std::string &body,
                       const std::function<void()> &render_background) {
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
   // Government news PICT with the 9000 fallback (0x0047d180 prologue).
   const std::int16_t news_pict =
       static_cast<std::int16_t>(NovaBar_NewsPictId(state, stellar_id));
@@ -188,8 +190,7 @@ void RunBarNewsWindow(SdlPlatform &platform,
   // NovaUi_DrawTravelNewsWindow 0x0047d370); no DITL items are required.
   const float win_w = static_cast<float>(dlog->right - dlog->left);
   const float win_h = static_cast<float>(dlog->bottom - dlog->top);
-  const SDL_FPoint output = platform.logical_playfield_size();
-  const SDL_FPoint origin{(output.x - win_w) / 2.0F, (output.y - win_h) / 2.0F};
+  const SDL_FPoint origin{0.0F, 0.0F};
   const SDL_FRect window{origin.x, origin.y, win_w, win_h};
 
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
@@ -197,15 +198,21 @@ void RunBarNewsWindow(SdlPlatform &platform,
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
 
+  ProbeUiAutoClear probe_ui_guard(platform);
   const auto draw_frame = [&]() {
-    platform.SetFullscreenPlayfield();
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(platform.renderer());
     if (render_background) {
       render_background();
     } else if (backdrop != nullptr) {
-      SDL_RenderTexture(platform.renderer(), backdrop->get(), nullptr, nullptr);
+      DrawContainedPict(platform, backdrop->get());
     }
+    platform.SetPlacement(PlaceContained({window.w, window.h},
+                                         platform.logical_playfield_size()));
+    const SDL_FRect probe_window =
+        platform.current_placement().ToWindowRect(window);
+    platform.PublishProbeUi(
+        "bar_news", {{"window", probe_window}, {"close", probe_window}});
     // Window fill + news art blitted over the window rect (0x0047d370).
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(platform.renderer(), &window);
@@ -226,8 +233,6 @@ void RunBarNewsWindow(SdlPlatform &platform,
     platform.Present();
   };
 
-  ProbeUiAutoClear probe_ui_guard(platform);
-  platform.PublishProbeUi("bar_news", {{"window", window}, {"close", window}});
   while (!platform.quit_requested()) {
     draw_frame();
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
@@ -264,6 +269,8 @@ LandedExit RunBarDialog(SdlPlatform &platform,
                         GameState &state,
                         std::int16_t stellar_id,
                         const std::function<void()> &render_background) {
+  const SdlPlatform::ScopedPlacement restore_placement(
+      platform, platform.current_placement());
   // The original composes the news texts once at bar entry
   // (NovaUi_ComposeTravelNewsTexts 0x0047d600, before the selection-dialog
   // load); the Holovid window (0x0047d180) only displays the stored strings,
@@ -317,8 +324,7 @@ LandedExit RunBarDialog(SdlPlatform &platform,
 
   const float win_w = static_cast<float>(dlog->right - dlog->left);
   const float win_h = static_cast<float>(dlog->bottom - dlog->top);
-  const SDL_FPoint output = platform.logical_playfield_size();
-  const SDL_FPoint origin{(output.x - win_w) / 2.0F, (output.y - win_h) / 2.0F};
+  const SDL_FPoint origin{0.0F, 0.0F};
   const SDL_FRect window{origin.x, origin.y, win_w, win_h};
   const auto item_rect = [&](std::size_t index) {
     for (const auto &item : *items) {
@@ -368,14 +374,15 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   // glitchy mission-offer rendering. Mirrors the landed/store/trade pattern
   // (docs/dlog_ditl_dialog_format.md section 7.1).
   const auto draw_bar_contents = [&]() {
-    platform.SetFullscreenPlayfield();
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(platform.renderer());
     if (render_background) {
       render_background();
     } else if (backdrop != nullptr) {
-      SDL_RenderTexture(platform.renderer(), backdrop->get(), nullptr, nullptr);
+      DrawContainedPict(platform, backdrop->get());
     }
+    platform.SetPlacement(PlaceContained({window.w, window.h},
+                                         platform.logical_playfield_size()));
     // Window fill + backdrop PICT (0x0047cfe0).
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(platform.renderer(), &window);
@@ -428,12 +435,18 @@ LandedExit RunBarDialog(SdlPlatform &platform,
 
   ProbeUiAutoClear probe_ui_guard(platform);
   const auto publish_probe_controls = [&]() {
+    const Placement bar_placement =
+        PlaceContained({window.w, window.h}, platform.logical_playfield_size())
+            .Canonicalized();
+    const auto probe_rect = [&bar_placement](SDL_FRect rect) {
+      return bar_placement.ToWindowRect(rect);
+    };
     platform.PublishProbeUi("bar",
-                            {{"window", window},
-                             {"leave", buttons[0]},
-                             {"gamble", buttons[1]},
-                             {"holovid", buttons[2]},
-                             {"hire_escort", buttons[4]}});
+                            {{"window", probe_rect(window)},
+                             {"leave", probe_rect(buttons[0])},
+                             {"gamble", probe_rect(buttons[1])},
+                             {"holovid", probe_rect(buttons[2])},
+                             {"hire_escort", probe_rect(buttons[4])}});
   };
   publish_probe_controls();
 

@@ -763,9 +763,10 @@ namespace {
 // Items 0..3 then 5..6 are the six option buttons (entry 4, the text panel, is
 // skipped); UiPanel entry indices are 1-based, so the action codes read back
 // by NovaUi_PollTravelScriptAction are 1,2,3,4,6,7 (no code 5). The window is
-// centred on the 640x480 playfield.
-constexpr float kBoardWindowX = (640.0F - 309.0F) / 2.0F; // 165.5
-constexpr float kBoardWindowY = (480.0F - 198.0F) / 2.0F; // 141.0
+// Authored locally in the 309x198 DLOG composition; the active placement
+// centres this composition in the window.
+constexpr float kBoardWindowX = 0.0F;
+constexpr float kBoardWindowY = 0.0F;
 constexpr float kBoardWindowW = 309.0F;
 constexpr float kBoardWindowH = 198.0F;
 constexpr std::uint16_t kBoardBackdropPict = 0x2143;
@@ -779,8 +780,8 @@ constexpr std::uint16_t kBoardBackdropPict = 0x2143;
 // t40 l40 b154 r297) and NovaUi_RedrawTravelBinaryChoiceButtons's label-index
 // table {0x2e, 0x2d} into the STR# 0x96 pstring table (0-based pool entries;
 // the STR# entry numbers below are those + 1).
-constexpr float kCaptureWindowX = (640.0F - 257.0F) / 2.0F; // 191.5
-constexpr float kCaptureWindowY = (480.0F - 114.0F) / 2.0F; // 183.0
+constexpr float kCaptureWindowX = 0.0F;
+constexpr float kCaptureWindowY = 0.0F;
 constexpr float kCaptureWindowW = 257.0F;
 constexpr float kCaptureWindowH = 114.0F;
 constexpr std::uint16_t kCaptureBackdropPict = 0x2144;
@@ -935,14 +936,14 @@ std::string CargoName(const GameState &state, int cargo_type) {
 
 // One boarding-window option button.
 struct BoardButton {
-  SDL_FRect rect;            // absolute 640x480 screen rect
+  SDL_FRect rect;            // local DLOG rect
   std::uint8_t action_code;  // 1 (Abort) .. 7 (Capture), skipping 5
   std::uint16_t label_index; // STR# 0x96 index
   std::string label;
 };
 
-// Builds the six option buttons from the DITL item rects (absolute screen
-// coords). Order matches the hit-test set (items 0..3 then 5..6).
+// Builds the six option buttons from the DITL item rects (local DLOG coords).
+// Order matches the hit-test set (items 0..3 then 5..6).
 std::array<BoardButton, 6> BuildBoardButtons() {
   const auto abs = [](float x, float y, float w, float h) {
     return SDL_FRect{kBoardWindowX + x, kBoardWindowY + y, w, h};
@@ -1079,7 +1080,8 @@ void DrawBoardWindow(SdlPlatform &platform,
   // its DLOG over the unmodified gameplay surface, and the HUD's overlay
   // message rect (loot / "Oops!" text) stays visible below the window.
   view.DrawGameFrame(platform, state, hud);
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(PlaceContained({kBoardWindowW, kBoardWindowH},
+                                       platform.logical_playfield_size()));
 
   const SDL_FRect window{
       kBoardWindowX, kBoardWindowY, kBoardWindowW, kBoardWindowH};
@@ -1314,6 +1316,9 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
                          const std::array<BoardButton, 6> &board_buttons,
                          const BoardingPlunderOptions &board_options,
                          SDL_Texture *board_backdrop) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
+
   struct CaptureButton {
     SDL_FRect rect;
     unsigned action_code;
@@ -1352,6 +1357,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
   bool take_ship = false;
   bool close = false;
   while (!platform.quit_requested() && !close) {
+    platform.SetPlacement(PlaceContained({kCaptureWindowW, kCaptureWindowH},
+                                         platform.logical_playfield_size()));
     int hovered = -1;
     const SDL_FPoint mouse = platform.mouse_position();
     for (std::size_t i = 0; i < buttons.size(); ++i) {
@@ -1365,7 +1372,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
     // Live game view + the boarding window beneath (the original composites
     // this dialog over the still-open boarding window).
     view.DrawGameFrame(platform, state, hud);
-    platform.SetCenteredPlayfield();
+    platform.SetPlacement(PlaceContained({kBoardWindowW, kBoardWindowH},
+                                         platform.logical_playfield_size()));
     DrawBoardWindow(platform,
                     font_cache,
                     art,
@@ -1376,6 +1384,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
                     hud,
                     board_backdrop,
                     -1);
+    platform.SetPlacement(PlaceContained({kCaptureWindowW, kCaptureWindowH},
+                                         platform.logical_playfield_size()));
 
     const SDL_FRect window{
         kCaptureWindowX, kCaptureWindowY, kCaptureWindowW, kCaptureWindowH};
@@ -1489,6 +1499,8 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
                                 GameState &state,
                                 SpaceflightView &view,
                                 HudRenderer &hud) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
   BoardingWindowResult result;
 
   const std::int16_t target_slot = state.player.primary_target_ship_slot;
@@ -1542,7 +1554,8 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
     NovaLog::Warn("three-state button art unavailable for the boarding window");
   }
   NovaFontCache font_cache;
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(PlaceContained({kBoardWindowW, kBoardWindowH},
+                                       platform.logical_playfield_size()));
   const std::array<BoardButton, 6> buttons = BuildBoardButtons();
 
   // NovaInputQueue_FlushAllCommands: the original discards pending input when
@@ -1909,7 +1922,9 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
               }
               const auto render_background = [&]() {
                 view.DrawGameFrame(platform, state, hud);
-                platform.SetCenteredPlayfield();
+                platform.SetPlacement(
+                    PlaceContained({kBoardWindowW, kBoardWindowH},
+                                   platform.logical_playfield_size()));
                 DrawBoardWindow(platform,
                                 font_cache,
                                 art,

@@ -37,10 +37,9 @@ constexpr std::uint64_t kMsPer60Tick = 60;
 // modelled by SdlAudio::Play, so the cue plays at unity gain.
 constexpr std::uint16_t kIntroSoundId = 0x7533;
 
-// Mirrors the splash presentation path in nova_app.cpp: the original centers
-// each intro PICT at native size on the offscreen surface and clips overflow;
-// here it is uniformly scaled to fit the 640x480 viewport. The visual is
-// equivalent for the intro frame art and keeps a single shared draw path.
+// The original centers each intro PICT at native size on the 1024x768 offscreen
+// surface and clips overflow. The surrounding placement contains that authored
+// surface in the window and caps it at 1x. Runs inline in IntroCinematic_Run.
 void PresentPict(SDL_Renderer *renderer, const PictImage &pict) {
   auto texture =
       SdlTexture::Create(renderer, pict.width, pict.height, pict.rgba_pixels);
@@ -50,11 +49,8 @@ void PresentPict(SDL_Renderer *renderer, const PictImage &pict) {
   float width = 0.0F;
   float height = 0.0F;
   SDL_GetTextureSize(texture->get(), &width, &height);
-  const auto scale = std::min(640.0F / width, 480.0F / height);
-  const SDL_FRect destination{(640.0F - width * scale) / 2.0F,
-                              (480.0F - height * scale) / 2.0F,
-                              width * scale,
-                              height * scale};
+  const SDL_FRect destination{
+      (1024.0F - width) / 2.0F, (768.0F - height) / 2.0F, width, height};
   SDL_RenderTexture(renderer, texture->get(), nullptr, &destination);
 }
 
@@ -113,9 +109,12 @@ struct IntroInput {
 IntroInput PollIntroInput(SdlPlatform &platform, std::uint16_t skip_key) {
   IntroInput result;
   for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
+    const SDL_FPoint mouse = platform.mouse_position();
+    const bool mouse_in_intro_surface = mouse.x >= 0.0F && mouse.x < 1024.0F &&
+                                        mouse.y >= 0.0F && mouse.y < 768.0F;
     if (input->key == TextKey::enter ||
         (input->key == TextKey::character && input->character == ' ') ||
-        input->key == TextKey::primary) {
+        (input->key == TextKey::primary && mouse_in_intro_surface)) {
       result.frame_done = true;
     }
     if (skip_key != 0xffff && input->key_code == skip_key) {
@@ -258,11 +257,12 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
             std::max<int>(0, cinematic.duration_60h_ticks[frame_index])) *
         kMsPer60Tick;
     while (!platform.quit_requested() && !input_state.skip_all) {
-      SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
+      SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(renderer);
-      // The intro cinematic renders as a fixed screen, upscaled to the window
-      // like the menu/splash (same scaled 640x480 logical presentation).
-      platform.SetScaledPlayfield();
+      // The intro cinematic uses the native 1024x768 authored composition.
+      SdlPlatform::ScopedPlacement placement(
+          platform,
+          PlaceContained({1024.0F, 768.0F}, platform.logical_playfield_size()));
       if (pict) {
         PresentPict(renderer, *pict);
       }

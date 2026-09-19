@@ -79,5 +79,27 @@ build\release\src\evnova.exe        # Windows
 
 The optional probe/control harness ([docs/probe_harness.md](docs/probe_harness.md)) is built by default on macOS/Linux and off on Windows, since its transport is a POSIX socket server. Toggle it with `-DEVNOVA_ENABLE_PROBE=ON|OFF` when configuring.
 
-The reimplementation loads the installed CE data (`Nova.rez`, `Nova Files/`, and the bundled `Charcoal.ttf`/`Geneva.ttf`), which this repo does not ship.
-Either run the binary from the install folder or from the repo root (which contains the `EV Nova/` folder); the resolver looks next to the executable first, then for `EV Nova` relative to the working directory.
+### Game data
+
+The reimplementation runs on an installed copy of the Windows CE data. That
+data (the `.rez` archives, `Nova Files/`, `Nova Plug-ins/` and the
+`Charcoal.ttf`/`Geneva.ttf` fonts) is kept locally and is not versioned here.
+
+It resolves two directories:
+
+- **Install root** — the read-only shipped data. The first candidate that
+  contains `Nova.rez` or a `Nova Files/` directory wins:
+  1. the directory next to the executable,
+  2. `EV Nova/` relative to the working directory,
+  3. `../../../EV Nova` relative to the working directory.
+- **Support folder** — per-user writable state (`Pilots/`, user plug-ins),
+  from `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`: on macOS
+  `~/Library/Application Support/Ambrosia Software/EV Nova/`.
+
+`.rez` archives load from weakest to strongest, so later ones override earlier
+ones: `Nova.rez` → `Nova Files/*.rez` → `Nova Plug-ins/*.rez` → support-folder
+`Nova Plug-ins/*.rez`. (A bare `Plug-ins/` is used when the CE-style
+`Nova Plug-ins/` folder is absent.)
+
+So run from inside the install folder, or from the repo root (which holds the
+gitignored `EV Nova/` folder).

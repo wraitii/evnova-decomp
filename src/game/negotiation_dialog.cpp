@@ -182,7 +182,7 @@ constexpr SDL_Color kStatusOrange{255, 102, 0, 255};
 
 // ---- DLOG 0x3f1 layout ----------------------------------------------------
 // All geometry comes from the real DLOG/DITL 0x3f1 resources, mapped into the
-// centred 640x480 playfield canvas. The constants below are the fallback used
+// local 540x295 composition. The constants below are the fallback used
 // when the resources fail to decode; they mirror the shipped DITL (see
 // docs/dlog_ditl_dialog_format.md).
 constexpr float kNegotiationFrameWidth = 540.0F;
@@ -215,8 +215,8 @@ struct NegotiationFrame {
   SDL_Color status_word_color = kWhite;
 };
 
-// Loads DLOG 0x3f1 + DITL, centred on the fixed 640x480 canvas like
-// Dialog_CreateFromDlog; fills `frame`'s geometry from DITL items 0..5.
+// Loads DLOG 0x3f1 + DITL into local 540x295 composition coordinates. The
+// active placement centres that composition in the window.
 // Returns false (leaving the shipped-DITL fallback geometry) when the
 // resources are unavailable.
 [[nodiscard]] bool LoadNegotiationGeometry(SDL_FRect *buttons,
@@ -233,8 +233,7 @@ struct NegotiationFrame {
   }
   const float width = static_cast<float>(definition->right - definition->left);
   const float height = static_cast<float>(definition->bottom - definition->top);
-  const SDL_FPoint origin{std::truncf((640.0F - width) * 0.5F),
-                          std::truncf((480.0F - height) * 0.5F)};
+  const SDL_FPoint origin{0.0F, 0.0F};
   window = {origin.x, origin.y, width, height};
   for (const auto &item : *items) {
     const SDL_FRect rect =
@@ -283,10 +282,7 @@ struct PaymentFrame {
 
 [[nodiscard]] PaymentFrame LoadPaymentGeometry() {
   PaymentFrame frame;
-  frame.window = {std::truncf((640.0F - kPaymentFrameWidth) * 0.5F),
-                  std::truncf((480.0F - kPaymentFrameHeight) * 0.5F),
-                  kPaymentFrameWidth,
-                  kPaymentFrameHeight};
+  frame.window = {0.0F, 0.0F, kPaymentFrameWidth, kPaymentFrameHeight};
   frame.buttons[0] = OffsetRect(kFallbackPaymentButtonRects[0],
                                 {frame.window.x, frame.window.y});
   frame.buttons[1] = OffsetRect(kFallbackPaymentButtonRects[1],
@@ -304,8 +300,7 @@ struct PaymentFrame {
   }
   const float width = static_cast<float>(definition->right - definition->left);
   const float height = static_cast<float>(definition->bottom - definition->top);
-  const SDL_FPoint origin{std::truncf((640.0F - width) * 0.5F),
-                          std::truncf((480.0F - height) * 0.5F)};
+  const SDL_FPoint origin{0.0F, 0.0F};
   frame.window = {origin.x, origin.y, width, height};
   for (const auto &item : *items) {
     const SDL_FRect rect =
@@ -402,7 +397,8 @@ void DrawNegotiationDialog(SdlPlatform &platform,
   // so this redraws the same world each frame): the original draws its DLOG
   // over the unmodified gameplay surface.
   view.DrawGameFrame(platform, state, hud);
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(PlaceContained({frame.window.w, frame.window.h},
+                                       platform.logical_playfield_size()));
 
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &frame.window);
@@ -587,6 +583,8 @@ void DrawPaymentWindow(SdlPlatform &platform,
                        std::int32_t payment_amount,
                        int hovered_slot) {
   SDL_Renderer *renderer = platform.renderer();
+  platform.SetPlacement(PlaceContained({frame.window.w, frame.window.h},
+                                       platform.logical_playfield_size()));
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &frame.window);
   } else {
@@ -650,6 +648,8 @@ RunBribePaymentWindow(SdlPlatform &platform,
                       SDL_Texture *backdrop,
                       const std::function<void()> &draw_underneath,
                       std::int32_t &payment_amount) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
   const PaymentFrame frame = LoadPaymentGeometry();
   // The window-open roll: "Lower Price" is granted when rand(100) <= 0x23.
   bool lower_granted = RandomBelow(state.rng, 100) <= kPaymentChancePercent;
@@ -664,6 +664,8 @@ RunBribePaymentWindow(SdlPlatform &platform,
   }
 
   while (!platform.quit_requested()) {
+    platform.SetPlacement(PlaceContained({frame.window.w, frame.window.h},
+                                         platform.logical_playfield_size()));
     int hovered = -1;
     const SDL_FPoint mouse = platform.mouse_position();
     for (int slot = 0; slot < 2; ++slot) {
@@ -761,6 +763,8 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                                                      std::int16_t stellar_id,
                                                      SpaceflightView &view,
                                                      HudRenderer &hud) {
+  SdlPlatform::ScopedPlacement placement_guard(platform,
+                                               platform.current_placement());
   NovaLog::Info("opening destination-interaction dialog 0x3f1 for stellar {}",
                 static_cast<int>(stellar_id));
 
@@ -836,10 +840,7 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
 
   // ---- Window content --------------------------------------------------
   NegotiationFrame frame;
-  frame.window = {std::truncf((640.0F - kNegotiationFrameWidth) * 0.5F),
-                  std::truncf((480.0F - kNegotiationFrameHeight) * 0.5F),
-                  kNegotiationFrameWidth,
-                  kNegotiationFrameHeight};
+  frame.window = {0.0F, 0.0F, kNegotiationFrameWidth, kNegotiationFrameHeight};
   for (int i = 0; i < 3; ++i) {
     frame.buttons[i] =
         OffsetRect(kFallbackButtonRects[i], {frame.window.x, frame.window.y});
@@ -984,7 +985,9 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                   "dialog buttons");
   }
   NovaFontCache font_cache;
-  platform.SetCenteredPlayfield();
+  platform.SetPlacement(
+      PlaceContained({kNegotiationFrameWidth, kNegotiationFrameHeight},
+                     platform.logical_playfield_size()));
 
   std::vector<ServiceButton> buttons;
   buttons.reserve(3);
