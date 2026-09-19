@@ -8,8 +8,11 @@
 
 #include "game/escort_formation.hpp"
 #include "game/game_state.hpp"
+#include "game/hud_overlay.hpp"
 #include "game/outfit.hpp"
+#include "game/preferences.hpp"
 #include "game/scenario_data.hpp"
+#include "game/spaceflight.hpp"
 #include "game/spaceflight_view.hpp"
 #include "game/targeting.hpp"
 #include "game/travel.hpp"
@@ -1214,4 +1217,40 @@ TEST_CASE("effective murk sums owned MurkMod outfits and clamps",
   // The value follows the current system.
   state.player.current_system_id = 1;
   CHECK(game::NovaSystem_GetEffectiveMurkPercent(state) == 40); // 90 - 50
+}
+
+TEST_CASE("flight tutorial range hints advance the hint state",
+          "[travel][hints]") {
+  GameState state;
+  game::NovaPreferences prefs;
+  prefs.bindings.ResetToDefaults();
+  state.spaceflight_frame_counter = 0;
+
+  // State 0, outside the 2,000,000 px^2 no-jump radius: the "not yet far
+  // enough away" hint (STR# 0x7d2 0x1e) latches the state to 1.
+  state.travel.travel_hint_state = 0;
+  state.player.pos_x = 2000.0F; // squared distance 4,000,000
+  state.player.pos_y = 0.0F;
+  game::PlayerTick_FlightTutorialHints(state, prefs);
+  CHECK(state.travel.travel_hint_state == 1);
+  REQUIRE(state.hud_overlay.active);
+  CHECK(state.hud_overlay.message.find("beyond safe hyperspace range") !=
+        std::string::npos);
+
+  // Latched at 1, beyond the 10,000,000 px^2 threshold: the "nothing to find
+  // out here" hint (0x1f) latches the state to 2.
+  state.spaceflight_frame_counter = 60;
+  state.player.pos_x = 4000.0F; // squared distance 16,000,000
+  game::NovaHud_ClearOverlayMessage(state);
+  game::PlayerTick_FlightTutorialHints(state, prefs);
+  CHECK(state.travel.travel_hint_state == 2);
+  REQUIRE(state.hud_overlay.active);
+  CHECK(state.hud_overlay.message.find("nothing to find out here") !=
+        std::string::npos);
+
+  // Once latched at 2 the tick is inert.
+  state.spaceflight_frame_counter = 120;
+  game::NovaHud_ClearOverlayMessage(state);
+  game::PlayerTick_FlightTutorialHints(state, prefs);
+  CHECK_FALSE(state.hud_overlay.active);
 }
