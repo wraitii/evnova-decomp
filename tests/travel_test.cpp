@@ -674,7 +674,7 @@ TEST_CASE("jump stop gate truncates velocity before starting Warp up") {
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
 
   CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
-  CHECK(state.travel.warp_up_sound_pending);
+  CHECK(state.warp_up_sound_pending);
 }
 
 TEST_CASE("jump payroll uses fleet travel days after escort restoration",
