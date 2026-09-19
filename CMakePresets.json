@@ -27,6 +27,18 @@
         "EVNOVA_ENABLE_CLANG_TIDY": "OFF",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       }
+    },
+    {
+      "name": "tidy",
+      "displayName": "Tidy (no PCH, for manual clang-tidy)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/tidy",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "EVNOVA_ENABLE_CLANG_TIDY": "OFF",
+        "EVNOVA_ENABLE_PCH": "OFF",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
     }
   ],
   "buildPresets": [
@@ -37,6 +49,10 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "tidy",
+      "configurePreset": "tidy"
     }
   ],
   "testPresets": [
