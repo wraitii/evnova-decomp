@@ -116,5 +116,15 @@ else()
     endif()
 endif()
 
+if(EVNOVA_ENABLE_PCH)
+    # clang-tidy runs its own frontend and ignores the PCH, so skip it there.
+    if(NOT CMAKE_CXX_CLANG_TIDY)
+        target_precompile_headers(evnova_runtime PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/nova_pch.hpp")
+    else()
+        message(STATUS "EVNOVA_ENABLE_PCH ignored: clang-tidy is enabled")
+    endif()
+endif()
+
 add_executable(evnova main.cpp)
 target_link_libraries(evnova PRIVATE evnova_runtime)
