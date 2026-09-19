@@ -1252,6 +1252,11 @@ struct GameState {
   // (Ship_UpdateShipCombatOddsScore 0x004133f0), and the mode-6 evasive-break
   // gate (NovaAi_PlayerCombatRatingGate 0x0046b330).
   std::int32_t player_combat_rating_points = 0;
+  // Rating-system base unit: the original reads class 0's Strength (the
+  // Shuttle, 2) unindexed in the fire-cooldown ladder, afterburner roll, and
+  // combat-odds scaling. Pinned so a mod editing class 0 cannot rescale the
+  // rating system (documented divergence; see known_original_bugs.md).
+  static constexpr std::int32_t kCombatRatingBaseStrength = 2;
   // Ghidra DAT_007353f6..0x7353fd: four persisted player stat modifiers held
   // as percentages. [0]/[1] random-walk +-1 with 2-in-3 probability, clamped
   // to [0x55,0x73] = [85,115], at Frame_JitterPlayerStatModifiers 0x00431480;

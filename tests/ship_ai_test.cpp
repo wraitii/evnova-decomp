@@ -1305,6 +1305,86 @@ TEST_CASE("ApplyControls mode 6 arms a turret bank via the current-target "
   CHECK(ship.ai_fire_trigger_latch != 0);
 }
 
+// Ship_CanShipUseAfterburner (0x0046b260): capability 0x0020 rolls
+// NovaRandom_Range(0x540) and passes when roll + 0x100 <= rating / base
+// strength. The base unit is pinned to GameState::kCombatRatingBaseStrength
+// (2; the original reads class-0 Strength, 0x0046b303-0x0046b316). With base
+// 2 the gate is deterministic at the ends: always false below rating 512,
+// always true at rating >= 3200 (roll+0x100 in [256,1599]).
+TEST_CASE("afterburner rating gate uses the pinned base strength") {
+  const auto can_use_afterburner = [](std::int32_t rating,
+                                      std::int16_t own_class_strength,
+                                      std::int16_t class0_strength) {
+    GameState state;
+    state.scenario.ships.resize(2);
+    state.scenario.ships[0].strength = class0_strength;
+    state.scenario.ships[1].strength = own_class_strength;
+    state.scenario.ships[1].capability_flags = 0x0020U;
+    game::Ship &ship = state.ShipAt(1);
+    ship.is_active = true;
+    ship.ship_instance_id = 1;
+    ship.ship_class_id = 1; // distinct from class 0 so own vs base differ
+    ship.armor_points = 100.0F;
+    ship.shield_points = 100.0F;
+    state.player_combat_rating_points = rating;
+    return game::NovaShip_CanShipUseAfterburner(state, ship);
+  };
+
+  CHECK_FALSE(can_use_afterburner(511, 500, 2)); // 511/2 = 255 < 256
+  CHECK(can_use_afterburner(3200, 500, 2));      // 3200/2 = 1600 >= 1599
+  // The divisor is the pinned base, not the ship's own class strength: with
+  // the old own-class read, 3200/10000 would truncate to 0 and fail.
+  CHECK(can_use_afterburner(3200, 10000, 2));
+  // Pinned divergence: editing class-0 Strength must not move the gate.
+  CHECK_FALSE(can_use_afterburner(511, 500, 100));
+  CHECK(can_use_afterburner(3200, 10000, 100));
+}
+
+// Ship_UpdateShipCombatOddsScore (0x004133f0) scales the player's contribution
+// to the hostile strength by clamp(rating / (base * 6400), 1, 2), with the
+// base unit pinned to GameState::kCombatRatingBaseStrength (2; the original
+// reads class-0 Strength at 0x0041343c). Player class and NPC class both have
+// Strength 100, so the resulting odds equal the rating scale directly.
+TEST_CASE("combat-odds player scaling uses the pinned base strength") {
+  const auto odds = [](std::int32_t rating, std::int16_t class0_strength) {
+    GameState state;
+    state.scenario.ships.resize(3);
+    state.scenario.ships[0].strength = class0_strength;
+    state.scenario.ships[1].strength = 100; // NPC
+    state.scenario.ships[2].strength = 100; // player
+
+    game::Ship &npc = state.ShipAt(1);
+    npc.is_active = true;
+    npc.ship_instance_id = 1;
+    npc.ship_class_id = 1;
+    npc.primary_target_ship_slot = 0;
+    npc.ai_state_code = 4;
+    npc.armor_points = 100.0F;
+    npc.shield_points = 100.0F;
+    npc.mission_fleet_slot = -1;
+    npc.defense_fleet_home_stellar_id = -1;
+
+    state.player.is_active = true;
+    state.player.ship_instance_id = 0;
+    state.player.ship_class_id = 2;
+    state.player.armor_points = 100.0F;
+    state.player.shield_points = 100.0F;
+    state.player_combat_rating_points = rating;
+
+    game::NovaAi_UpdateShipCombatOddsScore(state, npc);
+    return npc.ai_odds_score;
+  };
+
+  // Divisor = 2 * 6400 = 12800, clamped scale [1,2].
+  CHECK(odds(0, 100) == Catch::Approx(1.0F));
+  CHECK(odds(12800, 100) == Catch::Approx(1.0F));
+  CHECK(odds(25600, 100) == Catch::Approx(2.0F));
+  CHECK(odds(100000, 100) == Catch::Approx(2.0F));
+  // Pinned: with class-0 Strength 50 the original divisor would be 320000
+  // and rating 25600 would clamp to scale 1 (odds 1.0).
+  CHECK(odds(25600, 50) == Catch::Approx(2.0F));
+}
+
 // Ship_ApplyShipAiControls (0x00408150) reaches for the +0xC8DA last
 // lead-fired bank in the mode-6/7/0xe aim blocks: mode 6 leads with the active
 // bank when its weapon mode is {-1,6} and otherwise falls back to +0xC8DA,

@@ -115,6 +115,7 @@ Per the discord.
 * **Two `përs` with exactly the same name count as one person, but adding a trailing space makes them distinct.** 
 * **System-summoned fleets always arrive after the player**, via hyperspace/hypergate, rather than being present beforehand. 
 * **Scan-triggered mission failure requires the scanning government to have a smuggling penalty ≥1 as well as a matching scan mask.** 
+* (harcoded to avoid mod weirdness) **The combat-rating system's base unit is ship class 0's Strength** (the Shuttle, 2), read unindexed by the NPC fire-cooldown ladder (`0x00414ea8`), the afterburner roll (`0x0046b308`), and combat-odds player scaling (`0x0041343c`). The port pins 2 (`GameState::kCombatRatingBaseStrength`) so a mod editing class 0 cannot rescale the rating system. (The afterburner divides by this base, not the ship's own Strength; the port previously misread that.) 
 
 ## Datafile bugs
 
