@@ -217,6 +217,7 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
     UiControl_SetValue(*window, 13, static_cast<short>(preselect + 1));
   }
 
+  ProbeUiAutoClear probe_ui_guard(platform);
   short code = -1;
   bool accepted = false;
   bool cancelled = false;

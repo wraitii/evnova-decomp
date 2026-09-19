@@ -1296,6 +1296,7 @@ RunStoreQuantityPrompt(SdlPlatform &platform,
   UiPanel_SetEntryTextPascal(window, 2, InfoString(0x172));
   UiPanel_SetEntryTextPascal(window, 3, std::to_string(max_quantity));
   UiPanel_SetTextEntrySelectionRange(window, 3, 0, 0xfe);
+  ProbeUiAutoClear probe_ui_guard(platform);
   while (!platform.quit_requested()) {
     short code = -1;
     UiWindow_RunInteractionLoop(
@@ -1360,6 +1361,7 @@ RunShipPurchaseConfirmation(SdlPlatform &platform,
   UiPanel_SetEntryTextPascal(window, 3, prompt);
   UiPanel_SetEntryTextPascal(window, 5, proposed);
   UiPanel_SetTextEntrySelectionRange(window, 5, 0, 0xfe);
+  ProbeUiAutoClear probe_ui_guard(platform);
   while (!platform.quit_requested()) {
     short code = -1;
     UiWindow_RunInteractionLoop(
