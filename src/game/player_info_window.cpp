@@ -12,6 +12,7 @@
 #include "outfit.hpp"
 #include "pict_image.hpp"
 #include "pict_texture.hpp"
+#include "preferences.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
@@ -871,8 +872,12 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
 PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
                                                 GameState &state,
                                                 SpaceflightView &view,
-                                                HudRenderer &hud) {
+                                                HudRenderer &hud,
+                                                const NovaPreferences &prefs) {
   PlayerInfoWindowResult result;
+  // g_player_key_bindings[0x19] (default P, DIK 0x19): a still-held bound key
+  // closes the window once released.
+  const std::uint16_t close_key = prefs.bindings.cmd_to_key[0x19];
 
   // Guards: the original returns when a modal is already up (BOOL_007354a8),
   // the station-hold timer is not exactly +0.0, or the death timer exceeds
@@ -1157,9 +1162,8 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
       }
     }
     // g_player_key_bindings[0x19] (default P, DIK 0x19) still held closes,
-    // as in the dispatch callback's drain arm. TODO(decomp): thread the
-    // binding table in instead of the default slot value.
-    if (!platform.IsOriginalKeyCodeHeld(0x19)) {
+    // as in the dispatch callback's drain arm.
+    if (close_key == 0xffff || !platform.IsOriginalKeyCodeHeld(close_key)) {
       special_key_released = true;
     } else if (special_key_released) {
       close = true;

@@ -23,6 +23,7 @@ class SdlPlatform;
 namespace game {
 
 struct GameState;
+struct NovaPreferences;
 class SpaceflightView;
 
 // Ghidra 0x0049c050 NovaUi_BuildPlayerSpecialInteractionStrings: the three
@@ -52,14 +53,15 @@ struct PlayerInfoWindowResult {
 // Ghidra 0x00499c10 NovaUi_RunPlayerSpecialInteractionWindow (clean-room).
 // Runs the modal Player Info window (DLOG 0x3f9, backdrop PICTs
 // 0x2146-0x2148) over the live game view until the player presses Done,
-// Escape/Enter/P, or confirms a jettison. Pages 1-4 are selected with the
-// tab strip or Tab (shift reverses, wrapping 1..4), exactly as in the
-// dispatch callback 0x0049a3a0. The flight simulation is paused while the
-// window is open, as in the original.
+// Escape/Enter, the bound Player Info command, or confirms a jettison. Pages
+// 1-4 are selected with the tab strip or Tab (shift reverses, wrapping 1..4),
+// exactly as in the dispatch callback 0x0049a3a0. The flight simulation is
+// paused while the window is open, as in the original.
 [[nodiscard]] PlayerInfoWindowResult
 NovaPlayerInfo_RunWindow(SdlPlatform &platform,
                          GameState &state,
                          SpaceflightView &view,
-                         HudRenderer &hud);
+                         HudRenderer &hud,
+                         const NovaPreferences &prefs);
 
 } // namespace game

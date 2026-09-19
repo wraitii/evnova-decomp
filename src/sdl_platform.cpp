@@ -653,17 +653,6 @@ FlightInput SdlPlatform::PollFlightInput() {
       input.primary_clicked = true;
       continue;
     }
-    // Escape exits the flight loop; captured here because this function
-    // drains the queue the old PollTextEvent-based check relied on. The
-    // original returns to the menu only through the pause menu's primary-mouse
-    // command (see spaceflight.hpp), which is unported, so Escape is the port's
-    // documented stand-in. 'q' is deliberately NOT latched: it is the menu's
-    // quit token only and is unbound in flight.
-    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-        event.key.key == SDLK_ESCAPE) {
-      input.escape_pressed = true;
-      continue;
-    }
   }
   const bool *const keys = SDL_GetKeyboardState(nullptr);
   // Virtual held keys from the probe harness (SDL_GetKeyboardState cannot see

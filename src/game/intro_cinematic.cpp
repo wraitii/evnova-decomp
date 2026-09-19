@@ -7,6 +7,7 @@
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
 #include "mission.hpp"
+#include "preferences.hpp"
 #include "selection_text_dialog.hpp"
 
 #include <SDL3/SDL.h>
@@ -102,14 +103,14 @@ void RunPostIntroTextReader(SdlPlatform &platform,
 // g_key_state_snapshot[code] & 1) that only keyboard scancodes feed
 // (FUN_004d7330 case 0x100); the mouse button only raises the platform ready
 // flag (DAT_008701a0), which is what drives the in-rect frame advance. So a
-// single click advances exactly one slide, and Escape skips the whole intro.
-// TODO(decomp): read the live binding slot instead of assuming the default.
+// single click advances exactly one slide, and the bound skip command
+// (binding slot 0x17, default Escape) skips the whole intro.
 struct IntroInput {
   bool frame_done = false;
   bool skip_all = false;
 };
 
-IntroInput PollIntroInput(SdlPlatform &platform) {
+IntroInput PollIntroInput(SdlPlatform &platform, std::uint16_t skip_key) {
   IntroInput result;
   for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
     if (input->key == TextKey::enter ||
@@ -117,7 +118,7 @@ IntroInput PollIntroInput(SdlPlatform &platform) {
         input->key == TextKey::primary) {
       result.frame_done = true;
     }
-    if (input->key == TextKey::escape) {
+    if (skip_key != 0xffff && input->key_code == skip_key) {
       result.skip_all = true;
     }
   }
@@ -189,18 +190,18 @@ void NovaIntroCinematic_SetupFrames(GameState &state,
 // Ghidra 0x0048adc0 IntroCinematic_Run.
 bool NovaIntroCinematic_Run(SdlPlatform &platform,
                             SdlAudio &audio,
-                            GameState &state) {
+                            GameState &state,
+                            const NovaPreferences &prefs) {
   SDL_Renderer *const renderer = platform.renderer();
   const auto &cinematic = state.intro_cinematic;
+  const std::uint16_t skip_key = prefs.bindings.cmd_to_key[0x17];
 
-  // The skip latch is polled at entry too: Escape already held when the
-  // cinematic starts skips straight to the epilogue gate (the original tests
-  // g_player_key_bindings[0x17] once before the frame loop).
+  // The skip latch is polled at entry too: the bound skip key already held when
+  // the cinematic starts skips straight to the epilogue gate (the original
+  // tests g_player_key_bindings[0x17] once before the frame loop).
   IntroInput input_state;
-  for (std::optional<TextInput> held; (held = platform.PollTextEvent());) {
-    if (held->key == TextKey::escape) {
-      input_state.skip_all = true;
-    }
+  if (skip_key != 0xffff && platform.IsOriginalKeyCodeHeld(skip_key)) {
+    input_state.skip_all = true;
   }
 
   // Decode the intro sound once for the run (the original decodes the snd
@@ -269,7 +270,7 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
 
       // Wait out the per-frame duration; Enter/Space/in-rect click advance one
       // frame, Escape skips the rest.
-      const auto polled = PollIntroInput(platform);
+      const auto polled = PollIntroInput(platform, skip_key);
       input_state.skip_all = input_state.skip_all || polled.skip_all;
       if (platform.quit_requested() || input_state.skip_all ||
           polled.frame_done ||

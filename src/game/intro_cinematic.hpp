@@ -24,6 +24,8 @@ class SdlAudio;
 
 namespace game {
 
+struct NovaPreferences;
+
 // Ghidra 0x004cd3b0 IntroCinematic_SetupFrames: fills state.intro_cinematic
 // from the pilot-save block keyed by `block_key` (the selected character
 // template's registered name; Menu_RunNewGameFlow falls back to family entry
@@ -37,11 +39,12 @@ void NovaIntroCinematic_SetupFrames(GameState &state,
 // Plays the intro cinematic sequence described by state.intro_cinematic.
 // Returns the mirror of the original's bVar9 skip latch: true if the sequence
 // was not skipped by the skip command (so the intro-text dialog may open),
-// false if skipped (Escape by default). Enter/Space/in-rect click
-// fast-forward only the current frame and do not flip the return value, exactly
-// as in Ghidra.
+// false if skipped (binding slot 0x17, default Escape). Enter/Space/in-rect
+// click fast-forward only the current frame and do not flip the return value,
+// exactly as in Ghidra.
 bool NovaIntroCinematic_Run(SdlPlatform &platform,
                             SdlAudio &audio,
-                            GameState &state);
+                            GameState &state,
+                            const NovaPreferences &prefs);
 
 } // namespace game

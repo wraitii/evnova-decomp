@@ -152,6 +152,9 @@ TEST_CASE("Preferences defaults match NovaPrefs_ResetToDefaults") {
   CHECK(prefs.ambient_sounds == true);
   CHECK(prefs.hyperspace_effects == false);
   CHECK(prefs.check_for_updates == true);
+  // The port's overlay is cheap, so the galaxy-map borders default ON (the
+  // original defaulted OFF).
+  CHECK(prefs.starmap_show_borders == true);
 
   // Flight slots use the normalized navigation row from the original key-name
   // map: forward Up=0x61, turn-left Left=0x63, turn-right Right=0x64, and
@@ -189,6 +192,41 @@ TEST_CASE("Hyperspace effect preference selects the flash colour") {
   CHECK(game::NovaPrefs_HyperspaceFlashIsBlack(prefs));
 }
 
+TEST_CASE("Locked quality preferences force the render values") {
+  game::NovaPreferences prefs;
+  prefs.ResetToDefaults();
+  // Simulate a hostile legacy .prf: every locked field set against the port's
+  // fixed render values.
+  prefs.share_processor_time = false;
+  prefs.quicktime_movies = true;
+  prefs.smoke_trails = true;
+  prefs.run_in_window = true;
+  prefs.ship_animations = false;
+  prefs.engine_glows = false;
+  prefs.running_lights = false;
+  prefs.weapon_effects = false;
+  prefs.parallax_starfield = false;
+  prefs.hyperspace_effects = true;
+  prefs.check_for_updates = false;
+  prefs.brightness = 0;
+
+  game::NovaPrefs_ApplyLockedPreferences(prefs);
+  CHECK(prefs.share_processor_time == true);
+  CHECK(prefs.quicktime_movies == false); // inverted: 0 = movies on
+  CHECK(prefs.smoke_trails == false);     // inverted: 0 = trails on
+  CHECK(prefs.run_in_window == false);
+  CHECK(prefs.ship_animations == true);
+  CHECK(prefs.engine_glows == true);
+  CHECK(prefs.running_lights == true);
+  CHECK(prefs.weapon_effects == true);
+  CHECK(prefs.parallax_starfield == true);
+  CHECK(prefs.hyperspace_effects == false); // inverted: 0 = effects on
+  CHECK(prefs.check_for_updates == true);
+  CHECK(prefs.brightness == 3);
+  // starmap_show_borders is NOT locked: the map owns it.
+  CHECK(prefs.starmap_show_borders == true);
+}
+
 TEST_CASE("Original preference file round-trips modeled settings and keys") {
   const auto path = std::filesystem::temp_directory_path() /
                     "evnova_preferences_round_trip.prf";
@@ -198,10 +236,14 @@ TEST_CASE("Original preference file round-trips modeled settings and keys") {
   written.ResetToDefaults();
   written.intro_music = false;
   written.sound_volume = 8;
+  // starmap_show_borders is not locked, so its stored value round-trips.
+  written.starmap_show_borders = false;
+  written.bindings.cmd_to_key[0x15] = 0x20;
+  // Locked fields are written but forced to the render values on load.
   written.brightness = 6;
   written.smoke_trails = true;
-  written.starmap_show_borders = true;
-  written.bindings.cmd_to_key[0x15] = 0x20;
+  written.engine_glows = false;
+  written.parallax_starfield = false;
   REQUIRE(game::NovaPrefs_SaveToFile(path, written));
   CHECK(std::filesystem::file_size(path) == 0x8c);
 
@@ -210,10 +252,13 @@ TEST_CASE("Original preference file round-trips modeled settings and keys") {
   REQUIRE(game::NovaPrefs_LoadFromFile(path, loaded));
   CHECK(loaded.intro_music == false);
   CHECK(loaded.sound_volume == 8);
-  CHECK(loaded.brightness == 6);
-  CHECK(loaded.smoke_trails == true);
-  CHECK(loaded.starmap_show_borders == true);
+  CHECK(loaded.starmap_show_borders == false);
   CHECK(loaded.bindings.cmd_to_key[0x15] == 0x20);
+  // Locked fields ignore whatever the file held.
+  CHECK(loaded.brightness == 3);
+  CHECK(loaded.smoke_trails == false);
+  CHECK(loaded.engine_glows == true);
+  CHECK(loaded.parallax_starfield == true);
 
   std::filesystem::remove(path);
 }

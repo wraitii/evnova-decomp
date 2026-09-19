@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <string>
 
 class SdlAudio;
 class SdlMusic;
@@ -39,6 +40,13 @@ struct KeyBindings {
   // Defaults exactly as NovaPrefs_ResetKeyBindings writes them.
   void ResetToDefaults();
 };
+
+// Ghidra String_ExpandControlCode (0x004f1990): the display name the Escape-
+// code map (PTR_s_Escape_005776dc) substitutes for a normalized physical-key
+// code, or "none" when the key is unbound. Exposed for the flight-tutorial
+// hint text (STR# 0x7d2 entries 0x18-0x1c) which embeds the land/map/jump
+// binding names.
+[[nodiscard]] std::string NovaPrefs_KeyCodeDisplayName(std::uint16_t key_code);
 
 // One stored preference value. The original keeps 8-bit toggled bytes; here
 // they are bools. The "inverted" Mac-era flags (a 0 value means the feature is
@@ -86,13 +94,27 @@ struct NovaPreferences {
   // Ghidra g_pref_check_for_updates (inverted flag: 0 = check for updates).
   bool check_for_updates = true;
 
-  // CE addition persisted at .prf +0x76. It is not exposed by DLOG 0xfa3,
-  // but retaining it lets the original fixed-size file round-trip the value.
-  bool starmap_show_borders = false;
+  // CE addition persisted at .prf +0x76. It is not exposed by DLOG 0xfa3:
+  // the galaxy starmap's Show/Hide Borders button toggles it and it is
+  // persisted at the normal .prf save points. The original defaults it OFF and
+  // its overlay was slow/buggy; the port's overlay is cheap, so it defaults ON
+  // (see GameState::starmap_show_borders, the runtime copy the map edits).
+  bool starmap_show_borders = true;
 
   // Populates every field (and the key table) with the original defaults.
   void ResetToDefaults();
 };
+
+// Forces the quality/graphics preferences the SDL port always renders. The
+// Settings dialog shows them disabled and a legacy .prf cannot turn them off;
+// call this after NovaPrefs_LoadFromFile (and it is applied by
+// ResetToDefaults). Locked: share_processor_time=true, quicktime_movies=false,
+// smoke_trails=false, run_in_window=false, ship_animations=true,
+// engine_glows=true, running_lights=true, weapon_effects=true,
+// parallax_starfield=true, hyperspace_effects=false, check_for_updates=true,
+// brightness=3.
+// starmap_show_borders is NOT locked (the map toggles it).
+void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs);
 
 // Ghidra 0x00872384 DrawContext_SetHyperspaceFlashColor.
 // Resolves the hyperspace flash colour the CE build applies at the jump and
