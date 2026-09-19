@@ -1,11 +1,12 @@
-Purpose of this doc:
-- documenting bugs of the original Nova. Both known and unknown.
-- documenting weird behaviour & behaviour to verify.
+Bugs and odd behaviour of the original Nova, plus items to verify. Keep entries
+succinct (one line); put addresses, evidence and port behaviour at the
+`BUGFIX(original)`/`TODO` site in `src/`. Corrected bugs go through
+`kApplyOriginalBugFixes` in `src/game/compatibility.hpp`.
 
 ## Stuff that needs verifying with an original Nova copy
 
 Behaviour that the disassembly seems to say exist, but I don't remember:
-- Inherent combat government on polaris arachnid/scarab/raven, federation destroyer/carrier, rebel ships. The player should get attacked by governements that are hostile to the inherent gov, even if they directly aren't hostile.
+- Ships with an inherent combat government (Polaris arachnid/scarab/raven, Federation destroyer/carrier, rebel ships) should draw attacks from governments hostile to that inherent gov, even when not directly hostile. (unverified)
 
 
 ## List of known engine issues
@@ -19,12 +20,11 @@ Per the discord.
 
 * (fixed) **Weapons using another weapon as ammunition produce incorrect free-mass figures** in the ship-info dialog. 
 * (fixed+reworked) **Government borders are clipped to a fixed 512×512 map area**, breaking larger custom map layouts. 
-
 * **Small asteroids disappear at high resolutions** unless their sprites are padded to roughly 100×100. 
 * **`FragCount = 1` produces zero fragments**, despite the documented formula implying exactly one. 
-* **One-way system links become reciprocal** — linking A→B also permits B→A. 
-* **`Mxxx` behaves like `Nxxx`** instead of positioning the player at the first stellar/system center as documented. 
-* **`DeathDelay` 0 or 1 leaves an immortal ghost sprite** after a ship explodes. 
+* (fixed) **One-way system links become reciprocal** — linking A→B also permits B→A. 
+* (fixed) **`Mxxx` behaves like `Nxxx`** instead of positioning the player at the first stellar/system center. 
+* (fixed) **`DeathDelay` 0 or 1 leaves an immortal ghost sprite** after a ship explodes. 
 * **Zero inherent shields break escape-pod ejection** — the replacement ship can immediately explode after ejecting. Shield outfits do not prevent it.  
 * **Rank discounts do not apply to outfits**, despite the rank field being documented as affecting ships and outfits. 
 * **Auto-aborted missions can omit their legal-status reward** even when configured to pay on auto-abort. 
@@ -57,7 +57,7 @@ Per the discord.
 * **Always-dominated spobs show a disabled-looking “Leave” button that remains clickable.** 
 * **Beam decay can stack successive beam instances into an “auto-machine-gun” effect**, greatly multiplying damage. 
 * **Weapon timing mixes frame-based and fixed 1/30-second timing**, making beam continuity and damage-per-second depend on machine framerate. 
-* **AI cloaking has several broken transitions** — e.g. cloaking while hyperspacing but not necessarily entering cloaked, and inconsistent cloak/uncloak behaviour around system departure and docking. 
+* **AI cloaking has several broken transitions** (hyperspace cloak state, departure/docking cloak handling). 
 * **Pirate AI can make very-low-armour ships effectively invulnerable** because it refuses to destroy targets but cannot disable ships with ≤3 armour. 
 * **Windows hyperspace flash does not build up like the Mac implementation.** 
 * **`DispWeight` does not control mission ordering**; Mac 1.1 presents missions by increasing resource ID instead. 
@@ -77,11 +77,11 @@ Per the discord.
 
 ### Engine quirks
 
-* (identified, reworked) Nova uses the 'weapon 1' range to decide if carrier escorts attack or defend. Seems like an unintended quirk.
+* (identified, reworked) Carrier escorts use weapon 1's range to decide attack vs. defend. 
 * **Non-strict play gives the player +50% top speed**, with no independent switch for the bonus. 
 * **Escape-pod destination/location is undocumented**, so plug-in authors cannot reliably infer where the player will reappear. 
 * **Non-simultaneous weapons cannot fire more than once per rendered frame.** 
-* **A `përs` absent when a pilot is created is treated as permanently dead.** < I _think_ this means if you add a plugin during a run pers don't show up, which isn't per se a bug IMO, but because the game latches to 'alive' instead of 'killed'. Could be tweaked.
+* **A `përs` absent when a pilot is created is treated as permanently dead** (a plugin added mid-run never makes the person appear). 
 * **Mission persistence after failure depends on `CanAbort` rather than simply whether a fail text exists.** 
 * **Weapon firing arcs are calculated from the firing ship's center rather than the weapon exit point**, allowing geometrically strange shots. 
 * **`shan` flag 0x0002 unfolds ships both for hyperspace and landing**; the poster considered the landing behaviour undesirable but not necessarily broken. 
@@ -132,8 +132,8 @@ Per the discord.
 
 ## Datafile quirks
 
-* **The 200mm railgun is arguably worse overall than the 150mm** because its increased mass damage is outweighed by reload, decay, weight and cost; this is a balance/data choice rather than an engine failure. 
+* **The 200mm railgun is arguably worse overall than the 150mm** (balance choice, not an engine failure). 
 * **The Fission Reactor is less efficient than Solar Panels** in both mass/cost terms with no compensating benefit; another stock balance oddity. 
 * **The “Set and launch trap” mission is tuned extremely aggressively**, with escorts often destroying the target almost immediately. 
-* **United Shipping uses an intermediary government resource to confine rank benefits to United Shipping instead of all allied governments** — a deliberate stock-data workaround for how rank flags propagate. 
-* **`Nova Ships 8` is described as redundant; race movies carry unnecessary resource forks; music files have incorrect type/creator codes; and `Nova-DF.rsrc` was suggested for checksumming.** These are packaging/data hygiene oddities rather than runtime-engine bugs. 
+* **United Shipping uses an intermediary government to confine rank benefits to itself** (stock-data workaround for rank-flag propagation). 
+* **Packaging/data hygiene oddities**: redundant `Nova Ships 8`, race-movie resource forks, wrong music type/creator codes, `Nova-DF.rsrc` checksum suggestion. 

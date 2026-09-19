@@ -1,6 +1,7 @@
 #include "collision.hpp"
 
 #include "asteroid.hpp"
+#include "compatibility.hpp"
 #include "freeflight_objects.hpp"
 #include "game_state.hpp"
 #include "government.hpp"
@@ -1568,9 +1569,21 @@ void ResolveAsteroidDestructionPackage(GameState &state,
                                 true);
   }
   if (def->frag_count > 0) {
-    const int count =
-        std::uniform_int_distribution<int>{0, def->frag_count - 1}(state.rng) +
-        (def->frag_count + 1) / 2;
+    // The original rolls NovaRandom_Range(frag_count) once and adds a baseline
+    // of floor(frag_count/2) (disasm 0x004625df..0x004625eb:
+    // MOVSX/CMP 0x80000000/SBB -1/SAR 1), so its documented "average +/-50%"
+    // spread sits one low on odd counts. Keep the floor baseline for every
+    // count, but BUGFIX(original): frag_count == 1 evaluates to
+    // rand(1) + 0 == 0, contradicting the Bible's "average number of
+    // sub-asteroids (+/- 50%)", whose lower bound is one. The roll is still
+    // consumed first so the RNG sequence matches the original.
+    const int roll =
+        std::uniform_int_distribution<int>{0, def->frag_count - 1}(state.rng);
+    int baseline = def->frag_count / 2;
+    if (kApplyOriginalBugFixes && def->frag_count == 1) {
+      baseline = 1;
+    }
+    const int count = roll + baseline;
     for (int i = 0; i < count; ++i) {
       // Both child types unset means the original spawns nothing; a single
       // set type always spawns; otherwise a random pick per fragment.

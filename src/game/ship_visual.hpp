@@ -167,9 +167,9 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data);
 // personality deactivation, the Explode2 finale explosion, and the hull
 // deactivation. Reseeding when the timer has run out (DeathDelay) matches the
 // original; the player's seed is tripled by g_player_death_timer_scale
-// (0x00575378). Hulls with DeathDelay 0 destruct immediately in the port (the
-// original would linger forever - the port already spawns finale visuals
-// immediately for those at the hit site).
+// (0x00575378). Hulls with DeathDelay 0/1 destruct immediately when
+// kApplyOriginalBugFixes is on; with it off they reproduce the original's
+// immortal-ghost reseed loop.
 void NovaShip_TickDestroyedShipVisualState(GameState &state,
                                            Ship &ship,
                                            float elapsed_ticks);
