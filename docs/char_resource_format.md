@@ -79,6 +79,9 @@ When no pilot block is found, `IntroCinematic_SetupFrames` defaults the field to
 `ApplyCharacterTemplate` (`src/game/new_pilot_flow.cpp`) apply the start date
 (`Game_ResetNewGameState`'s clock+250 seed runs first as fallback), DatePrefix/
 Suffix, cash/kills/legal record and the `OnStart` control-bit string. The random
-`System1-4` pick is deliberately skipped (fixed start system). Remaining gap:
+`System1-4` pick is reconstructed by `PilotData_PickStartingSystem`
+(`src/game/pilot_file.cpp`), consuming the same rejection/draw cadence as
+`NovaRandom_Range`; the stock `.Trader` candidates are Kania (0x80), Fomalhaut
+(0x88), Porto Rillia (0xaa) and Moonrise (0xb8). Remaining gap:
 `IntroTextID` is stored but the epilogue is a stub (`RunPostIntroTextStub`), so
 the desc is never shown (stock `.Trader` is `-1`).

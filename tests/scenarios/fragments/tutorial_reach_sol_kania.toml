@@ -1,0 +1,72 @@
+version = 1
+name = "tutorial-reach-sol-kania"
+
+[defaults]
+timeout_ms = 30000
+
+# Start-system branch for Kania (`.Trader` System1 = 0x80). Land at Port Kane's
+# Federation spaceport, accept Barry's Tutorial 001 ("Head to Sol", mission 251
+# / template 123), then jump Kania -> Tichel -> Sol. The `tutorial_reach_sol`
+# dispatcher calls exactly one branch based on `state.system`; once in Sol the
+# tutorial continues on its normalized path.
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Port Kane"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "mission_offer" }
+timeout_ms = 180000
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 123 }
+
+[[steps]]
+action = "validate_state"
+expect = { "missions.missions.0.template_id" = 123, "missions.missions.0.return_stellar" = "Earth", "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# The controller moves out of the center gate; gameplay owns the jump itself.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tichel"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tichel" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000

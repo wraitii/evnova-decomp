@@ -405,6 +405,34 @@ def wait_for(
     )
 
 
+def wait_for_any(
+    probe: Probe, alternatives: list[dict[str, object]], timeout_ms: int
+) -> dict[str, object]:
+    """Wait until any one of the alternatives fully holds. Lets a route
+    branch on which modal the game opened next (e.g. an optional overwrite
+    confirmation) without racing a one-shot ``trigger`` check."""
+    # Fetch the union of every root any alternative needs, once per poll.
+    merged: dict[str, object] = {}
+    for expected in alternatives:
+        for path in expected:
+            merged.setdefault(path, None)
+    deadline = time.monotonic() + timeout_ms / 1000
+    last: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        last = observations(probe, merged)
+        for expected in alternatives:
+            if conditions_hold(last, expected):
+                return last
+        automation = last.get("automation")
+        if isinstance(automation, dict) and automation.get("phase") == "failed":
+            raise ScenarioError(f"automation failed: {automation.get('detail', '')}")
+        time.sleep(0.05)
+    raise ScenarioError(
+        f"timed out waiting for any of {alternatives!r}; "
+        f"last observation: {last!r}"
+    )
+
+
 def _item_target(ui: object, where: dict[str, object]) -> str | None:
     """First /probe/ui `items` entry whose fields all equal `where`, by name."""
     items = ui.get("items") if isinstance(ui, dict) else None
@@ -547,7 +575,7 @@ def run_step(
     action = step.get("action")
     common = {"action", "trigger", "trigger_not"}
     allowed = {
-        "wait": {"expect", "timeout_ms"},
+        "wait": {"expect", "expect_any", "timeout_ms"},
         "validate_state": {"expect", "matches"},
         "click": {"element", "where", "timeout_ms"},
         "key": {"key"},
@@ -590,9 +618,28 @@ def run_step(
 
     if action == "wait":
         expected = step.get("expect")
-        if not isinstance(expected, dict) or not expected:
-            raise ScenarioError("wait requires a non-empty expect table")
-        wait_for(probe, expected, int(step.get("timeout_ms", default_timeout_ms)))
+        alternatives = step.get("expect_any")
+        if expected is not None and alternatives is not None:
+            raise ScenarioError(
+                "wait accepts either expect or expect_any, not both"
+            )
+        timeout_ms = int(step.get("timeout_ms", default_timeout_ms))
+        if alternatives is not None:
+            if (
+                not isinstance(alternatives, list)
+                or not alternatives
+                or not all(
+                    isinstance(item, dict) and item for item in alternatives
+                )
+            ):
+                raise ScenarioError(
+                    "wait expect_any must be a non-empty array of non-empty tables"
+                )
+            wait_for_any(probe, alternatives, timeout_ms)
+        else:
+            if not isinstance(expected, dict) or not expected:
+                raise ScenarioError("wait requires a non-empty expect table")
+            wait_for(probe, expected, timeout_ms)
     elif action == "validate_state":
         expected = step.get("expect", {})
         regex_matches = step.get("matches", {})

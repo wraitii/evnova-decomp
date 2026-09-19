@@ -1,0 +1,32 @@
+version = 1
+name = "tutorial-reach-sol"
+
+[defaults]
+timeout_ms = 30000
+
+# Dispatch from the random `.Trader` start system to Sol with Barry's Tutorial
+# 001 accepted. The character template picks one of four systems (System1-4:
+# Kania, Fomalhaut, Porto Rillia, Moonrise), so each branch does its own
+# "land at the local Federation spaceport, accept Tutorial 001, jump to Sol".
+# `trigger` gates each call on the current system, so exactly one runs. Once the
+# pilot is in Sol the tutorial has a single normalized path and this fragment
+# returns.
+[[steps]]
+action = "call"
+scenario = "tutorial_reach_sol_kania"
+trigger = { "state.system" = "Kania" }
+
+[[steps]]
+action = "call"
+scenario = "tutorial_reach_sol_fomalhaut"
+trigger = { "state.system" = "Fomalhaut" }
+
+[[steps]]
+action = "call"
+scenario = "tutorial_reach_sol_porto_rillia"
+trigger = { "state.system" = "Porto Rillia" }
+
+[[steps]]
+action = "call"
+scenario = "tutorial_reach_sol_moonrise"
+trigger = { "state.system" = "Moonrise" }

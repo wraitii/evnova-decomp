@@ -5,12 +5,11 @@ name = "new-pilot"
 timeout_ms = 30000
 
 # Shared new-pilot bootstrap: reach the main menu, create a pilot through the
-# normal dialogs accepting their defaults, enter the ship, and wait for the
-# starting system. Callers may override the starting system and acceleration.
-
-[[params]]
-name = "start_system"
-default = "Tichel"
+# normal dialogs (typing a fixed name, accepting the other defaults), enter the
+# ship, and wait until the fresh pilot is in flight. The stock `.Trader`
+# character template picks one of four systems at random (System1-4: Kania,
+# Fomalhaut, Porto Rillia, Moonrise), so callers must branch on `state.system`
+# rather than assume a start system. Callers may still override acceleration.
 
 [[params]]
 name = "speed_multiplier"
@@ -31,13 +30,72 @@ suppress_audio = true
 action = "click"
 element = "new_pilot"
 
+# Starting a new pilot while one is already loaded (e.g. a later scenario
+# reusing the same probe process) first opens the "game already in progress"
+# confirm (DLOG 0xbba -> window 3002); a fresh process goes straight to the
+# pilot selection dialog (3102). Wait for whichever appears, accept the
+# optional confirm, then continue.
 [[steps]]
 action = "wait"
-expect = { "ui.window" = "ui_dialog_ditl_3102" }
+expect_any = [
+  { "ui.window" = "ui_dialog_ditl_3002" },
+  { "ui.window" = "ui_dialog_ditl_3102" },
+]
 
 [[steps]]
 action = "click"
 element = "ok"
+trigger = { "ui.window" = "ui_dialog_ditl_3002" }
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3102" }
+
+# Deterministic pilot name: the Full Name field is focused with its random
+# STR# 0x80 sample selected, so the taps replace it. Every run then uses the
+# same probe.plt path and exercises the overwrite-existing-pilot confirm below
+# instead of accumulating one randomly named file per run. (The name is
+# deliberately short: a tap per character is the only modal text-entry channel,
+# and SDL_GetKeyFromName only resolves safe names such as letters/digits.)
+[[steps]]
+action = "key"
+key = "p"
+
+[[steps]]
+action = "key"
+key = "r"
+
+[[steps]]
+action = "key"
+key = "o"
+
+[[steps]]
+action = "key"
+key = "b"
+
+[[steps]]
+action = "key"
+key = "e"
+
+[[steps]]
+action = "click"
+element = "ok"
+
+# The overwrite-existing-pilot confirm (DLOG 0xbba -> window 3002) opens when
+# probe.plt already exists; the christening box (3001) follows in either case.
+# Wait for whichever appears, click through the optional confirm, then
+# christen.
+[[steps]]
+action = "wait"
+expect_any = [
+  { "ui.window" = "ui_dialog_ditl_3002" },
+  { "ui.window" = "ui_dialog_ditl_3001" },
+]
+
+[[steps]]
+action = "click"
+element = "ok"
+trigger = { "ui.window" = "ui_dialog_ditl_3002" }
 
 [[steps]]
 action = "wait"
@@ -55,6 +113,15 @@ expect = { "ui.window" = "main_menu", "state.game_active" = true }
 action = "click"
 element = "enter_ship"
 
+# Wait for the random start-system pick to land the pilot in one of the four
+# stock `.Trader` systems. Naming all four (instead of only waiting for
+# `state.game_active`) makes a start outside the expected set fail here rather
+# than silently skipping every trigger-gated route in the caller.
 [[steps]]
 action = "wait"
-expect = { "state.system" = "{{ start_system }}" }
+expect_any = [
+  { "state.game_active" = true, "state.system" = "Kania" },
+  { "state.game_active" = true, "state.system" = "Fomalhaut" },
+  { "state.game_active" = true, "state.system" = "Porto Rillia" },
+  { "state.game_active" = true, "state.system" = "Moonrise" },
+]
