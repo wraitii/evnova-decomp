@@ -95,6 +95,65 @@ void CheckShotVelocity(const ActiveShot &shot,
   offset = std::fmod(std::fmod(offset, 360.0F) + 540.0F, 360.0F) - 180.0F;
   CHECK(std::abs(offset) <= 9.0F);
 }
+
+// Synthetic NPC (slot 1) / player (slot 0) pair for the direct-fire selector
+// (Weapon_SelectDirectFireWeaponBankForPrimaryTarget 0x0040d470) that does not
+// depend on the shipped archives. Both ships sit in system 0 one 100-px step
+// apart; pers_def_slot 0x3ff bypasses the cloak-engagement gate.
+void SetUpDirectFirePair(GameState &state) {
+  state.scenario.ships.resize(1);
+
+  Ship &target = state.player;
+  target.is_active = true;
+  target.ship_instance_id = 0;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.pos_x = 0.0F;
+  target.pos_y = 0.0F;
+  target.shield_points = 100.0F;
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.current_system_id = 0;
+  npc.primary_target_ship_slot = 0;
+  npc.pers_def_slot = 0x3ff;
+  npc.pos_x = 0.0F;
+  npc.pos_y = 100.0F;
+  npc.active_weapon_bank_slot = -1;
+  npc.ai_fire_trigger_latch = 0;
+  npc.npc_weapon_count_by_class.fill(0);
+  npc.npc_weapon_secondary_count_by_class.fill(0);
+  npc.npc_weapon_bank_cooldown.fill(0.0F);
+}
+
+// Arms one synthetic NPC direct-fire bank. mode -1/0/6 are unguided; 1 is
+// guided. ammo_type -1 is the unlimited/energy case, so no secondary counter
+// is required by NovaWeapon_CanFireWeaponBank.
+void ArmNpcDirectFireBank(GameState &state,
+                          std::int16_t bank,
+                          std::int16_t mode,
+                          std::int16_t mass_damage,
+                          std::int16_t energy_damage,
+                          float range_scalar,
+                          std::int16_t blast_radius = 0) {
+  const auto index = static_cast<std::size_t>(bank);
+  if (state.scenario.weapons.size() <= index) {
+    state.scenario.weapons.resize(index + 1);
+  }
+  Weapon &weapon = state.scenario.weapons[index];
+  weapon.name = "SyntheticDirectFire";
+  weapon.weapon_mode_code = mode;
+  weapon.ammo_type = -1;
+  weapon.mass_damage = mass_damage;
+  weapon.energy_damage = energy_damage;
+  weapon.range_scalar = range_scalar;
+  weapon.blast_radius = blast_radius;
+  weapon.beam_length_px = 0;
+  weapon.flags_secondary = 0;
+  state.ShipAt(1).npc_weapon_count_by_class[index] = 1;
+}
 } // namespace
 
 TEST_CASE("shot guidance preserves the shared bomb and rocket post-pass",
@@ -535,6 +594,86 @@ TEST_CASE("NPC energy weapons do not need a secondary ammo counter",
   NovaWeapon_FireNpcWeaponBank(state, npc);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(npc.npc_weapon_secondary_count_by_class[0] == 0);
+}
+
+TEST_CASE("direct-fire selector picks energy for shielded targets and mass "
+          "for bare hulls",
+          "[weapon][npc]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  // Bank 0 is mass-heavy, bank 1 energy-heavy; both unguided (mode -1) and in
+  // range. The original switches on target.shield_points >= 0.0.
+  ArmNpcDirectFireBank(state, 0, -1, 50, 1, 1000.0F);
+  ArmNpcDirectFireBank(state, 1, -1, 1, 50, 1000.0F);
+
+  SECTION("a shielded target takes the best energy bank") {
+    state.player.shield_points = 100.0F;
+    NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(
+        state, state.ShipAt(1), false);
+    CHECK(state.ShipAt(1).active_weapon_bank_slot == 1);
+    CHECK(state.ShipAt(1).ai_fire_trigger_latch == 1);
+  }
+  SECTION("an unshielded target takes the best mass bank") {
+    // Negative shield_points is the original's "no shields" sentinel.
+    state.player.shield_points = -1.0F;
+    NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(
+        state, state.ShipAt(1), false);
+    CHECK(state.ShipAt(1).active_weapon_bank_slot == 0);
+    CHECK(state.ShipAt(1).ai_fire_trigger_latch == 1);
+  }
+}
+
+TEST_CASE("mode-6 direct fire requires the target outside the blast envelope",
+          "[weapon][npc]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  // blast_radius 8 * 2.5 = a 20-px-per-axis placement gate.
+  ArmNpcDirectFireBank(state, 0, 6, 10, 10, 1000.0F, 8);
+
+  SECTION("target inside the blast ellipse is not armed") {
+    // NPC at (0, 100): |dx| = 0 < 20, so the gate rejects the bank.
+    NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(
+        state, state.ShipAt(1), false);
+    CHECK(state.ShipAt(1).active_weapon_bank_slot == -1);
+    CHECK(state.ShipAt(1).ai_fire_trigger_latch == 0);
+  }
+  SECTION("target clear on both axes is armed") {
+    state.ShipAt(1).pos_x = 100.0F;
+    state.ShipAt(1).pos_y = 100.0F;
+    NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(
+        state, state.ShipAt(1), false);
+    CHECK(state.ShipAt(1).active_weapon_bank_slot == 0);
+    CHECK(state.ShipAt(1).ai_fire_trigger_latch == 1);
+  }
+}
+
+TEST_CASE("direct-fire selector retries once with guided banks when no "
+          "unguided bank qualified",
+          "[weapon][npc]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  ArmNpcDirectFireBank(state, 0, 1, 10, 10, 1000.0F); // guided, in range
+
+  NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(
+      state, state.ShipAt(1), false);
+  CHECK(state.ShipAt(1).active_weapon_bank_slot == 0);
+  CHECK(state.ShipAt(1).ai_fire_trigger_latch == 1);
+}
+
+TEST_CASE("seeing an out-of-range unguided bank suppresses the guided retry",
+          "[weapon][npc]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  // Bank 0 is unguided but too short (mode 0 uses beam_length_px + 32 = 32 px
+  // against a 100-px separation); bank 1 is a guided bank that would win the
+  // relaxed retry if it were allowed to run.
+  ArmNpcDirectFireBank(state, 0, 0, 10, 10, 0.0F);
+  ArmNpcDirectFireBank(state, 1, 1, 10, 10, 1000.0F);
+
+  NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(
+      state, state.ShipAt(1), false);
+  CHECK(state.ShipAt(1).active_weapon_bank_slot == -1);
+  CHECK(state.ShipAt(1).ai_fire_trigger_latch == 0);
 }
 
 TEST_CASE("brave-trader weapon selection survives the post-state refresh",
