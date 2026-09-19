@@ -134,10 +134,11 @@ constexpr float kTunnelAlignDeg = 30.0F;
 // as "come to a stop", at which point the hold begins.
 constexpr float kStoppedRoundedVel = 2.0F;
 
-// Arrival position hurl (px) from the destination system center along the
-// departure map bearing + 180 (g_hyperspace_engage_velocity_hurl 0x57600,
-// float 1350.0): the ship materializes on the near side of the new system and
-// streaks through the center at max speed under normal flight.
+// Arrival position hurl (px) along the departure map bearing + 180 from the
+// in-system origin (0,0) (g_hyperspace_engage_velocity_hurl 0x57600, float
+// 1350.0; the original zeroes the ship at 0x0044f4cd before the polar add):
+// the ship materializes on the near side of the new system and streaks through
+// the center at max speed under normal flight.
 constexpr float kArrivalHurlPx = 1350.0F;
 
 // Engine-glow caps (the original's ShipState +0xc8d4 glow counter): 24 is the
@@ -235,9 +236,9 @@ void TickJumpRangeCue(GameState &state) {
 // arrival block at PlayerTick_HyperspaceSequenceAnchor (0x0044f3d0) and
 // PlayerTick_SystemTransitionAndArrival (0x0044f660) in
 // Ship_HandlePlayerShipCore: the 'Warp out' boom, the position hurl 1350 px
-// from the destination center along the map bearing + 180 with velocity reset
-// to max speed along the current heading, the fuel burn, the system change,
-// and the discovery flood. No shield/armor refill happens (the original
+// from the in-system origin (0,0) along the map bearing + 180 with velocity
+// reset to max speed along the current heading, the fuel burn, the system
+// change, and the discovery flood. No shield/armor refill happens (the original
 // restores nothing on hyperspace arrival). Control returns to normal flight
 // immediately; the ship coasts through the new system.
 void FireJump(GameState &state) {
@@ -321,19 +322,19 @@ void FireJump(GameState &state) {
   // The original charges at 0x0044fef8, after rebuilding the arrival fleet.
   t.pending_payroll_periods = static_cast<std::int16_t>(travel_days);
 
-  // Arrive 1350 px from the destination system's center on the near side
-  // along the jump heading's reverse (Math_BearingFromPointToPoint(cur,dest)
-  // + 180 at 0x0044f5ae, magnitude g_hyperspace_engage_velocity_hurl 1350),
-  // and reset velocity to max speed along the ship's heading (which the hold
-  // aligned onto the map travel bearing) -- "at full speed into the new
-  // system", streaking past the center in normal flight.
+  // Arrive 1350 px from the in-system origin (0,0) on the near side along
+  // the jump heading's reverse: the original zeroes the ship position
+  // (0x0044f4cd) and then adds a polar velocity at
+  // Math_BearingFromPointToPoint(cur,dest) + 180 (0x0044f5ae), magnitude
+  // g_hyperspace_engage_velocity_hurl 1350, and resets velocity to max speed
+  // along the ship's heading (which the hold aligned onto the map travel
+  // bearing) -- "at full speed into the new system", streaking past the
+  // center in normal flight.
   const auto *dest_sys = state.scenario.System(
       static_cast<std::int16_t>(t.destination_system_id + 0x80));
-  const float cx = dest_sys ? static_cast<float>(dest_sys->pos_x) : 0.0F;
-  const float cy = dest_sys ? static_cast<float>(dest_sys->pos_y) : 0.0F;
   const float arrival_speed = PlayerMaxSpeed(state);
-  player.pos_x = cx - std::sin(t.jump_heading_rad) * kArrivalHurlPx;
-  player.pos_y = cy + std::cos(t.jump_heading_rad) * kArrivalHurlPx;
+  player.pos_x = -std::sin(t.jump_heading_rad) * kArrivalHurlPx;
+  player.pos_y = std::cos(t.jump_heading_rad) * kArrivalHurlPx;
   player.vel_x = std::sin(player.heading) * arrival_speed;
   player.vel_y = -std::cos(player.heading) * arrival_speed;
   player.speed = arrival_speed;
@@ -444,13 +445,20 @@ void FireJump(GameState &state) {
   // starmap-window hide (Sprite_SetVisible 0x0044f857; the map is modal in
   // the port and cannot be open during flight).
   // Arrival route maintenance (Ship_HandlePlayerShipCore's arrival tick):
-  // the map pan re-centres on the new system (0x0044f8a6), a plotted route
-  // hop that matched this system is consumed
+  // the map pan re-centres on the new system (0x0044f8a6, reading
+  // g_system_defs_ptr[current_system_id].pos_x/y), a plotted route hop that
+  // matched this system is consumed
   // (System_NormalizePlannedRouteToCurrentSystem 0x004a7fc0) and the travel
   // slot re-arms from the next hop
   // (NovaUi_SyncTravelSelectionFromStarmapRoute 0x004a8080).
-  state.starmap_pan_x = cx;
-  state.starmap_pan_y = cy;
+  if (const auto *cur_sys = state.scenario.System(
+          static_cast<std::int16_t>(state.player.current_system_id + 0x80))) {
+    state.starmap_pan_x = static_cast<float>(cur_sys->pos_x);
+    state.starmap_pan_y = static_cast<float>(cur_sys->pos_y);
+  } else {
+    state.starmap_pan_x = 0.0F;
+    state.starmap_pan_y = 0.0F;
+  }
   // Route wipe on mismatch (0x0044f9ec): when the next plotted hop is not
   // the system just entered, the whole 16-hop route is discarded wholesale;
   // when it matches, the hop is consumed by the normalize below. The
