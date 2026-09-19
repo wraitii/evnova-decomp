@@ -155,7 +155,7 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
 // rounded back to float after each slot (the original's x87 FSTP/FLD).
 // TODO(decomp(0x0046c080)) skipped: the original's x87 64-bit intermediate
 // rounding. Double is an accepted platform-precision divergence; see
-// docs/ionization_decay_x87_precision.md.
+// docs/x87_precision.md.
 [[nodiscard]] float PlayerIonizationDecayFromOutfits(const GameState &state,
                                                      float class_rate) {
   double rate = static_cast<double>(class_rate);
@@ -181,7 +181,7 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
 // Each owned absorber adds the integer `mod_val * owned` to the class capacity.
 // The original accumulates in x87 extended and caches the total as a float;
 // this port accumulates in double and returns the rounded float. Accepted
-// precision divergence; see docs/ionization_decay_x87_precision.md.
+// precision divergence; see docs/x87_precision.md.
 [[nodiscard]] float PlayerIonizationCapacityFromOutfits(const GameState &state,
                                                         float class_capacity) {
   double capacity = static_cast<double>(class_capacity);
@@ -660,7 +660,7 @@ float NovaOutfit_ComputeIonizationCapacity(GameState &state, const Ship &ship) {
 // negative) charge fraction; callers cap it at 0.7. The player ModType-40
 // capacity scan runs inline in NovaOutfit_ComputeIonizationCapacity below.
 //
-// PRECISION (accepted divergence, docs/ionization_decay_x87_precision.md): on
+// PRECISION (accepted divergence, docs/x87_precision.md): on
 // the original's first (uncached) player call the x87 accumulator's unrounded
 // total is used for the division while the rounded float is stored to
 // DAT_007356a8; later calls divide by the rounded cache. This port returns the

@@ -120,8 +120,7 @@ int NovaAsteroid_SpawnRecord(GameState &state,
 // DIVERGENCE (documented): the original first runs a license-parity probe that
 // toggles a license-runtime byte
 // (g_ship_class_defs[alt].is_licensed_runtime_alt). Registration/licence
-// integrity is out of scope for the recompilation (see
-// docs/recomp_startup_main_menu.md), so that latch is skipped.
+// integrity is out of scope for the recompilation, so that latch is skipped.
 int NovaAsteroid_Spawn(GameState &state, bool place_in_ring) {
   const System *sys =
       state.scenario.System(state.player.current_system_id + 0x80);

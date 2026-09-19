@@ -8,11 +8,10 @@ resources kept in the `Nova.rez` UI archive (the "DLOG"/"DITL" `FourCC`s,
 * a **DITL** (Dialog ITem List) holds the individual ui controls (buttons, text,
   picture boxes, user items) and *their rects*.
 
-Getting the coordinate model right is the part that repeatedly confuses readers
-(after all, the ship-comm window's DITL items initially *look* like they fall
-outside the window bounds). This document nails the file layouts, the parsing
-trajectory, and — most importantly — how item rects map to screen space, so you
-can read a DITL directly instead of guessing.
+The coordinate model is the confusing part — the ship-comm window's DITL items
+look like they fall outside the window bounds (they are legal; see §3.1 and §6).
+This document covers the file layouts, the parsing trajectory, and item-rect
+mapping to screen space.
 
 Reference implementation:
 * C++ parser: `NovaResource_LoadDialogDefinition` / `NovaResource_LoadDialogItems`

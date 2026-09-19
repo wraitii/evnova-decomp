@@ -118,36 +118,24 @@ stellar objects). Naming done in the DB:
   `Sprite.distance_brightness` (+0xAA) from player distance and copies
   `SystemDef.space_color` (+0x1F8) into `Sprite.space_color` (+0xAC).
 
-### Distance/fog (Frame_UpdateSpriteDistanceIntensity) - decoded
+### Distance/fog (Frame_UpdateSpriteDistanceIntensity)
 
-`distance_brightness = round(g_distance_intensity_scale * distSq * 1.2e-05)`
-where `distSq` is squared rounded distance to the player on both axes and
-`g_distance_intensity_scale` (0x7356bc) is actually the **effective system murk
-percent** (0-100), rebuilt each recompute by
-`Outfit_RecomputeOutfitDerivedState` via `System_GetEffectiveMurkPercent()`
-(System `murk` clamped >=0 + murk-modifier outfits modtype 0x1c, clamp [0,100]).
-The tiny fog constant `g_distance_intensity_scale_const2` (= `_DAT_005754d0`,
-double 1.2e-05) makes brightness only visibly vary for large distances near a
-high-murk system. Clamp is 0..0x1F (0x18 in pixel-depth-8). Then copies
-`SystemDef.space_color` (5-5-5 packed from BkgndColor) into the sprite.
+`Frame_UpdateSpriteDistanceIntensity` (0x00438db0) sets
+`Sprite.distance_brightness` (+0xAA) and copies `SystemDef.space_color` (+0x1F8,
+5-5-5 from BkgndColor) into `Sprite.space_color` (+0xAC):
 
-**Starting-system no-op / implementation:** Kania has murk 0, so
-`g_distance_intensity_scale` is 0 and `distance_brightness` stays 0. It only
-materialises in high-murk systems. The port implements it:
-`NovaSystem_GetEffectiveMurkPercent` (src/game/travel.cpp, Ghidra 0x0046c250)
-recomputes the effective murk each frame, and `Sprite_DistanceBrightness`
-(src/game/sprite_world.cpp, Ghidra 0x00438db0) feeds
-`SpriteDrawOptions.fog_murk`/`fog_color`, which `DrawSprite` applies with a
-two-pass masked fog (`BlitFrame`): the frame's alpha silhouette is painted in
-the space colour (occluding whatever is behind), then the source is drawn at
-`(1-d/32)` over it. It is wired through ships, stellars, shots, freeflight
-objects, asteroids, impact/fading effects and the NPC engine-glow cap, and the
-starfield gets the separate raw-murk tint. `d >= 0x1f` snaps to fully fogged
-(the original's 5-bit `>>5` truncation zeroes the source there).
-**Divergence:** the exact RGB555 bit-sliced `BlitPixel_TintRgb15Span` math is
-not reproduced (SDL_Renderer has no shader), so mid-range fog is at most one
-5-bit step brighter than the original; sprites without an uploaded silhouette
-fall back to a source-alpha fade over `dst`. See `docs/system_murk_rendering.md`.
+    distance_brightness = trunc(g_distance_intensity_scale * distSq * 1.2e-05)
+
+where `distSq` is the squared truncated per-axis distance to the player and
+`g_distance_intensity_scale` (0x7356bc) is the **effective system murk percent**
+(0-100) rebuilt by `Outfit_RecomputeOutfitDerivedState` from
+`System_GetEffectiveMurkPercent` (System murk clamped >=0 + murk-modifier
+outfits ModType 0x1c, clamp [0,100]). The tiny constant
+`g_distance_intensity_scale_const2` (`_DAT_005754d0`, double 1.2e-05) makes
+brightness vary only at large distances in high-murk systems; the clamp is
+0..0x1F (0x18 at pixel depth 8). Kania has murk 0, so this is a no-op in the
+starting system. The full fog math, caller list, and the SDL two-pass masked-fog
+port are documented in `docs/system_murk_rendering.md`.
 - `SpaceflightView::AdvanceStellarAnimation` (src/game/spaceflight_view.cpp)
   reimplements the ambient frame-stepping part: the ordinary ping-pong/
   alternate/random cycler (availability_flags bit clear) and the hypergate
@@ -159,8 +147,7 @@ fall back to a source-alpha fade over `dst`. See `docs/system_murk_rendering.md`
   stellar id in the view (sprite_current/previous_frame + frame_accumulator,
   mirrored from StellarDef +0x476/+0x478/+0x490). Dwell/frame multiplier decode
   from the sp\x6fb payload +0x22/+0x24 (StellarDef +0x470/+0x472) as Bible
-  AnimDelay / Frame0Bias. Per-frame distance-intensity positioning remains
-  TODO(decomp).
+  AnimDelay / Frame0Bias.
 
 ### State-0x15 hypergate emergence
 
@@ -182,7 +169,7 @@ silhouette texture for the hull tint.
 so reaching a renderable ship sprite is: add Ships archives -> read `sh\x9an` for
 the class -> decode `rl\x91D` BaseImageID -> index frame by heading -> draw.
 
-## Step 4 status: NPC ships rendered (provisional)
+## NPC ship rendering (provisional)
 
 `SpaceflightView` now renders every active non-player ship in the current system:
 

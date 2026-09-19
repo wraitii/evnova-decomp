@@ -123,68 +123,46 @@ Ghidra. The clean-room counterparts live in
   secondary target mirroring the attach slot; behavior-5 followers of this
   ship re-enter state 0x05 (0x00410cb0 inline).
 
-## Ghidra annotations
-
-- `DAT_00575950` → **g_escort_hire_price_multiplier** (retyped `double`, =
-  0.1) with a pre-comment listing the three consumers.
-- `ShipClassDef` roll/availability fields documented (+0xa26/+0xa28 are the
-  static HireRandom/BuyRandom percents, +0xa2a/+0xa2c the daily rolls with
-  their clean-room mirrors); `is_licensed_runtime` (+0xab8) documented as a
-  global shareware-registration flag read through the
-  `g_expression_ship_class_id` indexing artifact (written at 0x00416100).
-- `NovaUi_RunTravelGoodsFlashWindow`/`...DrawTravelGoodsFlashWindow` →
-  **NovaUi_RunBarGamblingWindow** (0x0047dc50) /
-  **NovaUi_DrawBarGamblingWindow** (0x0047e1e0) with full mechanics plates.
-- `DAT_00776af4` → **g_mission_interaction_recheck_tick** with a pre-comment
-  (shared services-loop recheck timer; clean-room mirror
-  `GameState.mission_interaction_recheck_at_ms`).
-- Plate comment added to `NovaUi_RebuildShipyardAvailabilityList` 0x00469e90
-  (buy/hire lanes, license-multiplier quirk, ordering/suppression); pre-
-  comment at the Bar input callback `LAB_0047cdb0`.
-
-## Escort parity status
+## Escort fleet behavior and management
 
 - Hired escorts are `ai_behavior_code == 6` ships attached to the player
-  (`squad_leader_ship_slot == 0`); the escort-command overlay (E key) already
-  dispatches orders to them (`escort_commands.cpp`, order codes in
-  `EscortOrder`).
+  (`squad_leader_ship_slot == 0`); the E-key escort-command overlay dispatches
+  orders to them (`escort_commands.cpp`, order codes in `EscortOrder`).
 - State 0x0c (`Ship_UpdateShipAiState` arm) is the hire default; the escort
-  follow control mode is 0x08. Formation offsets (0x00413990), payroll
-  (0x004232d0), and jump-sync/arrival loss counting have implementations.
-  Jump payroll retains the maximum travel-day count and charges after arrival
-  fleet restoration (0x0044fef8), with a dismissal text reader on shortfall.
-  Normal launch restores player escorts with refill=true before mission and
-  ambient population, matching 0x00457580's call to 0x0041af90. The management
-  window (0x004853a0) is ported with DLOG 0x3fe / PICT 0x2141. It shows the
-  class portrait, captured/hired status, upgrade/sale values, and upkeep for
-  hired ships. Release transfers cargo before detaching and resetting AI.
-  Upgrade is enabled only when UpgradeTo resolves to a valid class whose
-  Availability expression passes; sale is captured-only. The two scheduling
-  marks are mutually exclusive and are consumed by the landed fleet pass.
-  Options occupy DITL item 9, the portrait item 10, and identity details item
-  11. Text uses Geneva 9 at the original fixed baselines; monetary values use
-  grouped digits and fixed value columns (+70 for upgrade/sale, +30 for pay).
+  follow control mode is 0x08. Formation offsets (0x00413990) and payroll
+  (0x004232d0) are wired, including jump-sync/arrival loss counting: jump
+  payroll retains the maximum travel-day count and charges after arrival fleet
+  restoration (0x0044fef8), with a dismissal text reader on shortfall. Normal
+  launch restores player escorts with refill=true before mission and ambient
+  population, matching 0x00457580's call to 0x0041af90.
+- The management window (0x004853a0, DLOG 0x3fe / PICT 0x2141) shows the class
+  portrait, captured/hired status, upgrade/sale values, and upkeep for hired
+  ships. Release transfers cargo before detaching and resetting AI. Upgrade is
+  enabled only when UpgradeTo resolves to a valid class whose Availability
+  expression passes; sale is captured-only. The two scheduling marks are
+  mutually exclusive and are consumed by the landed fleet pass. Options occupy
+  DITL item 9, the portrait item 10, and identity details item 11. Text uses
+  Geneva 9 at the original fixed baselines; monetary values use grouped digits
+  and fixed value columns (+70 for upgrade/sale, +30 for pay).
 - Command input, HUD, supervisor, and pilot persistence share the four-category
   order table. Closed-panel orders apply to all categories despite a retained
-  selection; Attack sets state 4 even with an existing target. Non-recall
-  orders clear a returning fighter's targets even when the order is unchanged.
-  Group selection uses the original fixed number-row keys 1..5; slots
-  0x2b..0x2f are not category bindings. The 160x120 overlay is positioned at
-  (15,150), uses fixed Geneva 9, remains opaque for 480 ticks after the last
-  interaction, then fades over 32 ticks. It has `N) Group` rows and
-  right-aligned order words. Either Alt key modifies Formation into Return to
-  Hangar.
-  The original +0xC4 cohort gate and acknowledgement chatter remain incomplete.
-- Cargo loss uses the existing 0x00469810 helper at unpaid-escort removal,
-  destruction, disabled-escort adoption, and communications release. It
-  **subtracts player commodities and junk**, and writes the removed commodities
-  to the recipient's six bins; it does not return cargo to the player.
-  Payroll/destruction transfer before deactivation, retaining the recipient
-  in the denominator. Adoption clears active first (0x0041b026), excluding
-  that recipient. Destruction also reconciles the player's weapon/outfit pool.
-  `tests/escort_fleet_test.cpp` covers these differing denominators and the
-  combat-class/mission exclusions.
+  selection; Attack sets state 4 even with an existing target. Non-recall orders
+  clear a returning fighter's targets even when the order is unchanged. Group
+  selection uses the original fixed number-row keys 1..5; slots 0x2b..0x2f are
+  not category bindings. The 160x120 overlay sits at (15,150), uses fixed
+  Geneva 9, stays opaque for 480 ticks after the last interaction, then fades
+  over 32 ticks. It has `N) Group` rows and right-aligned order words. Either
+  Alt key modifies Formation into Return to Hangar. The original +0xC4 cohort
+  gate and acknowledgement chatter are not fully decoded.
+- Cargo loss at unpaid-escort removal, destruction, disabled-escort adoption,
+  and communications release uses the 0x00469810 helper. It **subtracts player
+  commodities and junk** and writes the removed commodities to the recipient's
+  six bins; it does not return cargo to the player. Payroll/destruction transfer
+  before deactivation, retaining the recipient in the denominator. Adoption
+  clears active first (0x0041b026), excluding that recipient. Destruction also
+  reconciles the player's weapon/outfit pool. `tests/escort_fleet_test.cpp`
+  covers the differing denominators and the combat-class/mission exclusions.
 - Daily/launch re-rolls: escorts surviving into the next day re-roll
   availability only for the *listing*; hired ships persist (save/restore
-  restores them through the same spawn path — see
+  restores them through the same spawn path —
   `ShipClass_SpawnEscortShipFromClass` callers).

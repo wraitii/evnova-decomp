@@ -1,6 +1,16 @@
-# x87 FIST truncation idiom
+# x87 numeric behavior: FIST truncation and accepted precision divergences
 
-## The idiom
+Two related x87 topics:
+
+1. The **FIST truncation idiom** MSVC emits for implicit `(int)` / `(short)`
+   casts of floats — needed to read decompiled expressions correctly and to
+   reproduce their rounding at call sites.
+2. **Accepted double-vs-extended-precision divergences** where the original's
+   80-bit x87 accumulators are not bit-reproduced by the port.
+
+## FIST truncation idiom
+
+### The idiom
 
 MSVC compiles an implicit `(int)` / `(short)` cast of a float as an x87
 `FIST` (round-to-nearest) followed by a residual/sign correction whose
@@ -12,7 +22,7 @@ A genuinely different pattern, `ROUND(f) + (0 < frac)`, nets to ceil and
 must not be confused with this one. `ROUND(f)` alone (no correction) is
 round-half-even.
 
-## Detection recipe
+### Detection recipe
 
 1. Ghidra decompile text marker (both branches present):
 
@@ -32,7 +42,7 @@ round-half-even.
    This is a heuristic: the citation may cover a large function and the
    specific conversion can still be a different pattern.
 
-## Confirmed sites
+### Confirmed sites
 
 - `Ship_ComputeTradeInValue` (0x00469100), `Outfit_ComputeScaledPurchasePrice`
   (0x0049d640), `Outfit_ComputeOutfitPurchaseMass` (0x0046e950).
@@ -48,24 +58,12 @@ round-half-even.
   guided turn rate (0x00431530).
 - Pilot shield/fuel u16 save (0x004c7dd0).
 
-## Ghidra names
-
-- Renamed 0x00469100 -> `Ship_ComputeTradeInValue` (it includes the ship
-  hull term) and corrected its plate comment.
-- Added `OutfitDef +0x378 persistent_on_ship_swap` (byte; loader sets it
-  from flags bit 0x0004).
-- Renamed shared literal-pool doubles `kFloatConst_0_25` ->
-  `g_dbl_shared_0p25` and `g_dbl_rocket_max_range_scale_0p5` ->
-  `g_dbl_shared_0p5`, retyped `double`, added use-list pre-comments.
-- Corrected plate comments on 0x0049d640 and 0x0046e950 (truncation, not
-  rounding).
-
-## Verified sites
+### Verified sites
 
 Original functions confirmed to compile the conversion with the FIST
 truncation idiom:
 
-### Sites using the idiom
+#### Sites using the idiom
 
 - `ship_ai_state.cpp` `Ship_UpdateShipAiState` 0x00405590 (scripted-asteroid
   threshold); `ship_ai_controls.cpp` `Ship_ApplyShipAiControls` 0x00408150
@@ -96,7 +94,7 @@ truncation idiom:
 - `boarding_plunder.cpp` `Player_HandleBoardTargetCommand` 0x0045a3d0
   (heading gate) and `NovaUi_RunBoardingPlunderWindow` 0x00482940 (fuel fill).
 
-### False positives
+#### False positives
 
 - `RoundDouble` in `negotiation_dialog.cpp` (0x00480030 bribe scale) already
   truncates.
@@ -113,10 +111,85 @@ truncation idiom:
   `spaceflight_view.cpp` world-to-screen / starfield helpers are port-local
   render approximations, not call-site FIST conversions.
 
-### Detection caveat
+#### Detection caveat
 
 The full-dump grep plus nearest-citation heuristic misses sites whose function
 header names the original without the literal `Ghidra 0x` prefix, and it
 mis-tags functions whose nearest citation differs from the code being ported.
 Verify against the specific expression in the dump, not just the enclosing
 function.
+
+## Accepted double-vs-extended-precision divergences
+
+Covers `Ship_ComputeIonizationDecayRate` (0x0046c080) and
+`Ship_GetIonizationIntensity` (0x0046c160), plus the shared ionized-velocity
+ramp constants.
+
+`PlayerIonizationDecayFromOutfits` (`src/game/outfit.cpp`) accumulates the
+ModType 39 (ion dissipator) bonus in `double`. The original evaluates the same
+expression in x87 extended precision (64-bit significand). This is an accepted
+platform-precision divergence: the port is not bit-exact here, and the
+difference is not an original-game bug.
+
+### Startup control-word evidence
+
+- `PE_EntryPoint` (0x008713e0) jumps to `CRT_StartupMain` (0x00871160), the
+  process entry path.
+- `CRT_StartupMain` calls `FUN_00881060` at 0x0087123a (`FNINIT; RET`), which
+  loads control word **0x037F**: extended precision (64-bit), round-to-nearest.
+- No immediate `0x027F` (53-bit precision) exists in the image, and no
+  `_controlfp`/`_control87` use was found. The only located `FLDCW`
+  (0x004f4bba) temporarily changes the rounding mode for a truncating `FISTP`
+  and restores the saved word.
+- Uncertainty: a third-party DLL initialised later (for example QuickTime/qtml)
+  could in principle change the control word at runtime. This cannot be
+  resolved statically from the executable, and the SDL probe cannot inspect the
+  original executable's x87 state.
+
+### Concrete divergence
+
+| input | original (x87 64-bit) | port (double) |
+|---|---|---|
+| base = 1.0F, ModVal = -100, owned = 1 | ~ -2.0817e-17 | 0.0 |
+
+`(double)(-100) * 0.01` rounds to exactly `-1.0`; x87 extended retains the
+double `0.01` offset (0.01_double = 0.010000000000000000208...), so adding
+`1.0` leaves a tiny non-zero residual. Other values where `val * 0.01` loses
+low bits can shift a later cancellation.
+
+### Accepted scope
+
+The cancellation example has a tiny absolute difference; no general ULP bound
+or gameplay impact has been established. Software extended-precision emulation
+is deliberately omitted under the accepted scope. Revisit only if bit-exact
+reproduction is later required; that would need software 64-bit-significand
+arithmetic (or an equivalent double-double emulation).
+
+### `Ship_GetIonizationIntensity` capacity and division (0x0046c160)
+
+The player ModType 40 (ion absorber) capacity scan adds each owned outfit's
+`mod_val * owned` as an exact 32-bit integer product to the class
+`ionization_capacity` (sign-extended int16), accumulating in x87 extended
+precision. On the first (uncached) player call the original:
+
+1. stores the **rounded float** total to `DAT_007356a8` (`FST float`), then
+2. divides `ionization_points` by the **unrounded x87 accumulator** for that
+   same call (`FDIV ST0,ST1` on the retained x87 value).
+
+Subsequent calls read the rounded float cache and divide by it. The port
+(`NovaOutfit_ComputeIonizationCapacity` / `NovaOutfit_GetIonizationIntensity`)
+accumulates in `double` and always returns/divides by the rounded float, so its
+first-call division can differ from the original by one rounding step. Accepted
+platform-precision divergence under the same scope as the decay rate above; no
+gameplay impact has been established. The comment on
+`NovaOutfit_GetIonizationIntensity` records this inline.
+
+### Ionized-velocity ramp constants
+
+The post-decay ramp caps intensity with the double 0.7 (`DAT_00575478` NPC,
+`DAT_00575668` player) and steps each axis by the double 0.025 (`DAT_00575480`
+NPC, `DAT_00575670` player) times `g_avg_frame_tick_scale`. The port
+(`NovaShip_UpdateIonizationCharge`) keeps these as `float` literals, the same
+class of accepted precision divergence. The player caller also scales the decay
+rate by a float tick scale rather than the original double
+`g_avg_frame_tick_scale`.

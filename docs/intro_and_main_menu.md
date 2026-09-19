@@ -1,24 +1,24 @@
 # Startup Splash, Main Menu, and New-Game Intro Cinematic
 
-Documentation of the EV Nova boot → splash → main menu → gameplay flow, plus the **separate**
-new-game intro cinematic, and the frame renderer that draws the main menu / in-game HUD.
-All addresses reference the Ghidra DB.
+The EV Nova boot → splash → main menu → gameplay flow, the separate new-game
+intro cinematic, and the menu/HUD frame renderer. All addresses are Ghidra DB
+addresses.
 
-## ⚠️ Two very different things — do not conflate
+## Splash vs. intro cinematic
 
-This codebase has **two independent sequences** that are easy to mix up:
+Two independent sequences:
 
-1. **Startup splash** (boot phase, *before* the main menu). Played by
-   `NovaUi_PresentLoadingSplashFrame` / `NovaUi_PresentStartupSplashFrame` inside
-   `NovaGameSession_Run`, before `NovaMainLoop_Run` ever runs. These are static PICT
-   images (no animation/timing) and always play on every app launch.
-2. **New-game intro cinematic** (after a pilot starts, *inside* flight entry). Played by
-   `IntroCinematic_Run`, configured by `IntroCinematic_SetupFrames`. Plays only on a new
-   pilot's first flight entry (gated on `g_intro_played`), never during app boot.
+1. **Startup splash** (boot phase, *before* the main menu): static PICTs with no
+   animation/timing, played by `NovaUi_PresentLoadingSplashFrame` /
+   `NovaUi_PresentStartupSplashFrame` inside `NovaGameSession_Run`, before
+   `NovaMainLoop_Run` ever runs. Plays on every app launch.
+2. **New-game intro cinematic** (after a pilot starts, *inside* flight entry):
+   a timed scripted sequence played by `IntroCinematic_Run`, configured by
+   `IntroCinematic_SetupFrames`. Plays only on a new pilot's first flight entry
+   (gated on `g_intro_played`), never during app boot.
 
-Naming convention: the boot imagery is called **splash**; the delayed scripted sequence is
-called **intro cinematic** (`IntroCinematic_*`). Nothing named `IntroCinematic_*` runs at
-startup, and the splash functions never run at new-game time.
+`IntroCinematic_*` never runs at startup; the splash functions never run at
+new-game time.
 
 ## Flow map
 
@@ -155,11 +155,10 @@ depending on the game-active flag:
 - `Menu_RunSettingsDialog` (0x00488650) — preferences dialog (0xfa3).
 - `Menu_RunAboutNovaDialog` (0x00486120) — About Nova dialog.
 
-## Intro cinematic — NOT the splash, plays only on new-game flight entry
+## Intro cinematic
 
 `IntroCinematic_Run` (0x0048adc0) plays the intro cinematic
-when a pilot first enters spaceflight (gated on `g_intro_played`). This is distinct from the
-boot-phase splash above; it is a timed scripted sequence tied to a starting a run.
+when a pilot first enters spaceflight (gated on `g_intro_played`).
 
 - `g_intro_played` — intro-played latch, set to 1 in `Ship_RunSpaceflightMode` after the cinematic
   first runs; **persisted in the pilot save** (offset `0x3086`, restored by `PilotFile_LoadSave` and
@@ -230,10 +229,92 @@ extern IntroCinematicData g_intro_cinematic;   // resolves from 0x007d1f42
 source_pict_ids to `-1` before the main loop, so the intro only plays for a freshly configured
 game.
 
-## Naming conventions
+## Menu/splash graphics loading and draw model
 
-- **Splash** (boot-phase static PICT): `NovaUi_Present*SplashFrame`.
-- **Intro cinematic** (new-game delayed sequence): `IntroCinematic_SetupFrames` /
-  `IntroCinematic_Run`, struct `IntroCinematicData`, global `g_intro_cinematic`.
-- Main-menu actions: `Menu_*`.
-- Frame/overlay: `NovaRender_*` / `NovaHud_*`.
+EV Nova uses two distinct graphics systems; only the first is on the menu path:
+
+1. **Sprite / Image objects** — `.rez`-loaded images/sprites drawn onto surfaces through a
+   DrawContext (a process-global "current draw target" abstraction).
+2. **SpriteWorld** — the layered scene/dirty-rect engine used for the in-flight loop, and
+   *not* part of the menu path. In-flight ship/`sh\x9an` sprite loading and layer order are
+   documented in `docs/ship_sprite_rendering_path.md`.
+
+Menu/splash composition targets one shared offscreen surface: `DAT_00597950` (the full-size
+gameplay DrawContext, allocated by `FUN_004ac950` / `DrawContext_AllocateFromPictResource`
+0x0046f740), bounded by rect `DAT_00597954`. Everything is drawn into it and then blitted to
+the OS render-owner surface.
+
+### Loading
+
+- **Plain images (splash / intro backdrops).** `Resource_LoadPictAsImage(id)` →
+  `Resource_LoadPictAsImageWithColorRemap(id, remap)`; `Image_Destroy` frees the transient
+  wrapper. Pattern: load → `DrawContext_PushCurrentAndSet(&DAT_00597950)` →
+  `Rect_CenterImageInRect` → `DrawContext_BlitImageToRect` → `DrawContext_RestorePreviousCurrent`
+  → blit offscreen to the owner → commit (`Image_Destroy`). Used by
+  `NovaUi_PresentStartupSplashFrame` (PICT 0x83), `NovaUi_PresentLoadingSplashFrame`
+  (PICT 0x1fa4) and `IntroCinematic_Run` (pilot frames, not the boot splash).
+- **Animated sprites (RLE sprite sheets).** `FUN_004b4e10(id, ...)` reads the sprite-set
+  header (frame count, dims, anchors) and returns a validity flag;
+  `Resource_IsResourceTypePresent(type, id)` 0x0047b7a0 selects the RLE-sheet vs multi-frame
+  form. Creation helpers: `Sprite_CreateFromSpriteSheetResources`,
+  `Sprite_CreateFromMultiFrameResource`, `Sprite_PrepareFramesAndAttachResourceData`,
+  `Sprite_CompileFramesAndDiscardSourceData`, `Sprite_Create`/`Sprite_InitOrAllocate`/
+  `Sprite_Clone`, and `Sprite_Release`/`Sprite_Destroy` for teardown.
+- **Menu sprite table loader `FUN_004ad960`** (called from `NovaGameSession_Run` before the main
+  loop) runs five `FUN_004b4e10` + create/prepare/compile loops: weapon sprite sets (ids 3000+,
+  count 0x100 → `g_weapon_sprite_set_table`); ship-set sprites (ids 400+, count 0x40 →
+  `DAT_00596700`); ids 500+ (count 5); ids 800+ (count 0x10); and the **6 menu focus sprites**
+  (ids 600–605 → `DAT_00596cb8[6]`, frame 0 each), which the menu renderer and hover hit-test
+  use. `FUN_004aeda0` separately preloads per-class ship visuals into `g_ship_class_defs`
+  (`ShipClass_LoadShipClassVisualAndLaunchData`).
+
+### Per-frame menu rendering (`NovaRender_RedrawAndPresentFrame` 0x004873b0)
+
+1. Push the offscreen surface as the draw target.
+2. Menu branch (`DAT_00596d28 == 0`): draw the steady centered prompt (or the in-game HUD status
+   panel when a game is loaded).
+3. Blit the 6 focus sprites at `DAT_007d24cc[i] + DAT_007d2544` / `DAT_007d24ce[i] +
+   DAT_007d2546` via `BlitPixie_BlitRectRleCommandStream` (0x00470ee0; RLE command-stream
+   renderers `SpriteRleCommandStream_DecodeUnclipped` 0x00471e10 / `..._DecodeClippedRow`
+   0x00471e90) — the sprite→surface blit entry to replace with SDL `SDL_RenderTexture`.
+4. `NovaHud_RenderOverlays` (0x0048c3c0) then `NovaHud_RenderFocusOverlay`.
+5. Restore the owner context, blit the offscreen surface to it, and on mode 1 commit/present
+   (`NovaRender_CommitFrame` 0x004b6850 → `NovaRender_QueuePresentAndSwap`; in the port,
+   `SdlPlatform::Present`).
+
+### Menu hover / button interaction
+
+`NovaHud_TrackFocusHoverIndex` (0x004861b0) positions the 6 focus sprites and calls
+`Sprite_TestOpaquePixelAtPoint(sprite, mouse)` on each visible one, returning the hovered index
+(−1 = none). The same sprites double as hover highlight and hit-test geometry; the main loop
+feeds the result to `NovaGameMode_DispatchAction`.
+
+### DrawContext (draw-target) model
+
+`DrawContext_SetCurrent` / `DrawContext_GetCurrent` own the process-global current target;
+`DrawContext_PushCurrentAndSet(&handle)` / `DrawContext_RestoreOwnerContext(owner)` are the
+save/switch pattern for composing into offscreen surfaces. `DrawContext_BlitClippedRect` is the
+labelled blit wrapped by `DrawContext_BlitImageToRect`, and
+`DrawContext_SetRgbColor`/`SetFillRgbColor`/`SetFontId`/`DrawPascalString`/
+`FillRect16WithCurrentColor` are the text/fill primitives.
+
+### Key symbols (menu/intro/splash render path)
+
+| Addr | Role |
+|------|------|
+| `0x004873b0` `NovaRender_RedrawAndPresentFrame` | central menu/in-game frame renderer |
+| `0x004861b0` `NovaHud_TrackFocusHoverIndex` | menu focus sprite hover hit-test |
+| `0x0048c3c0` `NovaHud_RenderOverlays` | HUD overlay compositor |
+| `0x004aaf60` `NovaUi_PresentStartupSplashFrame` | startup splash (PICT 0x83) |
+| `0x004ab070` `NovaUi_PresentLoadingSplashFrame` | loading splash (PICT 0x1fa4) |
+| `0x004ab1b0` `NovaUi_RunProgressBarReveal` | seed + expand-in reveal of the startup loading bar |
+| `0x004ab3a0` `NovaUi_ProgressCallbackNoOp` | no-op progress sink |
+| `0x004ab3b0` `NovaUi_AddProgressAndRedraw` | add to the progress scalar and redraw |
+| `0x004ab3d0` `NovaUi_RedrawProgressBar` | draw the c\xf6lr-styled bar onto the shared surface |
+| `0x0048adc0` `IntroCinematic_Run` | new-game intro cinematic player via `DAT_00597950` |
+| `0x004ac950` / `0x0046f740` | offscreen surface (`DAT_00597950`) allocation |
+| `0x004ad960` | sprite table loader (menu focus 600–605, weapon 3000+, ship 400+) |
+| `0x00470ee0` + `0x00471e10/0x00471e90` | sprite→surface blit (RLE) |
+| `0x004b6850` / `QueuePresentAndSwap` | end-of-draw present |
+| `0x00597950` / `0x00597954` | shared offscreen surface + rect |
+| `0x00596cb8` | menu focus sprite array [6] |

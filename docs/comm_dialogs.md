@@ -1,10 +1,7 @@
 # In-space comm dialogs (ship hail + stellar destination interaction)
 
-Ground-truth notes for the two target-action comm modals rendered over the
-live flight scene. Both were re-aligned against the Ghidra decompile after
-playtesting showed divergences (wrong picture, wrong panel colours, missing
-text wrapping); this file records the draw-path facts so future changes don't
-have to re-derive them from the decompiler.
+Draw-path ground truth for the two target-action comm modals rendered over the
+live flight scene.
 
 - Stellar window: `src/game/negotiation_dialog.cpp` /
   `NovaNegotiation_RunDestinationDialog` (runner `0x00480030`
@@ -104,10 +101,6 @@ Black-filled rect, three left-aligned Geneva-12 lines:
     "Escort" (STR# 0x7d2 **0xa8**) / "Hired Escort" (**0xa6**, set when
     ShipState +0xbb — the port's `escort_origin_mark` — is non-zero),
     at x+0x23; otherwise the line is omitted.
-
-Note the earlier port draft drew STR# 0x7d2 0xa9 "Fighter" / 0xa7 "Captured
-Escort" here — those entries belong to other windows; the comm window uses
-0xa8/0xa6.
 
 ## Ship portrait PICT selection (0x0047e470)
 

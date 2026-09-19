@@ -214,12 +214,3 @@ from the capacity. `availability_flags 0x40` (Bible "starts the game
 Destroyed") is applied at new-game reset by
 `NovaNewPilot_ResetStellarStrengthForNewGame` (Ghidra `Game_ResetNewGameState`
 0x004b4690, 0x004b46bc..0x004b4760).
-
-## Validation
-
-```sh
-cmake --build build/release
-ctest --test-dir build/release --output-on-failure
-ctest --test-dir build/release --output-on-failure -R 'pixel mask|collision mask|asteroid mask|transparent'
-cmake --build build/debug
-```

@@ -4,7 +4,7 @@ Ground truth for the "inventory / loadout changed → rebuild derived state" hoo
 This is the single function the original calls after any code path that touches
 cargo, outfits, licenses, or active ranks. Companion to
 `docs/scenario_data_loading.md` (the `o\x9ftf` decoder that fills the outfit
-table) and `docs/x87_truncation_idiom.md` (the cargo-overflow scaling casts).
+table) and `docs/x87_precision.md` (the cargo-overflow scaling casts).
 
 ## Two mechanisms, not one
 
@@ -110,7 +110,7 @@ deliberate laziness divergence gets a marker and a tracker note.
 
 ## Remaining work (in priority order)
 
-1. Cargo-overflow scaling (use `docs/x87_truncation_idiom.md`).
+1. Cargo-overflow scaling (use `docs/x87_precision.md`).
 2. Carried-bomb class + detonation timer (gives `bomb_outfit_class` its writer;
    note the shared-RNG timing change).
 3. Junk flags (`DAT_007356cc/cf/d0`) and the license clamp (the murk

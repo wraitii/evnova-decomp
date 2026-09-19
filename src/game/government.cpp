@@ -477,7 +477,7 @@ bool NovaGovernment_TryTriggerAssistanceEncounter(GameState &state,
 //   -40001..-40099 deduct this percentage of the player's cash
 //   <= -40100      no effect (the -50000- range is consumed at acceptance)
 // Cash rounding matches the original's x87 FIST + residual/sign correction
-// idiom, which truncates toward zero (see docs/x87_truncation_idiom.md);
+// idiom, which truncates toward zero (see docs/x87_precision.md);
 // DAT_00575500 = 0.5 and DAT_00575508 = 0.01.
 void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
                                                std::int32_t delta) {

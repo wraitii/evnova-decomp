@@ -108,19 +108,8 @@ so it has no port). The scan candidate latches therefore stay cleared until a
 real inventory mutation calls `Outfit_RecomputeOutfitDerivedState`; repeated
 scans against unchanged inventory do not re-fire.
 
-## Tests
+## Remaining gap
 
-`tests/contraband_scan_test.cpp` covers the per-ship gates, the mission
-fine/fail arms, the mission-to-outfit fall-through, outfit flat-positive-only
-fines plus event 0, the junk percentage fine and outfit suppression quirk, the
-exact single-RNG-draw order, the state-7 caller integration, the latch-cleared
-behaviour (no re-fire without a recompute), the `[1]`/`[4]` voice-cue mapping,
-and a committed-jump suppression driven through `NovaTravel_Tick`.
-`tests/travel_test.cpp` pins the jump-onset multiplier and
-`tests/scenario_data_test.cpp` the four Flags branches.
-
-## Remaining gaps
-
-- **Caller only**: `g_ai_misc_event_flag = 1` and the `pers_def_slot == 0x3ff`
-  shareware/licence nag arm in the state-7 caller (`Ship_UpdateShipAiState`,
-  0x00405590) are unported. The scanner body itself has no known gaps.
+Caller only: `g_ai_misc_event_flag = 1` and the `pers_def_slot == 0x3ff`
+shareware/licence nag arm in the state-7 caller (`Ship_UpdateShipAiState`,
+0x00405590) are unported. The scanner body has no known gaps.

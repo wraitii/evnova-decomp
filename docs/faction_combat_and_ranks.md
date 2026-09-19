@@ -139,46 +139,19 @@ runs the stellar reaction scripts. TODO(decomp): the branch is not ported.
 Pilot save/load persists the `g_rank_defs` active flags (FleetState +0x5dde,
 one word per slot); see `docs/pilot_save_file_format.md`.
 
-The four rank effects are now ported and unit-tested:
+## Rank effects
 
-- **Contribute mask** — `NovaOutfit_AccumulatePlayerContributeMask` ORs every
-  active + defined rank's runtime `+0x14/+0x18` into the player mask
-  (`Mission_AccumulatePlayerContributeMask` 0x0046cca0).
-- **Daily salary** — `Mission_TickDailyWorldUpdate` (0x00466d63) pays
-  `Salary` (`+0x0c`) per game-day while the rank is active, stopping at a
-  positive `SalaryCap` (`+0x10`); 0/-1 is uncapped.
-- **Price modifier** — `NovaLanded_RankPriceScale` (0x00491f9b) seeds both
-  `DAT_007d4bbc`/`DAT_007d4bc0` to 1.0 and folds in `PriceMod * 0.01` for every
-  active + defined rank allied to the landed stellar's government; consumed by
-  the outfit, ship list, trade-in and hire price paths.
-- **Honors display** — `NovaPlayerInfo_BuildSummaryTexts` lists the active +
-  defined rank full names (record name) by Weight descending before the
-  0x2000-flag outfit entries (`NovaUi_BuildPlayerSpecialInteractionStrings`
-  0x0049c050).
+- **Contribute mask** — `Mission_AccumulatePlayerContributeMask` 0x0046cca0
+  ORs every active+defined rank's `+0x14/+0x18` into the player mask.
+- **Daily salary** — `Mission_TickDailyWorldUpdate` 0x00466d63 pays `+0x0c`
+  per game-day while active, stopping at a positive `+0x10` SalaryCap (0/-1
+  uncapped).
+- **Price modifier** — `NovaLanded_RankPriceScale` 0x00491f9b folds
+  `PriceMod * 0.01` into `DAT_007d4bbc`/`DAT_007d4bc0` for every active+defined
+  allied rank; consumed by outfit/ship/trade-in/hire prices.
+- **Honors** — `NovaUi_BuildPlayerSpecialInteractionStrings` 0x0049c050 lists
+  active+defined rank full names by Weight descending before the 0x2000-flag
+  outfits.
 
-Gameplay validation still needed: an event 3 should move `system_reputation`
-and revoke crime-sensitive allied ranks. Ask before using the probe.
-
-## Port status and continuation (2026)
-
-`Government_ProcessFactionCombatEvent` (0x00466fc0) and
-`Government_PropagateFactionCombatInfluenceToNearbySystems` (0x00467140) are
-faithful and their tracker rows are 100%. Callsites wired: `Ship_ApplyDamageToShip`
-event 1 (0x00419721) and event 3 (0x0041976f), `Shot_ResolveCollisions` stellar
-destruction event 3 x10 (0x004381ef), `Player_HandleBoardTargetCommand`
-event 2 (0x0045a85f), and the event-0 smuggle caller
-`Ship_ScanPlayerForContraband` (0x00401800, see docs/contraband_scan.md), whose
-mission-cargo / junk scan arms are the two event-0 callsites. The
-`mission_fleet_slot != -1` arm is inert.
-
-Remaining, deliberately out of scope:
-- **Demand tribute** `NovaUi_RunTravelDestinationInteractionWindow` (0x00480030)
-  event 3 x5 branch is unported (see its own TODO in negotiation_dialog.cpp).
-- **Ship_HandlePlayerShipCore** 0x00453670 event 3 x1 sits in the skipped
-  debug/cheat command arm (commands 0x38/0x6f/0x1d/0x6b/0x2a), not gameplay.
-
-Fixed alongside: `Ship_DoesShipLikePlayer` (0x0040fd20) had inverted
-allied/neutral/government-less CrimeTol polarity, a missing mission-fleet
-branch, a missing GovtDef +0x83 IFF-scrambler tail, and a
-`ScenarioData::System` lookup that omitted the +0x80 resource rebase. See
-tests/government_test.cpp and the Ghidra plate comment.
+Deliberately unported: the demand-tribute event-3 branch (above) and
+`Ship_HandlePlayerShipCore` 0x00453670 event 3 (skipped debug/cheat command arm).

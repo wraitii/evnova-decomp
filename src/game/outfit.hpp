@@ -291,7 +291,7 @@ Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state);
 // the result at 0.7. The player ModType-40 (ion absorber) capacity scan runs
 // inline in NovaOutfit_ComputeIonizationCapacity below.
 //
-// PRECISION (accepted divergence, docs/ionization_decay_x87_precision.md): on
+// PRECISION (accepted divergence, docs/x87_precision.md): on
 // the first (uncached) player call the original accumulates the capacity in
 // x87 extended precision, stores the ROUNDED float to DAT_007356a8, but keeps
 // dividing by the unrounded x87 accumulator for that same call; later calls

@@ -214,26 +214,16 @@ translated through `NovaCommand_TranslateByInputMap`.
   followed by the owned 0x2000-flag ("Ranks section") outfits with the same
   count-word machinery.
 
-## Port status
+## Notes
 
-The combat ladder has a distinct positive-score first rank: 0 points uses
-rank index 0, 1..99 uses index 1, then 100/200/400/.../25600 advance through
-indices 2..10. Legal status is derived rather than stored separately: the
-current system's saved reputation is graded against its government's CrimeTol
-by the shared 0x00468d90 ladder after the usable-destination gate.
+Combat ladder: 0 points uses rank index 0, 1..99 index 1, then
+100/200/400/.../25600 advance indices 2..10. Legal status is derived, not
+stored: the system's saved reputation is graded against its government's
+CrimeTol by the shared 0x00468d90 ladder after the usable-destination gate.
 
-Ported in `src/game/player_info_window.cpp` (see module comments; the
-`NovaUi_*` addresses above map to `NovaPlayerInfo_*`). Divergences are
-marked with `TODO(decomp)`/`NovaLog::Todo` at the port sites and tracked in
-`decomp-progress.tsv` rows 0x00499c10 / 0x0049a540 / 0x0049c050 /
-0x004a1ae0 / 0x004a1c40.
-
-The Cargo-page Jettison execution (`Player_RedistributeFleetCargoOverflow`
-0x0041f330) is ported in `src/game/outfit.cpp`. The window returns
-`PlayerInfoWindowResult::jettison_confirmed`; the flight loop applies it with
-the sim clock in scope (the original runs it inside the window loop). The
-in-flight cargo-dump channel (`Player_RedistributeFleetCargoOverflow` from
-`0x0044aa70` block 0x00451907) is wired to the arm-modifier + slot 0x0f
-binding. The visible jettisoned-cargo pods are spawned through the
-`FreeflightObjectState` pool (`src/game/freeflight_objects.cpp`,
-`Ship_SpawnFreeflightObjectForShip` 0x0041f800).
+Port: `src/game/player_info_window.cpp` (`NovaUi_*` → `NovaPlayerInfo_*`).
+Cargo-page Jettison (`Player_RedistributeFleetCargoOverflow` 0x0041f330) runs
+in `src/game/outfit.cpp`; the window returns
+`PlayerInfoWindowResult::jettison_confirmed`, applied by the flight loop with
+the sim clock. Jettisoned pods use the `FreeflightObjectState` pool
+(`Ship_SpawnFreeflightObjectForShip` 0x0041f800).

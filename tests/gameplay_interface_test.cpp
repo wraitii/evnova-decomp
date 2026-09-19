@@ -102,7 +102,7 @@ TEST_CASE("full 1024x768 canvas yields origin (512,384) and anchor (0,0)",
 // and the fill anchor is the left edge (wide) or the bottom edge (tall). The
 // original stores `trunc(anchor -/+ extent)` into the moved edge, and the x87
 // FIST + residual/sign correction truncates toward zero (see
-// docs/x87_truncation_idiom.md), so the wide extent is floor(width*fraction)
+// docs/x87_precision.md), so the wide extent is floor(width*fraction)
 // and the tall extent is ceil(height*fraction).
 
 TEST_CASE("tall life-bar slot fills from the bottom up", "[interface][hud]") {
