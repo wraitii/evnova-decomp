@@ -16,7 +16,7 @@ Relation to:
 
 ## Current status
 
-90% of the way there on vibes. There are missing pieces in a number of places like ship buying, escort management, some mission functionalities. Ship paints. Shield bubbles. Probably a number of other things.
+80-90% of the way there on vibes. There are missing pieces in a number of places like ship buying, escort management, some mission functionalities. Ship paints. Shield bubbles. Probably a number of other things. The fidelity is a little spiky, so large parts are completed with odd warts here and there too.
 
 ## AI slop disclaimer
 
@@ -50,15 +50,26 @@ export VCPKG_ROOT="$HOME/vcpkg"
 Platform notes:
 
 - **macOS:** `brew install cmake ninja` (the Xcode command line tools provide the compiler).
-- **Linux:** install `cmake`, `ninja-build` and a C++23 compiler from your distro (`g++` 13+ or `clang++` 17+).
-- **Windows:** install Visual Studio 2022 with the *Desktop development with C++* workload plus CMake and Ninja (`winget install Kitware.CMake Ninja-build.Ninja`), then bootstrap vcpkg from PowerShell:
+- **Linux (Ubuntu 24.04):** install the compiler, CMake, Ninja, and SDL build dependencies:
+
+  ```sh
+  sudo apt-get update
+  sudo apt-get install --no-install-recommends -y \
+    build-essential cmake ninja-build pkg-config \
+    autoconf autoconf-archive automake libtool libltdl-dev \
+    libegl1-mesa-dev libibus-1.0-dev libwayland-dev libx11-dev \
+    libxext-dev libxft-dev libxkbcommon-dev
+  ```
+
+- **Windows:** install Visual Studio 2022 with the *Desktop development with C++* workload plus CMake and Ninja (`winget install Kitware.CMake Ninja-build.Ninja`). Open an **x64 Developer PowerShell for VS 2022** (so the MSVC environment is initialized), then bootstrap vcpkg in that shell:
 
   ```powershell
-  git clone https://github.com/microsoft/vcpkg.git "$env:USERPROFILE\vcpkg" & "$env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat"
+  git clone https://github.com/microsoft/vcpkg.git "$env:USERPROFILE\vcpkg"
+  & "$env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat"
   $env:VCPKG_ROOT = "$env:USERPROFILE\vcpkg"
   ```
 
-  Run the build from an *x64 Native Tools Command Prompt for VS 2022* (or after running `vcvars64.bat`) so Ninja can find `cl.exe`.
+  Set `VCPKG_ROOT` after opening the developer shell; Visual Studio environment initialization can overwrite variables set earlier. Run the build from that same shell so Ninja can find `cl.exe`.
 
 ## Build and test
 
