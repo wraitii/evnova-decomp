@@ -1430,7 +1430,10 @@ void SpaceflightView::DrawAsteroids(SdlPlatform &platform,
 // refill timing do not match. Consequence: the original's "small asteroids
 // vanish at high resolution" defect (ring refills landing outside the cull
 // window, worked around by padding frames to ~100x100) is masked rather than
-// faithfully reproduced. Plausibly identified; not a faithful port.
+// faithfully reproduced. BUGFIX(original): the port therefore does not exhibit
+// the defect (docs/known_original_bugs.md), but this is a renderer-structural
+// divergence -- there is no per-record Sprite to gate -- so it is not routed
+// through kApplyOriginalBugFixes. Plausibly identified; not a faithful port.
 void SpaceflightView::WrapAsteroids(SdlPlatform &platform, GameState &state) {
   // Ghidra 0x00436910 Asteroid_UpdateSprites culls a record that left the
   // play area against g_viewport_center_x/y; use the synced half-size rather
