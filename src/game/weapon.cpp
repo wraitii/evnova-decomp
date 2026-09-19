@@ -962,6 +962,12 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     }
   }
   ship.npc_weapon_bank_cooldown[index] = fire_cooldown;
+  // Weapon_FireShipWeapons (0x00414550) records the bank it just served as the
+  // last lead-fired bank, but only for the lead-capable weapon modes {-1, 6}.
+  // The ship-AI aim blocks use this when the active bank is unset.
+  if (weapon->weapon_mode_code == -1 || weapon->weapon_mode_code == 6) {
+    ship.last_fired_weapon_bank_slot = ship.active_weapon_bank_slot;
+  }
   finish_fire_handoff();
 }
 

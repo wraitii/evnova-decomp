@@ -573,13 +573,27 @@ void NovaAi_ApplyControls(GameState &state,
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
     const float target_bearing_deg =
         BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-    // Ship_AimWeaponPredictive: steer at the predicted intercept of the live
-    // weapon bank (the original leads with the active bank or the +0xc8da
-    // candidate; a -1 active bank has no weapon context, so the helper falls
-    // back to the straight bearing below). Non-lead weapon modes return the
-    // straight bearing too, matching the original mode-6 branch.
-    ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
-        state, ship, target, ship.active_weapon_bank_slot);
+    // Ghidra 0x00408150 mode-6 aim: with no active bank (+0x72 == -1) the
+    // original leads with the last lead-fired bank (+0xc8da) when one exists,
+    // else falls back to the straight bearing; with an active bank it leads
+    // only when that bank's weapon mode is -1 or 6. Ship_AimWeaponPredictive
+    // itself returns the straight bearing for a -1 or non-lead weapon id.
+    const std::int16_t active_bank = ship.active_weapon_bank_slot;
+    if (active_bank == -1) {
+      ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
+          state, ship, target, ship.last_fired_weapon_bank_slot);
+    } else {
+      const Weapon *active_weapon =
+          state.scenario.Weapon(static_cast<std::int16_t>(active_bank + 0x80));
+      if (active_weapon != nullptr && (active_weapon->weapon_mode_code == -1 ||
+                                       active_weapon->weapon_mode_code == 6)) {
+        ship.ai_desired_heading_deg =
+            NovaAi_AimWeaponPredictive(state, ship, target, active_bank);
+      } else {
+        ship.ai_desired_heading_deg =
+            static_cast<std::int16_t>(target_bearing_deg);
+      }
+    }
     if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
       ship.ai_forward_thrust_cmd = eff_thrust;
       ship.ai_desired_speed = 0.0F;
@@ -759,12 +773,17 @@ void NovaAi_ApplyControls(GameState &state,
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
     const float target_bearing_deg =
         BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-    // Mode-7 combat strafe: the original aims at the predicted intercept
-    // (Ship_AimWeaponPredictive with the active bank weapon) whenever a
-    // weapon candidate is present. Mirror mode 6 using the live bank; the
-    // helper returns the straight bearing when no bank is armed.
-    ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
-        state, ship, target, ship.active_weapon_bank_slot);
+    // Ghidra 0x00408150 mode-7 aim: when the last lead-fired bank (+0xc8da)
+    // is unset the original uses the straight bearing; otherwise it calls
+    // Ship_AimWeaponPredictive with the *active* bank (+0x72), which itself
+    // falls back to the straight bearing for a -1 or non-lead weapon id.
+    if (ship.last_fired_weapon_bank_slot == -1) {
+      ship.ai_desired_heading_deg =
+          static_cast<std::int16_t>(target_bearing_deg);
+    } else {
+      ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
+          state, ship, target, ship.active_weapon_bank_slot);
+    }
     if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
       // Ghidra 0x00408150 mode 7 selects direct-fire then the current-target
       // bank within turn*3.
@@ -1135,9 +1154,9 @@ void NovaAi_ApplyControls(GameState &state,
 
   case 0xe: {
     // Evade / break: while still moving (>= 0.35 px/tick) brake like mode 1
-    // (reverse of the velocity bearing, or a predictive aim when a weapon
-    // bank is live -- deferred to the straight bearing), thrust once within
-    // turn+1 deg; inertialess ships reverse-thrust. Once slow, damp by 0.95
+    // (reverse of the velocity bearing, or a predictive aim with the last
+    // lead-fired bank when one is live), thrust once within turn+1 deg;
+    // inertialess ships reverse-thrust. Once slow, damp by 0.95
     // and steer at the target, arming direct-fire/guided/current banks within
     // turn*3 deg. The carrier-bay launch (Ship_LaunchShipFromCarrierBay) is
     // deferred.
@@ -1151,8 +1170,16 @@ void NovaAi_ApplyControls(GameState &state,
     if (std::abs(ship.vel_x) >= kVerySlowSpeed ||
         std::abs(ship.vel_y) >= kVerySlowSpeed) {
       if (!inertialess) {
-        ship.ai_desired_heading_deg = static_cast<std::int16_t>(
-            WrapDeg(BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
+        // Ghidra 0x00408150 mode 0xe fast branch: with no last lead-fired bank
+        // (+0xc8da == -1) the original steers opposite the velocity; otherwise
+        // it leads with that bank.
+        if (ship.last_fired_weapon_bank_slot == -1) {
+          ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+              WrapDeg(BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
+        } else {
+          ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
+              state, ship, target, ship.last_fired_weapon_bank_slot);
+        }
         if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
           ship.ai_forward_thrust_cmd = eff_thrust;
         }

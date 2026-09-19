@@ -75,6 +75,15 @@ void NovaWeapon_ClearTransientCombatState(GameState &state);
 // the player ship and when the cached loadout already matches the class.
 void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
 
+// Copies a ship class's decoded stock weapons (the original's
+// default_weapon_ammo/secondary 0x100 tables) into an NPC ship's flat
+// per-bank counters, zeroing both counters first. Unlike
+// NovaWeapon_EnsureNpcWeaponBanks it leaves the per-bank cooldown and
+// burst-counter arrays untouched, matching Ship_ResetShipToDefaultCombatState's
+// refill arm (0x0041e240), which only overwrites the two count tables. No-op
+// for the player ship. Callers own the npc_weapon_banks_ship_class cache.
+void NovaWeapon_CopyShipClassStockBanks(const GameState &state, Ship &ship);
+
 // Ghidra Weapon_InitShipWeaponBursts (0x00413810). For every mounted bank whose
 // weapon has both a burst cycle and a reset cooldown, zeroes the burst counter
 // and preloads the bank cooldown to the reset cooldown. Called when a loadout

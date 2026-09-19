@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "game/game_state.hpp"
+#include "game/nova_math.hpp"
 #include "game/scenario_data.hpp"
 #include "game/ship_ai.hpp"
 #include "game/ship_spawn.hpp"
@@ -1241,6 +1242,101 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
         Catch::Approx(eff.thrust_px_per_tick2 * 2.75F).margin(1e-4F));
   CHECK(ship.ai_desired_speed ==
         Catch::Approx(eff.max_speed_px_per_tick * 1.8F).margin(1e-3F));
+}
+
+// Ship_ApplyShipAiControls (0x00408150) reaches for the +0xC8DA last
+// lead-fired bank in the mode-6/7/0xe aim blocks: mode 6 leads with the active
+// bank when its weapon mode is {-1,6} and otherwise falls back to +0xC8DA,
+// mode 7 leads with the active bank only when +0xC8DA is set, and the mode-0xe
+// fast branch leads with +0xC8DA when set, else reverses the velocity bearing.
+TEST_CASE("ApplyControls lead aim uses the last lead-fired bank") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+
+  // Player (target) due north of the shooter, moving east; the shooter starts
+  // stationary. A lead-capable bank therefore aims off the due-north bearing.
+  ActivatePlayer(state, 0.0F, -100.0F);
+  state.player.vel_x = 100.0F;
+  state.player.vel_y = 0.0F;
+
+  REQUIRE(state.scenario.weapons.size() >= 2);
+  constexpr std::int16_t kLeadBank = 0;  // resolves to weapons[0]
+  constexpr std::int16_t kOtherBank = 1; // resolves to weapons[1]
+  state.scenario.weapons[kLeadBank].weapon_mode_code =
+      -1; // straight projectile
+  state.scenario.weapons[kLeadBank].projectile_speed = 100.0F;
+  state.scenario.weapons[kOtherBank].weapon_mode_code = 1; // no lead
+  state.scenario.weapons[kOtherBank].projectile_speed = 100.0F;
+
+  game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  ship.primary_target_ship_slot = 0;
+  ship.heading = 0.0F;
+  ship.ai_desired_heading_deg = 0;
+
+  const std::int16_t straight =
+      game::NovaAi_AimWeaponPredictive(state, ship, state.player, -1);
+  const std::int16_t lead =
+      game::NovaAi_AimWeaponPredictive(state, ship, state.player, kLeadBank);
+  REQUIRE(lead != straight);
+
+  // Mode 6: no active bank leads with +0xC8DA when set, else straight.
+  ship.ai_control_mode = 6;
+  ship.active_weapon_bank_slot = -1;
+  ship.last_fired_weapon_bank_slot = -1;
+  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  CHECK(ship.ai_desired_heading_deg == straight);
+
+  ship.last_fired_weapon_bank_slot = kLeadBank;
+  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  CHECK(ship.ai_desired_heading_deg == lead);
+
+  // Mode 6: a non-lead active bank wins over +0xC8DA; a lead active bank
+  // leads even with +0xC8DA unset.
+  ship.active_weapon_bank_slot = kOtherBank;
+  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  CHECK(ship.ai_desired_heading_deg == straight);
+
+  ship.active_weapon_bank_slot = kLeadBank;
+  ship.last_fired_weapon_bank_slot = -1;
+  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  CHECK(ship.ai_desired_heading_deg == lead);
+
+  // Mode 7: aims with the active bank but only when +0xC8DA is set.
+  ship.ai_control_mode = 7;
+  ship.active_weapon_bank_slot = kLeadBank;
+  ship.last_fired_weapon_bank_slot = -1;
+  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  CHECK(ship.ai_desired_heading_deg == straight);
+
+  ship.last_fired_weapon_bank_slot = kLeadBank;
+  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  CHECK(ship.ai_desired_heading_deg == lead);
+
+  // Mode 0xe fast branch (force the class off the inertialess model): +0xC8DA
+  // selects the lead, else the reverse-velocity bearing.
+  state.scenario.ships[static_cast<std::size_t>(ship.ship_class_id)]
+      .flags_secondary &= ~0x40U;
+  ship.ai_control_mode = 0xe;
+  ship.vel_x = 1.0F; // >= the 0.35 px/tick fast gate
+  ship.vel_y = 0.0F;
+  ship.last_fired_weapon_bank_slot = -1;
+  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  const std::int16_t reverse = static_cast<std::int16_t>(game::WrapDeg(
+      game::BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
+  CHECK(ship.ai_desired_heading_deg == reverse);
+
+  const std::int16_t lead_moving =
+      game::NovaAi_AimWeaponPredictive(state, ship, state.player, kLeadBank);
+  ship.last_fired_weapon_bank_slot = kLeadBank;
+  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  CHECK(ship.ai_desired_heading_deg == lead_moving);
 }
 
 // Mode 0xc (velocity match) copies the target's velocity once the relative

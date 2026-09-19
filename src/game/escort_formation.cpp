@@ -435,11 +435,14 @@ void NovaShip_ResetToDefaultCombatState(GameState &state,
   ship.ai_desired_speed = 0.0F;
   ship.pers_def_slot = -1;
   ship.ai_fire_trigger_latch = 0;
-  // TODO(decomp(0x0041e240)) skipped: the six cargo-bin clears and the
-  // ai_odds_score / field_0xac / last_fired_weapon_bank_slot resets -- NPC
-  // cargo bins and the combat-odds score are not modelled on the port Ship.
+  ship.ai_odds_score = -1.0F;
   ship.engine_glow_level = 0;
+  // Port-only derived render alpha; the original only writes the +0xc8d4
+  // engine-glow level above.
   ship.engine_glow_intensity = 0.0F;
+  ship.last_weapon_fire_time_ms = 0;
+  ship.last_mission_hail_tick_60hz = 0;
+  ship.last_fired_weapon_bank_slot = -1;
   ship.dude_class_id = -1;
   ship.mission_fleet_slot = -1;
   ship.ionization_points = 0.0F;
@@ -464,13 +467,15 @@ void NovaShip_ResetToDefaultCombatState(GameState &state,
   ship.vel_y = 0.0F;
   ship.vel_x = 0.0F;
   ship.speed = 0.0F;
-  if (refill) {
-    // Refill the class-default weapon ammo/secondary stock by forcing the
-    // cached NPC bank reseed (the original copies default_weapon_ammo /
-    // default_weapon_secondary into the per-ship tables).
-    ship.npc_weapon_banks_ship_class = -1;
-    NovaWeapon_EnsureNpcWeaponBanks(state, ship);
+  if (refill && cls != nullptr) {
+    // The original copies the class default_weapon_ammo/secondary 0x100 tables
+    // into the per-bank counters; unlike a fresh bank init it does not reset
+    // the per-bank cooldowns or burst state.
+    NovaWeapon_CopyShipClassStockBanks(state, ship);
+    ship.npc_weapon_banks_ship_class = ship.ship_class_id;
   }
+  // Six cargo bins clear last, after the refill block (Ghidra 0x0041e5da).
+  ship.cargo_bins.fill(0);
   NovaShip_EnterSquadReturnState(state, ship);
 }
 

@@ -371,6 +371,11 @@ struct Ship {
   // (0x00413810) when the weapon-bank loadout is (re)built.
   std::array<std::int16_t, 0x100> npc_weapon_bank_burst_counter{};
   std::int16_t npc_weapon_banks_ship_class = -1;
+  // Ghidra ShipState +0xC8DA. The bank Weapon_FireShipWeapons last served a
+  // lead-capable weapon mode (-1/6) from; the aim blocks of
+  // Ship_ApplyShipAiControls (modes 6/7/0xe) fall back to it when the active
+  // bank is unset. -1 means none (spawn/reset value).
+  std::int16_t last_fired_weapon_bank_slot = -1; // +0xC8DA
 
   // --- Mission / target/AI slots (added to unblock spawn/targeting) ---
   std::int16_t mission_owner_slot = -1; // +0x8A
