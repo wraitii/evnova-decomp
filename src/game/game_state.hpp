@@ -1159,6 +1159,42 @@ struct AsteroidState {
   static constexpr std::size_t kPoolSize = 16;
 };
 
+// The player-command edge-latch swath (Ghidra 0x007cab35..0x007cab53). Each
+// latch is set when its command fires and cleared once the bound key is
+// released; NovaUi_MarkTravelAndStatusPanelsDirty (0x0045c7a0) sets them all so
+// a key held across a modal or mode transition must be released and re-pressed
+// before its command fires again. The original keeps them as contiguous BSS
+// globals; the port keeps them in one explicit GameState value so the swallow
+// reaches every consumer.
+//
+// The original block also arms g_playerFpsToggleCommandLatch and the
+// not-yet-modelled DAT_007cab38/3b/3c/3d/3e/3f/40/41/43/49 latches; unmodelled
+// slots are documented at the swallow site (NovaUi_MarkTravelAndStatusPanels-
+// Dirty) rather than stored unused.
+struct PlayerCommandLatches {
+  bool target_cycle_was_held = false; // g_playerCycleShipTargetCommandLatch
+  // g_playerCycleTravelTargetCommandLatch
+  bool destination_cycle_was_held = false;
+  bool clear_target_was_held = false; // g_playerClearTargetCommandLatch
+  bool ship_cycle_was_held = false;
+  bool nearest_target_was_held = false;  // g_playerNearestTargetCommandLatch
+  bool secondary_cycle_was_held = false; // g_playerSecondaryCycleCommandLatch
+  bool clear_secondary_was_held = false;
+  bool starmap_was_held = false;
+  bool mission_info_was_held = false; // g_playerMissionComputerCommandLatch
+  bool land_was_held = false;
+  bool dismiss_was_held = false;
+  bool target_action_was_held = false; // g_playerTargetActionCommandLatch
+  bool board_was_held = false;
+  // DAT_007cab53: the cancel/return-to-menu command, consumed by
+  // Frame_SpaceflightLoop 0x00417b7e. This is the latch that stops an Esc held
+  // across the dock launch (or the intro skip) from immediately re-firing.
+  bool return_to_menu_was_held = false;
+  // Not a latch: last travel selection seen, for the reticle-pulse/latch
+  // re-arm (formerly PlayerTravelSelectionLatches::prev_travel_stellar).
+  std::int16_t prev_travel_stellar = -1;
+};
+
 // Everything about the running pilot's world. Replaces the Game_Reset* set of
 // globals for the transient not-yet-reconstructed subsystems with explicit
 // flags so we can log exactly what is and is not preserved.
@@ -1523,11 +1559,11 @@ struct GameState {
   // Ship.npc_weapon_bank_burst_counter.
   std::array<std::int16_t, 0x100> weapon_bank_burst_counter{};
 
-  // g_playerSecondaryCycleCommandLatch (DAT_007cab42): secondary-weapon-cycle
-  // command edge latch, set when the cycle command executes and cleared when
-  // the key is released; MarkTravel-style modal exits re-arm it so a held key
-  // does not re-fire (TODO(decomp): swallow site).
-  bool secondary_cycle_command_latch = false;
+  // The flight-loop command edge latches (Ghidra 0x007cab35..0x007cab53,
+  // including g_playerSecondaryCycleCommandLatch). NovaUi_MarkTravelAndStatus-
+  // PanelsDirty re-arms the block at mode/modal boundaries; see
+  // PlayerCommandLatches.
+  PlayerCommandLatches command_latches;
 
   // Lightweight ground-truth of fired shots (projectiles / beams) in flight,
   // reconstructed for the player's primary weapon. The original keeps these in
