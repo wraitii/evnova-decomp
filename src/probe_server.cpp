@@ -617,7 +617,7 @@ void ProbeServer::HandleRequest(const std::string &method,
       // Optional quantity: the trade modal consumes it inside its own handler
       // (the synthesized clicks below stay the transaction trigger). `tons`
       // requests an exact amount; `max` requests the whole affordable/held
-      // amount, matching the shift quantity prompt. Neither leaves 0, meaning
+      // amount, matching the alt quantity prompt. Neither leaves 0, meaning
       // the original hardcoded click quantity (up to 10 tons).
       const auto tons_field = JsonIntField(body, "tons");
       const bool want_max = JsonBoolField(body, "max").value_or(false);

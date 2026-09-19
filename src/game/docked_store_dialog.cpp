@@ -1480,7 +1480,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         });
   };
   (void)run_mission_offer();
-  // Ghidra 0x0048ea70 quantity arms (local_652 & 0x800): a shift-modified
+  // Ghidra 0x0048ea70 quantity arms (local_652 & 0x800): an alt-modified
   // buy/sell first computes the affordable/owned maximum and prompts DLOG
   // 0x3eb (FUN_0049e8e0). Plain actions buy/sell one unit. Returns 1 when the
   // maximum is 1 (nothing to choose) and 0 when the prompt is cancelled.
@@ -1506,7 +1506,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
     if (max <= 1)
       return 1;
     return RunStoreQuantityPrompt(
-        platform, static_cast<std::int16_t>(max), render_background);
+        platform, static_cast<std::int16_t>(max), render_store_background);
   };
   const auto prompt_sell_quantity = [&]() -> std::int16_t {
     if (!outfit_store || session.selected_id < 0)
@@ -1516,7 +1516,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
     const std::int16_t max = std::min<std::int16_t>(owned, 32000);
     if (max <= 1)
       return 1;
-    return RunStoreQuantityPrompt(platform, max, render_background);
+    return RunStoreQuantityPrompt(platform, max, render_store_background);
   };
   // The original input callback only emits the confirm action when the
   // purchase-allowed latch is set. Keep the input gate identical to the
@@ -1659,7 +1659,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           }
           if (outfit_store) {
             const std::int16_t quantity =
-                input->shift ? prompt_buy_quantity() : 1;
+                input->alt ? prompt_buy_quantity() : 1;
             if (quantity > 0) {
               (void)NovaLanded_BuyOutfit(
                   state, stellar_id, session.selected_id, quantity);
@@ -1688,8 +1688,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         }
         if (key == 's' && outfit_store && session.selected_id >= 0) {
           const std::int16_t sold_id = session.selected_id;
-          const std::int16_t quantity =
-              input->shift ? prompt_sell_quantity() : 1;
+          const std::int16_t quantity = input->alt ? prompt_sell_quantity() : 1;
           if (quantity > 0) {
             const OutfitSaleResult sale = NovaLanded_SellOutfit(
                 state, session, stellar_id, sold_id, quantity);
@@ -1744,8 +1743,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       }
       if (Contains(layout.buy, point) && can_buy_selected()) {
         if (outfit_store) {
-          const std::int16_t quantity =
-              input->shift ? prompt_buy_quantity() : 1;
+          const std::int16_t quantity = input->alt ? prompt_buy_quantity() : 1;
           if (quantity > 0) {
             (void)NovaLanded_BuyOutfit(
                 state, stellar_id, session.selected_id, quantity);
@@ -1772,8 +1770,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       if (Contains(layout.sell_or_info, point) && session.selected_id >= 0) {
         if (outfit_store) {
           const std::int16_t sold_id = session.selected_id;
-          const std::int16_t quantity =
-              input->shift ? prompt_sell_quantity() : 1;
+          const std::int16_t quantity = input->alt ? prompt_sell_quantity() : 1;
           if (quantity > 0) {
             const OutfitSaleResult sale = NovaLanded_SellOutfit(
                 state, session, stellar_id, sold_id, quantity);
