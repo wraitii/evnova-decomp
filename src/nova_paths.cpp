@@ -65,9 +65,67 @@ namespace {
 
 } // namespace
 
+namespace {
+
+// User-selected override, applied before the candidate search. Empty means
+// "search normally". Only touched on the main thread.
+std::optional<std::filesystem::path> g_install_root_override;
+std::optional<std::filesystem::path> g_install_root_cached;
+bool g_install_root_cached_valid = false;
+
+[[nodiscard]] std::optional<std::filesystem::path>
+NormalizeResolvedRoot(const std::filesystem::path &path) {
+  std::error_code ec;
+  const auto canonical = std::filesystem::weakly_canonical(path, ec);
+  return ec ? path : canonical;
+}
+
+} // namespace
+
 std::optional<std::filesystem::path> NovaPaths::InstallRoot() {
-  static const std::optional<std::filesystem::path> root = FindInstallRoot();
-  return root;
+  if (!g_install_root_cached_valid) {
+    if (g_install_root_override && IsInstallRoot(*g_install_root_override)) {
+      g_install_root_cached = g_install_root_override;
+      NovaLog::Info("install root (configured): '{}'",
+                    g_install_root_cached->string());
+    } else {
+      g_install_root_cached = FindInstallRoot();
+    }
+    g_install_root_cached_valid = true;
+  }
+  return g_install_root_cached;
+}
+
+void NovaPaths::SetInstallRootOverride(
+    std::optional<std::filesystem::path> root) {
+  g_install_root_override = std::move(root);
+  g_install_root_cached.reset();
+  g_install_root_cached_valid = false;
+}
+
+std::optional<std::filesystem::path> NovaPaths::ResolveUserSelectedInstallRoot(
+    const std::filesystem::path &selected) {
+  std::error_code ec;
+  if (std::filesystem::is_regular_file(selected, ec)) {
+    const std::filesystem::path parent = selected.parent_path();
+    if (IsInstallRoot(parent)) {
+      return NormalizeResolvedRoot(parent);
+    }
+    if (IsInstallRoot(parent / "EV Nova")) {
+      return NormalizeResolvedRoot(parent / "EV Nova");
+    }
+    return std::nullopt;
+  }
+  if (std::filesystem::is_directory(selected, ec)) {
+    if (IsInstallRoot(selected)) {
+      return NormalizeResolvedRoot(selected);
+    }
+    if (IsInstallRoot(selected / "EV Nova")) {
+      return NormalizeResolvedRoot(selected / "EV Nova");
+    }
+    return std::nullopt;
+  }
+  return std::nullopt;
 }
 
 std::optional<std::filesystem::path> NovaPaths::SupportDirectory() {

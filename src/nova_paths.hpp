@@ -33,6 +33,19 @@ namespace NovaPaths {
 // TODO(decomp) add it together with a mod-manager design.
 [[nodiscard]] std::optional<std::filesystem::path> InstallRoot();
 
+// Installs a user-selected install root, overriding the searched candidates.
+// Set from a valid path persisted in the extended prefs or chosen in the
+// startup locate-data screen; pass nullopt to clear. Clears the cached
+// resolution so the next InstallRoot() call re-resolves.
+void SetInstallRootOverride(std::optional<std::filesystem::path> root);
+
+// Best-effort resolution of a path picked in a native file/folder chooser into
+// an install root, or nullopt when it does not look like one. Accepts the
+// install folder itself, a parent that contains an "EV Nova" child, or the CE
+// executable (its containing folder is the install root).
+[[nodiscard]] std::optional<std::filesystem::path>
+ResolveUserSelectedInstallRoot(const std::filesystem::path &selected);
+
 // Per-user writable support folder, from SDL_GetPrefPath("Ambrosia Software",
 // "EV Nova"). On macOS this is
 // ~/Library/Application Support/Ambrosia Software/EV Nova/. The
