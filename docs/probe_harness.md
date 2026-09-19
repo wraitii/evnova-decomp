@@ -188,7 +188,7 @@ center without touching game state: it synthesizes a click on the published
 `trade.row.<commodity>` rect and then one on the `buy`/`sell` button, so the
 modal's own handler runs the transaction (the click quantity, up to 10 tons).
 An optional `"tons":N` (1..32000) makes that transaction exact, and
-`"max":true` trades the whole affordable/held amount (the shift quantity
+`"max":true` trades the whole affordable/held amount (the alt quantity
 prompt's default). The modal consumes the queued quantity inside the same
 handler, so no game state is written outside the UI path; the command waits
 for that consumption before returning (`504` if the modal never applies it),

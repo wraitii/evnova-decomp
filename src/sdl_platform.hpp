@@ -41,10 +41,11 @@ struct TextInput {
   // navigation and right-side modifiers in the compact 0x60..0x6f range).
   // 0xffff means that this event has no bindable key code.
   std::uint16_t key_code = 0xffff;
-  // Shift state at the moment of the event. The original reads this from the
-  // per-poll modifier word (FUN_004cea20) to select the landed-store quantity
-  // prompt (0x0048ea70 local_652 & 0x800).
-  bool shift = false;
+  // Alt/Option state at the moment of the event. The original reads this from
+  // the per-poll modifier word (FUN_004cea20: keys 0x38/0x6f set 0x800) to
+  // select the landed-store and trade-center quantity prompt (0x0048ea70
+  // local_652 & 0x800; 0x0048c730 local_36 & 0x800).
+  bool alt = false;
 };
 
 // Continuous flight-input snapshot polled once per frame from the live

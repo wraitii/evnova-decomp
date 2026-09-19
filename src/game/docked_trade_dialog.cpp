@@ -477,7 +477,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
   // Probe-harness support (docs/probe_harness.md): a `trade` command may carry
   // an explicit `tons` or `max`, consumed here so the transaction still runs
   // through this handler. A negative pending value means "the whole lot" (the
-  // shift quantity prompt's default); 0 keeps the original hardcoded click
+  // alt quantity prompt's default); 0 keeps the original hardcoded click
   // quantity (up to 10 tons).
   const auto trade_quantity = [&platform](std::int16_t max) -> std::int16_t {
     const std::int16_t requested =
@@ -557,10 +557,10 @@ RunTradeCenterDialog(SdlPlatform &platform,
           const std::int16_t max =
               NovaTradeCenter_BuyMax(state, session, session.selected);
           const std::int16_t qty =
-              in->shift ? (max <= 1 ? max
-                                    : RunStoreQuantityPrompt(
-                                          platform, max, render_background))
-                        : trade_quantity(max);
+              in->alt ? (max <= 1 ? max
+                                  : RunStoreQuantityPrompt(
+                                        platform, max, render_trade_background))
+                      : trade_quantity(max);
           if (qty > 0) {
             (void)NovaTradeCenter_Buy(state, session, session.selected, qty);
           }
@@ -570,10 +570,10 @@ RunTradeCenterDialog(SdlPlatform &platform,
           const std::int16_t max =
               NovaTradeCenter_SellMax(state, session, session.selected);
           const std::int16_t qty =
-              in->shift ? (max <= 1 ? max
-                                    : RunStoreQuantityPrompt(
-                                          platform, max, render_background))
-                        : trade_quantity(max);
+              in->alt ? (max <= 1 ? max
+                                  : RunStoreQuantityPrompt(
+                                        platform, max, render_trade_background))
+                      : trade_quantity(max);
           if (qty > 0) {
             (void)NovaTradeCenter_Sell(state, session, session.selected, qty);
           }

@@ -126,7 +126,7 @@ public:
   // server-side `trade` command stores it; the trade modal consumes it inside
   // its own handler, so the trade still runs through the normal UI path (no
   // direct game-state writes). 0 means "use the click quantity"; a negative
-  // value means "the whole affordable/held amount" (the shift prompt's max).
+  // value means "the whole affordable/held amount" (the alt prompt's max).
   // Consumption releases the waiting `trade` command.
   [[nodiscard]] std::int16_t ConsumePendingTradeQuantity();
 
