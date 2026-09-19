@@ -20,10 +20,12 @@
 // bottom status bar (entry 2).
 //
 // Remaining divergences from the original: the inline Find stands in for the
-// modal search dialog (DLOG 0xbbd), the destination-window route-editing
+// modal search dialog (DLOG 0xbbd), and the destination-window route-editing
 // sub-flow (DAT_007354a6 / hypergate destination selection through the map)
-// is not reconstructed, and the Show/Hide Borders preference defaults ON
-// (no prefs store yet; the original defaults OFF and persists the choice).
+// is not reconstructed. The Show/Hide Borders preference defaults ON in the
+// port (the original's overlay was slow/buggy and defaulted OFF); it is carried
+// on GameState::starmap_show_borders, seeded from
+// NovaPreferences::starmap_show_borders and persisted at .prf +0x76.
 // The view (zoom divisor + pan origin) and the plotted route persist across
 // map sessions in GameState; the route re-arms hop-by-hop on jump arrival.
 //

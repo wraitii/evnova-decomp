@@ -1415,7 +1415,11 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   // The mission-info window's destination-window sub-flow (route editing from
   // a selected stellar, DAT_007354a6) is not reconstructed; the flight map
   // always runs in the plain mode (logged divergence).
-  bool show_borders = true; // original pref default is OFF; no prefs store yet
+  // Runtime copy of NovaPreferences::starmap_show_borders (Ghidra
+  // g_starmap_show_borders, .prf +0x76); seeded from prefs at startup and
+  // synced back at the .prf save points. The port defaults it ON because its
+  // overlay is cheap (the original defaulted OFF).
+  bool &show_borders = state.starmap_show_borders;
   bool search_active = false;
   std::string search_query;
 
@@ -1606,7 +1610,8 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
             button_clicked = true;
             switch (static_cast<StarmapButton>(i)) {
             case StarmapButton::kShowBorders:
-              // Ghidra 0x004A9D10 NovaUi_EnableStarmapPoliticalOverlay.
+              // Ghidra 0x00872550 NovaUi_StarmapEnableBordersAction ->
+              // 0x004A9D10 NovaUi_EnableStarmapPoliticalOverlay.
               show_borders = !show_borders;
               overlay_needs_rebuild = true;
               break;

@@ -1258,6 +1258,13 @@ struct GameState {
   float starmap_zoom = 0.5625F;
   float starmap_pan_x = 0.0F;
   float starmap_pan_y = 0.0F;
+  // Show/hide the political-borders overlay on the galaxy starmap. The runtime
+  // copy of NovaPreferences::starmap_show_borders (Ghidra
+  // g_starmap_show_borders, .prf +0x76): the map's Show/Hide Borders button
+  // toggles this, and it is seeded from prefs at startup and synced back at the
+  // .prf save points. The port's overlay is cheap, so it defaults ON (the
+  // original defaulted OFF).
+  bool starmap_show_borders = true;
   IntroCinematicData intro_cinematic;
   // The transient HUD overlay message (see HudOverlayState). Kept on GameState
   // per AGENTS.md (no hidden globals) and rendered by the HudRenderer.
