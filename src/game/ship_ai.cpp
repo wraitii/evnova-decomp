@@ -544,14 +544,13 @@ void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
 
   if (NovaTargeting_IsShipAcquirableAsTarget(state, state.player, ship)) {
     const ShipClass *player_class = ShipClassFor(state, state.player);
-    const ShipClass *rating_baseline = state.scenario.Ship(0x80);
-    if (player_class != nullptr && rating_baseline != nullptr) {
+    if (player_class != nullptr) {
+      // Base unit pinned (GameState::kCombatRatingBaseStrength); the original
+      // divides by class 0's unindexed Strength at 0x0041343c.
       const std::int32_t divisor =
-          static_cast<std::int32_t>(rating_baseline->strength) * 0x1900;
+          GameState::kCombatRatingBaseStrength * 0x1900;
       float rating_scale =
-          divisor != 0
-              ? static_cast<float>(state.player_combat_rating_points / divisor)
-              : 1.0F;
+          static_cast<float>(state.player_combat_rating_points / divisor);
       rating_scale = std::clamp(rating_scale, 1.0F, 2.0F);
       hostile_strength = static_cast<std::int16_t>(
           static_cast<float>(player_class->strength) * rating_scale);
@@ -2039,16 +2038,14 @@ bool NovaShip_CanShipUseAfterburner(GameState &state, const Ship &ship) {
     return true; // always afterburner (AI ships)
   }
   if ((capability & 0x0020U) != 0U) {
-    // Bible shïp Flags 0x0020: afterburner when the player has an advanced
-    // combat rating. The original rolls NovaRandom_Range(0x540) and compares
-    // roll + 0x100 against rating / class Strength (the original divides
-    // unguarded; zero-strength classes would fault, so the division is
-    // guarded here).
+    // Bible shïp Flags 0x0020: afterburner once the rating passes a random
+    // roll (NovaRandom_Range(0x540) + 0x100 <= rating / base). Base is the
+    // pinned class-0 Strength, not this ship's own (0x0046b308); see
+    // game_state.hpp.
     const auto roll = static_cast<int>(
         std::uniform_int_distribution<int>{0, 0x53f}(state.rng));
-    const auto threshold =
-        static_cast<int>(state.player_combat_rating_points /
-                         (cls->strength != 0 ? cls->strength : 1));
+    const auto threshold = state.player_combat_rating_points /
+                           GameState::kCombatRatingBaseStrength;
     return roll + 0x100 <= threshold;
   }
   return false;

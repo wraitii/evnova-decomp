@@ -31,6 +31,15 @@ using weapon_detail::TurretBearingDegForShip;
 using weapon_detail::WeaponAt;
 
 namespace {
+// Ghidra Weapon_FireShipWeapons (0x00414550) combat-rating cooldown scales
+// (k_npc_fire_cooldown_scale_1p75/1p5/1p25/1p1; double constants at
+// 0x00575118/0x00575130/0x005751d0/0x005751c0). Larger cooldown = slower fire,
+// so hostile NPCs are gentle on weak players and full-rate on veterans.
+constexpr double kNpcFireCooldownScale1p75 = 1.75;
+constexpr double kNpcFireCooldownScale1p5 = 1.5;
+constexpr double kNpcFireCooldownScale1p25 = 1.25;
+constexpr double kNpcFireCooldownScale1p1 = 1.1;
+
 [[nodiscard]] std::int16_t PlayerFireSoundPriorityWidth(const Weapon &weapon) {
   // Weapon_FirePlayerWeaponBank 0x00455150: beam modes 0/3 and launch bays
   // use 6; other secondary-trigger banks use 6; ordinary primary fire uses 5.
@@ -927,14 +936,29 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   } else {
     fire_cooldown = static_cast<float>(weapon->reload_ticks);
   }
-  // Ghidra Weapon_FireShipWeapons (0x00414550) also scales this cooldown
-  // when firing at the player by a combat-rating ladder
-  // (k_npc_fire_cooldown_scale_1p75/1p5/1p25/1p1 = 1.75/1.5/1.25/1.1 as the
-  // rating climbs through ship-strength*100/400/800/1600; no scale at
-  // >=1600). LARGER cooldown = SLOWER fire, so hostile NPCs are gentle on
-  // weak players and full-rate on veterans. TODO(decomp(0x00414550)) skipped:
-  // g_player_combat_rating_points is not tracked, so the baseline (full-rate)
-  // value is emitted.
+  // Ghidra Weapon_FireShipWeapons (0x00414550): when the target is the player
+  // (slot 0), scale the cooldown 1.75/1.5/1.25/1.1 as the rating passes
+  // base*100/400/800/1600 (full rate above). Base is pinned to the shipped
+  // class-0 Strength (2) rather than read live; see game_state.hpp. Applied
+  // before the burst block, so a burst wrap still overwrites it unscaled.
+  if (ship.primary_target_ship_slot == 0) {
+    const std::int32_t reference_strength =
+        GameState::kCombatRatingBaseStrength;
+    const std::int32_t rating = state.player_combat_rating_points;
+    if (rating < reference_strength * 100) {
+      fire_cooldown = static_cast<float>(static_cast<double>(fire_cooldown) *
+                                         kNpcFireCooldownScale1p75);
+    } else if (rating < reference_strength * 400) {
+      fire_cooldown = static_cast<float>(static_cast<double>(fire_cooldown) *
+                                         kNpcFireCooldownScale1p5);
+    } else if (rating < reference_strength * 800) {
+      fire_cooldown = static_cast<float>(static_cast<double>(fire_cooldown) *
+                                         kNpcFireCooldownScale1p25);
+    } else if (rating < reference_strength * 1600) {
+      fire_cooldown = static_cast<float>(static_cast<double>(fire_cooldown) *
+                                         kNpcFireCooldownScale1p1);
+    }
+  }
 
   // Burst cycle (Weapon_FireShipWeapons): count a cycle tick; on the wrap
   // edge (flags_tertiary & 1) consume one round from the secondary ammo bank;

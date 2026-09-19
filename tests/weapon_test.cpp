@@ -512,6 +512,52 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
   state.pending_fire_sounds.clear();
 }
 
+// Ghidra Weapon_FireShipWeapons (0x00414550): when the primary target is the
+// player (slot 0), the post-volley bank cooldown is scaled by a combat-rating
+// ladder (1.75/1.5/1.25/1.1) as g_player_combat_rating_points climbs through
+// base_strength * 100/400/800/1600. The original reads the base unit from
+// g_ship_class_defs[0].strength (class resource 0x80, shipped Shuttle = 2);
+// the port pins it (GameState::kCombatRatingBaseStrength) so a mod editing
+// class 0 cannot rescale the rating system. Non-player targets and ratings at
+// or above 1600x take the unscaled baseline.
+TEST_CASE("NPC fire cooldown scales with the player combat-rating ladder",
+          "[weapon][npc]") {
+  const auto fire_and_read_cooldown = [](std::int32_t rating,
+                                         std::int16_t class0_strength,
+                                         std::int16_t target_slot) {
+    GameState state;
+    SetUpDirectFirePair(state);
+    state.scenario.ships[0].strength = class0_strength;
+    Ship &npc = state.ShipAt(1);
+    npc.primary_target_ship_slot = target_slot;
+    npc.armor_points = 100.0F;
+    npc.shield_points = 100.0F;
+    ArmNpcDirectFireBank(state, 0, -1, 5, 5, 500.0F);
+    state.scenario.weapons[0].reload_ticks = 10;
+    state.scenario.weapons[0].flags = 0;
+    state.scenario.weapons[0].projectile_speed = 100.0F;
+    state.scenario.weapons[0].lifetime_ticks = 30;
+    npc.active_weapon_bank_slot = 0;
+    npc.ai_fire_trigger_latch = 1;
+    state.player_combat_rating_points = rating;
+    NovaWeapon_FireNpcWeaponBank(state, npc);
+    return npc.npc_weapon_bank_cooldown[0];
+  };
+
+  // Pinned base unit 2 -> thresholds 200/800/1600/3200.
+  CHECK(fire_and_read_cooldown(0, 2, 0) == Catch::Approx(17.5F));
+  CHECK(fire_and_read_cooldown(199, 2, 0) == Catch::Approx(17.5F));
+  CHECK(fire_and_read_cooldown(799, 2, 0) == Catch::Approx(15.0F));
+  CHECK(fire_and_read_cooldown(800, 2, 0) == Catch::Approx(12.5F));
+  CHECK(fire_and_read_cooldown(1600, 2, 0) == Catch::Approx(11.0F));
+  CHECK(fire_and_read_cooldown(3200, 2, 0) == Catch::Approx(10.0F));
+  // Pinned divergence: editing class-0 Strength must not move the ladder.
+  CHECK(fire_and_read_cooldown(0, 50, 0) == Catch::Approx(17.5F));
+  CHECK(fire_and_read_cooldown(800, 50, 0) == Catch::Approx(12.5F));
+  // A non-player primary target (slot -1) never scales, even at rating 0.
+  CHECK(fire_and_read_cooldown(0, 2, -1) == Catch::Approx(10.0F));
+}
+
 TEST_CASE("continuous NPC weapon handoff retains its bank and trigger",
           "[weapon][npc]") {
   if (!ArchivesAvailable()) {
