@@ -1257,6 +1257,16 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
       // The 0.66 (DAT_005753d0) and 0.2 (DAT_005753d8) scales are IEEE
       // doubles; the original multiplies with FMUL double, then the x87 FIST+
       // residual/sign correction truncates toward zero.
+      // CONFIRMED-BUG(original): this is a center-in-sector test, not a hull
+      // test, so the original contact is very imprecise. The half-angle is
+      // fixed per ship, so its lateral tolerance d*tan(cone) is narrower than
+      // the hull at close range (the beam passes through the ship) and wider
+      // at long range (phantom hits, with the endpoint truncated in empty
+      // space); frame_span is the sprite's full width, so elongated hulls are
+      // sized by their longest dimension and over-hit edge-on. Nearest-center
+      // selection also ignores occlusion. Kept faithful for fidelity; see
+      // "Beam collision detection has holes" in docs/known_original_bugs.md.
+      // Deliberately not gated by kApplyOriginalBugFixes.
       constexpr double kBeamReachFrameScale = 0.66;
       constexpr double kBeamTruncateFrameScale = 0.2;
       float bearing_deg = static_cast<float>(beam.firing_bearing_deg);

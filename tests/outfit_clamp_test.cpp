@@ -4,6 +4,7 @@
 // multiplier, and the gun/turret slot caps, with OutfitOwnership::limited
 // carrying the original bool return.
 
+#include "game/compatibility.hpp"
 #include "game/game_state.hpp"
 #include "game/outfit.hpp"
 #include "game/scenario_data.hpp"
@@ -158,6 +159,42 @@ TEST_CASE("gun and turret slot caps bound ownership", "[outfit][clamp]") {
   CHECK(r.max_allowed == 2); // 1 + 1
   CHECK(r.effective_owned == 2);
   CHECK(r.limited); // still limited by the lifted cap, matching the original
+}
+
+// BUGFIX(original): the executable added the first ModType-45/46 value once per
+// owning outfit definition, so multiple copies of one mount modifier did not
+// stack. kApplyOriginalBugFixes scales the bonus by the owned count instead.
+TEST_CASE("max-gun/turret bonuses scale with owned copies", "[outfit][clamp]") {
+  GameState state;
+  state.scenario.outfits.resize(2);
+  state.scenario.ships.resize(1);
+  state.inventory.outfit_owned_count.fill(0);
+  state.scenario.ships[0].max_gun = 1;
+  state.scenario.ships[0].max_turret = 1;
+  state.player.ship_class_id = 0;
+
+  // [0] a mount modifier granting +2 guns and +2 turrets per copy.
+  state.scenario.outfits[0].max_count = 100;
+  state.scenario.outfits[0].mod_type = kModifyMaxGuns;
+  state.scenario.outfits[0].mod_val = 2;
+  state.scenario.outfits[0].alt_mod_types[0] = kModifyMaxTurrets;
+  state.scenario.outfits[0].alt_mod_vals[0] = 2;
+  // [1] the gun/turret being clamped (one owned copy fills the slot).
+  state.scenario.outfits[1].max_count = 100;
+  state.scenario.outfits[1].flags = 0x0001; // gun
+  state.inventory.outfit_owned_count[1] = 1;
+
+  const std::int16_t expected = kApplyOriginalBugFixes
+                                    ? static_cast<std::int16_t>(1 + 2 * 3)
+                                    : static_cast<std::int16_t>(1 + 2);
+
+  state.inventory.outfit_owned_count[0] = 3; // three modifier copies
+  OutfitOwnership r = Outfit_ClampOwnedCountToLimits(state, 1);
+  CHECK(r.max_allowed == expected);
+
+  state.scenario.outfits[1].flags = 0x0002; // turret
+  r = Outfit_ClampOwnedCountToLimits(state, 1);
+  CHECK(r.max_allowed == expected);
 }
 
 } // namespace

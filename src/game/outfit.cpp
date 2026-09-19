@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 
+#include "compatibility.hpp"
 #include "freeflight_objects.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
@@ -589,10 +590,17 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
         s.fuel_capacity += weighted;
         break;
       case OutfitEffect::kModifyMaxGuns: // opcode 45
-        s.max_guns += e.val;
+        // BUGFIX(original): see Outfit_ClampOwnedCountToLimits. The
+        // executable added the value once per owning outfit definition; the
+        // Bible's "add to max guns" is per item, so count copies here too.
+        s.max_guns += kApplyOriginalBugFixes ? static_cast<int>(owned) * e.val
+                                             : static_cast<int>(e.val);
         break;
       case OutfitEffect::kModifyMaxTurrets: // opcode 46
-        s.max_turrets += e.val;
+        // BUGFIX(original): as kModifyMaxGuns above.
+        s.max_turrets += kApplyOriginalBugFixes
+                             ? static_cast<int>(owned) * e.val
+                             : static_cast<int>(e.val);
         break;
       default:
         break;
@@ -798,13 +806,23 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
     std::int16_t gun_cap = cls != nullptr ? cls->max_gun : 0;
     for (std::size_t gid = 0; gid < state.inventory.outfit_owned_count.size();
          ++gid) {
-      if (state.inventory.outfit_owned_count[gid] <= 0 ||
-          gid >= state.scenario.outfits.size()) {
+      const std::int16_t gowned = state.inventory.outfit_owned_count[gid];
+      if (gowned <= 0 || gid >= state.scenario.outfits.size()) {
         continue;
       }
       for (const Effect &e : OutfitEffects(state.scenario.outfits[gid])) {
         if (e.type == static_cast<std::int16_t>(OutfitEffect::kModifyMaxGuns)) {
-          gun_cap = static_cast<std::int16_t>(gun_cap + e.val);
+          // BUGFIX(original): the executable added the first ModType-45 value
+          // once per owning outfit definition, so four copies of a "+2 guns"
+          // outfit still gave only +2 (the loader's default-outfit check at
+          // 0x004c2450 shares the omission). The Bible's "add to max guns" is
+          // per item -- cf. ModType 27, where per-copy counting is spelled out
+          // -- so scale by the owned count. Faithful when the compat policy is
+          // off.
+          const int delta = kApplyOriginalBugFixes
+                                ? static_cast<int>(e.val) * gowned
+                                : static_cast<int>(e.val);
+          gun_cap = static_cast<std::int16_t>(gun_cap + delta);
           break; // first ModType-45 slot per outfit
         }
       }
@@ -827,14 +845,18 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
     std::int16_t turret_cap = cls != nullptr ? cls->max_turret : 0;
     for (std::size_t gid = 0; gid < state.inventory.outfit_owned_count.size();
          ++gid) {
-      if (state.inventory.outfit_owned_count[gid] <= 0 ||
-          gid >= state.scenario.outfits.size()) {
+      const std::int16_t gowned = state.inventory.outfit_owned_count[gid];
+      if (gowned <= 0 || gid >= state.scenario.outfits.size()) {
         continue;
       }
       for (const Effect &e : OutfitEffects(state.scenario.outfits[gid])) {
         if (e.type ==
             static_cast<std::int16_t>(OutfitEffect::kModifyMaxTurrets)) {
-          turret_cap = static_cast<std::int16_t>(turret_cap + e.val);
+          // BUGFIX(original): as the gun arm above; per-owned-copy scaling.
+          const int delta = kApplyOriginalBugFixes
+                                ? static_cast<int>(e.val) * gowned
+                                : static_cast<int>(e.val);
+          turret_cap = static_cast<std::int16_t>(turret_cap + delta);
           break; // first ModType-46 slot per outfit
         }
       }
