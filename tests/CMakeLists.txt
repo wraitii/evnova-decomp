@@ -34,6 +34,7 @@ add_executable(evnova_tests
     render_clip_scope_test.cpp
     route_map_test.cpp
     scenario_data_test.cpp
+    selection_text_dialog_test.cpp
     services_buttons_test.cpp
     sdl_audio_test.cpp
     ship_ai_test.cpp

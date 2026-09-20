@@ -53,6 +53,12 @@ struct TextInput {
   // select the landed-store and trade-center quantity prompt (0x0048ea70
   // local_652 & 0x800; 0x0048c730 local_36 & 0x800).
   bool alt = false;
+  // True for an OS-generated key repeat (Mac autoKey, the original's event
+  // type 5). The original's event polls bind key-down and autoKey to the same
+  // handlers (e.g. the text-reader callback 0x00499440), so most consumers
+  // can ignore this; it exists for callers that must not re-fire a one-shot
+  // action while a key is held.
+  bool repeat = false;
 };
 
 // Continuous flight-input snapshot polled once per frame from the live
@@ -285,6 +291,12 @@ public:
   }
 
   [[nodiscard]] SDL_FPoint mouse_position() const;
+
+  // Live left-button state for hold-to-repeat widgets (the text-view scroll
+  // arrows). Reads SDL's real input state; probe-injected button events do
+  // not update that state, so a /probe/click stays a discrete click and never
+  // reports as held (see docs/probe_harness.md).
+  [[nodiscard]] bool PrimaryMouseDown() const;
 
   // Frame-boundary hook: captures a pending probe screenshot (while the
   // current frame is still the active render target), counts step frames,

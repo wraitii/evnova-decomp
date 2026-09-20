@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -19,6 +20,20 @@ namespace game {
 struct GameState;
 class NovaFontCache;
 
+// Port-normalized physical key codes the scroll actions consume (see
+// sdl_platform OriginalKeyCode): Home 0x60, Up 0x61, PageUp 0x62, End 0x65,
+// Down 0x66, PageDown 0x67. The original EV Nova codes are Home 0x91, Up 0x0b,
+// PageUp 0x92, End 0x93, Down 0x0a, PageDown 0x94.
+enum class TextScrollKey : std::uint8_t {
+  kNone,
+  kLineUp,
+  kLineDown,
+  kHome,
+  kPageUp,
+  kEnd,
+  kPageDown,
+};
+
 // Clean-room counterpart of the game's shared read-only scrolling text view:
 // NovaTextView_Create (0x004bcd90), NovaTextView_UpdateContentHeight
 // (0x004bce10) and NovaTextView_ScrollBy (0x004bce90). Every selection-dialog
@@ -36,6 +51,23 @@ public:
   // NovaUi_ScrollSelectionText steps +/-10 px per action; the clamp mirrors
   // the original's maxed/scrolled latch gating.
   void ScrollBy(float delta);
+
+  // Can the view still scroll in either direction? These are the original's
+  // g_selection_editor_maxed (can scroll up) / g_selection_editor_active (can
+  // scroll down) latches, which NovaUi_ScrollSelectionText (0x00499270)
+  // recomputes from the view/content rects.
+  [[nodiscard]] bool can_scroll_up() const { return scroll_offset_ > 0.0F; }
+
+  [[nodiscard]] bool can_scroll_down() const {
+    return scroll_offset_ < max_scroll_;
+  }
+
+  // Applies one original scroll action (Ghidra 0x00499440 reader callback /
+  // 0x00447170 offer poll, both through NovaUi_ScrollSelectionText): line
+  // actions move +/-10px, Home/End jump to an end, PageUp/PageDown move
+  // 0xfa (250)px. Every action is gated on the maxed/active latch it
+  // consumes. Returns true when the offset changed.
+  bool ApplyScrollKey(TextScrollKey key);
 
   [[nodiscard]] float max_scroll() const { return max_scroll_; }
 
@@ -71,6 +103,33 @@ private:
   float max_scroll_ = 0.0F;
   float scroll_offset_ = 0.0F;
   NovaFontCache *fonts_ = nullptr;
+};
+
+[[nodiscard]] TextScrollKey MapTextScrollKey(std::uint16_t key_code);
+
+// Hold-to-repeat state for the text-view arrow buttons (Ghidra 0x00447170 and
+// 0x00499440): a press that lands on an arrow enters a loop that scrolls 1px
+// per 60Hz tick while the button stays down, gated on the maxed/active
+// latches. A tap shorter than a tick still emits the first 1px step, which
+// keeps /probe/click usable because injected clicks never report as held.
+class NovaTextScrollHold {
+public:
+  // Primary press on the up (true) or down (false) arrow; emits the first
+  // step immediately.
+  void Press(NovaTextScrollView &view, bool up, std::uint64_t now_ms);
+
+  // Once per frame with the live button state; emits one step per elapsed
+  // 60Hz tick while held. Returns true when the offset changed.
+  bool Update(NovaTextScrollView &view, bool button_down, std::uint64_t now_ms);
+
+  [[nodiscard]] bool held() const { return held_; }
+
+  [[nodiscard]] bool up() const { return up_; }
+
+private:
+  bool held_ = false;
+  bool up_ = false;
+  std::uint64_t last_tick_ = 0;
 };
 
 // Ghidra 0x004a3340 NovaUi_DrawThreeStateButton via the selection-dialog
