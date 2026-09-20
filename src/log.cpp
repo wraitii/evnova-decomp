@@ -3,7 +3,9 @@
 #include <fmt/format.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
+#include <exception>
 #include <mutex>
 
 namespace {
@@ -28,10 +30,37 @@ namespace {
 // one deque push per line is noise next to the stderr print + fflush.
 constexpr std::size_t kLogBufferLines = 1000;
 
+// stderr can be a detached, closed or absent handle when the process is started
+// by a windowed launcher (or Wine/CrossOver starts this console-subsystem
+// binary with no attached console). fmt::print(FILE*, ...) throws
+// std::system_error when the underlying fwrite fails, so a single lost log line
+// used to escape Write() as an uncaught exception and abort the process. Build
+// the line in memory and treat the sink writes as best-effort instead.
+void WriteBestEffort(std::FILE *stream, std::string_view text) {
+  if (stream == nullptr) {
+    return;
+  }
+  std::fwrite(text.data(), 1, text.size(), stream);
+  std::fflush(stream);
+}
+
+// Optional persistent sink: EVNOVA_LOG_FILE=<path> truncates that file at first
+// use and mirrors every line to it, so a launch whose console is detached still
+// leaves a log behind (used to diagnose Wine/bottle launches).
+[[nodiscard]] std::FILE *OpenLogFileFromEnvironment() {
+  const char *const path = std::getenv("EVNOVA_LOG_FILE");
+  if (path == nullptr || *path == '\0') {
+    return nullptr;
+  }
+  return std::fopen(path, "w");
+}
+
 struct LogState {
   std::mutex mutex;
   std::deque<NovaLog::LoggedLine> buffer;
   std::uint64_t seq = 0;
+  std::FILE *file = nullptr;
+  bool file_checked = false;
 };
 
 // The log store is intentionally leaked so it is never torn down by
@@ -51,8 +80,14 @@ struct LogState {
 void NovaLog::Write(Level level, std::string_view message) {
   auto &state = State();
   const std::lock_guard lock{state.mutex};
-  fmt::print(stderr, "[{}] {}\n", LevelName(level), message);
-  std::fflush(stderr);
+  // Format to memory (no I/O) first, so the sink writes below cannot throw.
+  const std::string line = fmt::format("[{}] {}\n", LevelName(level), message);
+  WriteBestEffort(stderr, line);
+  if (!state.file_checked) {
+    state.file_checked = true;
+    state.file = OpenLogFileFromEnvironment();
+  }
+  WriteBestEffort(state.file, line);
   state.buffer.push_back({++state.seq, level, std::string{message}});
   while (state.buffer.size() > kLogBufferLines) {
     state.buffer.pop_front();

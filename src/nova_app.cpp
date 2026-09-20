@@ -1015,7 +1015,20 @@ int NovaProgramEntry() {
   // before any dialog reads them; the key-settings .prf load-overrides them
   // when available (NovaPrefs_LoadOrInit) and is deferred.
   runtime.prefs.ResetToDefaults();
-  return NovaApp_Run(runtime);
+  // Port-only top-level guard: the original always ran with a console and
+  // standard handles present, but a windowed launcher can start this
+  // console-subsystem binary detached. Log any escaped exception through the
+  // now non-throwing logger and exit with a failure code instead of aborting
+  // with no diagnostic.
+  try {
+    return NovaApp_Run(runtime);
+  } catch (const std::exception &e) {
+    NovaLog::Error("fatal: unhandled exception: {}", e.what());
+    return 1;
+  } catch (...) {
+    NovaLog::Error("fatal: unhandled non-standard exception");
+    return 1;
+  }
 }
 
 // Ghidra: 0x004d2a80 NovaApp_Run
