@@ -159,11 +159,15 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
     return false; // already locked onto the candidate
   }
   if (acquirer.ship_instance_id == 0) {
-    // Player branch: government policy flag 0 (the aggro gate) or the
-    // candidate is a threat to the player squad.
+    // Player branch. The original returns the policy flag byte in AL and every
+    // caller tests AL (e.g. 0x0040fb84/0x0040fb89): a SET flag 0 returns 0,
+    // and only a CLEAR flag falls through to the threat test. So the player
+    // may acquire a candidate only when the candidate's government does not
+    // carry the player's rank/commission (flag 0 clear) and the candidate is
+    // actively threatening the player squad.
     if (NovaGovernment_GetPolicyFlag(
             state.scenario, candidate.faction_or_government_id, 0)) {
-      return true;
+      return false;
     }
     return NovaTargeting_IsThreatToPlayerSquad(state, candidate);
   }

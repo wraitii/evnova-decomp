@@ -542,7 +542,13 @@ void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
       ship_class != nullptr ? ship_class->strength : 0;
   std::int16_t hostile_strength = 0;
 
-  if (NovaTargeting_IsShipAcquirableAsTarget(state, state.player, ship)) {
+  // The original passes (candidate = ship, acquirer = player): the player
+  // branch asks whether the player may validly target this ship, i.e. the
+  // ship's government has no player rank/commission (policy flag 0 clear) and
+  // the ship is threatening the player squad. Slot 0 is skipped by the scan
+  // loop, so this gate is the only path that credits the player's own hull to
+  // the hostile numerator.
+  if (NovaTargeting_IsShipAcquirableAsTarget(state, ship, state.player)) {
     const ShipClass *player_class = ShipClassFor(state, state.player);
     if (player_class != nullptr) {
       // Base unit pinned (GameState::kCombatRatingBaseStrength); the original
@@ -1923,10 +1929,14 @@ void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
   // Per-candidate eligibility, relative to the ship's squad leader. Slot 0
   // (the player) is special: the gate tests the SQUAD LEADER's pressing
   // state, not the candidate's (disasm 0x00410993 / 0x00410ab6). Other
-  // candidates are admitted by the leader's pressing state when the leader is
-  // the player, otherwise by pairwise acquirability from the leader. The
-  // original dereferences g_ship_states + squad_leader_ship_slot without a
-  // bounds check; a negative/unset leader (-1) fails the gate here.
+  // candidates are admitted by the candidate's own pressing state when the
+  // leader is the player, otherwise by Ship_IsShipAcquirableAsTarget with the
+  // SQUAD LEADER as its `candidate` and the random pick as its `acquirer`
+  // (disasm 0x0041099a passes the leader slot first, the picked slot second:
+  // it asks whether the pick is already engaged with the leader's squad, not
+  // whether the leader currently targets the pick). The original dereferences
+  // g_ship_states + squad_leader_ship_slot without a bounds check; a
+  // negative/unset leader (-1) fails the gate here.
   // TODO(decomp(0x00410900)): confirm no caller reaches this without a leader.
   auto candidate_gate = [&](const Ship &candidate, std::int16_t slot) {
     if (slot == 0) {
@@ -1937,7 +1947,7 @@ void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
       return NovaAiShip_ShouldKeepPressingTarget(state, candidate);
     }
     return leader != nullptr &&
-           NovaTargeting_IsShipAcquirableAsTarget(state, candidate, *leader);
+           NovaTargeting_IsShipAcquirableAsTarget(state, *leader, candidate);
   };
 
   // Count pass: no is_active gate (disabled/system checks only, matching the
