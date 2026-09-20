@@ -1245,7 +1245,7 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
 }
 
 // Regression: Ship_ApplyShipAiControls (0x00408150) mode 6 unconditionally
-// calls Weapon_SelectWeaponBankForCurrentTarget (0x0040ce00) at 0x00409163 --
+// calls Weapon_FireTurretAtTarget (0x0040ce00) at 0x00409163 --
 // after the aim block and before the turn+15 thrust gate -- so the primary
 // target's bank is armed even when the hull only carries turrets. The port
 // omitted that call, leaving a turret-only mode-6 ship (e.g. the Pirate

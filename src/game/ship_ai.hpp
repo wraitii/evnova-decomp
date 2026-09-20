@@ -236,18 +236,20 @@ NovaAi_ScoreAssistTargetForShip(const GameState &state,
 // Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget. Refreshes the
 // active NPC weapon bank for behavior >4 ships; ships with a lower behavior
 // return untouched (behavior 3/4 arm banks in the combat control modes).
-// Clears the primary target whenever it is inactive or disabled.
+// Clears the primary target whenever it is inactive or disabled, else
+// delegates to the turret/point-defense selector Weapon_FireTurretAtTarget.
 void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship);
 
-// The four per-mode weapon-bank selectors called by the AI control modes
+// The per-mode weapon-bank selectors called by the AI control modes
 // (Ghidra 0x00408150). Each is the faithful port of one original selector:
-// direct-fire and guided pick a primary-target weapon, current-target picks a
-// turret-ish bank, and general is the broad fallback.
+// direct-fire and guided pick a primary-target weapon, current-target fires
+// the turret/point-defense selector, and general is the broad fallback.
 
-// Ghidra 0x0040ce00 Weapon_SelectWeaponBankForCurrentTarget. Scans fireable
-// mode-3/4/7/8 turret banks in arc/range, scores by mass/energy damage, and
-// arms the best one.
-void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship);
+// Ghidra 0x0040ce00 Weapon_FireTurretAtTarget (Carbon symbol AIFireTurret).
+// Runs the point-defense auto-fire prologue, then scans fireable mode-3/4/7/8
+// turret banks in arc/range, scores by mass/energy damage, and arms the best
+// one (energy preferred while the target still has shields).
+void NovaAi_FireTurretAtTarget(GameState &state, Ship &ship);
 
 // Ghidra 0x004221d0 Ship_IsInboundThreatExceedingDefenses. True when the
 // signed inbound damage tally is at least 105% of the ship's current shields
