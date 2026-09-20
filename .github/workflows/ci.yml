@@ -90,7 +90,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .vcpkg-binary-cache
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          # The primary key must encode the full build configuration: vcpkg folds
+          # the triplet (and its overlay settings such as the macOS deployment
+          # target) into each port's ABI hash, so a config change means the old
+          # entries no longer match. Without this the primary key still hits, the
+          # save step is skipped, and every run silently rebuilds every port.
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.triplet }}-${{ matrix.deploy_target }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
             vcpkg-${{ runner.os }}-${{ runner.arch }}-
 
@@ -126,7 +131,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .vcpkg-binary-cache
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.triplet }}-${{ matrix.deploy_target }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
 
       - name: Add vcpkg DLLs to the Windows test path
         if: runner.os == 'Windows'
