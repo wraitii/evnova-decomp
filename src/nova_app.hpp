@@ -57,7 +57,7 @@ struct NovaRuntime {
   // SDL audio output shared by menu feedback sounds. Kept as a member (not a
   // singleton) so the runtime owns its lifecycle.
   SdlAudio audio;
-  // Background/menu bass stream (SDL3_mixer), separate logical device.
+  // Background/menu bass stream (dr_mp3 + SDL audio), separate logical device.
   SdlMusic music;
   // True once the menu bass has started on entry to the second startup splash;
   // the same stream continues into the main-menu phase.

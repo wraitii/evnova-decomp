@@ -92,7 +92,11 @@ add_library(evnova_runtime
 )
 
 target_include_directories(evnova_runtime PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(evnova_runtime PUBLIC SDL3::SDL3 SDL3_mixer::SDL3_mixer SDL3_ttf::SDL3_ttf fmt::fmt)
+# Vendored single-header third-party code (dr_mp3); SYSTEM keeps its warnings
+# from tripping -Werror on our translation units.
+target_include_directories(evnova_runtime PRIVATE SYSTEM
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+target_link_libraries(evnova_runtime PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf fmt::fmt)
 
 # The probe's POSIX socket server is the only non-portable runtime piece;
 # compile the no-op transport when it is disabled so the game-side call sites
