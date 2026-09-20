@@ -1170,6 +1170,7 @@ void Ship_ApplyDamageToShip(GameState &state,
           should_retarget = false;
         }
       }
+      // Ghidra 0x00412530 Ship_IsShipInAiControlMode0x0F runs inline here.
       if (should_retarget && target.ship_instance_id > 0 &&
           attacker_ship_slot > 0 && attacker_valid &&
           target.ai_control_mode == 0x0F) {
