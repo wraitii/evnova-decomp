@@ -818,7 +818,7 @@ TEST_CASE("Abomination can select and fire its pulse cannon", "[weapon][npc]") {
   npc.heading = 0.0F;
 
   NovaWeapon_EnsureNpcWeaponBanks(state, npc);
-  NovaAi_SelectWeaponBankForCurrentTarget(state, npc);
+  NovaAi_FireTurretAtTarget(state, npc);
   // The turret selector must keep the pulse cannon distinct from the loaded
   // mode-1 hailgun; the original does not let the latter win by damage score.
   REQUIRE(npc.active_weapon_bank_slot == 34);
@@ -828,8 +828,7 @@ TEST_CASE("Abomination can select and fire its pulse cannon", "[weapon][npc]") {
   CHECK(state.active_shots[0].weapon_id == 34);
 }
 
-TEST_CASE("destroyed NPCs neither select nor fire a weapon bank",
-          "[weapon][npc]") {
+TEST_CASE("a destroyed NPC cannot fire a weapon bank", "[weapon][npc]") {
   if (!ArchivesAvailable()) {
     SKIP("Nova .rez archives not present");
   }
@@ -853,12 +852,18 @@ TEST_CASE("destroyed NPCs neither select nor fire a weapon bank",
   state.player.ship_class_id = 0;
   state.player.current_system_id = 0;
 
+  // The refresh revalidates the target and delegates to the turret selector,
+  // whose own disabled gate returns without touching a stale latched bank
+  // (matching Weapon_FireTurretAtTarget 0x0040ce00).
   NovaAi_EscortFireAtUnprovokedTarget(state, npc);
-  CHECK(npc.active_weapon_bank_slot == -1);
-  CHECK(npc.ai_fire_trigger_latch == 0);
+  CHECK(npc.active_weapon_bank_slot == 0);
+  CHECK(npc.ai_fire_trigger_latch == 1);
 
+  // The firing handoff is what suppresses the destroyed ship's bank.
   NovaWeapon_FireNpcWeaponBank(state, npc);
   CHECK(state.active_shots.empty());
+  CHECK(npc.active_weapon_bank_slot == -1);
+  CHECK(npc.ai_fire_trigger_latch == 0);
 }
 
 TEST_CASE("a newly disabled NPC cannot retain a latched firing bank",

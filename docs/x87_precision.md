@@ -69,7 +69,7 @@ truncation idiom:
   threshold); `ship_ai_controls.cpp` `Ship_ApplyShipAiControls` 0x00408150
   (entry desired-heading sync, leader copy/delta, evasive +/-135,
   velocity-match mode 0xc, mode-0xf
-  copy); `ship_ai_weapons.cpp` `Weapon_SelectWeaponBankForCurrentTarget`
+  copy); `ship_ai_weapons.cpp` `Weapon_FireTurretAtTarget`
   0x0040ce00 (mode-7/8 arc);
   `Ship_ScoreAssistTargetForShip` 0x00412090 (helper renamed
   `RoundedDistanceSquared` -> `TruncatedDistanceSquared`, score sum truncates).

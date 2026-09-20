@@ -512,115 +512,38 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
   return best_slot;
 }
 
-// Ghidra 0x00411540 plus the weapon-bank chooser at 0x0040ce00. This is the
-// target-validity side faithfully; bank ranking is the available clean-room
-// subset (mode, ammo, cooldown, target capability, range, and damage class).
+// Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget (Carbon symbol
+// AIEscortFireUnprovoked). Escort/mission post-state refresh: behaviors below
+// 5 return without touching the bank (they arm banks in their own control-mode
+// bodies); otherwise the existing primary target is revalidated -- cleared
+// when inactive or disabled -- and, when still valid, the turret/point-defense
+// selector Weapon_FireTurretAtTarget (0x0040ce00) runs (the original's tail
+// call at 0x00411596).
 void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship) {
-  // Ship_EscortFireAtUnprovokedTarget (0x00411540) is an escort/mission
-  // post-state refresh: behaviors below 5 return without touching the bank,
-  // so only escorts/fighters/assists revalidate and re-arm here. Behaviors 3/4
-  // arm their banks in the combat control-mode bodies instead.
-  // Ship_IsShipDestroyed (0x004688e0) is a separate gate from the
-  // disabled predicate.  A lethal hit leaves the ship slot
-  // active during its destruction window, but it must not acquire a fresh
-  // weapon bank in the post-state refresh.
   if (ship.ai_behavior_code < 5) {
     return;
   }
-  if (NovaAiShip_IsDestroyed(ship)) {
-    ship.active_weapon_bank_slot = -1;
-    ship.ai_fire_trigger_latch = 0;
+  const std::int16_t target_slot = ship.primary_target_ship_slot;
+  if (target_slot < 0) {
     return;
   }
-  const std::int16_t target_slot = ship.primary_target_ship_slot;
-  if (target_slot < 0 ||
-      !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+  if (!state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+    // Defensive: the original only tests for -1 and indexes g_ship_states
+    // directly, so an out-of-range slot would read out of bounds there.
     ship.primary_target_ship_slot = -1;
     return;
   }
   const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
   // The original clears the primary target whenever it is inactive or
-  // disabled, so a disabled boarding victim is never re-armed here. Behavior
-  // 3/4 capture drives return above and do not reach this clear.
+  // disabled, so a disabled boarding victim is never re-armed here.
   if (!target.is_active || NovaAiShip_IsDisabled(state, target)) {
     ship.primary_target_ship_slot = -1;
     return;
   }
-  const ShipClass *target_class = ShipClassFor(state, target);
-  if (target_class == nullptr) {
-    return;
-  }
-  NovaWeapon_EnsureNpcWeaponBanks(state, ship);
-
-  const float distance_sq =
-      SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-  std::int16_t best_bank = -1;
-  std::int32_t best_score = -1;
-  std::int16_t best_turret_bank = -1;
-  std::int32_t best_turret_score = -1;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
-    const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
-    if (weapon == nullptr ||
-        (weapon->weapon_mode_code != -1 && weapon->weapon_mode_code != 0 &&
-         weapon->weapon_mode_code != 1 && weapon->weapon_mode_code != 3 &&
-         weapon->weapon_mode_code != 4 && weapon->weapon_mode_code != 5 &&
-         weapon->weapon_mode_code != 6 && weapon->weapon_mode_code != 7 &&
-         weapon->weapon_mode_code != 8) ||
-        !WeaponBankCanFire(state, ship, bank) ||
-        (weapon->flags_secondary & 0x400U) !=
-            (target_class->capability_flags & 0x400U)) {
-      continue;
-    }
-    const bool turret_mode =
-        weapon->weapon_mode_code == 3 || weapon->weapon_mode_code == 4 ||
-        weapon->weapon_mode_code == 7 || weapon->weapon_mode_code == 8;
-    if (turret_mode) {
-      // Ghidra 0x0040ce00 gates turret banks through
-      // Weapon_IsShipWithinWeaponRangeOfTarget (0x00411600) with the bank.
-      if (!NovaWeapon_ShipWithinWeaponRangeOfTarget(
-              state, ship, target, bank)) {
-        continue;
-      }
-    } else if (weapon->range_scalar > 0.0F &&
-               distance_sq * kInterceptDistanceScale >
-                   weapon->range_scalar * weapon->range_scalar) {
-      continue;
-    }
-    const float target_bearing =
-        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-    const float heading_deg = WrapDeg(ship.heading / kDegToRad);
-    const float reference = weapon->weapon_mode_code == 8
-                                ? WrapDeg(heading_deg + 180.0F)
-                                : heading_deg;
-    if ((weapon->weapon_mode_code == 7 || weapon->weapon_mode_code == 8) &&
-        std::abs(std::remainder(target_bearing - reference, kFullCircleDeg)) >=
-            46.0F) {
-      continue;
-    }
-    const std::int32_t score = target.shield_points > 0.0F
-                                   ? weapon->energy_damage
-                                   : weapon->mass_damage;
-    if (best_bank == -1 || score > best_score) {
-      best_bank = bank;
-      best_score = score;
-    }
-    // Ghidra's Weapon_SelectWeaponBankForCurrentTarget (0x0040ce00) is a
-    // separate turret/quadrant selection path from the guided/direct helpers.
-    // Keep that distinction here: otherwise a higher-damage mode-1 hailgun
-    // permanently wins the clean-room all-mode ranking over an Abomination's
-    // mode-4 pulse cannon, even though the original arms turret banks on
-    // their own control-mode passes.
-    if (turret_mode && (best_turret_bank == -1 || score > best_turret_score)) {
-      best_turret_bank = bank;
-      best_turret_score = score;
-    }
-  }
-  const std::int16_t selected_bank =
-      best_turret_bank != -1 ? best_turret_bank : best_bank;
-  if (selected_bank != -1) {
-    ship.active_weapon_bank_slot = selected_bank;
-    ship.ai_fire_trigger_latch = 1;
-  }
+  // Turret-only: Weapon_FireTurretAtTarget re-checks the ship's own disabled
+  // state, target class, cloak-engagement rules, arcs, and range, then arms
+  // the best mode-3/4/7/8 bank.
+  NovaAi_FireTurretAtTarget(state, ship);
 }
 
 namespace {
@@ -709,11 +632,12 @@ bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
   return blind;
 }
 
-// Ghidra 0x0040ce00 Weapon_SelectWeaponBankForCurrentTarget. Turret-ish bank
-// selection for the current primary target: scans fireable mode-3/4/7/8
-// banks in the allowed arc and range, scores by mass/energy damage, and arms
-// the best (energy-preferred when the target still has shields).
-void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
+// Ghidra 0x0040ce00 Weapon_FireTurretAtTarget (Carbon symbol AIFireTurret).
+// Turret-only bank selection for the current primary target: runs the
+// point-defense auto-fire prologue, then scans fireable mode-3/4/7/8 banks in
+// the allowed arc and range, scores by mass/energy damage, and arms the best
+// (energy-preferred when the target still has shields).
+void NovaAi_FireTurretAtTarget(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     return;
   }
@@ -783,7 +707,7 @@ void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
     } else {
       barrier = true;
     }
-    // Ghidra Weapon_SelectWeaponBankForCurrentTarget (0x0040ce00): a target
+    // Ghidra Weapon_FireTurretAtTarget (0x0040ce00): a target
     // in one of the weapon's turret blind-spot sectors disqualifies the bank;
     // otherwise the bank stays a candidate and still passes the range check.
     // (The former NovaAi_WeaponArcAllowed call had this polarity inverted.)

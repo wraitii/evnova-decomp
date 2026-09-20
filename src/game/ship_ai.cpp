@@ -1326,7 +1326,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
     ship.ai_state_code = 6;
-    NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
+    NovaAi_FireTurretAtTarget(state, ship);
     break;
   case 3: // return to hangar (carried fighters only; others coerced to 0)
     if (ship.ai_behavior_code == 5) {
@@ -1362,7 +1362,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
       NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state,
                                                         ship,
                                                         /*allow_guided=*/false);
-      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
+      NovaAi_FireTurretAtTarget(state, ship);
     }
     break;
   }

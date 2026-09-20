@@ -513,7 +513,7 @@ void NovaAi_ApplyControls(GameState &state,
     // the target (the close-range "attack while backing off" strafe; the
     // state machine only selects it within the 251 px combat station range).
     // Formation-offset mirroring is deferred; the weapon-bank select for
-    // states 3/4 arms the turret-ish current-target bank. Close (165 px/axis)
+    // states 3/4 arms the turret current-target bank. Close (165 px/axis)
     // + the +0xBD latch breaks off to a boost (0x11); the latch has no
     // producer yet so the transition is inert.
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
@@ -540,9 +540,9 @@ void NovaAi_ApplyControls(GameState &state,
       ship.ai_desired_speed = 0.0F;
     }
     if (ship.ai_state_code == 3 || ship.ai_state_code == 4) {
-      // Ghidra 0x00408150 mode 5 calls Weapon_SelectWeaponBankForCurrentTarget
+      // Ghidra 0x00408150 mode 5 calls Weapon_FireTurretAtTarget
       // (0x0040ce00) for states 3/4.
-      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
+      NovaAi_FireTurretAtTarget(state, ship);
     }
     if (ship.afterburner_latch != 0 &&
         (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange ||
@@ -600,7 +600,7 @@ void NovaAi_ApplyControls(GameState &state,
     // predictive branches rejoin at LAB_00409162). Without this a mode-7
     // (turret) bank is never selected in mode 6, so the direct-fire selector
     // (whitelist -1/0/6, +1 guided) cannot arm it and the ship never fires.
-    NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
+    NovaAi_FireTurretAtTarget(state, ship);
     if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
       ship.ai_forward_thrust_cmd = eff_thrust;
       ship.ai_desired_speed = 0.0F;
@@ -686,7 +686,7 @@ void NovaAi_ApplyControls(GameState &state,
         std::abs(ship.pos_y - target.pos_y) < kCombatCloseRange) {
       // Ghidra 0x00408150 mode 0x10 arms the current-target bank only while
       // both axes stay within 165 px (the original uses AND, not OR).
-      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
+      NovaAi_FireTurretAtTarget(state, ship);
     }
     const bool inertialess =
         cls != nullptr && NovaShip_IsInertialess(ship, *cls);
@@ -733,9 +733,9 @@ void NovaAi_ApplyControls(GameState &state,
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
     if (dx < kCombatCloseRange && dy < kCombatCloseRange) {
-      // Ghidra 0x00408150 mode 0x11 selects the turret-ish current bank first,
+      // Ghidra 0x00408150 mode 0x11 selects the turret current bank first,
       // then direct-fire within turn*3 while it is close.
-      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
+      NovaAi_FireTurretAtTarget(state, ship);
       if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
         NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
       }
@@ -795,7 +795,7 @@ void NovaAi_ApplyControls(GameState &state,
       // Ghidra 0x00408150 mode 7 selects direct-fire then the current-target
       // bank within turn*3.
       NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
-      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
+      NovaAi_FireTurretAtTarget(state, ship);
     }
     if (std::abs(heading_delta_deg()) < eff_turn_deg * 4.0F) {
       ship.ai_forward_thrust_cmd = eff_thrust;
@@ -1205,9 +1205,9 @@ void NovaAi_ApplyControls(GameState &state,
         NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
         NovaAi_SelectGuidedWeaponBankForPrimaryTarget(state, ship);
       }
-      // Ghidra 0x00408150 mode 0xe also runs the turret-ish current-target
+      // Ghidra 0x00408150 mode 0xe also runs the turret current-target
       // select each slow frame.
-      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
+      NovaAi_FireTurretAtTarget(state, ship);
     }
     // Mode-0xe tail: the carrier-bay launch driver runs every frame while
     // the mode is active (original: after the fast/slow branches, guarded
