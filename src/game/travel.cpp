@@ -90,8 +90,9 @@ constexpr float kTurnAroundAlignDeg = 20.0F;
 // VERIFIED UNITS (the historical _ms names are lies -- see the Ghidra plate
 // comments): the elapsed clock and the duration share the 1/60 s tick unit
 // (NovaTime_GetTickCount60Hz counts 1/60 s; the duration is the Warp up cue's
-// own length in the same unit, snd 128 frames*60/rate = 364, loader
-// 0x004b0a07). progress = elapsed_60hz * jump_duration_multiplier
+// own length in the same unit, loaded from snd 128/129 at preload, loader
+// 0x004b0a07; see NovaTravel_JumpSequenceDuration60Hz). progress =
+// elapsed_60hz * jump_duration_multiplier
 //   / (duration_60hz * 0.01)      (g_hyperspace_jump_duration_scale 0x575560)
 //   - escape_pod_offset / multiplier (0x575568 = 35.0)
 // For a mult=1 stock ship: onset (progress > 0) at tick 127 = 2.12 s into the
@@ -101,8 +102,6 @@ constexpr float kTurnAroundAlignDeg = 20.0F;
 // stationary alignment, then the
 // acceleration with the glow overdriving, then the boom.
 constexpr float kHyperspaceTickHz = 60.0F;
-constexpr float kJumpDuration60HzTicks =
-    364.0F; // g_hyperspace_jump_duration_engine_60hz (snd 128 frames*60/rate)
 constexpr float kJumpDurationScale = 0.01F; // 0x575560
 constexpr float kJumpProgressOffset =
     35.0F; // g_hyperspace_jump_progress_offset 0x575568
@@ -485,11 +484,14 @@ void FireJump(GameState &state) {
   // separate in-tunnel phase after this.
   t.engaging = false;
   t.jump_phase = TravelState::JumpPhase::kIdle;
-  t.hold_ticks = 0.0F;
   t.tunnel_elapsed_60hz = 0.0F;
   t.hold_audio_latch = false;
   t.warp_up_started = false;
   t.jump_heading_rad = 0.0F;
+  // The jump hold is over. The arrival handler later windows this to -999 for
+  // the escort scatter before zeroing it; reset here so direct callers (tests)
+  // do not leave the player station-held.
+  player.ai_station_hold_timer = -1.0F;
 }
 
 // ---------------------------------------------------------------------------
@@ -524,10 +526,14 @@ int FindLinkedTravelSlot(const GameState &state,
 
 } // namespace
 
-// Ghidra 0x0046efb0 Stellar_GetJumpSequenceDuration60Hz. Returns the
-// engine-enabled cue length; the noengine variant and fallback are deferred.
-[[nodiscard]] float NovaTravel_JumpSequenceDuration60Hz() {
-  return kJumpDuration60HzTicks;
+// Ghidra 0x0046efb0 Stellar_GetJumpSequenceDuration60Hz. The slots are filled
+// by the preload (NovaAudio_PreloadGameplayData 0x004b0740) and keep the 350
+// fallback for a missing/broken cue; see GameState::jump_duration_*.
+[[nodiscard]] float
+NovaTravel_JumpSequenceDuration60Hz(const GameState &state) {
+  return static_cast<float>(state.x2_mode_active
+                                ? state.jump_duration_noengine_60hz
+                                : state.jump_duration_engine_60hz);
 }
 
 // ShipClassDef.jump_duration_multiplier for the player's current hull. The
@@ -1339,7 +1345,8 @@ void NovaTravel_Tick(GameState &state,
       const float jump_multiplier =
           NovaTravel_PlayerJumpDurationMultiplier(state);
       const float progress = t.tunnel_elapsed_60hz * jump_multiplier /
-                                 (kJumpDuration60HzTicks * kJumpDurationScale) -
+                                 (NovaTravel_JumpSequenceDuration60Hz(state) *
+                                  kJumpDurationScale) -
                              kJumpProgressOffset / jump_multiplier;
       if (progress > kJumpProgressOnsetThreshold) {
         const float speed = std::min(progress, PlayerMaxSpeed(state));
@@ -1357,10 +1364,10 @@ void NovaTravel_Tick(GameState &state,
       state.warp_up_cancel_pending = true;
       t.jump_phase = TravelState::JumpPhase::kIdle;
       t.engaging = false;
-      t.hold_ticks = 0.0F;
       t.tunnel_elapsed_60hz = 0.0F;
       t.hold_audio_latch = false;
       t.warp_up_started = false;
+      player.ai_station_hold_timer = -1.0F;
       // The plotted destination stays armed (the original keeps travel_
       // transfer_mode 3 and the secondary target); the player can re-engage
       // once repaired.
@@ -1453,14 +1460,19 @@ void NovaTravel_Tick(GameState &state,
         player.pos_x += player.vel_x * ticks;
         player.pos_y += player.vel_y * ticks;
       } else {
-        // Stopped: begin the stationary hold. The original pre-stages the
-        // 'Warp up' cue here (NovaAudio_PreStageJumpSoundBySeconds at
-        // 0x0044c4e9, ai_station_hold_timer = 2.0).
+        // Stopped: begin the stationary hold. The original seeds the station-
+        // hold timer to 2.0 (0x0044c548), stamps the 60 Hz jump clock
+        // (ai_mode_start_time_ms at 0x0044c54f) and pre-stages the 'Warp up'
+        // cue. The timer doubles as the hold clock and the flag the escort
+        // jump sync (Ship_SyncJumpStateToSquad) and the player-led jump
+        // spin-up (Ship_HandleShip 0x00433050) read, so it MUST stay positive
+        // while the hold runs.
         t.jump_phase = TravelState::JumpPhase::kHold;
-        t.hold_ticks = 0.0F;
+        player.ai_station_hold_timer = 2.0F;
+        player.ai_mode_start_time_ms = state.tick_60hz;
         t.hold_audio_latch = false;
-        // The hold-begin block re-stamps the jump clock (ai_mode_start_time_ms
-        // at 0x0044c4e9), so the tunnel schedule runs from here.
+        // The hold-begin block re-stamps the tunnel clock; the schedule runs
+        // from here.
         t.tunnel_elapsed_60hz = 0.0F;
         state.screen_flash_intensity = 0.0F;
         state.screen_flash_mode = GameState::ScreenFlashMode::kBuildup;
@@ -1494,7 +1506,8 @@ void NovaTravel_Tick(GameState &state,
       const float jump_multiplier =
           NovaTravel_PlayerJumpDurationMultiplier(state);
       const float progress = t.tunnel_elapsed_60hz * jump_multiplier /
-                                 (kJumpDuration60HzTicks * kJumpDurationScale) -
+                                 (NovaTravel_JumpSequenceDuration60Hz(state) *
+                                  kJumpDurationScale) -
                              kJumpProgressOffset / jump_multiplier;
       const float fade_trigger = (progress - 55.0F) * 5.0F;
       if (!state.screen_flash_fade_in_started && fade_trigger > 0.0F) {
@@ -1516,7 +1529,17 @@ void NovaTravel_Tick(GameState &state,
       player.vel_y *= damp;
       player.speed = std::hypot(player.vel_x, player.vel_y);
       fade_glow();
-      // Align onto the jump heading at the class turn rate.
+      // Align onto the jump heading at the class turn rate. The original
+      // stores the integer map bearing in the player's ai_desired_heading_deg
+      // (0x0044eeb3) and turns through the shared auto-turn arm; the escorts'
+      // mode-0xD spin-up mirrors that field, so it must be live while the hold
+      // runs (a stale/zero value sends them to the leader-desired fallback and
+      // they point straight up).
+      int jump_heading_deg = static_cast<int>(
+          std::lround(t.jump_heading_rad * (180.0F / 3.14159265358979323846F)));
+      jump_heading_deg = ((jump_heading_deg % 360) + 360) % 360;
+      player.ai_desired_heading_deg =
+          static_cast<std::int16_t>(jump_heading_deg);
       turn_toward(
           t.jump_heading_rad,
           std::max(std::round(state.cached_stats.turn_raw * 0.1F), 1.0F));
@@ -1524,11 +1547,13 @@ void NovaTravel_Tick(GameState &state,
       player.pos_x += player.vel_x * ticks;
       player.pos_y += player.vel_y * ticks;
 
-      t.hold_ticks += ticks;
-      if (t.hold_ticks > kEngageHoldTicks && !warp_up_sound_active) {
+      player.ai_station_hold_timer += ticks;
+      if (player.ai_station_hold_timer > kEngageHoldTicks &&
+          !warp_up_sound_active) {
         t.hold_audio_latch = true;
       }
-      if (t.hold_ticks >= kEngageHoldTicks && t.hold_audio_latch) {
+      if (player.ai_station_hold_timer >= kEngageHoldTicks &&
+          t.hold_audio_latch) {
         // Boom/arrival: full-screen flash + 'Warp out' boom + the 1350 px
         // hurl + system change (see FireJump). Control returns to normal
         // flight immediately.
@@ -1690,7 +1715,6 @@ void NovaTravel_Tick(GameState &state,
   t.engaging = true;
   t.jump_phase = TravelState::JumpPhase::kBrake;
   t.warp_up_started = false;
-  t.hold_ticks = 0.0F;
   t.tunnel_elapsed_60hz = 0.0F;
   t.hold_audio_latch = false;
   NovaLog::Debug(
@@ -2081,9 +2105,10 @@ bool NovaTravel_PlayerPastJumpOnset(const GameState &state) {
   // (1/60 s ticks since the hold began), standing in for the original's
   // NovaTime_GetTickCount60Hz() - ai_mode_start_time_ms.
   const float jump_multiplier = NovaTravel_PlayerJumpDurationMultiplier(state);
-  const float progress = state.travel.tunnel_elapsed_60hz * jump_multiplier /
-                             (kJumpDuration60HzTicks * kJumpDurationScale) -
-                         kJumpProgressOffset / jump_multiplier;
+  const float progress =
+      state.travel.tunnel_elapsed_60hz * jump_multiplier /
+          (NovaTravel_JumpSequenceDuration60Hz(state) * kJumpDurationScale) -
+      kJumpProgressOffset / jump_multiplier;
   return progress > kJumpProgressOnsetThreshold;
 }
 

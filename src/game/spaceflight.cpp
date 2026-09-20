@@ -351,8 +351,8 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     // a destroyed NPC is inert for the rest of this tick. Ship_HandleShip
     // decrements the death presentation timer here (one tick per original
     // spaceflight call,
-    // g_cloak_fade_passive_decay = 1.0, paused while gameplay time is
-    // frozen); the destruction finale runs in the visual-state pass below.
+    // k_unit_f32 = 1.0, paused while gameplay time is frozen); the destruction
+    // finale runs in the visual-state pass below.
     if (NovaAiShip_IsDestroyed(ship)) {
       ship.ai_state_code = 0x16;
       ship.ai_control_mode = 0;
@@ -1493,12 +1493,26 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   NovaWeapon_PreloadOwnedFireSounds(state);
   // Preload the hyperspace jump sounds: snd 128 'Warp up' (the rising
   // 'hyperspace imminent' cue played as the ship accelerates into the jump
-  // zoom; snd 129 'Warp up.x2' is the faster engine variant) and snd 130
+  // zoom; snd 129 'Warp up.x2' is the faster noengine variant) and snd 130
   // 'Warp out' (the ~2.5 s boom at the fire/arrival instant). Mirrors
   // FUN_004b0740 preloading the jump handles
   // (NovaSound_LoadDecodedById(0x80/0x81/0x82) -> snd 128/129/130) so the
   // first jump plays them without a decode hitch. Missing resources -> the
   // jump plays silently (travel.cpp falls back to fixed durations).
+  //
+  // The original also derives each cue's 60 Hz tick length from its
+  // SoundHeader here, `numFrames * 60 / sampleRate` (0x004b0a07), keeping the
+  // 0x15e = 350 fallback on a missing/broken resource; the decoded clean-room
+  // sound is mono, so samples.size() is the frame count.
+  const auto sound_duration_60hz = [](const NovaSoundData &sound) {
+    if (sound.sample_rate <= 0 || sound.samples.empty()) {
+      return std::int16_t{350};
+    }
+    const std::int64_t ticks = static_cast<std::int64_t>(sound.samples.size()) *
+                               60 / sound.sample_rate;
+    return static_cast<std::int16_t>(
+        std::clamp<std::int64_t>(ticks, 1, 0x7fff));
+  };
   if (!state.warp_up_sound.has_value()) {
     if (const auto resource =
             NovaResource_LoadSndData(static_cast<std::uint16_t>(128))) {
@@ -1506,6 +1520,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         state.warp_up_sound = std::move(*decoded);
       }
     }
+  }
+  if (state.warp_up_sound.has_value()) {
+    state.jump_duration_engine_60hz = sound_duration_60hz(*state.warp_up_sound);
+  }
+  if (!state.warp_up_x2_sound.has_value()) {
+    if (const auto resource =
+            NovaResource_LoadSndData(static_cast<std::uint16_t>(129))) {
+      if (auto decoded = NovaSound_Decode(*resource)) {
+        state.warp_up_x2_sound = std::move(*decoded);
+      }
+    }
+  }
+  if (state.warp_up_x2_sound.has_value()) {
+    state.jump_duration_noengine_60hz =
+        sound_duration_60hz(*state.warp_up_x2_sound);
   }
   if (!state.warp_out_sound.has_value()) {
     if (const auto resource =

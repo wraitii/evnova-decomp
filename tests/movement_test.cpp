@@ -274,6 +274,7 @@ TEST_CASE("state 2 mode 4 applies the jump ramp directly to position") {
   ship.ai_desired_heading_deg = 0;
   ship.ai_mode_start_time_ms = 0;
   state.tick_60hz = 200;
+  state.jump_duration_engine_60hz = 364; // shipped snd 128 cue (1/60 s ticks)
 
   // The original mode-4 arm (Ship_HandleShip, 0x00433050) adds the ramp to
   // position; it does not accumulate the ramp into ordinary velocity. The
@@ -288,6 +289,103 @@ TEST_CASE("state 2 mode 4 applies the jump ramp directly to position") {
   CHECK(ship.pos_y == Catch::Approx(-(first_ramp + second_ramp)));
   CHECK(ship.vel_x == Catch::Approx(0.0F));
   CHECK(ship.vel_y == Catch::Approx(0.0F));
+}
+
+TEST_CASE("state 2 mode 4 jump ramp scales with the class multiplier") {
+  // Ship_HandleShip 0x004347e8 multiplies the elapsed 60 Hz clock by the
+  // ship class jump_duration_multiplier and divides the 35.0 offset by it, so
+  // a fast hull (stock Shuttle 1.3) ramps sooner and further.
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  cls.jump_duration_multiplier = 1.3F;
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ai_state_code = 2;
+  ship.ai_control_mode = 4;
+  ship.ai_station_hold_timer = 1.0F;
+  ship.ai_desired_heading_deg = 0;
+  ship.ai_mode_start_time_ms = 0;
+  state.tick_60hz = 200;
+  state.jump_duration_engine_60hz = 364;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+
+  const float ramp = 200.0F * 1.3F / 3.64F - 35.0F / 1.3F;
+  CHECK(ship.pos_y == Catch::Approx(-ramp));
+}
+
+TEST_CASE("state 2 mode 4 player-led escort uses the player clock and offset") {
+  // Ship_HandleShip 0x0043468d: an escort whose squad_leader_ship_slot == 0
+  // follows the player's jump, so it reads the player's class multiplier and
+  // mode-start stamp (offset 45.0, 0x575490) and only ramps while the
+  // player's hold timer is above k_unit_f32 (1.0, 0x575318).
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  cls.jump_duration_multiplier = 0.91F; // ignored by the player-led arm
+  state.scenario.ships.push_back(TestShipClass());
+  state.player.ship_class_id = 0;
+  state.player.ai_station_hold_timer = 2.0F;
+  state.player.ai_mode_start_time_ms = 0;
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.squad_leader_ship_slot = 0;
+  ship.ai_state_code = 2;
+  ship.ai_control_mode = 4;
+  ship.ai_station_hold_timer = 1.0F;
+  ship.ai_desired_heading_deg = 0;
+  ship.ai_mode_start_time_ms = 999;
+  state.tick_60hz = 200;
+  state.jump_duration_engine_60hz = 364;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+
+  const float ramp = 200.0F / 3.64F - 45.0F;
+  CHECK(ship.pos_y == Catch::Approx(-ramp));
+
+  // Below the passive-decay gate the player-led arm is inert.
+  ship.pos_y = 0.0F;
+  state.player.ai_station_hold_timer = 1.0F;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.pos_y == Catch::Approx(0.0F));
+}
+
+TEST_CASE("state 2 mode 4 jump ramp applies the x2 clock scales") {
+  // x2 mode scales the unled clock by 0.5 (0x3fe00000) and the player-led
+  // clock by 0.667 (0x3fe55810), and selects the noengine cue duration.
+  game::GameState state;
+  state.jump_duration_engine_60hz = 364;
+  state.jump_duration_noengine_60hz = 252;
+  state.x2_mode_active = true;
+
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  cls.jump_duration_multiplier = 1.3F;
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ai_state_code = 2;
+  ship.ai_control_mode = 4;
+  ship.ai_station_hold_timer = 1.0F;
+  ship.ai_desired_heading_deg = 0;
+  ship.ai_mode_start_time_ms = 0;
+  state.tick_60hz = 200;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  const float unled_ramp = 200.0F * 0.5F * 1.3F / 2.52F - 35.0F / 1.3F;
+  CHECK(ship.pos_y == Catch::Approx(-unled_ramp));
+
+  // Player-led (squad_leader_ship_slot == 0).
+  state.scenario.ships.push_back(TestShipClass());
+  state.player.ship_class_id = 0;
+  state.player.ai_station_hold_timer = 2.0F;
+  state.player.ai_mode_start_time_ms = 0;
+  ship.pos_y = 0.0F;
+  ship.squad_leader_ship_slot = 0;
+  ship.ai_mode_start_time_ms = 999;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  const float player_led_ramp = 200.0F * 0.667F / 2.52F - 45.0F;
+  CHECK(ship.pos_y == Catch::Approx(-player_led_ramp));
 }
 
 TEST_CASE("disabled and destroyed NPCs do not regenerate") {

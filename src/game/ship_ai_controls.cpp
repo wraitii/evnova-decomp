@@ -385,7 +385,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     }
     break;
 
-  case 4:
+  case 4: {
     // Jump spin-up: point away from the centre and accumulate the hold timer.
     // The original's completion block (hold timer past the class-scaled jump
     // duration) zeroes the timer, clears the ship's system id and deactivates
@@ -408,11 +408,13 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
 
     // Ghidra 0x00408150 compares elapsed 60 Hz tick time
     // (NovaTime_GetTickCount60Hz() - ai_mode_start_time_ms) against
-    // Stellar_GetJumpSequenceDuration60Hz() / jump_duration_multiplier. TODO
-    // (decomp(0x00408150)) skipped: NPC spin-up class multiplier (the port
-    // divides by the 1.0 base).
+    // Stellar_GetJumpSequenceDuration60Hz() / jump_duration_multiplier, so a
+    // fast-jumping hull (stock Shuttle 1.3) departs after ~4.7 s rather than
+    // the base 6.08 s.
+    const float jump_multiplier =
+        cls != nullptr ? cls->jump_duration_multiplier : 1.0F;
     if (static_cast<float>(state.tick_60hz - ship.ai_mode_start_time_ms) >=
-        NovaTravel_JumpSequenceDuration60Hz()) {
+        NovaTravel_JumpSequenceDuration60Hz(state) / jump_multiplier) {
       ship.ai_station_hold_timer = 0.0F;
       ship.is_active = false;
       ship.current_system_id = -1;
@@ -420,6 +422,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
       ship.ai_desired_speed = 0.0F;
     }
     break;
+  }
 
   case 0xd: {
     // Formation hold with leader release; squad_leader_ship_slot identifies
