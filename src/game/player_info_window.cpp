@@ -7,7 +7,6 @@
 #include "command_input.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
-#include "hud_renderer.hpp"
 #include "mission.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
@@ -16,7 +15,6 @@
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
-#include "spaceflight_view.hpp"
 #include "starmap.hpp"
 #include "travel.hpp"
 #include "ui_dialog.hpp"
@@ -869,10 +867,10 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
 // 0x0049a540 + dispatch 0x0049a3a0).
 // ---------------------------------------------------------------------------
 
-PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
-                                                GameState &state,
-                                                SpaceflightView &view,
-                                                HudRenderer &hud) {
+PlayerInfoWindowResult
+NovaPlayerInfo_RunWindow(SdlPlatform &platform,
+                         GameState &state,
+                         const std::function<void()> &render_background) {
   SdlPlatform::ScopedPlacement placement_guard(platform,
                                                platform.current_placement());
   PlayerInfoWindowResult result;
@@ -1004,7 +1002,12 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
   bool close = false;
 
   auto redraw = [&](int strip_hover) {
-    view.DrawGameFrame(platform, state, hud);
+    if (render_background) {
+      render_background();
+    } else {
+      SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+      SDL_RenderClear(platform.renderer());
+    }
     platform.SetPlacement(
         PlaceContained({window_rect_final.w, window_rect_final.h},
                        platform.logical_playfield_size()));

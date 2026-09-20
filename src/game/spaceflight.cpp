@@ -2351,7 +2351,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                   .value_or("You have no active missions."),
               static_cast<std::uint64_t>(0xf0));
         } else {
-          NovaMission_RunMissionInfoWindow(platform, audio, state, view, hud);
+          NovaMission_RunMissionInfoWindow(platform, audio, state, [&] {
+            view.DrawGameFrame(platform, state, hud);
+          });
           // The mission-computer window blocked the loop; freeze gameplay time
           // across it, and swallow the held info/close keys (the original arms
           // the command latches on the modal return).
@@ -2474,6 +2476,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                 state.mission_speaker_ship_slot = ship_target;
                 const MissionOfferResult result = NovaMission_RunOfferWindow(
                     platform,
+                    audio,
                     state,
                     pers->link_mission_id,
                     /*landed_stellar_id=*/-1,
@@ -2570,10 +2573,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         // frame-time accumulator after the modal closes; the port's modal
         // runs synchronously and the next frame's draw covers the refresh.
         // The mission-computer window (0x00451c87 -> 0x00451db0) that follows
-        // this block is TODO(decomp).
+        // this block in the original is ported above as the mission-info
+        // command (0x28) branch.
         if (held(binding_key[0x19])) {
           const PlayerInfoWindowResult info_result =
-              NovaPlayerInfo_RunWindow(platform, state, view, hud);
+              NovaPlayerInfo_RunWindow(platform, state, [&] {
+                view.DrawGameFrame(platform, state, hud);
+              });
           // The original runs Player_RedistributeFleetCargoOverflow(1) inside
           // the window loop when the Cargo page's Jettison action is confirmed
           // (0x00499c10); the port surfaces the confirmation and applies it

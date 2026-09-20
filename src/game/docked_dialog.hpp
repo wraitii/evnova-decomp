@@ -38,9 +38,6 @@ struct SDL_Texture;
 
 namespace game {
 
-class HudRenderer;
-class SpaceflightView;
-
 // Modal layering (deliberate divergence, see docs/dlog_ditl_dialog_format.md):
 // every sub-window re-renders the preserved underlying screen each frame (the
 // docked Spaceport menu, or the live flight view) and layers its DLOG window
@@ -116,6 +113,7 @@ struct NewsTextPanels {
 // nested-modality of the original sub-windows over the same backing store.
 [[nodiscard]] LandedExit NovaLanded_RunSubWindowDialog(
     SdlPlatform &platform,
+    SdlAudio &audio,
     GameState &state,
     LandedService service,
     std::int16_t stellar_id,
@@ -126,20 +124,20 @@ struct NewsTextPanels {
 // (mission_def + 4000) in a read-only text view over DLOG 0x3f8, with the
 // Accept/Decline buttons (captions from the mïsn payload +0x75f/+0x77f,
 // defaulting to STR# 0x96 entries 0x32/0x33). Accept activates the mission at
-// the slot with `landed_stellar_id` as the BBS context; decline runs nothing
-// (the payload decline script/reaction chain is not wired yet). Returns the
+// the slot with `landed_stellar_id` as the BBS context; decline runs the
+// payload +0x58 text reader and the +0x25a reaction script. Returns the
 // offer outcome for Mission_TriggerLandingInteractions' latch handling.
 // The target-action path (Ship_HandlePlayerTargetActionCommand 0x00454910)
 // reuses this shell for eligible AvailLoc 2 offers; it passes -1 for the
-// landed-stellar context and supplies the live-flight render callback. TODO
-// (decomp) skipped: the variant >= 0x80 DLOG 0x3fc art path, the status-string
-// panel (DITL entry 4), and the starmap/special-interaction/mission-computer
-// actions (4/5/7). The decline arm now shows the payload +0x58 desc via the
-// text reader and runs the +0x25a reaction script; the accept arm runs the
-// 0x0043f100 Brief/ LoadCarg acceptance dialogs. Port conveniences beyond the
-// original: Esc counts as decline, DIK arrows scroll.
+// landed-stellar context and supplies the live-flight render callback. The
+// starmap (action 4), player-special (action 5) and mission-computer
+// (action 7) sub-actions are wired, matching 0x00442510; the mission computer
+// (when it opens) uses `audio` for its cues. TODO(decomp) skipped: the variant
+// >= 0x80 DLOG 0x3fc art path and the status-string panel (DITL entry 4). Port
+// conveniences beyond the original: Esc counts as decline, DIK arrows scroll.
 [[nodiscard]] MissionOfferResult
 NovaMission_RunOfferWindow(SdlPlatform &platform,
+                           SdlAudio &audio,
                            GameState &state,
                            std::int16_t mission_def,
                            std::int16_t landed_stellar_id,
@@ -148,18 +146,19 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
 // Ghidra 0x00446150 NovaUi_RunMissionComputerWindow: the in-flight "mission
 // computer" window (gameplay command 0x28, default key I) listing the
 // pilot's active missions with each selection's quick-brief text. Renders
-// the live flight view beneath itself (SpaceflightView::DrawGameFrame, the
-// boarding/comm-dialog pattern). Supports the starmap action (with the
-// selected mission's destination preselect) and
+// through `render_background` (the caller supplies the live flight frame in
+// flight, or the docked menu when opened from the BBS/offer window), exactly
+// like RunMissionBbsWindow/NovaMission_RunOfferWindow. Supports the starmap
+// action (with the selected mission's destination preselect) and
 // aborting missions whose CanAbort latch is set (flags 0x40 apply the -5x
 // CompReward reputation reversal). See docked_mission_dialog.cpp for the
 // ported helper sites and skips. Opening with zero visible missions is refused
 // by the caller (Ship_HandlePlayerShipCore plays the denied cue and the STR#
 // 0x7d2 0x162 overlay instead).
-void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
-                                      SdlAudio &audio,
-                                      GameState &state,
-                                      SpaceflightView &view,
-                                      HudRenderer &hud);
+void NovaMission_RunMissionInfoWindow(
+    SdlPlatform &platform,
+    SdlAudio &audio,
+    GameState &state,
+    const std::function<void()> &render_background);
 
 } // namespace game

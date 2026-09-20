@@ -15,15 +15,14 @@
 //   NovaUi_BuildPlayerSpecialInteractionStrings 0x0049c050 (page texts)
 
 #include <cstdint>
+#include <functional>
 #include <string>
 
-class HudRenderer;
 class SdlPlatform;
 
 namespace game {
 
 struct GameState;
-class SpaceflightView;
 
 // Ghidra 0x0049c050 NovaUi_BuildPlayerSpecialInteractionStrings: the three
 // long-form page texts (cargo 0x7d5278 / extras 0x7d6278 / honors 0x7d7278).
@@ -51,15 +50,15 @@ struct PlayerInfoWindowResult {
 
 // Ghidra 0x00499c10 NovaUi_RunPlayerSpecialInteractionWindow (clean-room).
 // Runs the modal Player Info window (DLOG 0x3f9, backdrop PICTs
-// 0x2146-0x2148) over the live game view until the player presses Done,
-// Escape/Enter, the bound Player Info command, or confirms a jettison. Pages
-// 1-4 are selected with the tab strip or Tab (shift reverses, wrapping 1..4),
-// exactly as in the dispatch callback 0x0049a3a0. The flight simulation is
-// paused while the window is open, as in the original.
+// 0x2146-0x2148) over `render_background` (the live flight view in flight, or
+// the docked menu when opened from the BBS/offer window) until the player
+// presses Done, Escape/Enter, the bound Player Info command, or confirms a
+// jettison. Pages 1-4 are selected with the tab strip or Tab (shift reverses,
+// wrapping 1..4), exactly as in the dispatch callback 0x0049a3a0. The flight
+// simulation is paused while the window is open, as in the original.
 [[nodiscard]] PlayerInfoWindowResult
 NovaPlayerInfo_RunWindow(SdlPlatform &platform,
                          GameState &state,
-                         SpaceflightView &view,
-                         HudRenderer &hud);
+                         const std::function<void()> &render_background);
 
 } // namespace game

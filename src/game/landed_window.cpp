@@ -1028,6 +1028,7 @@ void DrawLandedMenu(SdlPlatform &platform,
 // immediately; a reconstructed sub-screen would instead open its own modal and
 // return kServiceComplete when it closes.
 LandedExit DispatchService(SdlPlatform &platform,
+                           SdlAudio &audio,
                            GameState &state,
                            LandedContext &ctx,
                            const std::function<void()> &render_background) {
@@ -1048,18 +1049,24 @@ LandedExit DispatchService(SdlPlatform &platform,
   case LandedService::kShipyard:
   case LandedService::kBar:
   case LandedService::kMissionBbs: {
-    // Render the sub-window as an on-screen dialog over the docked scene
-    // (frame PICT + heading + Leave). TODO(decomp): implement the service
-    // content behind the frame: buy/sell tables, outfit list, shipyard
-    // purchases, bar holovid/gamble, and map navigation.
-    const LandedExit dialog_exit = NovaLanded_RunSubWindowDialog(
-        platform, state, ctx.selection, ctx.stellar_id, render_background);
+    // Render the sub-window as an on-screen dialog over the docked scene.
+    // The service content runs in the dispatched modals
+    // (NovaLanded_RunSubWindowDialog): buy/sell trade center, outfit and
+    // shipyard stores, bar, and mission BBS; each draws its own frame PICT +
+    // heading + Leave control.
+    const LandedExit dialog_exit =
+        NovaLanded_RunSubWindowDialog(platform,
+                                      audio,
+                                      state,
+                                      ctx.selection,
+                                      ctx.stellar_id,
+                                      render_background);
     if (dialog_exit == LandedExit::kQuit) {
       return LandedExit::kQuit;
     }
-    // Otherwise the dialog closed back to the dock menu normally. The sub-
-    // window content is out of scope, so there is no kLaunched hand-off yet;
-    // a future service-internal "launch" path would return kLaunched here.
+    // Otherwise the dialog closed back to the dock menu normally. No service
+    // currently hands a launch back to the dock loop; a future service-
+    // internal "launch" path would return kLaunched here.
     return LandedExit::kServiceComplete;
   }
 
@@ -1360,7 +1367,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     if (!ServiceAvailable(state, ctx.stellar_id, ctx.selection)) {
       return false;
     }
-    LandedExit exit = DispatchService(platform, state, ctx, render_background);
+    LandedExit exit =
+        DispatchService(platform, audio, state, ctx, render_background);
     if (exit == LandedExit::kLaunched) {
       return true;
     }
@@ -1416,8 +1424,12 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
       3,
       static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
       [&](std::int16_t mission_def) {
-        return NovaMission_RunOfferWindow(
-            platform, state, mission_def, ctx.stellar_id, render_background);
+        return NovaMission_RunOfferWindow(platform,
+                                          audio,
+                                          state,
+                                          mission_def,
+                                          ctx.stellar_id,
+                                          render_background);
       });
 
   while (!platform.quit_requested()) {
@@ -1488,8 +1500,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                   ServiceButtonAt(button_rects, platform.mouse_position())) {
             ctx.selection = static_cast<LandedService>(*slot);
             if (ServiceAvailable(state, ctx.stellar_id, ctx.selection)) {
-              LandedExit exit =
-                  DispatchService(platform, state, ctx, render_background);
+              LandedExit exit = DispatchService(
+                  platform, audio, state, ctx, render_background);
               if (exit == LandedExit::kLaunched) {
                 return finish(LandedExit::kLaunched);
               }

@@ -12,14 +12,14 @@
 #include "../util/color.hpp"
 #include "command_input.hpp"
 #include "hud_overlay.hpp"
-#include "hud_renderer.hpp"
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "nova_font.hpp"
+#include "player_info_window.hpp"
 #include "scenario_data.hpp"
 #include "selection_text_dialog.hpp"
 #include "services_buttons.hpp"
-#include "spaceflight_view.hpp"
+#include "spaceflight.hpp"
 #include "starmap.hpp"
 #include "travel.hpp"
 #include "ui_dialog.hpp"
@@ -64,6 +64,15 @@ constexpr float kMissionListFontSize = 9.0F;
 // DAT_0088c01c (8) x the 1.5 UI-scale double (0x005754f8) — 12px,
 // independent of the DITL rect height.
 constexpr float kMissionListRowPitch = 12.0F;
+
+// Shared rebindable command slots polled by the mission windows (the same ones
+// the flight loop uses): slot 9 = galaxy map (default M), slot 0x19 = Player
+// Info (default P), slot 0x28 = mission computer (default I). Ghidra's BBS
+// poller reads the corresponding g_nova_control_bits channels (_44_2_, _76_2_,
+// _106_2_); the port resolves them through the one binding table.
+constexpr std::size_t kStarmapCommand = 0x09;
+constexpr std::size_t kPlayerInfoCommand = 0x19;
+constexpr std::size_t kMissionComputerCommand = 0x28;
 
 [[nodiscard]] std::optional<MissionBbsLayout> LayoutMissionBbs() {
   const auto definition = NovaResource_LoadDialogDefinition(0x3ee);
@@ -405,6 +414,72 @@ MakeAcceptanceSink(SdlPlatform &platform,
   };
 }
 
+// Resolves a mission's flags-0x100 destination into a zero-based system id for
+// the nested starmap preselect, or -1 when the mission does not request one.
+// `travel_stellar`/`return_stellar` are the resolved stellar ids
+// (ScenarioData::mission_target_resolutions for an offered mission; the active
+// slot's fields for an active one). Ghidra 0x0043c470 action 6 / 0x00442510
+// action 4: prefer TravelStel, else ReturnStel.
+[[nodiscard]] std::int16_t
+MissionDestinationPreselect(const GameState &state,
+                            std::uint16_t flags_primary,
+                            std::int16_t travel_stellar,
+                            std::int16_t return_stellar) {
+  if ((flags_primary & 0x0100U) == 0U) {
+    return -1;
+  }
+  std::int16_t stellar = travel_stellar;
+  if (stellar == -1) {
+    stellar = return_stellar;
+  }
+  if (stellar < 0 ||
+      static_cast<std::size_t>(stellar) >= state.scenario.stellars.size()) {
+    return -1;
+  }
+  return state.scenario.stellars[static_cast<std::size_t>(stellar)].system_id;
+}
+
+// Opens the nested starmap over the current background, saving and restoring
+// the player's travel selection around it (Ghidra NovaUi_RunMissionBbsWindow
+// 0x0043c470 action 6, NovaUi_RunMissionShipInteractionWindow 0x00442510
+// action 4, NovaUi_RunMissionComputerWindow 0x00446150: g_ship_states->
+// ai_secondary_target_slot + travel_transfer_mode). The map-selected
+// destination is plotted so the HUD keeps the planned jump. Returns true when
+// the app is quitting.
+[[nodiscard]] bool RunNestedMissionStarmap(SdlPlatform &platform,
+                                           GameState &state,
+                                           std::int16_t preselect_system) {
+  const std::int16_t saved_target = state.player.ai_secondary_target_slot;
+  const std::int16_t saved_mode = state.player.travel_transfer_mode;
+  const StarmapResult map_result =
+      NovaStarmap_RunWindow(platform, state, preselect_system);
+  state.player.ai_secondary_target_slot = saved_target;
+  state.player.travel_transfer_mode = saved_mode;
+  if (map_result.exit == StarmapExit::kQuit) {
+    return true;
+  }
+  if (map_result.destination_system_id >= 0) {
+    NovaTravel_PlotStarmapDestination(state, map_result.destination_system_id);
+  }
+  NovaUi_MarkTravelAndStatusPanelsDirty(state);
+  return false;
+}
+
+// True when at least one active mission shows in the mission list (its
+// flags_at_accept lacks the 0x400 "hidden" bit). The original gates the
+// mission-computer sub-window on this count (0x0043c470 action 10, 0x00442510
+// action 7, and the in-flight command 0x28).
+[[nodiscard]] bool HasVisibleActiveMission(const GameState &state) {
+  for (std::size_t slot = 0; slot < state.active_mission_runtime_flags.size();
+       ++slot) {
+    const auto &flags = state.active_mission_runtime_flags[slot];
+    if (flags.is_active && (flags.flags_primary_at_accept & 0x400) == 0U) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace
 
 // Ghidra 0x0043c470 NovaUi_RunMissionBbsWindow (partial port of the landed
@@ -412,6 +487,7 @@ MakeAcceptanceSink(SdlPlatform &platform,
 // 0x00440c90 NovaUi_PollMissionBbsWindow selection/navigation slice runs
 // inline in the input loop below.
 LandedExit RunMissionBbsWindow(SdlPlatform &platform,
+                               SdlAudio &audio,
                                GameState &state,
                                std::int16_t stellar_id,
                                const std::function<void()> &render_background) {
@@ -446,6 +522,11 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
   MissionListEvaluation missions = Mission_EvaluateMissionLists(state);
   std::size_t selected = 0;
   std::string status;
+  // Edge latches for the rebindable sub-window commands (0x00440c90 actions
+  // 6/9/10).
+  bool starmap_command_was_held = false;
+  bool player_info_command_was_held = false;
+  bool mission_computer_command_was_held = false;
   // The active mission list is re-evaluated when a mission is accepted, so
   // recompute the published controls every frame. Each available row is
   // addressable by its zero-based template id (matching the
@@ -484,6 +565,13 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
           : static_cast<int>(missions.page_zero.front()));
 
   while (!platform.quit_requested()) {
+    // Ghidra 0x00440c90 (top of NovaUi_PollMissionBbsWindow): a mission
+    // script's 'Q' stages g_pending_overlay_message; while it is non-empty
+    // the BBS poll returns action 7 and the run loop leaves without drawing
+    // the message here. The launch tail shows and clears it later.
+    if (!state.pending_overlay_message.empty()) {
+      return LandedExit::kServiceComplete;
+    }
     DrawMissionBbsBase(platform,
                        render_background,
                        backdrop ? backdrop->get() : nullptr,
@@ -568,6 +656,55 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
         accept();
       }
     }
+
+    // Ghidra 0x00440c90 actions 6/9/10: the travel window's command channels
+    // open the starmap, the Player Info window, and the mission computer over
+    // the BBS. The mission computer only opens when a visible active mission
+    // exists (the 0x0043c470 action-10 count).
+    const bool starmap_held =
+        NovaInput_IsCommandActive(platform, kStarmapCommand);
+    if (starmap_held && !starmap_command_was_held) {
+      std::int16_t preselect = -1;
+      if (!missions.page_zero.empty() && selected < missions.page_zero.size()) {
+        const auto mission_id = missions.page_zero[selected];
+        const auto *definition = state.scenario.Mission(
+            static_cast<std::int16_t>(mission_id + 0x80));
+        if (definition != nullptr) {
+          const auto &target =
+              state.mission_target_resolutions[static_cast<std::size_t>(
+                  mission_id)];
+          preselect = MissionDestinationPreselect(state,
+                                                  definition->flags_primary,
+                                                  target.travel_stellar_id,
+                                                  target.return_stellar_id);
+        }
+      }
+      if (RunNestedMissionStarmap(platform, state, preselect)) {
+        return LandedExit::kQuit;
+      }
+      // The mission list may have changed (an offer resolved while the map was
+      // open); refresh it and clamp the selection.
+      missions = Mission_EvaluateMissionLists(state);
+      if (!missions.page_zero.empty() &&
+          selected >= missions.page_zero.size()) {
+        selected = missions.page_zero.size() - 1;
+      }
+    }
+    starmap_command_was_held = starmap_held;
+    const bool player_info_held =
+        NovaInput_IsCommandActive(platform, kPlayerInfoCommand);
+    if (player_info_held && !player_info_command_was_held) {
+      (void)NovaPlayerInfo_RunWindow(platform, state, render_background);
+    }
+    player_info_command_was_held = player_info_held;
+    const bool mission_computer_held =
+        NovaInput_IsCommandActive(platform, kMissionComputerCommand);
+    if (mission_computer_held && !mission_computer_command_was_held &&
+        HasVisibleActiveMission(state)) {
+      NovaMission_RunMissionInfoWindow(
+          platform, audio, state, render_background);
+    }
+    mission_computer_command_was_held = mission_computer_held;
     platform.PaceFrame();
   }
   return LandedExit::kQuit;
@@ -680,6 +817,7 @@ void NovaMission_RunAcceptanceDialogs(
 
 MissionOfferResult
 NovaMission_RunOfferWindow(SdlPlatform &platform,
+                           SdlAudio &audio,
                            GameState &state,
                            std::int16_t mission_def,
                            std::int16_t landed_stellar_id,
@@ -908,6 +1046,11 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   };
 
   draw_frame();
+  // Edge latches for the rebindable sub-window commands of the offer window
+  // (0x00442510 actions 4/5/7).
+  bool starmap_command_was_held = false;
+  bool player_info_command_was_held = false;
+  bool mission_computer_command_was_held = false;
   while (!platform.quit_requested()) {
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
       if (input->key == TextKey::escape) {
@@ -979,6 +1122,40 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
         }
       }
     }
+
+    // Ghidra 0x00442510 actions 4/5/7: the starmap, Player Info window, and
+    // mission computer are opened over the offer window. The mission computer
+    // only opens when a visible active mission exists (the action-7 count).
+    const bool starmap_held =
+        NovaInput_IsCommandActive(platform, kStarmapCommand);
+    if (starmap_held && !starmap_command_was_held) {
+      const auto &target =
+          state.mission_target_resolutions[static_cast<std::size_t>(
+              mission_def)];
+      const std::int16_t preselect =
+          MissionDestinationPreselect(state,
+                                      def->flags_primary,
+                                      target.travel_stellar_id,
+                                      target.return_stellar_id);
+      if (RunNestedMissionStarmap(platform, state, preselect)) {
+        return MissionOfferResult::kDeclined;
+      }
+    }
+    starmap_command_was_held = starmap_held;
+    const bool player_info_held =
+        NovaInput_IsCommandActive(platform, kPlayerInfoCommand);
+    if (player_info_held && !player_info_command_was_held) {
+      (void)NovaPlayerInfo_RunWindow(platform, state, render_background);
+    }
+    player_info_command_was_held = player_info_held;
+    const bool mission_computer_held =
+        NovaInput_IsCommandActive(platform, kMissionComputerCommand);
+    if (mission_computer_held && !mission_computer_command_was_held &&
+        HasVisibleActiveMission(state)) {
+      NovaMission_RunMissionInfoWindow(
+          platform, audio, state, render_background);
+    }
+    mission_computer_command_was_held = mission_computer_held;
     draw_frame();
     platform.PaceFrame();
   }
@@ -990,10 +1167,6 @@ namespace {
 // ---- Active-missions info window (the in-flight `I` key) -------------------
 
 constexpr std::uint16_t kMissionInfoFramePict = 0x2145;
-
-// Command slot 9: the shared rebindable galaxy-map command (default M), the
-// same slot the flight loop and the text reader poll.
-constexpr std::size_t kStarmapCommand = 0x09;
 
 // One active-mission row: the mission's slot and its composed list text.
 struct MissionInfoRow {
@@ -1133,23 +1306,26 @@ BuildMissionInfoRows(const GameState &state) {
 
 // Ghidra 0x00446150 NovaUi_RunMissionComputerWindow (the gameplay command
 // 0x28 window, default key I). Modal over the flight scene: the active-
-// mission list (0x00445dc0), the selected mission's quick-brief text panel
-// (draw 0x00446e00), the Abort/Done button pair (0x004a1520 art + 0x004a13c0
-// hit-test) with the poller's navigation (0x00446770), the starmap action
-// (poller action 6, raised by command slot 9 — the same rebindable map
-// command as flight and the mission briefing reader — with the selected
-// mission's destination preselect), and the player-abort
-// arm (reputation penalty + Mission_ClearMisnSlotAssignments(slot, 1)).
+// mission list (0x00445dc0 NovaUi_RebuildMissionComputerList), the selected
+// mission's quick-brief text panel (draw 0x00446e00
+// NovaUi_DrawMissionComputerWindow), the Abort/Done button pair (0x004a1520
+// art + 0x004a13c0 hit-test) with the poller's navigation (0x00446770
+// NovaUi_PollMissionComputerWindow), the starmap action (poller action 6,
+// raised by command slot 9 — the same rebindable map command as flight and
+// the mission briefing reader — with the selected mission's destination
+// preselect), and the player-abort arm (reputation penalty +
+// Mission_ClearMisnSlotAssignments(slot, 1)).
 // Port conveniences: Esc closes; the open/close/denied cues play through
 // `audio` directly instead of the queued centered-sound channel.
 // TODO(decomp) skipped: restoring ai_secondary_target_slot/
-// travel_transfer_mode around a nested map destination window (the map runs
-// inspect-only here).
-void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
-                                      SdlAudio &audio,
-                                      GameState &state,
-                                      SpaceflightView &view,
-                                      HudRenderer &hud) {
+// travel_transfer_mode around the nested map and refreshing the cargo status
+// panel afterwards (the map itself plots the selected destination, it is not
+// inspect-only).
+void NovaMission_RunMissionInfoWindow(
+    SdlPlatform &platform,
+    SdlAudio &audio,
+    GameState &state,
+    const std::function<void()> &render_background) {
   SdlPlatform::ScopedPlacement placement_guard(platform,
                                                platform.current_placement());
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
@@ -1231,11 +1407,16 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
   const auto draw_frame = [&]() {
     SDL_Renderer *renderer = platform.renderer();
     // Deliberate divergence (see docs/dlog_ditl_dialog_format.md): the live
-    // flight view is re-rendered every frame and the window is layered on
+    // background is re-rendered every frame and the window is layered on
     // top (the boarding/comm-dialog pattern); the original composites the
-    // DLOG over the single game surface. The flight sim is paused, so this
-    // redraws the same world each frame.
-    view.DrawGameFrame(platform, state, hud);
+    // DLOG over the single game surface. The sim is paused, so this redraws
+    // the same world each frame.
+    if (render_background) {
+      render_background();
+    } else {
+      SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+      SDL_RenderClear(renderer);
+    }
     platform.SetPlacement(PlaceContained({layout->frame.w, layout->frame.h},
                                          platform.logical_playfield_size()));
     // DrawContext_BlitImageToRect(DAT_007742e4, UiWindow_GetRect(...)).
@@ -1392,9 +1573,11 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
 
   // Render callback for the acceptance readers a script S activation may
   // open during an abort (e.g. the tutorial's on-abort S758): re-draw the
-  // paused flight scene beneath the reader, matching the window's own frame.
+  // paused background beneath the reader, matching the window's own frame.
   const auto acceptance_background = [&]() {
-    view.DrawGameFrame(platform, state, hud);
+    if (render_background) {
+      render_background();
+    }
   };
 
   // Ghidra action 5 (0x00446150): the abort arm.
@@ -1451,32 +1634,20 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
   // Esc/Enter.
   const std::uint16_t mission_info_key = NovaInput_CommandKey(0x28);
   // Poller action 6: open the map (command slot 9) with the selected mission's
-  // flags-0x100 destination preselected.
+  // flags-0x100 destination preselected, saving/restoring the player's travel
+  // selection around the nested map (Ghidra 0x00446150).
   const auto open_starmap = [&]() {
     std::int16_t preselect = -1;
     if (selected >= 0) {
       const auto &mission = state.active_missions[static_cast<std::size_t>(
           rows[static_cast<std::size_t>(selected)].slot)];
-      if ((mission.flags_primary & 0x0100) != 0U) {
-        const std::int16_t stellar = mission.travel_stellar_id >= 0
-                                         ? mission.travel_stellar_id
-                                         : mission.return_stellar_id;
-        if (stellar >= 0 && static_cast<std::size_t>(stellar) <
-                                state.scenario.stellars.size()) {
-          preselect = state.scenario.stellars[static_cast<std::size_t>(stellar)]
-                          .system_id;
-        }
-      }
+      preselect = MissionDestinationPreselect(state,
+                                              mission.flags_primary,
+                                              mission.travel_stellar_id,
+                                              mission.return_stellar_id);
     }
-    const StarmapResult map_result =
-        NovaStarmap_RunWindow(platform, state, preselect);
-    if (map_result.exit == StarmapExit::kQuit) {
+    if (RunNestedMissionStarmap(platform, state, preselect)) {
       exit_requested = true;
-    } else if (map_result.destination_system_id >= 0) {
-      // The map's destination selection is the plotted jump target, the same
-      // end state as opening the map from the flight loop.
-      NovaTravel_PlotStarmapDestination(state,
-                                        map_result.destination_system_id);
     }
   };
 
