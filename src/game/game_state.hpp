@@ -437,17 +437,19 @@ struct Ship {
   // nearest travel point on the arrival/last-known system).
   std::int16_t travel_transfer_mode = 0;      // +0x2A (provisional offset)
   std::int16_t primary_target_ship_slot = -1; // +0x70
-  // Ghidra ShipState +0x6C. The original normalizes this to a 0-based
-  // g_stellar_defs index at load (loader 0x004bd3c0 subtracts 0x80), so the
-  // player path stores 0-based (Stellar_Dock records it, the launch tail reads
-  // slot + 0x80) and the pilot save persists it 0-based. TODO(decomp): the
-  // port's AI path instead stores a 0x80-based resource id
-  // (NovaAi_SelectRandomAdjacentTravelStellar returns nav_defs,
-  // NovaAi_CompleteNpcJump compares against nav_defs). The conventions are
-  // self-consistent per path but must not cross; escort_formation copies this
-  // field between ships, so a player-as-leader copy is the risky edge.
+  // Ghidra ShipState +0x6C. Polymorphic: either a stellar travel target or,
+  // in the combat/escort control modes, a ship slot. The original stores the
+  // stellar case as a 0-based g_stellar_defs index (the loader 0x004bd3c0
+  // normalizes resource ids to 0-based indices and the AI indexes
+  // g_stellar_defs[field] directly). The port instead stores every stellar
+  // reference as a 0x80-based resource id (matching nav_defs,
+  // jump_destination_stellar_id and ScenarioData::Stellar); the player and AI
+  // paths therefore agree, so escort_formation can copy the field between
+  // ships. Rebase to the original 0-based index only at the pilot-save
+  // boundary (PilotFileStellarIndexFromResourceId) and in
+  // MissionReferenceStellar. Ship-slot uses stay in slot space.
   std::int16_t ai_secondary_target_slot =
-      -1; // +0x6C (also a travel/stellar slot)
+      -1; // +0x6C (travel stellar resource id or ship slot, by context)
   // Squad leader / behavior anchor (Ghidra ShipState +0x9A
   // squad_leader_ship_slot): the ship
   // this NPC is attached to -- the carrier for behavior-5 fighters, the

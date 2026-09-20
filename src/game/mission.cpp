@@ -310,13 +310,18 @@ namespace {
     }
     return 0;
   }
-  // The original reads ShipState.ai_secondary_target_slot in flight. The
-  // port's travel commands retain that selection in TravelState instead;
-  // honor the ship field when a caller has populated it for a reconstructed
-  // path, then use the canonical clean-room travel selection.
-  if (state.player.ai_secondary_target_slot >= 0 &&
-      state.player.ai_secondary_target_slot < 0x800) {
-    return state.player.ai_secondary_target_slot;
+  // The original reads ShipState.ai_secondary_target_slot in flight and uses
+  // it directly as a 0-based g_stellar_defs index. The port stores a 0x80-based
+  // resource id there, so rebase at this boundary. The port's travel commands
+  // otherwise retain the selection in TravelState instead; honor the ship
+  // field when a caller has populated it for a reconstructed path, then use
+  // the canonical clean-room travel selection.
+  if (state.player.ai_secondary_target_slot >= kResourceIdBase) {
+    const std::int16_t index = static_cast<std::int16_t>(
+        state.player.ai_secondary_target_slot - kResourceIdBase);
+    if (index < 0x800) {
+      return index;
+    }
   }
   if (state.travel.selected_stellar_id >= kResourceIdBase &&
       state.travel.selected_stellar_id < kResourceIdBase + 0x800) {

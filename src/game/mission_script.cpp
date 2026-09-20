@@ -192,10 +192,11 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
         continue;
       }
       if (state.system_transition_active) {
-        // Docked: queue the destination's first nav (a 0-based stellar index)
-        // for the launch tail (0x004499e1..0x004499f5).
-        state.player.ai_secondary_target_slot =
-            static_cast<std::int16_t>(nav - kResourceIdBase);
+        // Docked: queue the destination's first nav resource id for the launch
+        // tail (0x004499e1..0x004499f5). The original stores its 0-based
+        // g_stellar_defs index; the port keeps the 0x80-based resource id (see
+        // ShipState::ai_secondary_target_slot).
+        state.player.ai_secondary_target_slot = nav;
       } else {
         state.player.pos_x = static_cast<float>(stellar->pos_x);
         state.player.pos_y = static_cast<float>(stellar->pos_y);

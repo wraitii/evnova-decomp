@@ -171,12 +171,14 @@ TEST_CASE("docked M queues the first nav and docked N latches the skip") {
   state.player.pos_x = -5.0F;
   state.player.pos_y = -6.0F;
 
-  // Docked M stashes the 0-based nav index for the launch tail instead of
-  // moving the ship (Ghidra 0x004499e1..0x004499f5).
+  // Docked M stashes the first nav's 0x80-based resource id for the launch
+  // tail instead of moving the ship (Ghidra 0x004499e1..0x004499f5). The
+  // original stores the 0-based g_stellar_defs index; the port keeps resource
+  // ids uniformly on ShipState::ai_secondary_target_slot.
   Mission_ExecuteScript(state, "M129");
   CHECK(state.player.pos_x == -5.0F);
   CHECK(state.player.pos_y == -6.0F);
-  CHECK(state.player.ai_secondary_target_slot == 0);
+  CHECK(state.player.ai_secondary_target_slot == 0x80);
 
   // Docked N clears the target and latches the one-shot launch skip.
   Mission_ExecuteScript(state, "N129");

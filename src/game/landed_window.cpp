@@ -226,13 +226,14 @@ bool Stellar_Dock(GameState &state,
   ctx.stellar_id = stellar_id;
   ctx.landed = true;
   // Stellar_RunDockAndLaunchSequence entry (0x00455e19/0x00455e20): bracket the
-  // docked visit, clear the one-shot reposition latch, and record the 0-based
-  // landing stellar. M may repoint ai_secondary_target_slot at the destination
-  // system's first nav and the launch tail reads it back.
+  // docked visit, clear the one-shot reposition latch, and record the landing
+  // stellar. The original writes its 0-based g_stellar_defs index here; the
+  // port keeps the 0x80-based resource id so the player path matches the AI
+  // (see ShipState::ai_secondary_target_slot). M may repoint this field at the
+  // destination system's first nav and the launch tail reads it back.
   state.system_transition_active = true;
   state.skip_player_reposition_once = false;
-  state.player.ai_secondary_target_slot =
-      PilotFileStellarIndexFromResourceId(stellar_id);
+  state.player.ai_secondary_target_slot = stellar_id;
   // The landing transition raises the no-asteroids latch
   // (Stellar_HandleStellarEntryAndExit 0x00457580 sets DAT_00596d2c = 1), so
   // the docked view hides the drifting field; the launch tail re-initialises
@@ -267,18 +268,18 @@ void Stellar_Launch(GameState &state) {
   state.player.vel_x = 0.0F;
   state.player.vel_y = 0.0F;
   state.player.speed = 0.0F;
-  // 0x00455fa6: snap to the queued travel stellar (ai_secondary_target_slot,
-  // which a docked M may have repointed at the destination system's first nav)
-  // unless a docked N latched g_skip_player_reposition_once (0x00449bda). The
-  // no-stellar fallback is the in-system origin (0,0), not System::pos_x.
+  // 0x00455fa6: snap to the queued travel stellar (ai_secondary_target_slot, a
+  // 0x80-based resource id in the port, which a docked M may have repointed at
+  // the destination system's first nav) unless a docked N latched
+  // g_skip_player_reposition_once (0x00449bda). The no-stellar fallback is the
+  // in-system origin (0,0), not System::pos_x.
   if (state.skip_player_reposition_once) {
     state.skip_player_reposition_once = false;
   } else if (state.player.ai_secondary_target_slot < 0) {
     state.player.pos_x = 0.0F;
     state.player.pos_y = 0.0F;
-  } else if (const auto *stellar =
-                 state.scenario.Stellar(static_cast<std::int16_t>(
-                     state.player.ai_secondary_target_slot + 0x80))) {
+  } else if (const auto *stellar = state.scenario.Stellar(
+                 state.player.ai_secondary_target_slot)) {
     state.player.pos_x = static_cast<float>(stellar->pos_x);
     state.player.pos_y = static_cast<float>(stellar->pos_y);
   }
@@ -308,14 +309,17 @@ void Stellar_Launch(GameState &state) {
   // that function's ShipStart-1 delayed-arrival head.
   Mission_RearmActiveMissionTimers(state);
   // 0x00456103: launch autosave, with ship->ai_secondary_target_slot as the
-  // restore point (block1 +0x00). That is already the 0-based g_stellar_defs
-  // index; a docked M/N may have overwritten it (destination nav / -1). Tests
-  // and incomplete bootstrap states have no pilot name; the original entry
-  // point is likewise only reachable for an active pilot.
+  // restore point (block1 +0x00). The pilot file stores the original's 0-based
+  // g_stellar_defs index, so rebase the port's 0x80-based field at this
+  // boundary; a docked M/N may have overwritten it (destination nav / -1).
+  // Tests and incomplete bootstrap states have no pilot name; the original
+  // entry point is likewise only reachable for an active pilot.
   if (!state.pilot.first_name.empty()) {
     if (const auto directory = PilotFileSaveDirectory()) {
-      if (!PilotFileSaveGame(
-              *directory, state, state.player.ai_secondary_target_slot)) {
+      if (!PilotFileSaveGame(*directory,
+                             state,
+                             PilotFileStellarIndexFromResourceId(
+                                 state.player.ai_secondary_target_slot))) {
         NovaLog::Error("launch: could not autosave pilot '{}'",
                        state.pilot.first_name);
       }
