@@ -91,8 +91,8 @@ NovaStarmap_LoadMarkerIcons(SdlPlatform &platform);
 // nebulae/political layers, which the flight route map never draws) into
 // `rect` at the given zoom, panned on the current system. `alpha` multiplies
 // every element colour (the original applies it as the blit tint at
-// 0x00439bd0). Background fill + border colours TODO(decomp): PTR_DAT_00575acc
-// / DAT_00735658 are unresolved globals.
+// 0x00439bd0). `border_color` is the caller-resolved c\x9alr Colors
+// floating_map colour (DAT_00735658).
 void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
                                    NovaFontCache &font_cache,
                                    const GameState &state,
@@ -100,7 +100,8 @@ void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
                                    float zoom,
                                    std::int16_t selected_id,
                                    float alpha,
-                                   const NovaStarmap_MarkerIcons &icons);
+                                   const NovaStarmap_MarkerIcons &icons,
+                                   SDL_Color border_color);
 
 // Runs the modal galaxy starmap until the player closes it or the app quits.
 // Opens over the current flight scene (the caller should have already drawn

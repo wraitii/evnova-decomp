@@ -84,8 +84,8 @@ RouteMapClickResult RouteMap_HandleClick(GameState &state,
                                          float click_y);
 
 // Ghidra FUN_004ab9d4 rect derivation: top-left square of the view, side
-// round(view_width * DAT_00575a80) clamped to min 200 (the scale factor is an
-// unresolved global; the port uses 0.5 and the current render viewport).
+// round(view_width * DAT_00575a80) clamped to min 200, where DAT_00575a80 is
+// the double 0.25 and the width is the live render-owner width.
 [[nodiscard]] SDL_FRect RouteMap_OverlayRect(class SdlPlatform &platform);
 
 // Fade of the chart for the current tick (Ghidra 0x00439bd0 blit tint):
@@ -94,8 +94,8 @@ RouteMapClickResult RouteMap_HandleClick(GameState &state,
 // quirk, see the auto-dismiss comment).
 [[nodiscard]] float RouteMap_FadeAlpha(const GameState &state);
 
-// Session assets for the chart (Geneva label font cache + marker CICNs),
-// held by the flight loop.
+// Session assets for the chart (Geneva label font cache + marker CICNs + the
+// c\x9alr frame colour), held by the flight loop.
 class RouteMapView {
 public:
   void Load(class SdlPlatform &platform);
@@ -110,6 +110,9 @@ private:
   NovaFontCache font_cache_;
   NovaStarmap_MarkerIcons icons_;
   bool icons_loaded_ = false;
+  // Frame colour (Ghidra DAT_00735658 <- c\x9alr style floating_map +0x8a).
+  // Black until Load resolves the Colors record, matching the global default.
+  SDL_Color border_color_{0, 0, 0, SDL_ALPHA_OPAQUE};
 };
 
 } // namespace game
