@@ -23,8 +23,10 @@ namespace NovaPaths {
 // Nova Plug-ins. Candidates in order, first one that looks like an install
 // (has Nova.rez or a Nova Files directory) wins:
 //
-//   1. the executable's own directory (SDL_GetBasePath), so dropping the
-//      reimplementation next to an existing install works unchanged;
+//   1. the executable's own directory (SDL_GetBasePath) and its "EV Nova"
+//      child, so dropping the reimplementation next to or one level above an
+//      existing install works unchanged and regardless of the working
+//      directory;
 //   2. "EV Nova" and "../../../EV Nova" relative to the working directory,
 //      which is how the dev build and the ctest suite find the data.
 //
