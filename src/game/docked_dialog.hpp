@@ -127,14 +127,17 @@ struct NewsTextPanels {
 // the slot with `landed_stellar_id` as the BBS context; decline runs the
 // payload +0x58 text reader and the +0x25a reaction script. Returns the
 // offer outcome for Mission_TriggerLandingInteractions' latch handling.
+// A dësc variant >= 0x80 selects the custom-art arm: DLOG 0x3fc (DITL 1020)
+// with backdrop PICT 0x2150 and the variant PICT in entry 8.
 // The target-action path (Ship_HandlePlayerTargetActionCommand 0x00454910)
 // reuses this shell for eligible AvailLoc 2 offers; it passes -1 for the
 // landed-stellar context and supplies the live-flight render callback. The
 // starmap (action 4), player-special (action 5) and mission-computer
 // (action 7) sub-actions are wired, matching 0x00442510; the mission computer
-// (when it opens) uses `audio` for its cues. TODO(decomp) skipped: the variant
-// >= 0x80 DLOG 0x3fc art path and the status-string panel (DITL entry 4). Port
-// conveniences beyond the original: Esc counts as decline, DIK arrows scroll.
+// (when it opens) uses `audio` for its cues. TODO(decomp) skipped: the
+// status-string panel (Ui_PlayMovieFileModal, DITL entry 4 -- a QuickTime
+// platform replacement). Port conveniences beyond the original: Esc counts as
+// decline, DIK arrows scroll.
 [[nodiscard]] MissionOfferResult
 NovaMission_RunOfferWindow(SdlPlatform &platform,
                            SdlAudio &audio,

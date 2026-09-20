@@ -169,11 +169,19 @@ void Mission_ClearMisnSlotAssignments(
     std::uint32_t now_ms,
     const MissionAcceptanceSink &acceptance = {});
 
+// Composed selection-dialog text plus the dësc trailing variant field, which
+// the text reader consumes as custom art (PICT id >= 0x80 selects the
+// DLOG 0xbbc arm). Callers that only have a bare string leave the variant 0.
+struct MissionDialogText {
+  std::string text;
+  std::int16_t dialog_variant = 0;
+};
+
 // UI sink for the mission debrief text-reader dialogs (MisnActive +0x3d Comp
 // on success, +0x3f Fail on failure). The landing gate invokes it with the
-// composed dialog text; the flight-layer caller wires it to
+// composed dialog text and its variant; the flight-layer caller wires it to
 // NovaUi_RunTextReaderDialog. Unset sinks keep the pre-port TODO logging.
-using MissionDebriefSink = std::function<void(const std::string &text)>;
+using MissionDebriefSink = std::function<void(const MissionDialogText &text)>;
 
 // Ghidra 0x00440410 Mission_ResolveMissionSuccess. Shows the success debrief
 // dialog (+0x3d Comp dësc) through `debrief` when wired, runs the success

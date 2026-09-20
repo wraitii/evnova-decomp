@@ -88,7 +88,7 @@ public:
   // and the scroll clamp move.
   void SetViewRect(const SDL_FRect &rect) {
     view_rect_ = rect;
-    max_scroll_ = std::max(0.0F, text_height_ - view_rect_.h);
+    UpdateMaxScroll();
     scroll_offset_ = std::clamp(scroll_offset_, 0.0F, max_scroll_);
   }
 
@@ -96,12 +96,18 @@ public:
   void Draw(SdlPlatform &platform) const;
 
 private:
+  // Clamped scroll extent for the current view height and line metrics.
+  void UpdateMaxScroll();
+
   SDL_FRect view_rect_{};
   std::vector<std::string> lines_;
   float content_height_ = 0.0F;
   float text_height_ = 0.0F;
   float max_scroll_ = 0.0F;
   float scroll_offset_ = 0.0F;
+  // Baseline distance the draw model adds below the wrapped text height (the
+  // first-line offset minus the font ascent); see UpdateMaxScroll.
+  float bottom_correction_ = 0.0F;
   NovaFontCache *fonts_ = nullptr;
 };
 
@@ -167,14 +173,23 @@ void NovaUi_DrawScrollArrow(SdlPlatform &platform,
 // `render_background` re-renders the preserved underlying screen (docked
 // menu, flight view, ...) each frame so the modal just layers its window on
 // top; without it the screen is cleared to black.
-// TODO(decomp) skipped: the variant >= 0x80 DLOG 0xbbc + PICT 0x214f art
-// path, the desc status-string display, and g_selection_dialog_over_static-
-// _surface redraw variants.
+//
+// `dialog_variant` is the dësc's trailing variant field. When it is a PICT id
+// >= 0x80 AND the original's caller passed show_art_and_status, the reader
+// runs the custom-art arm: DLOG 0xbbc with the single backdrop PICT 0x214f
+// and the variant PICT blitted into DITL entry 2 (Ghidra 0x004982a0 /
+// NovaUi_DrawSelectionDialogContent 0x00499870). A variant < 0x80 keeps the
+// 0xbbb strip. Callers that only have a bare string pass 0. The auto-size arm
+// is disabled in the art arm, as in the original.
+// TODO(decomp) skipped: the desc status-string movie (Ui_PlayMovieFileModal
+// 0x0049db00, recorded as a `qt` platform skip in decomp-skipped.tsv) and
+// g_selection_dialog_over_static_surface redraw variants.
 void NovaUi_RunTextReaderDialog(
     SdlPlatform &platform,
     GameState &state,
     const std::string &text,
     bool allow_starmap,
-    const std::function<void()> &render_background = {});
+    const std::function<void()> &render_background = {},
+    std::int16_t dialog_variant = 0);
 
 } // namespace game

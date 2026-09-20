@@ -817,13 +817,14 @@ TEST_CASE("tutorial 001 reveals Sol on accept and completes on landing") {
   // success and hand the Comp dësc (9200) text to the debrief sink.
   std::string debrief_text;
   int debrief_calls = 0;
-  Mission_TickReactionSlotsForTravelInteraction(state,
-                                                /*landed_stellar_id=*/0x80,
-                                                /*now_ms=*/0,
-                                                [&](const std::string &text) {
-                                                  ++debrief_calls;
-                                                  debrief_text = text;
-                                                });
+  Mission_TickReactionSlotsForTravelInteraction(
+      state,
+      /*landed_stellar_id=*/0x80,
+      /*now_ms=*/0,
+      [&](const MissionDialogText &message) {
+        ++debrief_calls;
+        debrief_text = message.text;
+      });
   CHECK(debrief_calls == 1);
   CHECK_FALSE(debrief_text.empty());
 

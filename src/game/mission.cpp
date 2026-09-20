@@ -1806,15 +1806,9 @@ void Mission_ResolveMissionSuccess(GameState &state,
           Mission_ExpandMissionWildcards(state, comp_text, false, mission_slot);
     }
   }
-  if (comp_variant >= 0x80) {
-    NovaLog::Todo("mission success debrief desc {} variant {:#x}: DLOG 0xbbc "
-                  "+ PICT 0x214f art path not reconstructed",
-                  comp_text_id,
-                  comp_variant);
-  }
   if (!comp_text.empty()) {
     if (debrief) {
-      debrief(comp_text);
+      debrief(MissionDialogText{comp_text, comp_variant});
     } else {
       NovaLog::Todo("mission success debrief dialog (misn {} id {}) has no "
                     "UI sink",
@@ -1896,15 +1890,9 @@ void Mission_ResolveMissionFailure(GameState &state,
           Mission_ExpandMissionWildcards(state, fail_text, false, mission_slot);
     }
   }
-  if (fail_variant >= 0x80) {
-    NovaLog::Todo("mission failure debrief desc {} variant {:#x}: DLOG 0xbbc "
-                  "+ PICT 0x214f art path not reconstructed",
-                  fail_text_id,
-                  fail_variant);
-  }
   if (!fail_text.empty()) {
     if (debrief) {
-      debrief(fail_text);
+      debrief(MissionDialogText{fail_text, fail_variant});
     } else {
       NovaLog::Todo("mission failure debrief dialog (misn {} id {}) has no "
                     "UI sink",

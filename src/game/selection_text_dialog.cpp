@@ -26,6 +26,11 @@ using evnova::util::Contains;
 namespace {
 
 constexpr std::uint16_t kReaderDialogId = 0xbbb;
+// Custom-art arm (Ghidra 0x004982a0): variant >= 0x80 runs in DLOG 0xbbc with
+// the single backdrop PICT 0x214f and blits the variant PICT into entry 2.
+constexpr std::uint16_t kReaderArtDialogId = 0xbbc;
+constexpr std::uint16_t kReaderArtBackdropPict = 0x214f;
+constexpr std::int16_t kArtVariantThreshold = 0x80;
 
 // Command slot 9: the one rebindable galaxy-map command (default M), the same
 // slot the flight loop reads. The original reader callback (0x00499440) raises
@@ -38,6 +43,10 @@ constexpr std::size_t kStarmapCommand = 0x09;
 constexpr float kTextSize = 9.0F;
 constexpr float kLineHeight = 11.0F;
 constexpr float kFirstLineOffset = 11.0F;
+// Breathing room below the last line once the text overflows. Applied only to
+// the scrollable case (see UpdateMaxScroll) so a fitted view never gains
+// phantom scroll just to show the margin.
+constexpr float kBottomMargin = 2.0F;
 
 } // namespace
 
@@ -56,13 +65,35 @@ NovaTextScrollView::NovaTextScrollView(NovaFontCache &fonts,
   const float wrapped_height = static_cast<float>(lines_.size()) * kLineHeight;
   text_height_ = wrapped_height;
   content_height_ = kFirstLineOffset + wrapped_height + 6.0F;
-  // NovaTextView_ScrollBy (0x004bce90) clamps the scroll against the content
-  // height reported by NovaTextView_UpdateContentHeight (0x004bce10) =
-  // NovaText_MeasureWrappedTextHeight, i.e. the wrapped text height only.
-  // The first-line/bottom insets in content_height_ are draw-only and must not
-  // inflate the scroll extent, or a fitted view still claims ~17px of scroll
-  // and the arrow buttons light up with nothing to scroll to.
-  max_scroll_ = std::max(0.0F, text_height_ - view_rect.h);
+  // The original top-aligns the run inside the content rect (first baseline at
+  // content.top + ascent) and slides the view over it. The per-line draw here
+  // anchors the run to the view at kFirstLineOffset, which is lower by
+  // (kFirstLineOffset - ascent); carry that into the clamp so the final line's
+  // descenders can still be scrolled fully into the view, plus a small gap.
+  bottom_correction_ =
+      std::max(0.0F,
+               kFirstLineOffset -
+                   static_cast<float>(fonts.Ascent(NovaFontFamily::kGeneva,
+                                                   kTextSize,
+                                                   kNovaFontStyleRegular))) +
+      kBottomMargin;
+  UpdateMaxScroll();
+}
+
+// NovaTextView_ScrollBy (0x004bce90) clamps the scroll against the content
+// height reported by NovaTextView_UpdateContentHeight (0x004bce10) =
+// NovaText_MeasureWrappedTextHeight, i.e. the wrapped text height only. The
+// first-line/bottom insets in content_height_ are draw-only and must not
+// inflate the scroll extent, or a fitted view claims scroll and the arrow
+// buttons light up with nothing to scroll to. Once the text does overflow,
+// however, the run's bottom edge (not its last baseline) has to reach the view
+// bottom, so add back bottom_correction_. The guard keeps a view that only
+// just fits (or was auto-shrunk to fit) at zero extent.
+void NovaTextScrollView::UpdateMaxScroll() {
+  max_scroll_ = std::max(0.0F, text_height_ - view_rect_.h);
+  if (max_scroll_ > 0.0F) {
+    max_scroll_ += bottom_correction_;
+  }
 }
 
 // Ghidra 0x00499270 NovaUi_ScrollSelectionText, immediate arm. Its
@@ -180,7 +211,7 @@ bool NovaTextScrollHold::Update(NovaTextScrollView &view,
   return view.scroll_offset() != before;
 }
 
-// Ghidra 0x004bcf30 NovaTextView redraw path: the wrapped text is clipped to
+// Ghidra 0x004bcf30 NovaTextView_Draw: the wrapped text is clipped to
 // the view rect and offset by the scroll position.
 void NovaTextScrollView::Draw(SdlPlatform &platform) const {
   SDL_Renderer *renderer = platform.renderer();
@@ -191,9 +222,16 @@ void NovaTextScrollView::Draw(SdlPlatform &platform) const {
                       static_cast<int>(view_rect_.w),
                       static_cast<int>(view_rect_.h)};
   SDL_SetRenderClipRect(renderer, &clip);
+  // The original hands the whole wrapped run to one clipped DrawText
+  // (0x004bcf30 -> NovaText_DrawText), so a line whose baseline is still below
+  // the view bottom already shows its upper half as it scrolls in. Per-line
+  // drawing must test the line box top rather than the baseline, then let the
+  // clip rect trim the overhang; breaking on the baseline dropped the incoming
+  // line until it was fully in view.
   float baseline = view_rect_.y + kFirstLineOffset - scroll_offset_;
+  const float view_bottom = view_rect_.y + view_rect_.h;
   for (const auto &line : lines_) {
-    if (baseline > view_rect_.y + view_rect_.h) {
+    if (baseline - kLineHeight >= view_bottom) {
       break;
     }
     if (baseline >= view_rect_.y) {
@@ -232,24 +270,30 @@ namespace {
 struct ReaderLayout {
   SDL_FRect window{};
   SDL_FRect done_button{}; // UiPanel entry 1
+  SDL_FRect art_entry{};   // UiPanel entry 2: variant PICT target (art arm)
   SDL_FRect text_area{};   // UiPanel entry 3
   SDL_FRect arrow_up{};    // UiPanel entry 5
   SDL_FRect arrow_down{};  // UiPanel entry 6
   std::string done_caption = "Okay";
+  bool art_variant = false;
 };
 
 // Window bounds + control rects from the real DLOG/DITL in authored local
 // coordinates. The platform contains this composition and maps input back to
 // the same local space.
-[[nodiscard]] ReaderLayout LoadReaderLayout() {
+[[nodiscard]] ReaderLayout LoadReaderLayout(std::int16_t dialog_variant) {
   ReaderLayout layout;
-  const auto definition = NovaResource_LoadDialogDefinition(kReaderDialogId);
+  layout.art_variant =
+      static_cast<std::uint16_t>(dialog_variant) >= kArtVariantThreshold;
+  const auto definition = NovaResource_LoadDialogDefinition(
+      layout.art_variant ? kReaderArtDialogId : kReaderDialogId);
   const auto items =
       definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
                  : std::nullopt;
   if (!definition || !items) {
-    NovaLog::Todo("text-reader DLOG/DITL 0xbbb unavailable; refusing a "
-                  "synthetic layout");
+    NovaLog::Todo("text-reader DLOG/DITL {:#x} unavailable; refusing a "
+                  "synthetic layout",
+                  layout.art_variant ? kReaderArtDialogId : kReaderDialogId);
     return layout;
   }
   const float win_w = static_cast<float>(definition->right - definition->left);
@@ -268,6 +312,7 @@ struct ReaderLayout {
     return SDL_FRect{};
   };
   layout.done_button = rect(0); // UiPanel entry 1
+  layout.art_entry = rect(1);   // UiPanel entry 2 (art arm only)
   layout.text_area = rect(2);   // UiPanel entry 3
   layout.arrow_up = rect(4);    // UiPanel entry 5
   layout.arrow_down = rect(5);  // UiPanel entry 6
@@ -290,9 +335,12 @@ struct ReaderLayout {
 // to the window rect (the painter draws inside the modal window's context).
 // Loaded once per dialog, not per frame.
 struct ReaderBackdrop {
-  std::unique_ptr<SdlTexture> top;    // 0x214c
-  std::unique_ptr<SdlTexture> body;   // 0x214d
-  std::unique_ptr<SdlTexture> bottom; // 0x214e
+  std::unique_ptr<SdlTexture> top;    // 0x214c (variant < 0x80)
+  std::unique_ptr<SdlTexture> body;   // 0x214d (variant < 0x80)
+  std::unique_ptr<SdlTexture> bottom; // 0x214e (variant < 0x80)
+  std::unique_ptr<SdlTexture> art;    // 0x214f (variant >= 0x80)
+  // The dësc variant itself, blitted into DITL entry 2 in the art arm.
+  std::unique_ptr<SdlTexture> variant_pict;
 };
 
 [[nodiscard]] std::unique_ptr<SdlTexture>
@@ -306,8 +354,24 @@ LoadBackdropPict(SdlPlatform &platform, std::uint16_t pict_id) {
       platform.renderer(), image->width, image->height, image->rgba_pixels);
 }
 
-[[nodiscard]] ReaderBackdrop LoadReaderBackdrop(SdlPlatform &platform) {
+[[nodiscard]] ReaderBackdrop LoadReaderBackdrop(SdlPlatform &platform,
+                                                std::int16_t dialog_variant) {
   ReaderBackdrop backdrop;
+  if (static_cast<std::uint16_t>(dialog_variant) >= kArtVariantThreshold) {
+    backdrop.art = LoadBackdropPict(platform, kReaderArtBackdropPict);
+    backdrop.variant_pict =
+        LoadBackdropPict(platform, static_cast<std::uint16_t>(dialog_variant));
+    if (!backdrop.art) {
+      NovaLog::Todo("text-reader art backdrop PICT 0x214f missing; window "
+                    "stays a flat fill");
+    }
+    if (!backdrop.variant_pict) {
+      NovaLog::Todo("text-reader variant PICT {:#x} missing; entry 2 stays "
+                    "unpainted",
+                    static_cast<std::uint16_t>(dialog_variant));
+    }
+    return backdrop;
+  }
   backdrop.top = LoadBackdropPict(platform, 0x214c);
   backdrop.body = LoadBackdropPict(platform, 0x214d);
   backdrop.bottom = LoadBackdropPict(platform, 0x214e);
@@ -320,15 +384,15 @@ LoadBackdropPict(SdlPlatform &platform, std::uint16_t pict_id) {
 
 } // namespace
 
-void NovaUi_RunTextReaderDialog(
-    SdlPlatform &platform,
-    GameState &state,
-    const std::string &text,
-    bool allow_starmap,
-    const std::function<void()> &render_background) {
+void NovaUi_RunTextReaderDialog(SdlPlatform &platform,
+                                GameState &state,
+                                const std::string &text,
+                                bool allow_starmap,
+                                const std::function<void()> &render_background,
+                                std::int16_t dialog_variant) {
   const SdlPlatform::ScopedPlacement restore_placement(
       platform, platform.current_placement());
-  ReaderLayout layout = LoadReaderLayout();
+  ReaderLayout layout = LoadReaderLayout(dialog_variant);
   if (layout.window.w <= 0.0F) {
     return;
   }
@@ -354,7 +418,7 @@ void NovaUi_RunTextReaderDialog(
   // 0.3f) to re-balance it. The original does this in window-local
   // coordinates, so the drop carries the child items with it; the port's
   // rects are absolute, so every rect shifts down by the same amount.
-  if (view.text_height() < layout.text_area.h) {
+  if (!layout.art_variant && view.text_height() < layout.text_area.h) {
     const float measured = std::max(view.text_height(), 48.0F);
     const float shrink = layout.text_area.h - measured - 16.0F;
     const auto shift_up = [&](SDL_FRect &rect) { rect.y -= shrink; };
@@ -378,7 +442,7 @@ void NovaUi_RunTextReaderDialog(
     view.SetViewRect(layout.text_area);
   }
 
-  const ReaderBackdrop backdrop = LoadReaderBackdrop(platform);
+  const ReaderBackdrop backdrop = LoadReaderBackdrop(platform, dialog_variant);
 
   // Publish the final (post-auto-size) control rects to the probe harness.
   ProbeUiAutoClear probe_ui_guard(platform);
@@ -407,38 +471,52 @@ void NovaUi_RunTextReaderDialog(
     // matching the opaque black text panel below.
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(platform.renderer(), &layout.window);
-    // Backdrop composite (0x00499870): body 0x214d first, then the top
-    // strip 0x214c, then the bottom strip 0x214c-anchored 0x214e -- the
-    // bottom strip paints over the body's overhang. All blits clip to the
-    // window rect.
-    if (backdrop.top || backdrop.body || backdrop.bottom) {
+    // Backdrop composite (0x00499870). Variant < 0x80: body 0x214d first,
+    // then the top strip 0x214c, then the bottom strip 0x214e -- the bottom
+    // strip paints over the body's overhang. Variant >= 0x80: the single art
+    // PICT 0x214f fills the window, then the dësc variant PICT is blitted
+    // into entry 2. All blits clip to the window rect.
+    const auto blit = [&](const std::unique_ptr<SdlTexture> &texture,
+                          const SDL_FRect &dst) {
+      if (texture) {
+        SDL_RenderTexture(platform.renderer(), texture->get(), nullptr, &dst);
+      }
+    };
+    const auto blit_native =
+        [&](const std::unique_ptr<SdlTexture> &texture, float x, float y) {
+          if (!texture) {
+            return;
+          }
+          float w = 0.0F;
+          float h = 0.0F;
+          SDL_GetTextureSize(texture->get(), &w, &h);
+          blit(texture, SDL_FRect{x, y, w, h});
+        };
+    if (backdrop.art || backdrop.variant_pict || backdrop.top ||
+        backdrop.body || backdrop.bottom) {
       const SDL_Rect window_clip{static_cast<int>(layout.window.x),
                                  static_cast<int>(layout.window.y),
                                  static_cast<int>(layout.window.w),
                                  static_cast<int>(layout.window.h)};
       SDL_SetRenderClipRect(platform.renderer(), &window_clip);
-      const auto blit = [&](const std::unique_ptr<SdlTexture> &texture,
-                            float y) {
-        if (!texture) {
-          return;
+      if (layout.art_variant) {
+        blit(backdrop.art, layout.window);
+        blit(backdrop.variant_pict, layout.art_entry);
+      } else {
+        float top_h = 0.0F;
+        if (backdrop.top) {
+          SDL_GetTextureSize(backdrop.top->get(), nullptr, &top_h);
         }
-        float w = 0.0F;
-        float h = 0.0F;
-        SDL_GetTextureSize(texture->get(), &w, &h);
-        const SDL_FRect dst{layout.window.x, y, w, h};
-        SDL_RenderTexture(platform.renderer(), texture->get(), nullptr, &dst);
-      };
-      float top_h = 0.0F;
-      if (backdrop.top) {
-        SDL_GetTextureSize(backdrop.top->get(), nullptr, &top_h);
+        blit_native(backdrop.body, layout.window.x, layout.window.y + top_h);
+        blit_native(backdrop.top, layout.window.x, layout.window.y);
+        float bottom_h = 0.0F;
+        if (backdrop.bottom) {
+          SDL_GetTextureSize(backdrop.bottom->get(), nullptr, &bottom_h);
+        }
+        blit_native(backdrop.bottom,
+                    layout.window.x,
+                    layout.window.y + layout.window.h - bottom_h);
       }
-      blit(backdrop.body, layout.window.y + top_h);
-      blit(backdrop.top, layout.window.y);
-      float bottom_h = 0.0F;
-      if (backdrop.bottom) {
-        SDL_GetTextureSize(backdrop.bottom->get(), nullptr, &bottom_h);
-      }
-      blit(backdrop.bottom, layout.window.y + layout.window.h - bottom_h);
       SDL_SetRenderClipRect(platform.renderer(), nullptr);
     }
 

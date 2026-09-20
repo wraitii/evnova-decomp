@@ -2,6 +2,32 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 
+// T4 custom-art ordinals: the reader's DLOG 0xbbc blits the dësc variant
+// PICT into DITL entry 2, and the offer's DLOG 0x3fc into entry 8 (Ghidra
+// NovaUi_DrawSelectionDialogContent 0x00499870 / NovaUi_DrawMissionShip-
+// InteractionWindow 0x00447680). The port maps entry N to item index N-1, so
+// pin the two target ordinals here.
+TEST_CASE("variant dialogs carry the reader/offer art ordinals") {
+  if (!std::filesystem::exists("EV Nova/Nova.rez"))
+    SKIP("no rez");
+  const auto dlog = NovaResource_LoadDialogDefinition(0xbbc);
+  REQUIRE(dlog.has_value());
+  const auto items = NovaResource_LoadDialogItems(dlog->dialog_item_list_id);
+  REQUIRE(items.has_value());
+  REQUIRE(items->size() == 6);
+  CHECK((*items)[1].index == 1); // DITL entry 2
+  CHECK((*items)[1].right - (*items)[1].left == 200);
+  CHECK((*items)[1].bottom - (*items)[1].top == 200);
+
+  const auto offer_dlog = NovaResource_LoadDialogDefinition(0x3fc);
+  REQUIRE(offer_dlog.has_value());
+  const auto offer_items =
+      NovaResource_LoadDialogItems(offer_dlog->dialog_item_list_id);
+  REQUIRE(offer_items.has_value());
+  REQUIRE(offer_items->size() == 10);
+  CHECK((*offer_items)[7].index == 7); // DITL entry 8
+}
+
 TEST_CASE("DLOG 0x3f8 mission offer dialog") {
   if (!std::filesystem::exists("EV Nova/Nova.rez"))
     SKIP("no rez");
