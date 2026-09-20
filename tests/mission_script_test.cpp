@@ -5,6 +5,16 @@
 
 using namespace game;
 
+namespace {
+void SetScriptText(std::array<std::byte, 255> &buffer, std::string_view text) {
+  std::fill(buffer.begin(), buffer.end(), std::byte{0});
+  const std::size_t count = std::min(text.size(), buffer.size() - 1);
+  for (std::size_t i = 0; i < count; ++i) {
+    buffer[i] = static_cast<std::byte>(text[i]);
+  }
+}
+} // namespace
+
 TEST_CASE("mission script executor follows Bible control-bit set syntax") {
   GameState state;
   Mission_ExecuteScript(state, "b311 !b312 ^b311");
@@ -32,6 +42,69 @@ TEST_CASE("mission script executor implements mission lifecycle operators") {
   CHECK_FALSE(state.active_mission_runtime_flags[0].is_active);
 }
 
+TEST_CASE("mission script A opcode runs the on-abort payload and releases the "
+          "fleet") {
+  GameState state;
+  state.active_mission_runtime_flags[0].is_active = true;
+  state.active_missions[0].mission_template_id = 2;
+  SetScriptText(state.active_missions[0].on_abort_text, "b77");
+
+  Mission_ExecuteScript(state, "A130");
+
+  CHECK_FALSE(state.active_mission_runtime_flags[0].is_active);
+  CHECK(state.control.ControlBit(77));
+}
+
+TEST_CASE("mission script Y/U operators set the live strength and regen "
+          "schedule") {
+  GameState state;
+  state.scenario.stellars.resize(1);
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.strength_capacity = 40;
+  stellar.strength = 40;
+  stellar.schedule_days = 3;
+
+  Mission_ExecuteScript(state, "Y128");
+  CHECK(stellar.strength == -1);
+  CHECK(stellar.destroyed_days_remaining == 3);
+
+  Mission_ExecuteScript(state, "U128");
+  CHECK(stellar.strength == 40);
+  CHECK(stellar.destroyed_days_remaining == -1);
+}
+
+TEST_CASE("mission script E/H adds class default weapons on top of the "
+          "retained loadout") {
+  GameState state;
+  state.scenario.ships.resize(2);
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].mod_type = 1; // kWeapon
+  state.scenario.outfits[0].mod_val = 0;
+  state.scenario.outfits[0].max_count = 10;
+  state.inventory.outfit_owned_count[0] = 2;
+  state.weapon_count_by_class[0] = 2;
+  ShipClass &new_class = state.scenario.ships[1];
+  new_class.stock_weapons[0].weapon_id = 0x80;
+  new_class.stock_weapons[0].count = 1;
+
+  Mission_ExecuteScript(state, "C129");
+  CHECK(state.inventory.outfit_owned_count[0] == 2);
+  CHECK(state.weapon_count_by_class[0] == 2);
+
+  Mission_ExecuteScript(state, "E129");
+  CHECK(state.weapon_count_by_class[0] == 3);
+}
+
+TEST_CASE("mission script control bits accept a bare modifier without b") {
+  GameState state;
+  state.control.SetControlBit(9, true);
+
+  Mission_ExecuteScript(state, "!9 ^10");
+
+  CHECK_FALSE(state.control.ControlBit(9));
+  CHECK(state.control.ControlBit(10));
+}
+
 TEST_CASE("mission script executor mutates ranks, exploration, and stellars") {
   GameState state;
   state.scenario.stellars.resize(1);
@@ -46,17 +119,21 @@ TEST_CASE("mission script executor mutates ranks, exploration, and stellars") {
   CHECK(state.scenario.ranks[3].active);
   CHECK(state.recently_activated_rank_id == 3);
   CHECK(state.scenario.systems[0].discovery_state > 0);
-  CHECK_FALSE(state.scenario.stellars[0].is_destroyed);
+  // U restored the body; Y below destroys it. Live strength is the authored
+  // destruction state (Stellar_IsStellarActive 0x0046e3c0), not a separate
+  // flag; the dedicated Y/U test pins the strength/regen values.
+  CHECK(state.scenario.stellars[0].strength == 0);
 
   Mission_ExecuteScript(state, "Y128");
-  CHECK(state.scenario.stellars[0].is_destroyed);
+  CHECK(state.scenario.stellars[0].strength == -1);
 }
 
 TEST_CASE("mission script executor supports random two-branch choices") {
   GameState state;
   state.rng.seed(42);
 
-  Mission_ExecuteScript(state, "R(b7 !b8)");
+  // The two alternatives are exclusive: exactly one bit is set.
+  Mission_ExecuteScript(state, "R(b7 b8)");
 
   CHECK(state.control.ControlBit(7) != state.control.ControlBit(8));
 }

@@ -5,6 +5,7 @@
 #include "../cicn_image.hpp"
 #include "../log.hpp"
 #include "../pict_image.hpp"
+#include "../util/format.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "mission.hpp"
@@ -1054,13 +1055,18 @@ void DrawSidePanels(SdlPlatform &platform,
     append(strings.visibility[static_cast<std::size_t>(tier)] + " " +
            strings.visibility_noun);
   }
-  DrawTextAt(platform,
-             font_cache,
-             hazard_x,
-             bar.y + 36.0F * s,
-             10.0F,
-             kColorWhite,
-             hazards.empty() ? strings.none : hazards);
+  // The original composes the hazard summary, falls back to STR# 0x7d2 0x14f
+  // ("none"), then runs the first byte through the C-locale toupper
+  // MWRuntime_ToUpper (0x004a70b3), so the row reads "None". The goods/ports
+  // rows call Resource_DrawStringEntry directly and stay lower-case.
+  DrawTextAt(
+      platform,
+      font_cache,
+      hazard_x,
+      bar.y + 36.0F * s,
+      10.0F,
+      kColorWhite,
+      evnova::util::UpperFirstAscii(hazards.empty() ? strings.none : hazards));
 }
 
 // ---- Bottom button row -----------------------------------------------------

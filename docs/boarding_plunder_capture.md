@@ -138,7 +138,8 @@ triggers mission failure when the player is boarded.
   text panel at entry 5); the original hit code reads exactly that set.
 - Text panel rows (x offsets from panel left, y offsets from panel top):
   - y+12: "Cargo:" (STR# 0x7d2 0x6d) | y+28: "Ammo:" (0x6e) | y+42: key hint
-    (DAT_0072f1cc pstring through NovaCommand_TranslateByInputMap) |
+    (DAT_0072f1cc pstring; first byte through the C-locale toupper
+    MWRuntime_ToUpper, so it draws "Credits:") |
     y+56: "Capture Odds:" (0x6f)
   - values at x+50: y+28 cargo qty "tons of" <commodity>, y+42 credits
     (grouped), y+56 ammo count + (plural|singular) weapon name (outfit

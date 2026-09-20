@@ -229,10 +229,14 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
         static_cast<std::int16_t>(stock.count > 0 ? stock.count : 0);
     if (stock.ammo_load > 0) {
       // The original seeds the secondary counter at the mounted weapon's
-      // ammo_or_energy_cost_code (mode-99 carried-ship bays and out-of-range
-      // codes fall back to the bank); it is NOT the weapon bank itself. See
-      // Menu_RunNewGameFlow 0x00489d70 and Player_ReplaceShipWithCapturedHull
-      // 0x00423fa0.
+      // ammo_or_energy_cost_code (out-of-range codes fall back to the bank);
+      // see Menu_RunNewGameFlow 0x00489d70. BUGFIX(original), currently
+      // ungated: for a mode-99 carried-ship bay AmmoType is the carried ship
+      // class id, and the original writes the count into that class slot even
+      // though every read/spend path reads the bay's own counter, leaving the
+      // bay empty. See docs/known_original_bugs.md ("Hxxx/Exxx ship changes
+      // omit carried fighters"). The same fix is applied in
+      // NovaWeapon_AddShipClassStockBanks for the C/E/H mission operators.
       std::size_t secondary_bank = bank;
       const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
       if (weapon != nullptr && weapon->weapon_mode_code != 99 &&
@@ -241,6 +245,39 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
       }
       state.weapon_secondary_count_by_class[secondary_bank * kBankStride] =
           static_cast<std::int16_t>(stock.ammo_load);
+    }
+  }
+}
+
+void NovaWeapon_AddShipClassStockBanks(GameState &state,
+                                       std::int16_t ship_class_id) {
+  // Ghidra 0x00449370 'C'/'E'/'H': add the new class's mounted stock weapons
+  // on top of the retained loadout. Like NovaWeapon_SeedBanksFromShipStock it
+  // keeps a mode-99 carried-ship count in the bay's own counter instead of the
+  // class slot the original writes: BUGFIX(original), currently ungated (see
+  // the sibling helper and docs/known_original_bugs.md "Hxxx/Exxx ship changes
+  // omit carried fighters").
+  const ShipClass *ship =
+      state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80));
+  if (ship == nullptr) {
+    return;
+  }
+  for (const ShipDefaultWeaponBank &stock : ship->stock_weapons) {
+    if (stock.weapon_id < 0x80 || stock.weapon_id > 0x17f || stock.count <= 0) {
+      continue;
+    }
+    const auto bank = static_cast<std::int16_t>(stock.weapon_id - 0x80);
+    BankAmmo(state, bank) =
+        static_cast<std::int16_t>(BankAmmo(state, bank) + stock.count);
+    if (stock.ammo_load > 0) {
+      std::int16_t secondary_bank = bank;
+      const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
+      if (weapon != nullptr && weapon->weapon_mode_code != 99 &&
+          weapon->ammo_type >= 0 && weapon->ammo_type < 0x100) {
+        secondary_bank = weapon->ammo_type;
+      }
+      BankSecondary(state, secondary_bank) = static_cast<std::int16_t>(
+          BankSecondary(state, secondary_bank) + stock.ammo_load);
     }
   }
 }

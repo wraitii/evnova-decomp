@@ -108,7 +108,8 @@ constexpr std::uint32_t kRankResourceType = 0x728a6e6b; // r\x8ank
 // Nova control bit (NCB) test-expression evaluator
 // --------------------------------------------------------------------------
 // Gates ship/outfit/mission availability and system visibility in the original
-// (Ghidra NovaExpression_EvaluateToken 0x00448be0 /
+// (Ghidra NovaExpression_SkipWhitespace 0x00448ba0 /
+// NovaExpression_EvaluateToken 0x00448be0 /
 // NovaExpression_EvaluateBoolean 0x00449020). Implements the Bible's
 // test-expression grammar: Bxxx (control bit), Pxxx (registered-with-days), G
 // (gender: male=1), Oxxx (owns outfit), Exxx (explored system), the `& | ! ( )`
@@ -131,22 +132,12 @@ struct ControlExpressionState {
   std::function<bool(std::int16_t system_id)> has_explored;
 };
 
-// Mutation callback used by the OnPurchase/OnSell/OnRetire NCB set strings.
-// Set strings are a distinct language from availability tests: a bare Bn sets
-// bit n, while !Bn or Bn=0 clears it. Unknown directives are deliberately
-// ignored by this small executor until their opcode has been reconstructed.
-struct ControlExpressionMutation {
-  std::function<void(std::uint32_t bit, bool value)> set_control_bit;
-};
-
 // Evaluates a Nova control bit test expression against `state`. Returns true
 // for an empty expression. Malformed/unknown tokens evaluate as false and are
 // logged. Thread-safe (no hidden globals).
 [[nodiscard]] bool
 NovaControlExpression_Evaluate(std::string_view expression,
                                const ControlExpressionState &state);
-void NovaControlExpression_ExecuteSet(
-    std::string_view expression, const ControlExpressionMutation &mutation);
 
 // Mission resource definition. This is deliberately a value model rather
 // than a byte-for-byte packed struct: the original's 0x12c-byte MisnDef is a
@@ -1024,10 +1015,6 @@ struct Stellar {
   // stelAnnoyance persists this same word; no reset or other writer is known.
   std::int16_t domination_days = 0;
   std::uint8_t field_0x47 = 0;
-  // Runtime destruction latch used by the Y/U mission-script operators.
-  // The original stores this across several unnamed StellarDef fields; this
-  // explicit projection keeps the gameplay state testable.
-  bool is_destroyed = false;
 
   // Current ambient-sprite animation frame (Ghidra StellarDef +0x476,
   // sprite_current_frame). The renderer's AdvanceStellarAnimation

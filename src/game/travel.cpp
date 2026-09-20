@@ -1,10 +1,12 @@
 #include "travel.hpp"
 
 #include "../log.hpp"
+#include "../util/format.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "landed_store.hpp"
 #include "mission.hpp"
+#include "mission_script.hpp"
 #include "mission_trace.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
@@ -182,22 +184,26 @@ float PlayerMaxSpeed(const GameState &state) {
   return state.cached_stats.speed_raw / kMaxSpeedScale;
 }
 
-// Ghidra 0x00465d90 Ship_FormatLocalizedCountWord (the count-word half;
-// TODO(decomp) skipped: the original's translate_first flag passes the first
-// character through NovaCommand_TranslateByInputMap, an input-map highlight
-// quirk not modelled here). Counts 1..10 load STR# 0x89 "Date/Numbers"
-// entries 0x1d..0x26 ("one".."ten"); anything else renders as decimal digits
-// (PascalString_FromUInt). Used by the arrival "fighter(s) abandoned"
-// tally (0x0044fc92).
-std::string FormatArrivalCountWord(int count) {
+// Ghidra 0x00465d90 Ship_FormatLocalizedCountWord. Counts 1..10 load STR#
+// 0x89 "Date/Numbers" entries 0x1d..0x26 ("one".."ten"); anything else
+// renders as decimal digits (PascalString_FromUInt). translate_first runs the
+// first byte through the MetroWerks C-locale toupper (MWRuntime_ToUpper
+// 0x004d6260), so "one" displays as "One". Used by the arrival
+// "fighter(s) abandoned" tally (0x0044fc92, translate_first = 1).
+std::string FormatArrivalCountWord(int count, bool translate_first) {
+  std::string word;
   if (count < 1 || 10 < count) {
-    return std::to_string(count);
+    word = std::to_string(count);
+  } else if (const auto text = NovaHud_LoadStringEntry(
+                 0x89, static_cast<std::uint16_t>(count + 0x1c))) {
+    word = *text;
+  } else {
+    word = std::to_string(count);
   }
-  if (const auto text = NovaHud_LoadStringEntry(
-          0x89, static_cast<std::uint16_t>(count + 0x1c))) {
-    return *text;
+  if (translate_first) {
+    word = evnova::util::UpperFirstAscii(std::move(word));
   }
-  return std::to_string(count);
+  return word;
 }
 
 // Ghidra flight-tail block of Ship_HandlePlayerShipCore (~0x00450a2c): with a
@@ -389,7 +395,8 @@ void FireJump(GameState &state) {
       // (0xa5) + ")". Note the original's two leading spaces.
       if (abandoned_fighters > 0) {
         msg += "  (";
-        msg += FormatArrivalCountWord(abandoned_fighters);
+        msg += FormatArrivalCountWord(abandoned_fighters,
+                                      /*translate_first=*/true);
         msg += " ";
         const std::uint16_t word_id = abandoned_fighters == 1 ? 0xa4 : 0xa5;
         if (const auto text = NovaHud_LoadStringEntry(0x7d2, word_id)) {
@@ -1164,14 +1171,10 @@ void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
                   zero_based_system_id,
                   zero_based_system_id + 0x80);
     // Ghidra Mission_ExecuteReactionScript on the OnExplore set string
-    // (0x00467cc1); the clean-room executor handles the control-bit set
-    // grammar (Bxxx / !Bxxx / Bxxx=0).
-    NovaControlExpression_ExecuteSet(
-        neb.on_explore_expression,
-        ControlExpressionMutation{[&state](std::uint32_t bit, bool value) {
-          MissionTrace::SetControlBit(
-              state.control, bit, value, "nebula OnExplore");
-        }});
+    // (0x00467cc1); the full opcode grammar applies, not just control bits.
+    Mission_ExecuteReactionScript(state,
+                                  neb.on_explore_expression,
+                                  MissionScriptContext{"nebula OnExplore"});
   }
 }
 

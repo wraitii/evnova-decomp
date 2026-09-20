@@ -171,7 +171,13 @@ failure, `0x00440750` `Government_ApplyReputationCreditDelta` (PayVal), and
 - `0x00448020` reaction-condition checking (0x00447F20), `0x00448050` script
   payload execution (shared executor, entrypoint).
 - `0x00449370` mission script engine: Bible opcodes
-  A/F/S/G/D/M/N/C/E/H/K/L/P/Q/T/U/X/Y; grammar partially decoded.
+  A/F/S/G/D/M/N/C/E/H/K/L/P/Q/T/U/X/Y plus the `b`/`!`/`^` control-bit
+  forms and `R(...)`. The parser is the original's byte-at-a-time state
+  machine (documented at the top of `src/game/mission_script.cpp`): opcode
+  letters arm the command and zero the accumulator, digits accumulate, any
+  other byte is a delimiter that executes, and the NUL terminator flushes a
+  trailing token. `R` draws a 0/1 branch and skips the other alternative (the
+  original two-byte skip quirk at branch 0 is reproduced).
 - `0x00448910` active-mission timer tick; `0x00466C40` calendar advancement.
 - `0x00872040` `Debug_HandleCheatAndNcbCommands`: debug/cheat path, not gameplay.
 - The interpreter can mutate ships, active missions, rank definitions

@@ -54,6 +54,16 @@ void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state);
 void NovaWeapon_SeedBanksFromShipStock(GameState &state,
                                        std::int16_t ship_class_id);
 
+// Additive variant of NovaWeapon_SeedBanksFromShipStock: adds a ship class's
+// mounted stock weapons on top of the live bank counters instead of
+// overwriting them. Ghidra 0x00449370's C/E/H mission-script arm adds
+// default_weapon_ammo/default_weapon_secondary to the player's existing banks
+// after rebuilding them from owned outfits, so the class defaults stack with
+// the retained loadout (SeedBanksFromShipStock, used by new-game seeding and
+// capture, deliberately replaces).
+void NovaWeapon_AddShipClassStockBanks(GameState &state,
+                                       std::int16_t ship_class_id);
+
 // Ghidra Weapon_ReconcileOutfitPoolWithWeaponBanks (0x00462ec0): reconciles
 // outfit-pool counts with the live weapon-bank ammo/secondary counters in both
 // directions. After seeding banks from a ship class's stock weapons

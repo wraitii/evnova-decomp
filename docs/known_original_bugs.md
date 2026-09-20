@@ -43,7 +43,7 @@ Per the discord.
 * **Multi-ship cargo-retrieval missions mishandle cargo** — the first target gives the full cargo amount, later targets require the same free space but yield 0 tons. 
 * **Nebula image selection chooses a too-small image and scales it up** rather than scaling a slightly oversized image down. 
 * (fixed) **Max-guns/max-turrets outfit bonuses do not stack.** The executable added the first ModType-45/46 value once per owning outfit definition, so N copies of one modifier gave its bonus once. Fixed in `Outfit_ClampOwnedCountToCurrentLimits` (0x004656a0) under `kApplyOriginalBugFixes`: scale by the owned count, matching the Bible's per-item "add to max" and ModType 27's explicit per-copy rule. The shipped "Sigma Mount Reinforcement" has `Max` 1, so the bug was latent in the base scenario; the faithful behavior is kept when the policy is off. 
-* **`Hxxx`/probably `Exxx` ship changes omit carried fighters**, leaving the new ship's bays empty; the initial player ship has the same problem. 
+* (fixed, ungated) **`Hxxx`/probably `Exxx` ship changes omit carried fighters**, leaving the new ship's bays empty; the initial player ship has the same problem. Mechanism: `default_weapon_secondary` is written at `ammo_or_energy_cost_code` with no mode-99 special case (C/E/H arm 0x00449370 and new-game seeding 0x00489d70), but a mode-99 carried-ship bay's `AmmoType` is the carried ship class id and every read/spend path (`Weapon_GetWeaponBurstAttempts` 0x0046f2c0, `Weapon_CanFireWeaponBank`, `Weapon_FirePlayerWeaponBank`) and `Player_ReplaceShipWithCapturedHull` (0x00423fa0) use the bay's own counter, so the newly seeded bay reads empty. 74 shipped stock loadouts are affected. The port keeps the count in the bay counter in `NovaWeapon_SeedBanksFromShipStock` and `NovaWeapon_AddShipClassStockBanks` (`BUGFIX(original)`); the original class-slot write is not reimplemented and the fix is not yet gated through `kApplyOriginalBugFixes`. 
 * **Visbit-swapped systems can retain the previous system's map colour and message-buoy string.** 
 * **A brief tractor-beam hit can permanently paralyse an AI ship** until it is hit by the tractor again. 
 * **Map outfits can fail to reveal systems that are actually within range** because Nova does not always calculate the shortest hyperlink path. 
@@ -72,7 +72,7 @@ Per the discord.
 * **Negative recoil does not work for the player.** 
 * **`chär` Initial Record values can fail to set the player's initial legal status correctly.** 
 * **`përs` ships will not offer missions whose destination or return stellar is in the current system.** 
-* **A mission that aborts itself in `OnAccept` and starts another mission displays the second briefing twice.** 
+* (fixed) **A mission that aborts itself in `OnAccept` and starts another mission displays the second briefing twice.** Mechanism: the mission-script engine scans the shared `g_reaction_script_buffer` (DAT_007c8a10) and re-reads its length every byte (0x00449370), while the `S` opcode's activation runs the new mission's `OnAccept` payload through `Mission_RunMisnScriptPayload` (0x00448050) into that same buffer, so the outer scan continues over nested-payload bytes. Fixed in `Mission_ExecuteReactionScript`: the port passes an explicit `std::string_view`, so the outer script completes normally and the second briefing is shown once. Not gated by `kApplyOriginalBugFixes` yet and there is no path that reproduces the broken behaviour; see the `BUGFIX(original)` note at the site and the row for 0x00448050 in `decomp-progress.tsv`. 
 * **AI ships can launch fighters while cloaked even when the fighter bay is not flagged to fire while cloaked.** 
 * **`TravelStel 30000–30255` does not work** for selecting a random stellar belonging to a particular government/class. 
 * **The fleet “random cargo” flag does nothing**; fleet-created ships have no cargo when boarded. 
@@ -119,6 +119,7 @@ Per the discord.
 
 ## Datafile bugs
 
+* **mïsn 428 (`Federation Resupply;Fed1`) AvailBits has a missing `b` prefix**: `!(b511 | b515) & !((b50 | 467) | b6666)` uses `467` instead of `b467`. Nova's tokenizer reads a bare digit run as a `#` compare-value token that is a no-op in boolean position, so the original evaluates the expression as if the `467` were absent (`!(b511 | b515) & !(b50 | b6666)`); bit 467 is never consulted. The port reproduces this (the evaluator consumes the whole digit run) rather than silently correcting it to `b467`, which would change mission availability from the original. The nearby mïsn 150 (``!(b275 | b512) & !((b511 | b515) | b6666)``) shows the same expression shape. 
 * **STR# 4001 and 4002 are missing entry 80, `*Samantha`.** 
 * **Ancient Vell-os Sculpture has a typo on Windows**: `"ancient Vell-s sculpture"`. 
 * **Kymonth Station description uses “bought” instead of “brought.”** 

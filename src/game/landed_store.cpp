@@ -1,10 +1,12 @@
 #include "landed_store.hpp"
 
+#include "../util/format.hpp"
 #include "compatibility.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "log.hpp"
 #include "mission.hpp"
+#include "mission_script.hpp"
 #include "mission_trace.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
@@ -218,11 +220,15 @@ NovaLanded_ControlExpressionState(const GameState &state) {
 void NovaLanded_ExecuteControlSet(GameState &state,
                                   std::string_view expression,
                                   std::string_view origin) {
-  NovaControlExpression_ExecuteSet(
-      expression,
-      {.set_control_bit = [&state, origin](std::uint32_t bit, bool value) {
-        MissionTrace::SetControlBit(state.control, bit, value, origin);
-      }});
+  // Ghidra routes every OnPurchase/OnSell/OnRetire/OnCapture NCB set string
+  // through the shared reaction-script engine Mission_ExecuteReactionScript
+  // (0x00448020 -> 0x00449370), so the full opcode grammar is available and
+  // not just the control-bit directives. The ship-upgrade outfits rely on
+  // this: e.g. "Chrome Valk Upgrade" OnPurchase is `H165` (change the player
+  // hull) and "Forged Exotic Ships & Weapons License" is
+  // `S731 D265 D264 ...` (start a mission, remove outfits).
+  Mission_ExecuteReactionScript(
+      state, expression, MissionScriptContext{origin});
 }
 
 std::vector<std::int16_t>
@@ -1465,17 +1471,24 @@ namespace {
 
 // Ghidra Ship_FormatLocalizedCountWord (0x00465d90): 1..10 load STR# 0x89
 // "Date/Numbers" entries 0x1d..0x26 ("one".."ten"); anything else is decimal
-// digits. The translate_first input-map highlight quirk is not modelled (see
-// the identical travel.cpp FormatArrivalCountWord).
-[[nodiscard]] std::string FormatLocalizedCountWord(int count) {
+// digits. translate_first runs the first byte through the MetroWerks C-locale
+// toupper (MWRuntime_ToUpper 0x004d6260); the escort-trade call sites
+// (0x0042307d / 0x004231e0) pass 1, so the sentence starts "One ...".
+[[nodiscard]] std::string FormatLocalizedCountWord(int count,
+                                                   bool translate_first) {
+  std::string word;
   if (count < 1 || count > 10) {
-    return std::to_string(count);
+    word = std::to_string(count);
+  } else if (auto entry = NovaHud_LoadStringEntry(
+                 0x89, static_cast<std::uint16_t>(count + 0x1c))) {
+    word = *entry;
+  } else {
+    word = std::to_string(count);
   }
-  if (auto word = NovaHud_LoadStringEntry(
-          0x89, static_cast<std::uint16_t>(count + 0x1c))) {
-    return *word;
+  if (translate_first) {
+    word = evnova::util::UpperFirstAscii(std::move(word));
   }
-  return std::to_string(count);
+  return word;
 }
 
 // Ghidra CString_AppendFormattedQuantity (0x00465c10): plain digits below
@@ -1599,7 +1612,7 @@ void Player_ProcessEscortFleetAtStellar(
     if (sold > 0 || upgraded > 0) {
       std::string text;
       if (sold > 0) {
-        text += FormatLocalizedCountWord(sold);
+        text += FormatLocalizedCountWord(sold, /*translate_first=*/true);
         text += " ";
         text += MiscString(sold == 1 ? 0x12a : 299);
         text += " ";
@@ -1614,7 +1627,7 @@ void Player_ProcessEscortFleetAtStellar(
         }
       }
       if (upgraded > 0) {
-        text += FormatLocalizedCountWord(upgraded);
+        text += FormatLocalizedCountWord(upgraded, /*translate_first=*/true);
         text += " ";
         text += MiscString(upgraded == 1 ? 0x12a : 299);
         text += " ";

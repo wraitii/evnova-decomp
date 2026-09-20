@@ -1300,3 +1300,18 @@ TEST_CASE("outfit prices apply the allied rank discount",
   // quantum to leave it unchanged.
   CHECK(game::NovaLanded_OutfitPrice(state, 0x80, 0x80) == 500);
 }
+
+// Regression: the OnPurchase/OnSell/OnRetire/OnCapture set strings go through
+// the shared reaction-script engine (Ghidra 0x00448020 -> 0x00449370), not a
+// control-bit-only mini-parser. Base-data ship-upgrade outfits encode
+// `H<class>` and the Forged Exotic license encodes `S<mission> D...`.
+TEST_CASE("landed control set strings run the full mission engine",
+          "[landed_store]") {
+  game::GameState state;
+  state.scenario.ships.resize(0x40);
+
+  game::NovaLanded_ExecuteControlSet(state, "b42 H165", "outfit OnPurchase");
+
+  CHECK(state.control.ControlBit(42));
+  CHECK(state.player.ship_class_id == 165 - 0x80);
+}
