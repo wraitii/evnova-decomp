@@ -233,6 +233,31 @@ NovaAi_ScoreAssistTargetForShip(const GameState &state,
 [[nodiscard]] std::int16_t NovaAi_FindBestAssistTargetForShip(
     const GameState &state, const Ship &ship, std::int16_t score_flags);
 
+// Ghidra 0x00411c20 Ship_FindLowerIndexedWingmanSharingTarget. Resets the
+// cached wingman slot to -1, then scans strictly lower ship slots for an
+// active swarming-behavior hull (ShipClass Flags2 0x0001) that shares this
+// ship's primary target and either its faction (when not -1) or its squad
+// leader (when not -1). Caches and returns the first match, else -1. This is
+// the only producer of a positive formation_leader_ship_slot.
+[[nodiscard]] std::int16_t
+NovaAi_FindLowerIndexedWingmanSharingTarget(const GameState &state, Ship &ship);
+
+// Ghidra 0x00411b40 Ship_IsWingmanMirrorTargetStillValid. True for a
+// non-swarming hull (nothing to maintain), or when the cached lower-indexed
+// wingman is still active, swarming, and sharing the same primary target plus
+// faction / squad-leader context. False means the cache must be re-found.
+[[nodiscard]] bool
+NovaAiShip_IsWingmanMirrorTargetStillValid(const GameState &state,
+                                           const Ship &ship);
+
+// Ghidra 0x00411ae0 Ship_ShouldSwitchToEscortWingmanTarget. For a swarming
+// hull outside a defense fleet, when the cached wingman slot is valid and is
+// not this ship's own squad leader, forces ai_control_mode 0x12 (chase the
+// wingman) and returns true. The side effect is committed before returning.
+[[nodiscard]] bool
+NovaAiShip_ShouldSwitchToEscortWingmanTarget(const GameState &state,
+                                             Ship &ship);
+
 // Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget. Refreshes the
 // active NPC weapon bank for behavior >4 ships; ships with a lower behavior
 // return untouched (behavior 3/4 arm banks in the combat control modes).
@@ -448,7 +473,8 @@ NovaAiShip_IsShipLockedOnAttackerInState4(const Ship &ship,
 //   behavior-5 ship in state 5 (deployed fighter returning);
 //   state {2,3,0x0B} with control mode 4 or 0x0D (escort hold variants);
 //   state 0x08 (arrival slowdown); control mode 0x0C (velocity match);
-//   state 4 (combat engagement); state 2 (idle travel staging).
+//   state 4 (combat engagement); state 2 (idle travel staging);
+//   state 0x15 (hypergate/wormhole emergence hold).
 [[nodiscard]] bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship);
 [[nodiscard]] bool
 NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship);
@@ -456,6 +482,7 @@ NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiControlModeC(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiState4(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiState2(const Ship &ship);
+[[nodiscard]] bool NovaAiShip_IsShipInAiState0x15(const Ship &ship);
 
 // Ghidra Ship_IsInPlayerSquad (0x0046b8d0). Player-squad membership predicate:
 // true for the player (ship_instance_id 0), a ship attached directly to the
