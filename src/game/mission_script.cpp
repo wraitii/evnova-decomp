@@ -173,6 +173,15 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
       attached.current_system_id = state.player.current_system_id;
     }
   }
+  // 0x0044a3c0 (case 'M') / 0x0044a400 (case 'N'): an in-flight relocation
+  // raises the four transition-frame clear latches alongside
+  // g_no_asteroids_latch, so the old system's shots, effect pools and
+  // freeflight objects do not follow the player. A docked relocation instead
+  // rewrites the mission locator lists and raises no latches (that list reset
+  // is not reconstructed here), so only clear when not transitioning.
+  if (!state.system_transition_active) {
+    NovaWeapon_ClearTransientCombatState(state);
+  }
   return true;
 }
 

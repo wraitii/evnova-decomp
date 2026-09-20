@@ -136,8 +136,10 @@ void NovaFreeflight_SpawnAtPosition(GameState &state,
 
 // Ghidra 0x0042c1b0 Frame_UpdateFreeflightObjectSprites (simulation half).
 // The original also cancels every object when the DAT_00596d2a "clear
-// transient sprites" latch is set; the port has no counterpart (the effect
-// pools behave the same), so objects are retired by lifetime/system instead.
+// transient sprites" latch is set. The port instead wipes the pool
+// synchronously at the transition boundaries via
+// NovaWeapon_ClearTransientCombatState (the latch is a pure one-shot clear
+// request; see its comment), so this tick only handles lifetime/system.
 void NovaFreeflight_Tick(GameState &state, float elapsed_ticks) {
   const float delta = std::max(0.0F, elapsed_ticks);
   for (FreeflightObjectState &object : state.freeflight_objects) {

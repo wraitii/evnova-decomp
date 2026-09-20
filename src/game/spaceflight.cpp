@@ -2730,6 +2730,12 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   bool returning_to_menu = false;
   NovaFrame_SpaceflightLoop(platform, audio, state, returning_to_menu, prefs);
   NovaFrame_CancelCombatChatter(state, audio);
+  // NovaMainLoop_Run's mode-exit teardown (0x00486c8a..0x00486cbe) raises the
+  // five "clear transient sprites" latches before the menu shell resumes, so
+  // re-entering flight with the same pilot (GameState persists on the app)
+  // starts from an empty effect/freeflight/asteroid slate. The port clears
+  // synchronously on the way out.
+  NovaWeapon_ClearTransientCombatState(state);
 
   NovaLog::Info("leaving spaceflight mode to the main menu");
 }

@@ -83,7 +83,10 @@ void NovaEffects_SpawnShipDestructionDebrisPuff(GameState &state,
   }
 }
 
-// Ghidra 0x0043b170 Frame_UpdateFadingEffectSprites.
+// Ghidra 0x0043b170 Frame_UpdateFadingEffectSprites. The original also cancels
+// every live fragment when the DAT_00596d29 "clear transient sprites" latch is
+// set; the port wipes the pool synchronously at the transition boundaries via
+// NovaWeapon_ClearTransientCombatState (see its comment).
 void NovaEffects_TickFadingEffects(GameState &state, float elapsed_ticks) {
   const float delta = std::max(0.0F, elapsed_ticks);
   for (FadingEffectInstance &fragment : state.fading_effect_instances) {

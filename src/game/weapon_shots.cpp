@@ -147,7 +147,20 @@ void TurnShotToward(ActiveShot &shot,
 } // namespace
 
 void NovaWeapon_ClearTransientCombatState(GameState &state) {
-  // The original retires every ShotState during
+  // The original raises a group of one-frame "clear transient sprites" latches
+  // at every system/stellar boundary and lets the transition-frame auxiliary
+  // pass wipe the matching pools while they are set:
+  //   DAT_00596d29 -> shots + beam records + fading fragments
+  //   DAT_00596d2a -> freeflight objects (resource-boxes, jettisoned pods)
+  //   DAT_00596d2b -> impact effects
+  //   DAT_00596d2d -> weapon smoke puffs
+  //   g_no_asteroids_latch -> asteroid / drift-debris records (handled by
+  //                          NovaAsteroid_InitSystem /
+  //                          NovaAsteroid_UpdateSprites)
+  // The latches are pure one-shot clear requests (every reader just
+  // deactivates and skips the normal update), so the port performs the wipe
+  // synchronously at the same transition boundaries instead of modelling four
+  // extra flags. The original also retires every ShotState directly during
   // Stellar_RunDockAndLaunchSequence and marks all live beam records inactive
   // during the landing transition. Ship slots (including the player's) get
   // their jamming-score cache reseeded to -1 at allocation; the port resets the
@@ -160,6 +173,12 @@ void NovaWeapon_ClearTransientCombatState(GameState &state) {
   }
   for (ImpactEffectInstance &effect : state.impact_effect_instances) {
     effect = ImpactEffectInstance{};
+  }
+  for (FadingEffectInstance &fragment : state.fading_effect_instances) {
+    fragment = FadingEffectInstance{};
+  }
+  for (FreeflightObjectState &object : state.freeflight_objects) {
+    object = FreeflightObjectState{};
   }
   state.sw_particles.clear();
   state.sw_particle_tick_accumulator = 0.0F;
