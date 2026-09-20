@@ -1474,7 +1474,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
     if (!mission_context) {
       return false;
     }
-    return Mission_TriggerLandingInteractions(
+    return Mission_RunAvailLocOffers(
         state,
         *mission_context,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),

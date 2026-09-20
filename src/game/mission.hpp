@@ -252,15 +252,15 @@ void Mission_RerollOfferingRolls(GameState &state);
 // (FUN_004cd0b0) are unmodelled and documented as skipped at the definition.
 void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state);
 
-// Outcome of one mission-offer interaction window (NovaUi_RunMissionShip-
-// InteractionWindow 0x00442510 return values).
+// Outcome of one mission-offer interaction window (NovaUi_RunMissionOfferWindow
+// 0x00442510 return values).
 enum class MissionOfferResult {
   kAccepted,         // Mission_ActivateMissionAtSlot succeeded (return 1)
   kDeclined,         // player took the decline arm (return 0)
   kActivationFailed, // auto-accept/window accept failed (return -1)
 };
 
-// Ghidra 0x00448670 Mission_TriggerReturnMissionInteractions. Runs one
+// Ghidra 0x00448670 Mission_RunAvailLocOffers. Runs one
 // mission-offer interaction for `context` (the original's first parameter,
 // matched against MisnDef AvailLoc; the Spaceport loop calls it with 3 right
 // after landing, the services windows with their own lanes). Clears the
@@ -272,7 +272,7 @@ enum class MissionOfferResult {
 // offering list -- the port re-evaluates lists on demand, and an activated
 // mission fails the duplicate-active check on the next evaluation, so the
 // removal is implicit. Returns true when an offer interaction ran.
-[[nodiscard]] bool Mission_TriggerLandingInteractions(
+[[nodiscard]] bool Mission_RunAvailLocOffers(
     GameState &state,
     std::int16_t context,
     std::uint32_t now_ms,

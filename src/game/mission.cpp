@@ -2070,7 +2070,7 @@ void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
   state.mission_interaction_context = -1;
 }
 
-// Ghidra 0x00448670 Mission_TriggerReturnMissionInteractions. See the header
+// Ghidra 0x00448670 Mission_RunAvailLocOffers. See the header
 // comment. The original walks the persistent lane-1 list (g_return_mission_list
 // = g_mission_slot_list[1], rebuilt by Mission_EvaluateMissionLists on every
 // arrival); the port rebuilds the lane fresh here with the same page-group
@@ -2078,7 +2078,7 @@ void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
 // walk time. The original's walk call passes the interaction flag, but the
 // Spaceport loop clears the interaction context before entering, so the list-
 // context gate set applies.
-bool Mission_TriggerLandingInteractions(
+bool Mission_RunAvailLocOffers(
     GameState &state,
     std::int16_t context,
     std::uint32_t now_ms,
@@ -2570,7 +2570,7 @@ bool Mission_CheckMissionShipInteractionEligibility(const GameState &state,
 
 // Ghidra 0x00454910 Ship_HandlePlayerTargetActionCommand, post-accept arm.
 // The original performs the personality and fleet lookup inline after
-// NovaUi_RunMissionShipInteractionWindow returns 1. Keep the state mutation
+// NovaUi_RunMissionOfferWindow returns 1. Keep the state mutation
 // here so the SDL modal remains a thin presentation wrapper.
 bool Mission_HandleAcceptedShipInteraction(GameState &state,
                                            std::int16_t target_ship_slot,

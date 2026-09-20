@@ -65,7 +65,7 @@ though the command is the same:
 |---|---|---|---|
 | In-flight | `Ship_HandlePlayerShip` 0x0044b120 | open (edge) | gated while landing / hyperspacing / dead |
 | Mission initial briefing (text reader) | `Ui_RunTravelSelectionDialog` 0x004982a0 | **4** | only when its `allow_starmap` arg is set |
-| Mission-ship interaction | `NovaUi_PollMissionShipInteractionWindow` 0x00447170 | **4** | |
+| Mission offer window (dock/hail) | `NovaUi_PollMissionOfferWindow` 0x00447170 | **4** | |
 | Mission computer (I) | `NovaUi_RunMissionComputerWindow` 0x00446150 | **6** | preselects the selected mission's flags-0x100 destination |
 | Mission BBS | `NovaUi_PollMissionBbsWindow` 0x00440c90 | **6** | |
 | Bar | `NovaUi_RunBarWindow` 0x0047c8e0 | **8** | |

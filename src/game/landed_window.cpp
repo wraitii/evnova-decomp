@@ -1383,8 +1383,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
 
   // Mission offers with AvailLoc 3 pop as the player docks: the Spaceport
   // loop (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30) sets
-  // g_misn_list_page_group = 3 and calls Mission_TriggerReturnMission-
-  // Interactions(3) (0x00448670) right after the window is up, before its
+  // g_misn_list_page_group = 3 and calls Mission_RunAvailLocOffers(3)
+  // (0x00448670) right after the window is up, before its
   // input loop. Reproduce that ordering: render the dock once, then run the
   // offer pass over the live dock (the offer window re-renders it each
   // frame). TODO(decomp):
@@ -1423,7 +1423,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                    render_background,
                                    message.dialog_variant);
       });
-  (void)Mission_TriggerLandingInteractions(
+  (void)Mission_RunAvailLocOffers(
       state,
       3,
       static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
