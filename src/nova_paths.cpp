@@ -27,8 +27,16 @@ namespace {
   // SDL3 returns a const pointer it caches internally and frees in
   // SDL_QuitFilesystem, so the caller must not free it. emplace_back copies.
   if (const char *base = SDL_GetBasePath()) {
-    candidates.emplace_back(base);
+    const std::filesystem::path base_path{base};
+    // The executable either sits inside the install folder (Nova.rez beside
+    // it) or one level above it (next to an "EV Nova" folder); cover both so
+    // resolution never depends on the launch working directory.
+    candidates.emplace_back(base_path);
+    candidates.emplace_back(base_path / "EV Nova");
   }
+  // Development-build fallbacks, relative to the working directory. Kept last
+  // on purpose: a launcher (or a native file manager) may start the process
+  // with an arbitrary CWD.
   candidates.emplace_back("EV Nova");
   candidates.emplace_back("../../../EV Nova");
 
