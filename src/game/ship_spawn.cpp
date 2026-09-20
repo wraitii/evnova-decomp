@@ -80,10 +80,7 @@ BearingFromPointToPoint(float from_x, float from_y, float to_x, float to_y) {
 // on the shared arrival bearing at the ~2100-unit polar radius, facing back
 // toward the system centre with a 50-unit inward velocity, no AI state entry,
 // and the jump-destination sentinels (-2 stellar / -2 system).
-void PlaceMissionFleetRespawn(GameState &state,
-                              Ship &ship,
-                              float bearing,
-                              std::uint32_t now_ms) {
+void PlaceMissionFleetRespawn(GameState &state, Ship &ship, float bearing) {
   const float radius = RandomPolarArrivalRadius();
   const float point_x = std::sin(bearing) * radius;
   const float point_y = -std::cos(bearing) * radius;
@@ -96,7 +93,7 @@ void PlaceMissionFleetRespawn(GameState &state,
   ship.vel_y = 0.0F;
   ship.speed = 0.0F;
   ship.ai_station_hold_timer = -999.0F;
-  ship.ai_mode_start_time_ms = now_ms;
+  ship.ai_mode_start_time_ms = state.tick_60hz;
   AddArrivalSlowdownVelocity(ship);
   ship.arrival_monitor_elapsed_ticks = 0.0F;
   ship.arrival_monitor_active = true;
@@ -1739,7 +1736,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
           if ((mission.flags_primary & 0x0010U) == 0U) {
             --mission.mission_ship_count_active;
           }
-          PlaceMissionFleetRespawn(state, ship, bearing, now_ms);
+          PlaceMissionFleetRespawn(state, ship, bearing);
         }
         if ((mission.flags_primary & 0x0001U) != 0U) {
           Mission_ResolveMisnSlot(state, slot, now_ms);
@@ -1803,7 +1800,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
           }
           Ship &ship = state.ShipAt(static_cast<std::size_t>(spawned));
           ++mission.goal_count_remaining;
-          PlaceMissionFleetRespawn(state, ship, bearing, now_ms);
+          PlaceMissionFleetRespawn(state, ship, bearing);
         }
         if ((mission.flags_primary & 0x0001U) != 0U) {
           Mission_ResolveMisnSlot(state, slot, now_ms);

@@ -209,14 +209,18 @@ TEST_CASE("state 2 mode 4 applies the jump ramp directly to position") {
   ship.ai_station_hold_timer = 1.0F;
   ship.ai_desired_heading_deg = 0;
   ship.ai_mode_start_time_ms = 0;
+  state.tick_60hz = 200;
 
   // The original mode-4 arm (Ship_HandleShip, 0x00433050) adds the ramp to
-  // position; it does not accumulate the ramp into ordinary velocity.
-  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F, 200);
-  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F, 233);
+  // position; it does not accumulate the ramp into ordinary velocity. The
+  // clock and the duration are both 1/60 s ticks (Stellar_GetJumpSequence
+  // Duration60Hz = 364).
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  state.tick_60hz = 233;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
 
-  const float first_ramp = 200.0F / 3.5F - 35.0F;
-  const float second_ramp = 233.0F / 3.5F - 35.0F;
+  const float first_ramp = 200.0F / 3.64F - 35.0F;
+  const float second_ramp = 233.0F / 3.64F - 35.0F;
   CHECK(ship.pos_y == Catch::Approx(-(first_ramp + second_ramp)));
   CHECK(ship.vel_x == Catch::Approx(0.0F));
   CHECK(ship.vel_y == Catch::Approx(0.0F));
@@ -544,8 +548,9 @@ TEST_CASE("state 2 mode 4 ramps engine glow with its departure step") {
   ship.ai_station_hold_timer = 1.0F;
   ship.ai_desired_heading_deg = 0;
   ship.ai_mode_start_time_ms = 0;
+  state.tick_60hz = 200;
 
-  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F, 200);
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
 
   // Mode 4 adds three, then the ordinary zero-thrust glow path fades once.
   CHECK(ship.engine_glow_level == 2);

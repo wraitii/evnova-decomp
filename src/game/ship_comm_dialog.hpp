@@ -79,11 +79,8 @@ enum class EscortManagementAction : std::uint8_t {
 // Applies one action from the escort-management modal. Returns true when the
 // window should close (Close/Release). Release transfers cargo before
 // detaching the escort, matching NovaUi_RunEscortShipManagementWindow.
-[[nodiscard]] bool
-NovaEscortManagement_ApplyAction(GameState &state,
-                                 Ship &escort,
-                                 EscortManagementAction action,
-                                 std::uint32_t now_ms);
+[[nodiscard]] bool NovaEscortManagement_ApplyAction(
+    GameState &state, Ship &escort, EscortManagementAction action);
 
 // Runs the DLOG 0x3ef ship-comm modal for the ship in `ship_slot` (must be a
 // valid active NPC slot). Draws PICT 0x213f as the window backdrop over the

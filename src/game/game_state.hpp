@@ -276,8 +276,10 @@ struct Ship {
   float arrival_monitor_elapsed_ticks = 0.0F;
   bool arrival_monitor_active = false;
   bool arrival_monitor_warning_logged = false;
-  // Wall-clock (SDL ticks) the current AI mode began; used by the jump-sequence
-  // and formation positioning timing.
+  // Wall-clock 1/60 s tick count (NovaTime_GetTickCount60Hz) the current AI
+  // mode began; used by the jump-sequence and formation positioning timing.
+  // Despite the legacy _ms name this is NOT milliseconds -- compare it against
+  // GameState.tick_60hz, never gameplay_now_ms.
   std::uint32_t ai_mode_start_time_ms = 0; // +0xA4
   // AI turn-bias direction (-1/0/+1) used by ships that bank/lean into turns.
   // Ghidra names the source phase at ShipState +0xC8E4

@@ -5,6 +5,7 @@
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight_internal.hpp"
+#include "travel.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -487,8 +488,7 @@ float NovaShip_ComputeEffectiveMaxSpeedPxPerTick(const GameState &state,
 void NovaShip_IntegrateNpcMovement(GameState &state,
                                    Ship &ship,
                                    const ShipClass &ship_class,
-                                   float elapsed_ticks,
-                                   std::uint32_t now_ms) {
+                                   float elapsed_ticks) {
   constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
   constexpr float kTwoPi = 6.283185307179586F;
   constexpr float kFullCircleDeg = 360.0F;
@@ -774,11 +774,12 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       !fire_restricted;
   bool jump_glow_active = false;
   if (jump_spinup_control) {
-    constexpr float kJumpVelocityDamp = 0.8F;      // DAT_00575488
-    constexpr float kJumpProgressSubtract = 35.0F; // DAT_00575490
+    constexpr float kJumpVelocityDamp = 0.8F; // DAT_00575488
+    // 0x575498 = 35.0 is the unled/escort offset; the player-led branch uses
+    // 0x575490 = 45.0 and is a deferred gap.
+    constexpr float kJumpProgressSubtract = 35.0F; // DAT_00575498
     constexpr float kJumpProgressCap = 50.0F;      // DAT_00575388
     constexpr float kJumpDurationScale = 0.01F;    // DOUBLE_00575368
-    constexpr float kJumpDurationMs = 350.0F;
 
     ship.vel_x *= kJumpVelocityDamp;
     ship.vel_y *= kJumpVelocityDamp;
@@ -792,17 +793,17 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     if (!aligned) {
       // Ghidra resets the mode-start timestamp while the ship is still
       // turning, so the jump-speed ramp begins only after alignment.
-      ship.ai_mode_start_time_ms = now_ms;
+      ship.ai_mode_start_time_ms = state.tick_60hz;
     } else {
-      // The original uses elapsed wall-clock time multiplied by the ship-class
-      // jump_duration_multiplier, divided by duration_ms * 0.01, then subtracts
-      // 35. The class multiplier is decoded (ShipClassDef +0x44) but this NPC
-      // ramp still uses 1.0; apply it here as a follow-up.
-      // TODO(decomp(0x004347e8)) skipped: NPC jump ramp class multiplier.
-      const float elapsed_jump_ms =
-          static_cast<float>(now_ms - ship.ai_mode_start_time_ms);
+      // The original uses elapsed 60 Hz ticks multiplied by the ship-class
+      // jump_duration_multiplier, divided by duration_60hz * 0.01, then
+      // subtracts 35 / multiplier. TODO(decomp(0x004347e8)) skipped: NPC jump
+      // ramp class multiplier (the port uses the 1.0 base).
+      const float elapsed_jump_60hz =
+          static_cast<float>(state.tick_60hz - ship.ai_mode_start_time_ms);
       float jump_progress =
-          elapsed_jump_ms / (kJumpDurationMs * kJumpDurationScale) -
+          elapsed_jump_60hz /
+              (NovaTravel_JumpSequenceDuration60Hz() * kJumpDurationScale) -
           kJumpProgressSubtract;
       jump_progress = std::clamp(jump_progress, 0.0F, kJumpProgressCap);
       if (jump_progress > 0.0F) {

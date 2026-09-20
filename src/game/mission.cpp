@@ -1699,6 +1699,9 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
                                       bool emit_completion_payload,
                                       std::uint32_t now_ms,
                                       const MissionAcceptanceSink &acceptance) {
+  // now_ms is kept for the caller chain but the AI state-2 stamp reads the
+  // shared 60 Hz counter (NovaAi_EnterState2ClearPrimaryTarget).
+  (void)now_ms;
   for (Ship &ship : state.ships_) {
     if (!ship.is_active || ship.mission_fleet_slot != mission_slot) {
       continue;
@@ -1711,7 +1714,7 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
         ship.ai_behavior_code = ship_class->default_ai_behavior;
       }
       ship.squad_leader_ship_slot = -1;
-      NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+      NovaAi_EnterState2ClearPrimaryTarget(state, ship);
     }
     if (state.in_travel_scene) {
       ship.is_active = false;
@@ -2584,6 +2587,9 @@ bool Mission_CheckMissionShipInteractionEligibility(const GameState &state,
 bool Mission_HandleAcceptedShipInteraction(GameState &state,
                                            std::int16_t target_ship_slot,
                                            std::uint32_t now_ms) {
+  // now_ms is kept for the caller chain; the state-2 stamp reads the shared
+  // 60 Hz counter.
+  (void)now_ms;
   if (target_ship_slot <= 0 ||
       !state.SlotInRange(static_cast<std::size_t>(target_ship_slot))) {
     return false;
@@ -2602,7 +2608,7 @@ bool Mission_HandleAcceptedShipInteraction(GameState &state,
     pers.alive = false;
   }
   if ((pers.flags_primary & 0x0800U) != 0U) {
-    NovaAi_EnterState2ClearPrimaryTarget(target, now_ms);
+    NovaAi_EnterState2ClearPrimaryTarget(state, target);
   }
 
   std::int16_t mission_slot = -1;

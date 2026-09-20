@@ -363,12 +363,7 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       // Ship_HandleShip's position integration precedes Ship_UpdateVisualState
       // in the containing scope. Keep the wreck's current-frame coast before
       // any finale deactivates it.
-      NovaShip_IntegrateNpcMovement(
-          state,
-          ship,
-          *cls,
-          elapsed_ticks,
-          static_cast<std::uint32_t>(state.gameplay_now_ms));
+      NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
       ship.destruction_raw_tick_accumulator +=
           std::max(0.0F, RawSpaceflightCallTicks(elapsed_ticks));
       // Clean-room scheduler: the accumulator does not model an original
@@ -392,12 +387,7 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       continue;
     }
 
-    NovaShip_IntegrateNpcMovement(
-        state,
-        ship,
-        *cls,
-        elapsed_ticks,
-        static_cast<std::uint32_t>(state.gameplay_now_ms));
+    NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
 
     NovaWeapon_TickNpcWeaponBanks(ship, elapsed_ticks);
     // Ship_HandleShip hands a latched active bank to Weapon_FireShipWeapons.
