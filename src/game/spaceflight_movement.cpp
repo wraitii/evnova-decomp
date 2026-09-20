@@ -46,10 +46,11 @@ namespace game {
 //    ship turning at full thrust can build a small off-axis component that
 //    pushes its net speed modestly past the nominal top speed (the authentic
 //    EVN drift). Separately, the final velocity vector is then hard-capped
-//    each frame to +/-the effective max-speed component (DAT_005997bc/c0 in
-//    Ship_HandlePlayerShipControl 0x0044e019), pulling back any excess built
-//    up off-axis, so the cap bounds the net speed. The original's throttle is
-//    high enough to top out within a few frames.
+//    each frame to +/-the effective max-speed component
+//    (PlayerTick_ClampVelocity ToSpeedCaps 0x0044d05b, internal to
+//    Ship_HandlePlayerShipCore 0x0044aa70), pulling back any excess built up
+//    off-axis, so the cap bounds the net speed. The original's throttle is high
+//    enough to top out within a few frames.
 //
 //  * Inertia: most ships preserve momentum when throttle is released -- there
 //    is NO continuous velocity drag in the original's free-flight path, so a
@@ -60,7 +61,8 @@ namespace game {
 //
 //  * REVERSE ('s'/down) turns the ship toward the heading opposite its current
 //    velocity, then continues to coast; it does not apply retro-thrust. This is
-//    Ship_HandlePlayerShipControl's early Ship_TurnShipTowardHeading path.
+//    the PlayerTick_ReverseCommand arm (0x0044fff0), which arms the shared
+//    auto-turn continuation with the opposite-velocity heading.
 //
 // NOTE(decomp) scale/cadence: the original integrates over g_avg_frame_time_ms
 // (0x00735448, Frame_MeasureFrameTiming 0x00432ea0), so ship motion is
@@ -174,18 +176,36 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   }
 
   if (input_enabled && input.reverse) {
-    // Ghidra 0x0044e019: the reverse command finds the current velocity's
-    // bearing, adds 180 degrees, and calls Ship_TurnShipTowardHeading. It
-    // turns the hull around while preserving its velocity; it is not braking.
-    const float speed = std::hypot(ship.vel_x, ship.vel_y);
-    if (speed > 1e-4F) {
+    // Ghidra 0x0044fff0 PlayerTick_ReverseCommand (binding slot 0x16 / Down):
+    // the reverse command has two arms, split by Outfit_ShipIsInertialess
+    // (0x0044ffa8). It never applies forward thrust and never brakes via the
+    // normal velocity path.
+    if (opts.inertialess) {
+      // Inertialess arm (Ghidra 0x0044ffa8): retro-decay the maintained scalar
+      // speed (+0x48) by the effective thrust step, flooring at zero. The
+      // inertialess steering block below then rotates the velocity toward
+      // heading * the reduced speed; there is no turn and no turn_dir.
+      ship.speed = std::max(
+          0.0F, ship.speed - stats.thrust_px_per_tick2 * elapsed_ticks);
+    } else if (std::abs(ship.vel_x) >= 0.05F || std::abs(ship.vel_y) >= 0.05F) {
+      // Non-inertialess arm (Ghidra 0x0044fff0): derives the heading opposite
+      // the current velocity -- Math_BearingFromPointToPoint(origin,
+      // vel*100) + 180 deg -- stores it in ai_desired_heading_deg and latches
+      // the manual-flight auto-turn arm. It is not braking and applies no
+      // damping. The turn itself is the shared continuation at 0x00450086
+      // (the same one the face-target arm uses): one rounded turn step per
+      // frame, and no turn_dir once the shortest delta is within a step,
+      // where the original leaves sVar8 = 0 (so the bank animation decays
+      // instead of holding). DAT_005755b0 (0.05) is the per-axis gate.
       const float reverse_heading =
           std::atan2(ship.vel_x, -ship.vel_y) + 3.14159265358979323846F;
       const float desired = std::fmod(reverse_heading + kTwoPi, kTwoPi);
-      float delta = std::remainder(desired - ship.heading, kTwoPi);
-      stats.turn_dir = delta > 0.0F ? 1 : -1;
-      delta = std::clamp(delta, -turn_rad, turn_rad);
-      ship.heading = std::fmod(ship.heading + delta + kTwoPi, kTwoPi);
+      const float delta = std::remainder(desired - ship.heading, kTwoPi);
+      if (std::abs(delta) > turn_rad) {
+        ship.heading = std::fmod(
+            ship.heading + std::copysign(turn_rad, delta) + kTwoPi, kTwoPi);
+        stats.turn_dir = delta > 0.0F ? 1 : -1;
+      }
     }
   } else if (opts.face_target_armed) {
     // Ghidra 0x0044aa70 manual-flight auto-turn continuation: with the
