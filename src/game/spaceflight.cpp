@@ -133,9 +133,10 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
     // dispatch inside that function; the state/control tail must still run.
     // In particular, state-8 arrivals need mode 0x0a armed every frame or
     // their seeded 50-unit inward velocity never decays.
-    // skip_heavy_ai=0: these spawned ships run the full (heavy) AI decision.
-    NovaAi_UpdateShipAI(
-        state, ship, /*skip_heavy_ai=*/false, now_ms, elapsed_ticks);
+    // The original's second argument only gates its AI-update throttle
+    // (g_ai_update_period); the port runs at maximum cadence and does not model
+    // that throttle, so the argument is not carried here.
+    NovaAi_UpdateShipAI(state, ship, now_ms, elapsed_ticks);
   }
 }
 

@@ -757,14 +757,20 @@ void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
 }
 
 // ---- Ghidra 0x00401000 Ship_UpdateShipAI : the top-level dispatcher. ----
-// Applies the global "heavy AI" cadence gating/skips, recomputes the effective
-// movement stats cached on the ship when its class is the 0x2ff sentinel
-// (player-side; not relevant to NPCs), dispatches to the behavior supervisor
-// selected by ship.ai_behavior_code, then runs the state machine and applies
-// the controls. `skip_heavy_ai` forces the reduced (non-heavy) path.
+// Recomputes the effective movement stats cached on the ship when its class is
+// the 0x2ff sentinel (player-side; not relevant to NPCs), selects the
+// dispatcher arm, dispatches to the behavior supervisor selected by
+// ship.ai_behavior_code, then runs the state machine and applies the controls.
+//
+// Deliberate divergence (maximum cadence): the original throttles the heavy
+// decision on slow machines with the g_ai_update_period stagger. Around
+// 0x00401242 it raises a skip flag for a non-idle ship on every frame where
+// spaceflight_frame_counter % period != instance_id % period; that flag
+// suppresses both the behavior supervisor and Ship_UpdateShipAiState. The port
+// runs every frame (period 1) and does not model the throttle, nor the
+// original's second argument that only bypasses it.
 void NovaAi_UpdateShipAI(GameState &state,
                          Ship &ship,
-                         bool skip_heavy_ai,
                          std::uint32_t now_ms,
                          float elapsed_ticks) {
   // Rare "defunct / retired" global abort (DAT_00596d3d set): skip AI.
@@ -796,24 +802,25 @@ void NovaAi_UpdateShipAI(GameState &state,
   // the ordinary arrival slowdown before behavior dispatch. The threshold is
   // FLOAT_00575004 (-900.0f), not the general negative-timer test.
   const bool arrival_slowdown_sentinel = ship.ai_station_hold_timer < -900.0F;
+  // Latch the control mode before the state-0x0B hold-exit writes below can
+  // change it: the original picks its dispatcher arm from the entry value
+  // (disasm 0x004011de/0x004011ee).
+  const std::int16_t entry_control_mode = ship.ai_control_mode;
+  const bool entry_hold_control =
+      entry_control_mode == 4 || entry_control_mode == 0xd;
+
   if (arrival_slowdown_sentinel) {
     ship.ai_state_code = 8;
     ship.ai_control_mode = 10;
-  } else if (ship.ai_state_code == 8) {
-    // State 8 is valid only while its arrival sentinel is present. The
-    // original clears an orphaned state 8 before cadence/behavior dispatch;
-    // this is also the normal state observed immediately after the movement
-    // integrator completes the negative-speed slowdown reset.
-    ship.ai_state_code = 0;
-  }
-
-  // Ghidra 0x00401000 slice (disasm 0x004012c0..0x00401340): while parked in
-  // the formation control modes, state 0x0B (squad jump hold) exits when its
-  // reason disappears -- the player leader went disabled, or an NPC leader
-  // left the hold (timer <= 1.0) into combat (state 4). Same reset writes as
-  // the disabled path.
-  const std::int16_t entry_control_mode = ship.ai_control_mode;
-  if (ship.ai_control_mode == 4 || ship.ai_control_mode == 0xd) {
+  } else if (entry_hold_control) {
+    // Ghidra 0x00401000 slice (disasm 0x004016b4..0x004017ec): while parked in
+    // the formation control modes, state 0x0B (squad jump hold) exits when its
+    // reason disappears -- the player leader went disabled, or an NPC leader
+    // left the hold (timer <= 1.0) into combat (state 4). This arm rejoins
+    // directly at the state machine below (disasm 0x00401798 -> 0x004013d6),
+    // bypassing behavior selection: that is what keeps a control-mode-4 ship
+    // from re-stamping its jump spin-up clock every frame. The original also
+    // skips the cadence test and the state-0x13 roll here.
     auto exit_jump_hold = [&]() {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
@@ -833,24 +840,42 @@ void NovaAi_UpdateShipAI(GameState &state,
         exit_jump_hold();
       }
     }
+  } else {
+    // State 8 is valid only while its arrival sentinel is present. The
+    // original clears an orphaned state 8 before cadence/behavior dispatch;
+    // this is also the normal state observed immediately after the movement
+    // integrator completes the negative-speed slowdown reset.
+    if (ship.ai_state_code == 8) {
+      ship.ai_state_code = 0;
+    }
+
+    // Ghidra 0x00401000 calls Ship_IssueEscortOrders only in this ordinary
+    // arm (disasm 0x00401205..0x0040123d), after the arrival sentinel and
+    // hold-mode bypasses, and before the disabled auto-guard clears the
+    // leader's transient state. The frame phase is the original signed
+    // remainder of the signed 16-bit counter.
+    const int frame_phase =
+        static_cast<int>(state.spaceflight_frame_counter) % 8;
+    const int leader_phase = ship.ship_instance_id >> 3;
+    if (ship.is_any_ships_squad_leader && frame_phase == leader_phase) {
+      NovaAi_IssueEscortOrders(state, ship);
+    }
+
+    // TODO(decomp(0x004012ae)): the original's ordinary arm also rolls state
+    // 0x13 (escort disengagement idle) back to state 0, probability
+    // 1/trunc(100/frame_scale) per frame, and otherwise skips the heavy
+    // decision for that frame. Neither is modelled yet.
   }
 
-  // Ghidra 0x00401000 calls Ship_IssueEscortOrders only after the arrival
-  // sentinel and entry/hold control-mode bypasses, and before the disabled
-  // auto-guard clears the leader's transient state. The frame phase is the
-  // original signed remainder of the signed 16-bit global counter.
-  const int frame_phase = static_cast<int>(state.spaceflight_frame_counter) % 8;
-  const int leader_phase = ship.ship_instance_id >> 3;
-  if (!arrival_slowdown_sentinel && entry_control_mode != 4 &&
-      entry_control_mode != 0xd && ship.is_any_ships_squad_leader &&
-      frame_phase == leader_phase) {
-    NovaAi_IssueEscortOrders(state, ship);
-  }
-
-  // Auto-guard: a disabled ship ignores the whole AI selection and just
-  // holds its current state/controls; mirrors the original clearing the target
-  // slots and control to 0 first.
-  if (restricted && !arrival_slowdown_sentinel) {
+  // The disabled auto-guard and the behavior selection both live inside the
+  // original's ordinary arm; the sentinel and control-4/0xd arms rejoin at the
+  // state machine instead.
+  const bool ordinary_arm = !arrival_slowdown_sentinel && !entry_hold_control;
+  if (restricted && ordinary_arm) {
+    // Auto-guard: a disabled ship ignores the whole AI selection and just
+    // holds its current state/controls; mirrors the original clearing the
+    // target slots and control to 0 first. It falls through to the state
+    // machine so the ship (re)parks.
     ship.squad_leader_ship_slot = -1;
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
@@ -860,35 +885,13 @@ void NovaAi_UpdateShipAI(GameState &state,
     // TODO(decomp): the original also clears defense_fleet_home_stellar_id
     // here (Ship_UpdateShipAI 0x00401000); the port leaves it set. Investigate
     // whether dropping it is a deliberate divergence or a gap.
-    // Fall through to the state machine so it (re)parks the ship.
   }
 
-  // Half of the heavy cadence: the original skips the heavy AI block for some
-  // ships each frame (g_render_quality_setting / skill-variance staggering).
-  // We preserve the cadence structure: heavy AI runs unless skip_heavy_ai or
-  // a per-ship skill-variance gate says otherwise.
-  bool run_heavy = !skip_heavy_ai;
-  if (run_heavy) {
-    const ShipClass *cls = state.scenario.Ship(
-        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    if (cls && (cls->sprite_behavior_flags & 2) != 0) {
-      // Ships with fold/unfold animation frames (Flags 2) can afford the
-      // heavy decision every frame; basic ones are rate-limited by the
-      // animation cycle length (provisional cadence, from +0xA00).
-      const std::int16_t variance = cls->animation_cycle_count;
-      if (variance > 0 || ship.ship_instance_id % 3 == 0) {
-        // heavy path allowed
-      } else {
-        run_heavy = false;
-      }
-    }
-  }
-
-  // The original sentinel arm bypasses the entire behavior/disabled branch,
-  // then runs only the state and control tail. State 8 restores -999 each
-  // frame, keeping behavior supervisors from stealing the arrival until the
-  // negative-speed integrator completes it.
-  if (run_heavy && !restricted && !arrival_slowdown_sentinel) {
+  // The original sentinel and control-4/0xd arms bypass the entire
+  // behavior/disabled branch, then run only the state and control tail. State 8
+  // restores -999 each frame, keeping behavior supervisors from stealing the
+  // arrival until the negative-speed integrator completes it.
+  if (!restricted && ordinary_arm) {
     // Dispatch precedence (Ship_UpdateShipAI 0x00401000): a ship holding a
     // stellar assignment runs Ship_DefenseFleetPrioritizePlayerThreat and
     // skips the behavior supervisors entirely. Otherwise availability-driven
@@ -963,10 +966,10 @@ void NovaAi_UpdateShipAI(GameState &state,
     }
   }
 
-  // Always run the state machine + controls (the original does so after the
-  // heavy block even when bVar6 skipped the heavy decision). elapsed_ticks is
-  // the normalized cadence published by the original's misleadingly named
-  // _g_avg_frame_time_ms EMA (about 1.0 at 30 Hz).
+  // The state machine always runs; the original only gates it on its
+  // max-cadence throttle, which the port does not model (see the header).
+  // elapsed_ticks is the normalized cadence published by the original's
+  // misleadingly named _g_avg_frame_time_ms EMA (about 1.0 at 30 Hz).
   NovaAi_UpdateShipState(state, ship, now_ms, elapsed_ticks);
   NovaAi_ApplyControls(state, ship, elapsed_ticks, now_ms);
 }
