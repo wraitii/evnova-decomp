@@ -5,6 +5,8 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace game::starmap_detail {
@@ -58,6 +60,13 @@ struct PoliticalOverlay {
 
 [[nodiscard]] bool SystemOnMap(const GameState &state,
                                std::int16_t zero_based_id);
+
+// Ghidra 0x004aab30 search helpers: normalize a name to lowercase [a-z0-9], and
+// pick the best visible+visited name prefix match (-1 when nothing qualifies).
+[[nodiscard]] std::string NormalizeSearchName(std::string_view text);
+
+[[nodiscard]] std::int16_t FindBestSystemMatch(const GameState &state,
+                                               std::string_view query);
 
 [[nodiscard]] std::vector<MappedSystem> BuildMappedSystems(
     const GameState &state, const MapView &view, const SDL_FRect &panel);
