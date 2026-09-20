@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "boarding_plunder.hpp"
+#include "compatibility.hpp"
 #include "escort_formation.hpp"
 #include "frame_timing.hpp"
 #include "government.hpp"
@@ -1991,22 +1992,38 @@ void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
 
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Ports the escort-mode/state
 // flip plus the pers announcement arm: a personality ship (no mission fleet)
-// whose pers Flags carry 0x10 hails once when made hostile, unless it is
+// whose pers Flags carry 0x10 announces once when made hostile, unless it is
 // already disabled/destroyed or still pressing its previous target.
 void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
   if (!NovaAiShip_ShouldKeepPressingTarget(state, ship) &&
       ship.pers_def_slot >= 0 && ship.mission_fleet_slot == -1) {
     const auto &pers =
         state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
+    // BUGFIX(original): 0x00410755 pushes [g_ship_states] (slot 0 == the
+    // player) into Ship_IsShipDestroyed while the adjacent disabled and
+    // keep-pressing calls take the argument ship, so the original consults the
+    // wrong hull. The predicates agree in practice because IsDisabled already
+    // covers most destroyed ships, so this only diverts in the edges: a dying
+    // stellar-attached ship that is destroyed-but-not-disabled, or frames while
+    // the player is destroyed. The port checks the ship being flipped; clearing
+    // the compat flag restores the literal player-slot read.
+    const bool destroyed = kApplyOriginalBugFixes
+                               ? NovaAiShip_IsDestroyed(ship)
+                               : NovaAiShip_IsDestroyed(state.player);
     if ((static_cast<std::uint16_t>(pers.flags_primary) & 0x10U) != 0U &&
-        !NovaAiShip_IsDisabled(state, ship) && !NovaAiShip_IsDestroyed(ship)) {
+        !NovaAiShip_IsDisabled(state, ship) && !destroyed) {
       state.mission_speaker_ship_slot = ship.ship_instance_id;
+      // TODO(decomp(0x00410773)) skipped: g_hud_overlay_msg_color = 0xffff is a
+      // dead store; Mission_ShowMissionShipAnnouncement's overlay show
+      // immediately overwrites it with the 0x1a4 tick countdown.
       Mission_ShowMissionShipAnnouncement(state, pers.hail_quote_id);
       ship.mission_hail_latch = 1;
       state.mission_speaker_ship_slot = -1;
     }
   }
-  if (ship.ai_control_mode == 4 || ship.ai_control_mode == 0x0D) {
+  // 0x004107ab gates the drop on Ship_IsShipInHoldStateWithControlMode4Or0x0D:
+  // ai_state_code must be 2/3/0x0B *and* ai_control_mode 4/0x0D.
+  if (NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(ship)) {
     ship.ai_control_mode = 0;
   }
   ship.ai_state_code = 4;
