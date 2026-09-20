@@ -40,7 +40,7 @@ jobs:
             package_name: evnova-macos-arm64
           - name: Windows
             runner: windows-2022
-            triplet: x64-windows
+            triplet: x64-windows-static
             deploy_target: ''
             package_name: evnova-windows-x64
 
@@ -90,11 +90,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .vcpkg-binary-cache
-          # The primary key must encode the full build configuration: vcpkg folds
-          # the triplet (and its overlay settings such as the macOS deployment
-          # target) into each port's ABI hash, so a config change means the old
-          # entries no longer match. Without this the primary key still hits, the
-          # save step is skipped, and every run silently rebuilds every port.
+          # The primary key encodes the full build configuration because vcpkg
+          # folds the triplet (and overlay settings such as the macOS deployment
+          # target) into each port's ABI hash. If the key omitted them, a config
+          # change would produce a primary-key hit, skip the save step, and force
+          # a full rebuild on every run.
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.triplet }}-${{ matrix.deploy_target }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
             vcpkg-${{ runner.os }}-${{ runner.arch }}-
@@ -133,16 +133,6 @@ jobs:
           path: .vcpkg-binary-cache
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.triplet }}-${{ matrix.deploy_target }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
 
-      - name: Add vcpkg DLLs to the Windows test path
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE 'vcpkg_installed\x64-windows\bin'
-          if (-not (Test-Path $vcpkgBin)) {
-            throw "vcpkg runtime directory was not found: $vcpkgBin"
-          }
-          Add-Content -Path $env:GITHUB_PATH -Value $vcpkgBin
-
       - name: Configure
         run: cmake --preset release -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVCPKG_OVERLAY_TRIPLETS=ci-triplets -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ matrix.deploy_target }}
 
@@ -167,9 +157,9 @@ jobs:
             '[#collision_test],[#command_input_test],[#flight_automation_test],[#impact_effects_test],[#mission_script_test]~"mission payload context expands Q message text tags",[#movement_test],[#nova_command_test],[#nova_font_test],[#outfit_clamp_test],[#outfit_ionization_test],[#placement_test],[#render_clip_scope_test],[#sdl_audio_test],[#services_buttons_test],[#ship_visual_test],[#spaceflight_player_state_test],[#sprite_test]' \
             --reporter console --verbosity quiet
 
-      # The Windows build links vcpkg's dynamic triplet, so bundle its runtime
-      # DLLs beside the executable. macOS links statically. Linux ships no
-      # binary: the glibc floor of the runner would exclude older distros, so
+      # Windows uses the static triplet, so the executable is self-contained
+      # with no vcpkg runtime DLLs to bundle. macOS links statically. Linux ships
+      # no binary: the glibc floor of the runner would exclude older distros, so
       # Linux users build from source instead.
       - name: Package
         if: runner.os != 'Linux'
@@ -181,7 +171,6 @@ jobs:
           mkdir -p "dist/$pkg"
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cp build/release/src/evnova.exe "dist/$pkg/"
-            cp vcpkg_installed/${{ matrix.triplet }}/bin/*.dll "dist/$pkg/"
             (cd dist && 7z a "$pkg.zip" "$pkg" >/dev/null)
           else
             cp build/release/src/evnova "dist/$pkg/"
