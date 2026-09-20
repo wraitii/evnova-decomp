@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.25)
 
+# SDL3_ttf/SDL3_mixer's CMake config adds their vcpkg libdir as a link directory,
+# which CMake turns into an LC_RPATH pointing into the build tree. Every dependency
+# is linked statically, so no rpath is needed; suppress it so a binary copied out of
+# the build tree does not carry developer-specific paths.
+if(APPLE)
+    set(CMAKE_SKIP_BUILD_RPATH TRUE)
+endif()
+
 project(EscapeVelocityNova
     VERSION 0.1.0
     DESCRIPTION "A clean-room recompilation of Escape Velocity Nova"

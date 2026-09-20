@@ -31,12 +31,18 @@ jobs:
           - name: Linux
             runner: ubuntu-24.04
             triplet: x64-linux
+            deploy_target: ''
+            package_name: evnova-linux-x64
           - name: macOS
             runner: macos-15
             triplet: arm64-osx
+            deploy_target: 11.0
+            package_name: evnova-macos-arm64
           - name: Windows
             runner: windows-2022
             triplet: x64-windows
+            deploy_target: ''
+            package_name: evnova-windows-x64
 
     steps:
       - name: Check out source
@@ -92,9 +98,28 @@ jobs:
         shell: bash
         run: mkdir -p .vcpkg-binary-cache
 
+      - name: Prepare the vcpkg triplet overlay
+        shell: bash
+        run: |
+          # vcpkg accepts a macOS deployment target only through a triplet, and the
+          # project keeps no project-local triplet (vcpkg's arm64-osx already links
+          # statically). Generate one here so the distribution build targets arm64's
+          # floor of 11.0 instead of the runner's SDK.
+          mkdir -p ci-triplets
+          if [[ -n "${{ matrix.deploy_target }}" ]]; then
+          cat > "ci-triplets/${{ matrix.triplet }}.cmake" <<'EOF'
+          set(VCPKG_TARGET_ARCHITECTURE arm64)
+          set(VCPKG_CRT_LINKAGE dynamic)
+          set(VCPKG_LIBRARY_LINKAGE static)
+          set(VCPKG_CMAKE_SYSTEM_NAME Darwin)
+          set(VCPKG_OSX_ARCHITECTURES arm64)
+          set(VCPKG_OSX_DEPLOYMENT_TARGET "${{ matrix.deploy_target }}")
+          EOF
+          fi
+
       - name: Install manifest dependencies
         shell: bash
-        run: ./vcpkg/vcpkg install --x-manifest-root=. --triplet "${{ matrix.triplet }}"
+        run: ./vcpkg/vcpkg install --x-manifest-root=. --triplet "${{ matrix.triplet }}" --overlay-triplets=ci-triplets
 
       - name: Save vcpkg binary cache
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
@@ -114,7 +139,7 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $vcpkgBin
 
       - name: Configure
-        run: cmake --preset release -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
+        run: cmake --preset release -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVCPKG_OVERLAY_TRIPLETS=ci-triplets -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ matrix.deploy_target }}
 
       - name: Build
         run: cmake --build --preset release --parallel -- -k 0
@@ -136,3 +161,79 @@ jobs:
           "$test_exe" --filenames-as-tags \
             '[#collision_test],[#command_input_test],[#flight_automation_test],[#impact_effects_test],[#mission_script_test]~"mission payload context expands Q message text tags",[#movement_test],[#nova_command_test],[#nova_font_test],[#outfit_clamp_test],[#outfit_ionization_test],[#placement_test],[#render_clip_scope_test],[#sdl_audio_test],[#services_buttons_test],[#ship_visual_test],[#spaceflight_player_state_test],[#sprite_test]' \
             --reporter console --verbosity quiet
+
+      # The Windows build links vcpkg's dynamic triplet, so bundle its runtime
+      # DLLs beside the executable. macOS links statically. Linux ships no
+      # binary: the glibc floor of the runner would exclude older distros, so
+      # Linux users build from source instead.
+      - name: Package
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg="${{ matrix.package_name }}"
+          rm -rf dist
+          mkdir -p "dist/$pkg"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp build/release/src/evnova.exe "dist/$pkg/"
+            cp vcpkg_installed/${{ matrix.triplet }}/bin/*.dll "dist/$pkg/"
+            (cd dist && 7z a "$pkg.zip" "$pkg" >/dev/null)
+          else
+            cp build/release/src/evnova "dist/$pkg/"
+            chmod +x "dist/$pkg/evnova"
+            (cd dist && tar -czf "$pkg.tar.gz" "$pkg")
+          fi
+          ls -l dist
+
+      - name: Upload package
+        if: runner.os != 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package_name }}
+          path: dist/${{ matrix.package_name }}.*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-nightly:
+    name: Publish latest-nightly
+    needs: release
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish latest-nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-nightly
+          name: Latest nightly
+          prerelease: true
+          body: |
+            Automated nightly build of `main`, refreshed on every green CI run.
+
+            These builds are untested snapshots of an in-progress reimplementation
+            and are not signed.
+
+            **macOS:** the build is unsigned and targets Apple Silicon only. After
+            extracting, clear the quarantine flag before running:
+
+            ```
+            xattr -dr com.apple.quarantine evnova-macos-arm64
+            ```
+
+            **Linux:** no prebuilt binary is provided. Clone the repository and
+            build from source (the `release` CMake preset installs dependencies via
+            vcpkg).
+
+            Assets:
+            - `evnova-macos-arm64.tar.gz`
+            - `evnova-windows-x64.zip`
+          files: dist/*
+          fail_on_unmatched_files: true
