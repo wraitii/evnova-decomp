@@ -256,6 +256,17 @@ related side effects owned by another subsystem.
 | `0x16` | Jump-out / retreat | Heads at stellar map coordinates but does not thrust. |
 | `0x17` | Hypergate/wormhole entry handoff | No dedicated movement block | State `0x14` uses this marker after reaching the gate. The control-mode switch does no steering; transfer/vanish is completed by the surrounding jump path. |
 
+The `Ship_EscortFireAtUnprovokedTarget` (0x00411540) automatic-weapon refresh
+is made from exactly five mode arms, each at its body tail: mode `0x00`
+(0x00408674, the dispatch's leading `TEST EDI,EDI; JZ` target hit before the
+mode-0x12 block, unconditional, no steering/speed write), mode `0x01`
+(0x0040847d, disabled-gated), mode `0x09` (0x0040ae2f, disabled- and
+target-slot-gated), mode `0x0b` (0x0040acf1, disabled- and target-slot-gated)
+and mode `0x0c` (0x0040b4bc, disabled-gated and requiring
+`ai_secondary_target_slot != -1`). A failed `!disabled`/target guard skips the
+whole arm, refresh included. Modes above `0x16` (including `0x17`) match no arm
+and fall through the dispatch to the epilogue at 0x0040c553 with no call.
+
 ## Relevant `ShipState` values
 
 Offsets are original-binary `ShipState` offsets.  The C++ model intentionally
@@ -370,17 +381,6 @@ labels.
   behavior cannot replace the arrival state before its speed decay completes.
 
 ## Known divergences
-
-- **Fire-refresh call site.** The original `Ship_ApplyShipAiControls`
-  (0x00408150) calls `Ship_EscortFireAtUnprovokedTarget` (0x00411540) at the
-  tail of control modes `0x00`, `0x01`, `0x09`, `0x0b`, and `0x0c`
-  (0x0040847d, 0x00408674, 0x0040acf1, 0x0040ae2f, 0x0040b4bc). The port
-  implements the calls in modes 1/9/0xb/0xc but omits the mode-0 call and
-  instead runs an unconditional post-state call in `NovaAi_UpdateShipAI`
-  guarded only on `ai_state_code != 0x12`. That covers every control mode
-  (including 6/7/0x16, where the original never calls it) and also mode `0x17`,
-  which has no arm in the original. Tracked as `TODO(decomp(0x00408150))` in
-  `src/game/ship_ai_controls.cpp`.
 
 - **Carrier-bay launch and state-4 standoff arm.** The original state-4
   valid-target tail (`LAB_00406bc2`, 0x00406bd2) now runs in the port
