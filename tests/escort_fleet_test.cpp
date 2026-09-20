@@ -61,22 +61,22 @@ TEST_CASE("escort management keeps sale and upgrade marks exclusive",
   Ship &escort = MakeEscort(state, 1, 0);
 
   CHECK_FALSE(game::NovaEscortManagement_ApplyAction(
-      state, escort, game::EscortManagementAction::kToggleUpgrade, 0));
+      state, escort, game::EscortManagementAction::kToggleUpgrade));
   CHECK(escort.escort_upgrade_mark == 1);
   CHECK(escort.escort_pending_sale_mark == 0);
 
   CHECK_FALSE(game::NovaEscortManagement_ApplyAction(
-      state, escort, game::EscortManagementAction::kToggleSale, 0));
+      state, escort, game::EscortManagementAction::kToggleSale));
   CHECK(escort.escort_upgrade_mark == 0);
   CHECK(escort.escort_pending_sale_mark == 1);
 
   CHECK_FALSE(game::NovaEscortManagement_ApplyAction(
-      state, escort, game::EscortManagementAction::kToggleSale, 0));
+      state, escort, game::EscortManagementAction::kToggleSale));
   CHECK(escort.escort_pending_sale_mark == 0);
 
   escort.escort_origin_mark = 1;
   CHECK_FALSE(game::NovaEscortManagement_ApplyAction(
-      state, escort, game::EscortManagementAction::kToggleSale, 0));
+      state, escort, game::EscortManagementAction::kToggleSale));
   CHECK(escort.escort_pending_sale_mark == 0);
 }
 
@@ -97,7 +97,7 @@ TEST_CASE("escort management release transfers cargo before detaching",
   state.player.current_system_id = 4;
 
   REQUIRE(game::NovaEscortManagement_ApplyAction(
-      state, released, game::EscortManagementAction::kRelease, 1234));
+      state, released, game::EscortManagementAction::kRelease));
   CHECK(released.cargo_bins[0] == 10);
   CHECK(state.inventory.cargo_bins[0] == 20);
   CHECK(released.squad_leader_ship_slot == -1);

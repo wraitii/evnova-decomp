@@ -188,7 +188,7 @@ void NovaAi_UpdateShipState(GameState &state,
       if (!NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
         ship.ai_state_code = 6;
       } else {
-        NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+        NovaAi_EnterState2ClearPrimaryTarget(state, ship);
       }
       return;
     }

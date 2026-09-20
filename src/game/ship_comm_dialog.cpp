@@ -961,8 +961,7 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
           (*action == EscortManagementAction::kToggleSale && !can_sell)) {
         continue;
       }
-      if (NovaEscortManagement_ApplyAction(
-              state, escort, *action, platform.gameplay_ticks_ms())) {
+      if (NovaEscortManagement_ApplyAction(state, escort, *action)) {
         return true;
       }
     }
@@ -975,8 +974,7 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
 
 bool NovaEscortManagement_ApplyAction(GameState &state,
                                       Ship &escort,
-                                      EscortManagementAction action,
-                                      std::uint32_t now_ms) {
+                                      EscortManagementAction action) {
   switch (action) {
   case EscortManagementAction::kClose:
     return true;
@@ -990,7 +988,7 @@ bool NovaEscortManagement_ApplyAction(GameState &state,
     escort.ai_behavior_code =
         ship_class != nullptr ? ship_class->default_ai_behavior : 1;
     NovaShip_ResetAiBehaviorRuntimeFields(escort);
-    NovaAi_EnterState2ClearPrimaryTarget(escort, now_ms);
+    NovaAi_EnterState2ClearPrimaryTarget(state, escort);
     state.InvalidateDerivedStatCaches();
     return true;
   }
@@ -1036,6 +1034,11 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   SdlPlatform::ScopedPlacement placement_guard(platform,
                                                platform.current_placement());
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
+  // Keep the shared 60 Hz tick counter current for the state-2 entries this
+  // dialog can make (NovaAi_EnterState2ClearPrimaryTarget stamps
+  // ai_mode_start_time_ms from it).
+  state.tick_60hz =
+      static_cast<std::uint32_t>(state.gameplay_now_ms * 60 / 1000);
   if (ship_slot <= 0 ||
       ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips)) {
     NovaLog::Warn("ship-comm: slot {} out of range",
@@ -1310,8 +1313,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
             RunBribePayment(state, bribe_cost, free_help);
         if (outcome == BribeOutcome::kPaid) {
           status = LoadCommPrompt(random_index, kMsgBusiness).value_or(status);
-          NovaAi_EnterState2ClearPrimaryTarget(
-              target, static_cast<std::uint32_t>(platform.gameplay_ticks_ms()));
+          NovaAi_EnterState2ClearPrimaryTarget(state, target);
           target.ai_behavior_code = 1;
         } else if (outcome == BribeOutcome::kRefused) {
           status =
@@ -1559,8 +1561,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     target.ai_state_code = 0;
     target.ai_control_mode = 0;
     target.ai_secondary_target_slot = -1;
-    NovaAi_EnterState2ClearPrimaryTarget(
-        target, static_cast<std::uint32_t>(platform.gameplay_ticks_ms()));
+    NovaAi_EnterState2ClearPrimaryTarget(state, target);
   }
   target.comm_interacted_mark = 1;
   return true;

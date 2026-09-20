@@ -120,10 +120,10 @@ NovaAi_SelectRandomAdjacentDestination(GameState &state, const Ship &ship);
 
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget. Enters AI
 // state 0x02 (local jump-departure staging), clears the current primary target,
-// clamps the station-hold timer below zero, and records the current tick count
-// in ai_mode_start_time_ms. The state brakes while moving, then selects the
-// centre-outward mode-3/mode-4 departure path.
-void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms);
+// clamps the station-hold timer below zero, and records the current 60 Hz tick
+// count (GameState.tick_60hz) in ai_mode_start_time_ms. The state brakes while
+// moving, then selects the centre-outward mode-3/mode-4 departure path.
+void NovaAi_EnterState2ClearPrimaryTarget(GameState &state, Ship &ship);
 
 // Ghidra 0x00410dd0 Ship_ResetShipPrimaryAndSecondaryTargets. Resets the
 // movement/target state to idle unless the ship is in states 9 or 0xf; this is
@@ -311,16 +311,14 @@ void NovaAi_UpdateShipState(GameState &state,
 // AI state machine actually move ships. Also latches ai_fire_trigger_latch for
 // the firing path. `elapsed_ticks` is the normalized
 // cadence used by the position/velocity creeps (the original's misleadingly
-// named _g_avg_frame_time_ms is elapsed milliseconds * 0.03); `now_ms` backs
-// the mode-4/0xd wall-clock bookkeeping.
+// named _g_avg_frame_time_ms is elapsed milliseconds * 0.03). The mode-4/0xd
+// jump/formation bookkeeping reads GameState.tick_60hz directly and stamps
+// ai_mode_start_time_ms in those 1/60 s ticks.
 // The per-mode turn/thrust polynomials come from the decoded _DAT_00575xxx
 // globals. Weapon selection is wired in via the four NovaAi_Select* helpers;
 // formation-offset mirroring, predictive-aim-when-bank-live, carrier-bay
 // launches and the +0xBD boost latch remain deferred (TODO(decomp)).
-void NovaAi_ApplyControls(GameState &state,
-                          Ship &ship,
-                          float elapsed_ticks,
-                          std::uint32_t now_ms);
+void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks);
 
 // Ghidra 0x00401000 Ship_UpdateShipAI. The top-level per-ship AI entry: applies
 // the dispatcher's arm selection, recomputes some stat caches, dispatches to
@@ -355,8 +353,7 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
 // ship has a fireable stellar-damage weapon, otherwise falls back to behavior
 // 0x03. Dispatched for active mission fleets whose ShipGoal is 2.
 void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
-                                                     Ship &ship,
-                                                     std::uint32_t now_ms);
+                                                     Ship &ship);
 
 // Ghidra 0x004048a0 Ship_UpdateEscortAI. Per-frame supervisor
 // for behavior > 4 ships: releases squads whose leader vanished, arms the

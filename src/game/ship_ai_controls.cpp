@@ -47,14 +47,6 @@ constexpr float kMode2CloseGatePx = 500.0F;
 constexpr float kMode2ArriveFraction = 0.25F;
 // Mode-3 (depart from centre): alignment addend 3.0 (0x575120, float).
 constexpr float kMode3AlignAddend = 3.0F;
-// Stellar_GetJumpSequenceDuration60Hz (0x0046EFB0) returns 350 for the
-// engine-enabled path used by the NPC spin-up; the original threshold is
-// 350 / ShipClassDef.jump_duration_multiplier (decoded in the shp loader
-// 0x004bd3c0). This NPC path still uses the 1.0 multiplier (a follow-up gap);
-// NOTE: the original compares against 60 Hz tick elapsed time, i.e. a ~5.8 s
-// NPC spin-up, while the port's NPC path measures wall-clock ms (350 ms).
-// TODO(decomp) apply the class multiplier and unify on the 60 Hz tick unit.
-constexpr float kNpcJumpSpinupDurationMs = 350.0F;
 
 // --- Combat control-mode constants (Ship_ApplyShipAiControls, decoded from
 // the typed _DAT_00575xxx globals; same source table as the travel block). ---
@@ -107,10 +99,7 @@ constexpr float kEscortHalfSpanPx = 75.0F;
 // (5-0x17) are provisionally mapped onto the same steering primitive until
 // the combat/formation systems land. The movement constants are now decoded
 // from the Ghidra _DAT_00575xxx globals (see the constant block at the top).
-void NovaAi_ApplyControls(GameState &state,
-                          Ship &ship,
-                          float elapsed_ticks,
-                          std::uint32_t now_ms) {
+void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
   ship.ai_forward_thrust_cmd = 0.0F;
   ship.ai_fire_trigger_latch = 0;
   const ShipClass *cls =
@@ -409,22 +398,21 @@ void NovaAi_ApplyControls(GameState &state,
         BearingDeg(0.0F, 0.0F, ship.pos_x, ship.pos_y));
     if (ship.ai_station_hold_timer <= 0.0F) {
       ship.ai_station_hold_timer = 1.0F;
-      ship.ai_mode_start_time_ms = now_ms;
+      ship.ai_mode_start_time_ms = state.tick_60hz;
     }
     if (ship.ai_station_hold_timer > 1.0F &&
-        now_ms < ship.ai_mode_start_time_ms) {
-      ship.ai_mode_start_time_ms = now_ms;
+        state.tick_60hz < ship.ai_mode_start_time_ms) {
+      ship.ai_mode_start_time_ms = state.tick_60hz;
     }
     ship.ai_station_hold_timer += elapsed_ticks;
 
-    // Ghidra 0x00408150 compares elapsed 60 Hz tick time against
-    // Stellar_GetJumpSequenceDuration60Hz() / jump_duration_multiplier. The
-    // class multiplier is decoded (ShipClassDef +0x44) but this NPC path still
-    // uses the 1.0 base; keep the lifecycle transition exact. (Port measures
-    // ms; see the kNpcJumpSpinupDurationMs note.) TODO(decomp(0x00408150))
-    // skipped: NPC spin-up class multiplier.
-    if (static_cast<float>(now_ms - ship.ai_mode_start_time_ms) >=
-        kNpcJumpSpinupDurationMs) {
+    // Ghidra 0x00408150 compares elapsed 60 Hz tick time
+    // (NovaTime_GetTickCount60Hz() - ai_mode_start_time_ms) against
+    // Stellar_GetJumpSequenceDuration60Hz() / jump_duration_multiplier. TODO
+    // (decomp(0x00408150)) skipped: NPC spin-up class multiplier (the port
+    // divides by the 1.0 base).
+    if (static_cast<float>(state.tick_60hz - ship.ai_mode_start_time_ms) >=
+        NovaTravel_JumpSequenceDuration60Hz()) {
       ship.ai_station_hold_timer = 0.0F;
       ship.is_active = false;
       ship.current_system_id = -1;
@@ -457,8 +445,8 @@ void NovaAi_ApplyControls(GameState &state,
     ship.ai_desired_heading_deg = static_cast<std::int16_t>(leader_heading_deg);
     if (leader.ai_station_hold_timer > 1.0F) {
       if (ship.ai_station_hold_timer > 1.0F &&
-          now_ms < ship.ai_mode_start_time_ms) {
-        ship.ai_mode_start_time_ms = now_ms;
+          state.tick_60hz < ship.ai_mode_start_time_ms) {
+        ship.ai_mode_start_time_ms = state.tick_60hz;
       }
       if (ship.ai_station_hold_timer > 30.0F && leader_slot != 0) {
         ship.ai_desired_heading_deg = leader.ai_desired_heading_deg;
@@ -477,7 +465,7 @@ void NovaAi_ApplyControls(GameState &state,
         ship.ai_secondary_target_slot = leader.ai_secondary_target_slot;
         if (ship.ai_station_hold_timer == 0.0F) {
           ship.ai_station_hold_timer = 1.0F;
-          ship.ai_mode_start_time_ms = now_ms;
+          ship.ai_mode_start_time_ms = state.tick_60hz;
         }
         ship.vel_x *= kMode1StopDamp;
         ship.vel_y *= kMode1StopDamp;

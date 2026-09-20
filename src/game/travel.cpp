@@ -524,6 +524,12 @@ int FindLinkedTravelSlot(const GameState &state,
 
 } // namespace
 
+// Ghidra 0x0046efb0 Stellar_GetJumpSequenceDuration60Hz. Returns the
+// engine-enabled cue length; the noengine variant and fallback are deferred.
+[[nodiscard]] float NovaTravel_JumpSequenceDuration60Hz() {
+  return kJumpDuration60HzTicks;
+}
+
 // ShipClassDef.jump_duration_multiplier for the player's current hull. The
 // loader floors it at 0.5; 1.0 is the fallback for a missing/hostile class.
 [[nodiscard]] float

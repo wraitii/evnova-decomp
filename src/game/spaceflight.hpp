@@ -266,8 +266,7 @@ void NovaFrame_CancelCombatChatter(GameState &state, SdlAudio &audio);
 extern void NovaShip_IntegrateNpcMovement(GameState &state,
                                           Ship &ship,
                                           const ShipClass &ship_class,
-                                          float elapsed_ticks,
-                                          std::uint32_t now_ms = 0);
+                                          float elapsed_ticks);
 
 // Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020), the momentum
 // / turn integrator for inertialess ships (ShipClassDef.flags_secondary bit

@@ -852,9 +852,7 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
 // Shared travel fallback used by behavior 0x02/0x03. This is the common
 // `state 0 -> adjacent stellar -> state 1/2/6` ladder visible in both Ghidra
 // supervisors; mission and special-loadout branches remain deferred.
-void NovaAi_ReacquireTravelOrSettle(GameState &state,
-                                    Ship &ship,
-                                    std::uint32_t now_ms) {
+void NovaAi_ReacquireTravelOrSettle(GameState &state, Ship &ship) {
   const System *sys = CurrentSystem(state);
   const bool still_at_point = sys && ship.jump_destination_stellar_id >= 0 &&
                               NovaTargeting_IsStellarAdjacentToSystem(
@@ -866,7 +864,7 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state,
   }
   if (ship.ai_secondary_target_slot == -1) {
     if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
-      NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+      NovaAi_EnterState2ClearPrimaryTarget(state, ship);
     } else {
       ship.ai_state_code = 6;
     }
@@ -874,7 +872,7 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state,
     ship.travel_transfer_mode = 2;
     ship.ai_state_code = 1;
   } else if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
-    NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+    NovaAi_EnterState2ClearPrimaryTarget(state, ship);
   } else {
     ship.ai_state_code = 6;
   }
@@ -959,7 +957,7 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
       // gate uses THIS ship's class fuel (NovaTravel_CanShipInitiateJump-
       // Sequence), not the player's.
       if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
-        NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+        NovaAi_EnterState2ClearPrimaryTarget(state, ship);
       } else {
         ship.ai_state_code = 6;
       }
@@ -972,7 +970,7 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
       if (ship.ai_secondary_target_slot == -1) {
         // No route remains: try to jump, else settle into idle-template.
         if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
-          NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+          NovaAi_EnterState2ClearPrimaryTarget(state, ship);
         } else {
           ship.ai_state_code = 6;
         }
@@ -1021,9 +1019,7 @@ namespace {
 // ship has no squad leader. Arms the scripted asteroid manoeuvre (state 0x10),
 // the freeflight-anchor cargo pick-up (state 0x11), or the nearest-adjacent-
 // travel-stellar wander ladder; a hostile contact escalates to state 3.
-void NovaAi_UpdateAvailabilityBehavior(GameState &state,
-                                       Ship &ship,
-                                       std::uint32_t now_ms) {
+void NovaAi_UpdateAvailabilityBehavior(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     ship.ai_state_code = 0;
     ship.ai_control_mode = 0;
@@ -1079,7 +1075,7 @@ void NovaAi_UpdateAvailabilityBehavior(GameState &state,
             ship.ai_state_code = 0x11;
           }
         } else {
-          NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+          NovaAi_EnterState2ClearPrimaryTarget(state, ship);
         }
       }
     }
@@ -1096,7 +1092,7 @@ void NovaAi_UpdateAvailabilityBehavior(GameState &state,
         if (ship.ai_secondary_target_slot == -1 || ship.ai_state_code == 2 ||
             ship.ai_state_code == 3) {
           if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
-            NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+            NovaAi_EnterState2ClearPrimaryTarget(state, ship);
           } else {
             ship.ai_state_code = 6;
           }
@@ -1230,9 +1226,7 @@ void NovaAi_DefenseFleetPrioritizePlayerThreat(GameState &state, Ship &ship) {
 // contacts enter state 3. Government chatter and assistance encounter side
 // effects remain
 // TODO(decomp).
-void NovaAi_UpdateBehavior0x02(GameState &state,
-                               Ship &ship,
-                               std::uint32_t now_ms) {
+void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     return;
   }
@@ -1242,7 +1236,7 @@ void NovaAi_UpdateBehavior0x02(GameState &state,
   }
 
   if (ship.ai_state_code == 0 && ship.primary_target_ship_slot == -1) {
-    NovaAi_ReacquireTravelOrSettle(state, ship, now_ms);
+    NovaAi_ReacquireTravelOrSettle(state, ship);
   }
 
   if (ship.ai_hostility_accumulator > 0 &&
@@ -1281,9 +1275,7 @@ void NovaAi_UpdateBehavior0x02(GameState &state,
 // falls back to the normal travel/jump ladder when combat has no target. The
 // government flee, weapon-readiness, mission-fleet, and capture-variant arms
 // depend on data not represented by the current clean-room Ship model.
-void NovaAi_UpdateBehavior0x03(GameState &state,
-                               Ship &ship,
-                               std::uint32_t now_ms) {
+void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     return;
   }
@@ -1307,7 +1299,7 @@ void NovaAi_UpdateBehavior0x03(GameState &state,
   if (ship.ai_state_code == 0 && ship.primary_target_ship_slot == -1) {
     NovaAi_AcquirePrimaryTarget(state, ship);
     if (ship.primary_target_ship_slot == -1) {
-      NovaAi_ReacquireTravelOrSettle(state, ship, now_ms);
+      NovaAi_ReacquireTravelOrSettle(state, ship);
     } else if (ship.ai_station_hold_timer <= 0.0F) {
       // 0x00402e50 state-0 arm: a freshly acquired target promotes to attack
       // here, not inside Ship_AcquirePrimaryTargetForShip.
@@ -1390,7 +1382,7 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
                   /*unrestricted_only=*/false);
           if (ship.ai_secondary_target_slot == -1) {
             if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
-              NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+              NovaAi_EnterState2ClearPrimaryTarget(state, ship);
             } else {
               ship.ai_state_code = 6;
             }
@@ -1399,12 +1391,12 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
             ship.ai_state_code = 1;
           }
         } else if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
-          NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+          NovaAi_EnterState2ClearPrimaryTarget(state, ship);
         } else {
           ship.ai_state_code = 6;
         }
       } else if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
-        NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+        NovaAi_EnterState2ClearPrimaryTarget(state, ship);
       } else {
         ship.ai_state_code = 6;
       }

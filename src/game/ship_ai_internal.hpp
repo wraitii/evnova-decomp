@@ -55,18 +55,12 @@ namespace game {
 // ship-AI header because they are only called by the split implementation
 // units and the top-level dispatcher.
 void NovaAi_DefenseFleetPrioritizePlayerThreat(GameState &state, Ship &ship);
-void NovaAi_UpdateAvailabilityBehavior(GameState &state,
-                                       Ship &ship,
-                                       std::uint32_t now_ms);
+void NovaAi_UpdateAvailabilityBehavior(GameState &state, Ship &ship);
 void NovaAi_UpdateBehavior0x01(GameState &state,
                                Ship &ship,
                                std::uint32_t now_ms);
-void NovaAi_UpdateBehavior0x02(GameState &state,
-                               Ship &ship,
-                               std::uint32_t now_ms);
-void NovaAi_UpdateBehavior0x03(GameState &state,
-                               Ship &ship,
-                               std::uint32_t now_ms);
+void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship);
+void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship);
 
 [[nodiscard]] bool
 WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank);

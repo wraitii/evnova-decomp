@@ -57,13 +57,13 @@ using namespace ship_ai_detail;
 bool NovaAiShip_IsDestroyed(const Ship &ship) { return IsShipDestroyed(ship); }
 
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget.
-void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms) {
+void NovaAi_EnterState2ClearPrimaryTarget(GameState &state, Ship &ship) {
   ship.ai_state_code = 2;
   if (ship.ai_station_hold_timer < 0.0F) {
     ship.ai_station_hold_timer = 0.0F;
   }
   ship.primary_target_ship_slot = -1;
-  ship.ai_mode_start_time_ms = now_ms;
+  ship.ai_mode_start_time_ms = state.tick_60hz;
 }
 
 // Ghidra 0x00410dd0 Ship_ResetShipPrimaryAndSecondaryTargets.
@@ -915,17 +915,17 @@ void NovaAi_UpdateShipAI(GameState &state,
           state.active_missions[mission_slot].ship_behavior == 2;
     }
     if (mission_stellar_attack) {
-      Mission_UpdateShipMissionStellarAttackDirective(state, ship, now_ms);
+      Mission_UpdateShipMissionStellarAttackDirective(state, ship);
     } else if (ship.defense_fleet_home_stellar_id != -1) {
       // Ghidra 0x00405120 Ship_DefenseFleetPrioritizePlayerThreat.
       NovaAi_DefenseFleetPrioritizePlayerThreat(state, ship);
     } else if (availability_hull && ship.squad_leader_ship_slot == -1) {
       // Ghidra 0x00402980 Ship_UpdateShipAiAvailabilityBehavior.
-      NovaAi_UpdateAvailabilityBehavior(state, ship, now_ms);
+      NovaAi_UpdateAvailabilityBehavior(state, ship);
     } else if (behavior == 1) {
       NovaAi_UpdateBehavior0x01(state, ship, now_ms);
     } else if (behavior == 2) {
-      NovaAi_UpdateBehavior0x02(state, ship, now_ms);
+      NovaAi_UpdateBehavior0x02(state, ship);
     } else if (behavior == 3) {
       // Ship_UpdateShipAI (0x00401000) dispatch: hostile behavior 0x03 has a
       // plunder/capture variant selected by the faction's government
@@ -948,13 +948,13 @@ void NovaAi_UpdateShipAI(GameState &state,
       } else {
         // Ship_UpdateShipAiBehavior0x03_Warship (0x00402e50) has the hostile
         // target acquisition/travel fallback.
-        NovaAi_UpdateBehavior0x03(state, ship, now_ms);
+        NovaAi_UpdateBehavior0x03(state, ship);
       }
     } else if (behavior == 4) {
       // Ship_UpdateShipAiBehavior0x04_Interceptor (0x00403de0): reuse the
       // reconstructed hostile path so an existing target is also promoted into
       // state 4.
-      NovaAi_UpdateBehavior0x03(state, ship, now_ms);
+      NovaAi_UpdateBehavior0x03(state, ship);
     } else if (behavior > 4) {
       // Ship_UpdateEscortAI (0x004048a0), now ported as
       // NovaAi_UpdateEscortAI (replaces the former force-state-10
@@ -971,15 +971,14 @@ void NovaAi_UpdateShipAI(GameState &state,
   // elapsed_ticks is the normalized cadence published by the original's
   // misleadingly named _g_avg_frame_time_ms EMA (about 1.0 at 30 Hz).
   NovaAi_UpdateShipState(state, ship, now_ms, elapsed_ticks);
-  NovaAi_ApplyControls(state, ship, elapsed_ticks, now_ms);
+  NovaAi_ApplyControls(state, ship, elapsed_ticks);
 }
 
 // ---------------------------------------------------------------------------
 
 // Ghidra 0x004053c0 Mission_UpdateShipMissionStellarAttackDirective.
 void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
-                                                     Ship &ship,
-                                                     std::uint32_t now_ms) {
+                                                     Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship) || NovaAiShip_IsDestroyed(ship) ||
       ship.ai_state_code == 0x16) {
     return;
@@ -1030,7 +1029,7 @@ void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
     }
-    NovaAi_UpdateBehavior0x03(state, ship, now_ms);
+    NovaAi_UpdateBehavior0x03(state, ship);
     return;
   }
 

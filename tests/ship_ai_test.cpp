@@ -977,7 +977,7 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   REQUIRE(ship.ai_state_code == 8);
   CHECK(ship.ai_station_hold_timer == Catch::Approx(-999.0F));
   REQUIRE(ship.ai_control_mode == 10);
-  game::NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  game::NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_speed == Catch::Approx(-30.0F));
   CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-1.165F));
 
@@ -1132,14 +1132,14 @@ TEST_CASE("ApplyControls mode 0xd formation release uses raw-call cadence") {
   // Half of an original 21 ms call advances half a raw-call unit. The release
   // test precedes the increment in the original, so crossing 30 does not
   // release until the following update.
-  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.315F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.315F);
   CHECK(follower.ai_station_hold_timer == Catch::Approx(1.5F));
 
   follower.ai_station_hold_timer = 30.0F;
-  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.63F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.63F);
   CHECK(follower.ai_station_hold_timer == Catch::Approx(31.0F));
   CHECK(follower.ai_control_mode == 0x0d);
-  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.63F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.63F);
   CHECK(follower.squad_leader_ship_slot == -1);
   CHECK(follower.ai_state_code == 2);
   CHECK(follower.ai_control_mode == 4);
@@ -1165,20 +1165,14 @@ TEST_CASE("ApplyControls mode 5 steers away from the target (original quirk)") {
   ship.ai_state_code = 4;
   ship.heading = 0.0F; // currently pointing up
 
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
 
   // Player is east of the ship: mode 5 must steer west (270 deg), not east.
   REQUIRE(ship.ai_desired_heading_deg == 270);
   // Once aligned, mode 5 applies the raw effective thrust.
   ship.heading = static_cast<float>(ship.ai_desired_heading_deg) *
                  (3.14159265358979323846F / 180.0F);
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   const game::ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   const game::NpcEffectiveStats eff =
@@ -1210,10 +1204,7 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
   ship.ai_control_mode = 6;
   ship.primary_target_ship_slot = 0;
   ship.heading = 90.0F * (3.14159265358979323846F / 180.0F); // already aligned
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   REQUIRE(ship.ai_desired_heading_deg == 90);
   CHECK(ship.ai_forward_thrust_cmd ==
         Catch::Approx(eff.thrust_px_per_tick2).margin(1e-4F));
@@ -1223,10 +1214,7 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
   ship.ai_control_mode = 0x10;
   ship.ai_evasive_heading_deg = 200;
   ship.heading = 200.0F * (3.14159265358979323846F / 180.0F);
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   REQUIRE(ship.ai_desired_heading_deg == 200);
   CHECK(ship.ai_forward_thrust_cmd ==
         Catch::Approx(eff.thrust_px_per_tick2 * 1.5F).margin(1e-4F));
@@ -1234,10 +1222,7 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
 
   // Mode 0x11: boost at 2.75x thrust, cruise 1.8x max speed.
   ship.ai_control_mode = 0x11;
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_forward_thrust_cmd ==
         Catch::Approx(eff.thrust_px_per_tick2 * 2.75F).margin(1e-4F));
   CHECK(ship.ai_desired_speed ==
@@ -1294,10 +1279,7 @@ TEST_CASE("ApplyControls mode 6 arms a turret bank via the current-target "
   ship.npc_weapon_bank_cooldown.fill(0.0F);
   ship.npc_weapon_count_by_class[0] = 1;
 
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
 
   // The mode-7 bank is armed and the fire latch raised by the current-target
   // selector; the direct-fire selector would leave both untouched.
@@ -1477,33 +1459,33 @@ TEST_CASE("ApplyControls lead aim uses the last lead-fired bank") {
   ship.ai_control_mode = 6;
   ship.active_weapon_bank_slot = -1;
   ship.last_fired_weapon_bank_slot = -1;
-  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_heading_deg == straight);
 
   ship.last_fired_weapon_bank_slot = kLeadBank;
-  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_heading_deg == lead);
 
   // Mode 6: a non-lead active bank wins over +0xC8DA; a lead active bank
   // leads even with +0xC8DA unset.
   ship.active_weapon_bank_slot = kOtherBank;
-  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_heading_deg == straight);
 
   ship.active_weapon_bank_slot = kLeadBank;
   ship.last_fired_weapon_bank_slot = -1;
-  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_heading_deg == lead);
 
   // Mode 7: aims with the active bank but only when +0xC8DA is set.
   ship.ai_control_mode = 7;
   ship.active_weapon_bank_slot = kLeadBank;
   ship.last_fired_weapon_bank_slot = -1;
-  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_heading_deg == straight);
 
   ship.last_fired_weapon_bank_slot = kLeadBank;
-  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_heading_deg == lead);
 
   // Mode 0xe fast branch (force the class off the inertialess model): +0xC8DA
@@ -1514,7 +1496,7 @@ TEST_CASE("ApplyControls lead aim uses the last lead-fired bank") {
   ship.vel_x = 1.0F; // >= the 0.35 px/tick fast gate
   ship.vel_y = 0.0F;
   ship.last_fired_weapon_bank_slot = -1;
-  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   const std::int16_t reverse = static_cast<std::int16_t>(game::WrapDeg(
       game::BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
   CHECK(ship.ai_desired_heading_deg == reverse);
@@ -1522,7 +1504,7 @@ TEST_CASE("ApplyControls lead aim uses the last lead-fired bank") {
   const std::int16_t lead_moving =
       game::NovaAi_AimWeaponPredictive(state, ship, state.player, kLeadBank);
   ship.last_fired_weapon_bank_slot = kLeadBank;
-  NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_heading_deg == lead_moving);
 }
 
@@ -1549,27 +1531,18 @@ TEST_CASE("ApplyControls mode 0xc velocity match") {
   // OR across axes): the brake arm runs (no velocity copy).
   ship.vel_x = 3.0F;
   ship.vel_y = 2.0F;
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.vel_x == 3.0F); // not copied while outrunning
   // Align with the reverse of the relative-velocity bearing and brake:
   // relative (2.6, 2.2) points ~130.2 deg; reverse is ~310.2 deg.
   ship.heading = 310.2F * (3.14159265358979323846F / 180.0F);
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_forward_thrust_cmd > 0.0F); // braking on the relative velocity
 
   // Match the velocity: the copy arm runs and snaps velocity to the target.
   ship.vel_x = 0.4F;
   ship.vel_y = -0.2F;
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.vel_x == 0.4F);
   CHECK(ship.vel_y == -0.2F);
 }
@@ -1597,26 +1570,17 @@ TEST_CASE("ApplyControls mode 0xf velocity-match pursuit") {
   // relative-velocity bearing (relative vel (2,0) -> bearing 90 -> +180 = 270).
   ship.vel_x = 2.0F;
   ship.vel_y = 0.0F;
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   REQUIRE(ship.ai_desired_heading_deg == 270);
   ship.heading = static_cast<float>(ship.ai_desired_heading_deg) *
                  (3.14159265358979323846F / 180.0F);
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_forward_thrust_cmd > 0.0F);
 
   // Relative velocity small: match the target's velocity.
   ship.vel_x = 0.1F;
   ship.vel_y = 0.05F;
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.vel_x == 0.1F);
   CHECK(ship.vel_y == 0.0F);
 }
@@ -1634,10 +1598,7 @@ TEST_CASE("ApplyControls mode 0x12 chase leader") {
   game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
   ship.ai_control_mode = 0x12;
   ship.formation_leader_ship_slot = -1;
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   REQUIRE(ship.ai_control_mode == 0); // no leader: idle control
 
   ship.ai_control_mode = 0x12;
@@ -1656,10 +1617,7 @@ TEST_CASE("ApplyControls mode 0x12 chase leader") {
   leader.pos_x = 100.0F;
   leader.pos_y = 0.0F;
   leader.heading = 0.0F; // leader facing up: lead point = north of leader
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   // Lead point is (100, -15*max) north of the leader; the ship at the origin
   // must steer roughly north-east.
   const game::ShipClass *cls =
@@ -1682,10 +1640,7 @@ TEST_CASE("ApplyControls mode 10 arrival slowdown") {
   ship.ship_instance_id = 1;
   ship.ai_control_mode = 10;
   ship.ai_desired_speed = 0.0F;
-  NovaAi_ApplyControls(state,
-                       ship,
-                       1.0F,
-                       /*now_ms=*/0);
+  NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_speed == Catch::Approx(-50.0F));
   CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-1.165F));
 }
@@ -1727,7 +1682,7 @@ TEST_CASE("state 0x08 drives visible high-speed NPC arrival") {
   while (ship.ai_state_code == 8 && slowdown_ticks < 64) {
     game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
     REQUIRE(ship.ai_control_mode == 10);
-    game::NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+    game::NovaAi_ApplyControls(state, ship, 1.0F);
     game::NovaShip_TickNpcShips(state, 1.0F);
     ++slowdown_ticks;
 
@@ -2209,7 +2164,9 @@ TEST_CASE("control-mode-4 jump spin-up is not re-stamped by the capture "
   ship.vel_x = 0.0F;
   ship.vel_y = 0.0F;
 
-  // 1000 ms after the recorded start is well past the 350 ms spin-up.
+  // 1000 60 Hz ticks after the recorded start is well past the 364-tick
+  // (Stellar_GetJumpSequenceDuration60Hz) spin-up.
+  state.tick_60hz = 1000;
   game::NovaAi_UpdateShipAI(state,
                             ship,
                             /*now_ms=*/1000);
@@ -3018,8 +2975,7 @@ TEST_CASE("mission stellar attack directive selects a hostile stellar") {
   ship.armor_points = 100.0F;
   ship.npc_weapon_count_by_class[0] = 1;
 
-  game::Mission_UpdateShipMissionStellarAttackDirective(
-      state, ship, /*now_ms=*/0);
+  game::Mission_UpdateShipMissionStellarAttackDirective(state, ship);
 
   CHECK(ship.ai_state_code == 0x12);
   CHECK(ship.ai_secondary_target_slot == 0x80);
