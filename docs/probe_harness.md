@@ -115,7 +115,9 @@ slot and inflate the count. `decline_mission` is a semantic step for the Spacepo
 AvailLoc offer passes: it clicks `decline` on any `mission_offer` and `done`
 on the `text_reader` refuse dialog that follows, returning once no such modal
 has appeared for `settle_ms` (default 300, raise it to cover the Bar's delayed
-recheck timer).
+recheck timer). An offer whose mïsn Flags 0x0004 is set ("can't refuse", e.g.
+the shipped storyline missions) publishes no `decline` element — it must be
+accepted; `decline_mission` will wait out its timeout if one appears.
 
 ### Callable scenario fragments
 

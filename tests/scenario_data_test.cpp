@@ -1420,6 +1420,23 @@ TEST_CASE("scenario loads pers personalities", "[scenario][data]") {
   REQUIRE((absent == nullptr || !absent->alive));
 }
 
+// The mission Flags field lives at raw m\x95sn payload +0x50 and is copied into
+// the runtime MisnDef +0x18 slot that NovaUi_RunMissionOfferWindow reads for
+// the Flags 0x0004 ("can't refuse") arm (NovaResources_LoadMisnResourceDefs
+// 0x0043bbb0). The raw +0x18 ScanMask stays in MissionDef::scan_mask. Pin both
+// offsets on a definition that has Flags 0x0004 set and ScanMask zero so the
+// two fields cannot be swapped undetected.
+TEST_CASE("mission flags and scan mask decode from distinct payload offsets",
+          "[scenario][data]") {
+  using namespace game;
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const MissionDef *mission = data.Mission(130); // Return to Earth for Training
+  REQUIRE(mission != nullptr);
+  CHECK(mission->flags_primary == 0x1004); // raw +0x50, Can't refuse bit 2
+  CHECK(mission->scan_mask == 0);          // raw +0x18 (distinct field)
+}
+
 TEST_CASE("temp personality probe", "[.persprobe]") {
   using namespace game;
   ScenarioData data;

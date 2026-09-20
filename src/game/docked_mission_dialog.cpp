@@ -441,7 +441,7 @@ MissionDestinationPreselect(const GameState &state,
 
 // Opens the nested starmap over the current background, saving and restoring
 // the player's travel selection around it (Ghidra NovaUi_RunMissionBbsWindow
-// 0x0043c470 action 6, NovaUi_RunMissionShipInteractionWindow 0x00442510
+// 0x0043c470 action 6, NovaUi_RunMissionOfferWindow 0x00442510
 // action 4, NovaUi_RunMissionComputerWindow 0x00446150: g_ship_states->
 // ai_secondary_target_slot + travel_transfer_mode). The map-selected
 // destination is plotted so the HUD keeps the planned jump. Returns true when
@@ -647,9 +647,10 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
       if (input->key == TextKey::primary) {
         const SDL_FPoint point = platform.mouse_position();
         bool handled = false;
-        // Scrollbar arm of FUN_004d1db0: the arrow caps step one row and the
-        // trough pages by the visible row count. Thumb dragging is not
-        // reproduced (TODO(decomp)).
+        // Scrollbar arm of NovaList_HitTestPoint (0x004d1db0): the arrow caps
+        // step one row and a click above/below the thumb pages by the visible
+        // row count. A click on the thumb itself is a no-op -- the original
+        // has no drag tracking.
         switch (
             NovaListScrollbarHitTest(list_control, layout->scrollbar, point)) {
         case NovaListScrollbarPart::kUp:
@@ -772,15 +773,19 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
 }
 
 // ---------------------------------------------------------------------------
-// Ghidra 0x00442510 NovaUi_RunMissionShipInteractionWindow (partial port: the
-// text-offer arm). The 0x00447170 NovaUi_PollMissionShipInteractionWindow input
-// slice and 0x00447680 NovaUi_DrawMissionShipInteractionWindow draw slice run
-// inline in this function and its draw_frame lambda below. Window DLOG 0x3f8
+// Ghidra 0x00442510 NovaUi_RunMissionOfferWindow. The 0x00447170
+// NovaUi_PollMissionOfferWindow input slice and 0x00447680
+// NovaUi_DrawMissionOfferWindow draw slice run inline in this function and its
+// draw_frame lambda below. Window DLOG 0x3f8
 // (DITL 1016: entry 1 = accept button, entry 2 = decline button, entry 3 =
 // read-only text view, entries 9/10 = scroll arrows); background = PICT 0x214a
 // (main art, top-anchored) with strips 0x2149 (top) and 0x214b (bottom). When
 // the dësc variant is >= 0x80 the original switches to DLOG 0x3fc (DITL 1020)
 // with single backdrop PICT 0x2150 and blits the variant PICT into entry 8.
+// Flags 0x0004 ("can't refuse"): both poll actions activate the mission and
+// 0x004a1820 paints one accept button from DITL entry 6 with the decline slot
+// suppressed (0x004a1670 leaves the decline rect unhittable). The port mirrors
+// that by drawing/hit-testing entry 6 and omitting decline.
 // Button captions come from the mïsn
 // payload +0x75f/+0x77f, which the original truncates at the first
 // non-lowercase byte and replaces with STR# 0x96 entries 0x32/0x1b (accept) and
@@ -906,9 +911,13 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   if (def == nullptr) {
     return MissionOfferResult::kDeclined;
   }
-  // DAT_00773ee9: (MisnDef +0x18 & 4) == 0. When the bit is set and the offer
-  // text is empty the original activates the mission without showing a window.
-  const bool normal_arm = (def->scan_mask & 4) == 0;
+  // g_mission_offer_refusable = (Flags & 4) == 0. The original tests the
+  // runtime g_misn_resource_defs entry's flags field; NovaResources_LoadMisn-
+  // ResourceDefs (0x0043bbb0) copies the raw mïsn Flags at +0x50 into runtime
+  // MisnDef +0x18, so this is MissionDef::flags_primary (raw +0x50), not the
+  // raw +0x18 ScanMask. When Flags 0x0004 ("can't refuse") is set and the
+  // offer text is empty the original activates the mission without a window.
+  const bool normal_arm = (def->flags_primary & 4U) == 0;
 
   // dësc (def + 4000): the original expands the {g}/{G}/{p}/{b} placeholder
   // blocks at load (Ui_LoadSelectionDialogResource 0x004c6d50 ->
@@ -972,7 +981,14 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   };
   const SDL_FRect accept_rect = item_rect(0);  // UiPanel entry 1
   const SDL_FRect decline_rect = item_rect(1); // UiPanel entry 2
-  const SDL_FRect text_rect = item_rect(2);    // UiPanel entry 3: text view
+  // Entry 6 (DITL item 5): single accept button in the Flags 0x0004 arm
+  // (0x004a1820 reads UiPanel entry 6; 0x004a1670 hit-tests it as slot 0).
+  const SDL_FRect cannot_refuse_rect = item_rect(5);
+  // The can't-refuse arm moves the accept button to entry 6 and drops
+  // decline, so this is the rect the draw, probe registry, and hit-test use.
+  const SDL_FRect accept_button_rect =
+      normal_arm ? accept_rect : cannot_refuse_rect;
+  const SDL_FRect text_rect = item_rect(2); // UiPanel entry 3: text view
   // Entries 9/10 (DITL items 8/9) are the text-view scroll arrows. Entry 9 is
   // label 0x12 (STR# 0x96 entry 19 '^' = up) and entry 10 label 0x13 (entry 20
   // '&' = down) per 0x004a1820. Actions 9/10 pass +/-10 as a content
@@ -995,18 +1011,24 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     const auto probe_rect = [&](SDL_FRect rect) {
       return platform.current_placement().ToWindowRect(rect);
     };
-    platform.PublishProbeUi("mission_offer",
-                            {{"window", probe_rect({0.0F, 0.0F, win_w, win_h})},
-                             {"accept", probe_rect(accept_rect)},
-                             {"decline", probe_rect(decline_rect)},
-                             {"text", probe_rect(text_rect)},
-                             {"scroll_up", probe_rect(scroll_up_rect)},
-                             {"scroll_down", probe_rect(scroll_down_rect)}});
+    // The active accept rect moves to entry 6 in the can't-refuse arm; the
+    // decline slot does not exist there, so it is not published.
+    std::vector<std::pair<std::string, SDL_FRect>> rects = {
+        {"window", probe_rect({0.0F, 0.0F, win_w, win_h})},
+        {"accept", probe_rect(accept_button_rect)},
+        {"text", probe_rect(text_rect)},
+        {"scroll_up", probe_rect(scroll_up_rect)},
+        {"scroll_down", probe_rect(scroll_down_rect)}};
+    if (normal_arm) {
+      rects.emplace_back("decline", probe_rect(decline_rect));
+    }
+    platform.PublishProbeUi("mission_offer", std::move(rects));
   };
 
   // Button captions: payload +0x75f/+0x77f C-strings truncated at the first
   // non-lowercase byte (0x00442510 caption-normalisation loop), else the STR#
-  // 0x96 defaults (0x32 "Yes", or 0x1b "Okay" in the +0x18-&4 arm; 0x33 "No").
+  // 0x96 defaults (0x32 "Yes", or 0x1b "Okay" in the Flags-0x0004 arm;
+  // 0x33 "No").
   const auto payload_caption = [&](std::size_t offset) {
     const auto *bytes = def->raw_payload.data();
     std::string out;
@@ -1065,8 +1087,21 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   // Shared read-only text view (NovaTextView 0x004bcd90) over DITL entry 3.
   NovaTextScrollView view(font_cache, text, text_rect);
   NovaTextScrollHold scroll_hold;
+  // 0x00442510's accept arm (action 1): activate, then
+  // Mission_ActivateMissionAtSlot (0x0043f100) shows the Brief/LoadCarg
+  // dialogs inline via the sink. Shared by the accept-button click and Return.
+  const auto accept_offer = [&]() {
+    if (!Mission_ActivateAtSlot(
+            state,
+            mission_def,
+            landed_stellar_id,
+            MakeAcceptanceSink(platform, state, render_background))) {
+      return MissionOfferResult::kActivationFailed;
+    }
+    return MissionOfferResult::kAccepted;
+  };
   // One window frame over the docked backing store. The original's draw
-  // callback (NovaUi_DrawMissionShipInteractionWindow 0x00447680) fills the
+  // callback (NovaUi_DrawMissionOfferWindow 0x00447680) fills the
   // window, blits the main art top-anchored (clipped), then the top and
   // bottom strips.
   auto draw_frame = [&]() {
@@ -1157,13 +1192,21 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                              view.scroll_offset() < view.max_scroll());
     }
 
-    for (const auto &[rect, caption] :
-         std::array<std::pair<SDL_FRect, const std::string &>, 2>{
-             {{accept_rect, accept_caption},
-              {decline_rect, decline_caption}}}) {
-      button_art.Draw(platform, rect, ButtonState::kNormal);
-      DrawThreeStateButtonLabel(
-          platform, font_cache, rect, caption, SDL_Color{255, 255, 255, 255});
+    // Flags 0x0004 arm: one accept button at entry 6, decline suppressed
+    // (0x004a1820).
+    button_art.Draw(platform, accept_button_rect, ButtonState::kNormal);
+    DrawThreeStateButtonLabel(platform,
+                              font_cache,
+                              accept_button_rect,
+                              accept_caption,
+                              SDL_Color{255, 255, 255, 255});
+    if (normal_arm) {
+      button_art.Draw(platform, decline_rect, ButtonState::kNormal);
+      DrawThreeStateButtonLabel(platform,
+                                font_cache,
+                                decline_rect,
+                                decline_caption,
+                                SDL_Color{255, 255, 255, 255});
     }
     publish_probe_ui();
     platform.Present();
@@ -1184,22 +1227,19 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                       "no Esc exit (0x00442510)");
         return MissionOfferResult::kDeclined;
       }
+      if (input->key == TextKey::enter) {
+        // Ghidra 0x00447170 (sVar1 == 3/5, keycode 0xd): Return is action 1
+        // (accept), the same in both arms; the can't-refuse arm is unaffected.
+        return accept_offer();
+      }
       if (input->key == TextKey::primary) {
         const SDL_FPoint point = platform.mouse_position();
-        if (Contains(accept_rect, point)) {
-          if (!Mission_ActivateAtSlot(
-                  state,
-                  mission_def,
-                  landed_stellar_id,
-                  MakeAcceptanceSink(platform, state, render_background))) {
-            return MissionOfferResult::kActivationFailed;
-          }
-          // 0x00442510's accept arm activates, then Mission_ActivateMission-
-          // AtSlot (0x0043f100) shows the Brief/LoadCarg dialogs inline via
-          // the sink passed above.
-          return MissionOfferResult::kAccepted;
+        // Action 1: activate. In the can't-refuse arm the same single entry-6
+        // button activates and 0x004a1670 never yields action 2.
+        if (Contains(accept_button_rect, point)) {
+          return accept_offer();
         }
-        if (Contains(decline_rect, point)) {
+        if (normal_arm && Contains(decline_rect, point)) {
           // 0x00442510's decline arm: the payload +0x58 desc (slot_aux_text)
           // opens the text reader when present, then the decline reaction
           // script (payload +0x25a) runs either way. Text composition
@@ -1855,8 +1895,9 @@ void NovaMission_RunMissionInfoWindow(
       if (input->key == TextKey::primary) {
         const SDL_FPoint point = platform.mouse_position();
         bool handled = false;
-        // Scrollbar arm of FUN_004d1db0 (arrows step a row, the trough pages
-        // by the visible row count; thumb dragging is not reproduced).
+        // Scrollbar arm of NovaList_HitTestPoint (0x004d1db0): arrows step one
+        // row, a click above/below the thumb pages by the visible row count,
+        // and a click on the thumb does nothing (no drag tracking).
         switch (NovaListScrollbarHitTest(list_control, info_scrollbar, point)) {
         case NovaListScrollbarPart::kUp:
           list_control.ScrollRows(-1);

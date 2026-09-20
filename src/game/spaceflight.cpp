@@ -2468,7 +2468,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                       pers->link_mission_id,
                       /*interaction_context=*/true)) {
                 // The original sets g_travel_scene_ctx and the speaking-ship
-                // latch around NovaUi_RunMissionShipInteractionWindow. The
+                // latch around NovaUi_RunMissionOfferWindow. The
                 // mission offer renderer is the current clean-room window
                 // shell; it accepts the same definition and paints over the
                 // live flight frame while the state-only post-accept arm below

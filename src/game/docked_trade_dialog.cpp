@@ -453,7 +453,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
                           list_hilite);
   };
   const auto run_mission_offer = [&]() {
-    return Mission_TriggerLandingInteractions(
+    return Mission_RunAvailLocOffers(
         state,
         4,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),

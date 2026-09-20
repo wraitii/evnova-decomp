@@ -104,14 +104,17 @@ Related: Ghidra `0x00447f00 System_GetSystemDefFlagByte` is exactly the
   at the end. Acceptance UI (Brief dialog payload +0x34 with starmap access,
   LoadCarg dialog +0x38 on PickupMode 0) runs after activation. The decline arm
   shows the payload +0x58 desc (if any) and executes the +0x25a reaction script.
-- `0x00448670` `Mission_TriggerReturnMissionInteractions`: context latch
+- `0x00448670` `Mission_RunAvailLocOffers`: context latch
   (DAT_00774ae2) with the non-3 wholesale clear of the shown latches
   (DAT_00773eed), a lane-1 walk for the first `AvailLoc == context` definition
   still passing eligibility, the −1-return latch, and the DAT_00776af4 recheck
   timer.
-- `0x00442510` `NovaUi_RunMissionShipInteractionWindow`: DLOG 0x3f8/DITL 1016
-  with STR# 0x96 button defaults; the +0x18-&4 empty-text auto-accept arm; the
-  variant ≥ 0x80 DLOG 0x3fc art path; accept via `Mission_ActivateAtSlot`.
+- `0x00442510` `NovaUi_RunMissionOfferWindow`: DLOG 0x3f8/DITL 1016
+  with STR# 0x96 button defaults; the Flags-0x0004 empty-text auto-accept arm
+  (the runtime field is Flags, not ScanMask); the variant ≥ 0x80 DLOG 0x3fc
+  art path; the Flags 0x0004 ("can't refuse") arm, where both button actions
+  activate and `0x004a1820` paints a single entry-6 accept button with the
+  decline slot suppressed; accept via `Mission_ActivateAtSlot`.
 - `0x0044A4D0` `Ship_ExpandStringPlaceholders`: the
   `{g}/{G}/{pN}/{bN}/!` placeholder state machine with escapes; the gender arm
   reads the 'm' latch. Wired at desc consumers via the load-time pass in

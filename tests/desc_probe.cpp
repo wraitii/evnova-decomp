@@ -26,6 +26,10 @@ TEST_CASE("variant dialogs carry the reader/offer art ordinals") {
   REQUIRE(offer_items.has_value());
   REQUIRE(offer_items->size() == 10);
   CHECK((*offer_items)[7].index == 7); // DITL entry 8
+  // The variant DITL 0x3fc also carries the entry-6 can't-refuse accept.
+  CHECK((*offer_items)[5].index == 5); // entry 6
+  CHECK((*offer_items)[5].left == 170);
+  CHECK((*offer_items)[5].top == 213);
 }
 
 TEST_CASE("DLOG 0x3f8 mission offer dialog") {
@@ -38,6 +42,17 @@ TEST_CASE("DLOG 0x3f8 mission offer dialog") {
                           << " ditl=" << dlog->dialog_item_list_id);
   const auto items = NovaResource_LoadDialogItems(dlog->dialog_item_list_id);
   REQUIRE(items.has_value());
+  // DITL 1016 item 5 is UiPanel entry 6, the single accept button the
+  // Flags-0x0004 ("can't refuse") arm draws/hit-tests (0x004a1820 /
+  // 0x004a1670). Pin its rect so a layout regression is caught.
+  REQUIRE(items->size() == 10);
+  CHECK((*items)[0].index == 0); // entry 1 accept
+  CHECK((*items)[1].index == 1); // entry 2 decline
+  CHECK((*items)[5].index == 5); // entry 6 can't-refuse accept
+  CHECK((*items)[5].left == 173);
+  CHECK((*items)[5].top == 285);
+  CHECK((*items)[5].right - (*items)[5].left == 99);
+  CHECK((*items)[5].bottom - (*items)[5].top == 25);
   for (std::size_t i = 0; i < items->size(); ++i) {
     WARN("  item " << i << " type=" << (int)(*items)[i].type
                    << " rect=" << (*items)[i].top << "," << (*items)[i].left

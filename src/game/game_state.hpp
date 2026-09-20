@@ -1400,7 +1400,7 @@ struct GameState {
   std::array<std::int16_t, 1000> mission_offering_rolls{};
   // Ghidra DAT_00773eed: per-definition "interaction already shown" latch
   // (one byte per mission definition). Set when an offer interaction window
-  // ends without accepting (Mission_TriggerReturnMissionInteractions 0x00448670
+  // ends without accepting (Mission_RunAvailLocOffers 0x00448670
   // return -1 arm); cleared wholesale the next time the interaction walk runs
   // in a context other than 3 (DAT_00774ae2).
   std::array<std::uint8_t, 1000> mission_interaction_shown{};

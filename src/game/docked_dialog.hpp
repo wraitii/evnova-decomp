@@ -119,14 +119,14 @@ struct NewsTextPanels {
     std::int16_t stellar_id,
     const std::function<void()> &render_background = {});
 
-// Ghidra 0x00442510 NovaUi_RunMissionShipInteractionWindow (partial port: the
-// text-offer arm). Shows mission definition `mission_def`'s dësc
+// Ghidra 0x00442510 NovaUi_RunMissionOfferWindow. Shows mission definition
+// `mission_def`'s dësc
 // (mission_def + 4000) in a read-only text view over DLOG 0x3f8, with the
 // Accept/Decline buttons (captions from the mïsn payload +0x75f/+0x77f,
 // defaulting to STR# 0x96 entries 0x32/0x33). Accept activates the mission at
 // the slot with `landed_stellar_id` as the BBS context; decline runs the
 // payload +0x58 text reader and the +0x25a reaction script. Returns the
-// offer outcome for Mission_TriggerLandingInteractions' latch handling.
+// offer outcome for Mission_RunAvailLocOffers' latch handling.
 // A dësc variant >= 0x80 selects the custom-art arm: DLOG 0x3fc (DITL 1020)
 // with backdrop PICT 0x2150 and the variant PICT in entry 8.
 // The target-action path (Ship_HandlePlayerTargetActionCommand 0x00454910)
@@ -134,7 +134,9 @@ struct NewsTextPanels {
 // landed-stellar context and supplies the live-flight render callback. The
 // starmap (action 4), player-special (action 5) and mission-computer
 // (action 7) sub-actions are wired, matching 0x00442510; the mission computer
-// (when it opens) uses `audio` for its cues. TODO(decomp) skipped: the
+// (when it opens) uses `audio` for its cues. Flags 0x0004 ("can't refuse")
+// draws/hit-tests the single accept button from DITL entry 6 and suppresses
+// the decline slot, as 0x004a1820/0x004a1670 do. TODO(decomp) skipped: the
 // status-string panel (Ui_PlayMovieFileModal, DITL entry 4 -- a QuickTime
 // platform replacement). Port conveniences beyond the original: Esc counts as
 // decline, DIK arrows scroll.

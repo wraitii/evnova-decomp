@@ -452,7 +452,7 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   publish_probe_controls();
 
   const auto run_mission_offer = [&]() {
-    return Mission_TriggerLandingInteractions(
+    return Mission_RunAvailLocOffers(
         state,
         1,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
@@ -467,7 +467,7 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   };
 
   // Ghidra 0x0047c8e0 sets g_misn_list_page_group = 1 and schedules action 6
-  // (Mission_TriggerReturnMissionInteractions(1)) fifteen 60 Hz ticks after
+  // (Mission_RunAvailLocOffers(1)) fifteen 60 Hz ticks after
   // entry.
   state.tick_60hz =
       static_cast<std::uint32_t>(platform.gameplay_ticks_ms() * 60 / 1000);

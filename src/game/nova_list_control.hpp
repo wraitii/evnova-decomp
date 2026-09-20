@@ -99,7 +99,9 @@ private:
 };
 
 // NovaList_HitTestPoint (scrollbar arm) hit classification for a click in the
-// strip.
+// strip. kThumb is a click landing on the thumb body itself; the original
+// leaves that case unhandled (no drag tracking), so callers treat it as a
+// no-op alongside kNone.
 enum class NovaListScrollbarPart {
   kNone,
   kUp,

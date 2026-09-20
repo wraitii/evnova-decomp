@@ -392,7 +392,7 @@ TEST_CASE("mission random locator uses the current travel stellar as anchor") {
   CHECK(state.mission_target_resolutions[0].travel_stellar_id == -1);
 }
 
-// Regression for Ghidra 0x00448670 Mission_TriggerReturnMissionInteractions:
+// Regression for Ghidra 0x00448670 Mission_RunAvailLocOffers:
 // an ordinary decline removes the offer from the current interaction walk and
 // must not immediately present the same definition again in that context.
 TEST_CASE("declined mission offer is suppressed for the current context") {
@@ -411,10 +411,10 @@ TEST_CASE("declined mission offer is suppressed for the current context") {
     return MissionOfferResult::kDeclined;
   };
 
-  CHECK(Mission_TriggerLandingInteractions(state, 3, 100, decline));
+  CHECK(Mission_RunAvailLocOffers(state, 3, 100, decline));
   CHECK(offer_count == 1);
   CHECK(offered_definition == 0);
-  CHECK_FALSE(Mission_TriggerLandingInteractions(state, 3, 200, decline));
+  CHECK_FALSE(Mission_RunAvailLocOffers(state, 3, 200, decline));
   CHECK(offer_count == 1);
 }
 
@@ -435,7 +435,7 @@ TEST_CASE("trade center mission interaction offers the AvailLoc 4 lane") {
     return MissionOfferResult::kDeclined;
   };
 
-  CHECK(Mission_TriggerLandingInteractions(state, 4, 100, decline));
+  CHECK(Mission_RunAvailLocOffers(state, 4, 100, decline));
   CHECK(offered_definition == 0);
 }
 
@@ -457,8 +457,8 @@ TEST_CASE("shipyard and outfitter mission interactions use their own lanes") {
     return MissionOfferResult::kDeclined;
   };
 
-  CHECK(Mission_TriggerLandingInteractions(state, 5, 100, decline));
-  CHECK(Mission_TriggerLandingInteractions(state, 6, 200, decline));
+  CHECK(Mission_RunAvailLocOffers(state, 5, 100, decline));
+  CHECK(Mission_RunAvailLocOffers(state, 6, 200, decline));
   CHECK(offered == std::vector<std::int16_t>{0, 1});
 }
 

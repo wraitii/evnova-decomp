@@ -30,7 +30,8 @@ Ghidra. The clean-room counterparts live in
   (close); key arms g/r → action 2, w/n → action 3, h/e → action 5; key
   bindings 9/25/40 → actions 8 (starmap) / 9 (special) / 0xa (mission
   computer); clicks map through the button hit test. When the recheck timer
-  `DAT_00776af4` expires it fires action 6 (return-mission interactions) and
+  `DAT_00776af4` expires it fires action 6 (the AvailLoc-1 offer pass,
+  `Mission_RunAvailLocOffers`) and
   reseeds itself to `now + rand(0x1e) + 0x1e`.
 - Action arms: 2 = Gamble — STR# 0x7d2 0x169 via the text-reader when
   `credits < 1`, else the gambling window (`NovaUi_RunBarGamblingWindow`
