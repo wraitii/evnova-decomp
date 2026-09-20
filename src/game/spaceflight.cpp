@@ -1663,8 +1663,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     const bool arm_modifier_held = platform.IsOriginalKeyCodeHeld(0x38) ||
                                    platform.IsOriginalKeyCodeHeld(0x6f);
     // Ship_HandlePlayerShipControl reads every action through
-    // g_player_key_bindings. PollFlightInput owns the SDL event pump; replace
-    // its convenience defaults with the persisted original command table.
+    // g_player_key_bindings. PollFlightInput owns the SDL event pump and the
+    // clean-room fixed keys (Tab/Ctrl); fill every original binding-table
+    // command from the persisted table here.
     frame_input.turn_left = binding_held(0x13);
     frame_input.turn_right = binding_held(0x14);
     frame_input.thrust = binding_held(0x15);

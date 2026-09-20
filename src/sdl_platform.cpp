@@ -680,50 +680,25 @@ FlightInput SdlPlatform::PollFlightInput() {
   const auto pressed = [&](SDL_Scancode scancode) {
     return keys[scancode] != 0 || probe_.VirtualKey(scancode);
   };
-  input.turn_left = pressed(SDL_SCANCODE_LEFT) || pressed(SDL_SCANCODE_A);
-  input.turn_right = pressed(SDL_SCANCODE_RIGHT) || pressed(SDL_SCANCODE_D);
-  input.thrust = pressed(SDL_SCANCODE_UP) || pressed(SDL_SCANCODE_W);
-  input.reverse = pressed(SDL_SCANCODE_DOWN) || pressed(SDL_SCANCODE_S);
-  input.afterburner = pressed(SDL_SCANCODE_Z);
-  input.travel = pressed(SDL_SCANCODE_J);
-  input.starmap = pressed(SDL_SCANCODE_M);
-  // Gameplay command 0x28 (default DIK 0x17 = I): the active-missions window.
-  input.mission_info = pressed(SDL_SCANCODE_I);
-  // NOTE: the movement/fire/target/land/board fields set below are placeholder
-  // defaults. The spaceflight loop replaces every one of them with its
-  // persisted binding-table lookup (binding_held) before they are consumed, so
-  // these values only matter if PollFlightInput is ever used standalone.
-  input.face_target = pressed(SDL_SCANCODE_R);
-  input.land = pressed(SDL_SCANCODE_RETURN) || pressed(SDL_SCANCODE_KP_ENTER);
-  input.board = pressed(SDL_SCANCODE_B);
+  // Only the clean-room fixed keys live here. Every original binding-table
+  // command (movement, fire, target, land/dismiss, travel, cycle_ship_target,
+  // nearest-target, face-target, eject, ...) is left false and filled by the
+  // spaceflight loop from `NovaInput_IsCommandActive`.
+  //
+  // Tab cycles the in-system stellar target (Shift = backwards).
   input.cycle_target_next = pressed(SDL_SCANCODE_TAB) &&
                             !pressed(SDL_SCANCODE_LSHIFT) &&
                             !pressed(SDL_SCANCODE_RSHIFT);
   input.cycle_target_previous =
       pressed(SDL_SCANCODE_TAB) &&
       (pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT));
-  // Shift is the shared direction modifier for the backward cycling commands.
-  const bool shift_held =
-      pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT);
-  // Destination-system, hyperspace-mode, ship-target and nearest-target
-  // commands are sampled from their persisted binding slots by the
-  // spaceflight loop (see its binding_held block). Only the escort/squad
-  // modifier stays here: Ship_FindNext/PreviousPlayerCycleTarget reads the raw
-  // DIK codes 0x1d/0x6b (Left/Right Ctrl), so holding either Ctrl restricts
-  // the ship cycle to the player's own squad/escorts. Do not reuse the
-  // 0x38/0x6f Alt arm modifier here: Alt already forces the face-target/stellar
-  // channels and would silently flip the cycle into its escort half.
+  // Ship_FindNext/PreviousPlayerCycleTarget reads the raw DIK codes 0x1d/0x6b
+  // (Left/Right Ctrl), so holding either Ctrl restricts the ship cycle to the
+  // player's own squad/escorts. Do not reuse the 0x38/0x6f Alt arm modifier
+  // here: Alt already forces the face-target/stellar channels and would
+  // silently flip the cycle into its escort half.
   input.cycle_ship_escorts =
       pressed(SDL_SCANCODE_LCTRL) || pressed(SDL_SCANCODE_RCTRL);
-  // Primary fire (held): space. See FlightInput::fire for the mapping note.
-  input.fire = pressed(SDL_SCANCODE_SPACE);
-  // Secondary fire (held): Left Ctrl (the original's binding slot 3 default).
-  input.fire_secondary = pressed(SDL_SCANCODE_LCTRL);
-  // Secondary-bank cycle: X next, Shift+X previous (original: W + Shift pair).
-  input.cycle_secondary = pressed(SDL_SCANCODE_X) && !shift_held;
-  input.cycle_secondary_backwards = pressed(SDL_SCANCODE_X) && shift_held;
-  // Deselect secondary: C (original default S is reverse here).
-  input.clear_secondary = pressed(SDL_SCANCODE_C);
   return input;
 }
 

@@ -60,12 +60,15 @@ struct TextInput {
 // Mirrors the player-control channel the original reads through the primary
 // input driver in Frame_SpaceflightLoop scope 3 (Ship_HandlePlayerShipCore).
 struct FlightInput {
-  bool turn_left = false;  // left / 'a'
-  bool turn_right = false; // right / 'd'
-  bool thrust = false;     // up / 'w' (accelerate toward heading)
-  bool reverse = false;    // down / 's' (turn ship to fly backward)
-  // Held afterburner command, Z (the original's binding slot 0x18 default,
-  // DIK 0x2c).
+  // Held flight commands. Resolved from the persisted binding table by the
+  // spaceflight loop: turn-left slot 0x13 (default DIK 0x63 = Left), turn-right
+  // slot 0x14 (0x64 = Right), thrust slot 0x15 (0x61 = Up; accelerates toward
+  // heading), reverse slot 0x16 (0x66 = Down; turns the ship to fly backward).
+  bool turn_left = false;
+  bool turn_right = false;
+  bool thrust = false;
+  bool reverse = false;
+  // Held afterburner command, binding slot 0x18 (default DIK 0x2c = Z).
   bool afterburner = false;
   // Primary fire: space (hold to keep firing all primary banks). Mirrors the
   // original's primary-fire command (binding slot 2, default DIK 0x39 =
@@ -75,15 +78,14 @@ struct FlightInput {
   // (DIK 0x1d). Fires the currently selected secondary bank
   // (active_weapon_bank_slot).
   bool fire_secondary = false;
-  // Cycle the selected secondary weapon: X (next), Shift+X (previous). The
-  // original binds slot 0 to DIK 0x11 = W with its 0x38/0x6f Shift pair as
-  // the backwards modifier; W/S are the port's thrust/reverse keys
-  // (documented divergence), so X stands in. Edge-resolved by the flight loop
-  // against g_playerSecondaryCycleCommandLatch (DAT_007cab42).
+  // Cycle the selected secondary weapon: binding slot 0x00 (default DIK
+  // 0x11 = W; Shift pair 0x2a/0x36 backwards). Resolved from the persisted
+  // binding table by the spaceflight loop. Edge-resolved against
+  // g_playerSecondaryCycleCommandLatch (DAT_007cab42).
   bool cycle_secondary = false;
   bool cycle_secondary_backwards = false;
-  // Deselect the secondary weapon: C (the original's slot 1 default is
-  // DIK 0x1f = S, taken by reverse; documented divergence).
+  // Deselect the secondary weapon: binding slot 0x01 (default DIK 0x1f = S).
+  // Resolved from the persisted binding table by the spaceflight loop.
   bool clear_secondary = false;
   // Eject command: the arm-modifier pair (0x38/0x6f = Alt) plus binding slot
   // 0x11, whose default is DIK 0x2d = X. Resolved from the persisted binding
@@ -92,25 +94,23 @@ struct FlightInput {
   // owned auto-eject outfit ejects without the key once the death presentation
   // is past its gate.
   bool eject = false;
-  // Edge-triggered travel engage: 'j' (hyperspace jump toward the nearest
-  // available travel point). The original uses a separate travel command
-  // channel; this build maps it to a dedicated key so it is distinct from the
-  // continuous steer inputs.
+  // Edge-triggered travel engage: binding slot 0x0e (default DIK 0x24 = J),
+  // hyperspace jump toward the nearest available travel point.
   bool travel = false;
-  // Edge-triggered galaxy-map command: 'm' opens the starmap modal. Mirrors
-  // the original's map command checked by Ship_HandlePlayerShip (0x0044b120)
-  // through NovaInput_IsCommandActiveWithGameplayGuards; this build binds it to
-  // a single key distinct from the steer/travel/target inputs.
+  // Edge-triggered galaxy-map command: binding slot 0x09 (default DIK 0x32 =
+  // M) opens the starmap modal. Mirrors the original's map command checked by
+  // Ship_HandlePlayerShip (0x0044b120).
   bool starmap = false;
   // Edge-triggered active-missions command: 'i' opens the mission-info
   // ("mission computer") window listing the pilot's active missions. Mirrors
   // gameplay command 0x28 in Ship_HandlePlayerShipCore (0x0044aa70), whose
   // default binding is DIK 0x17 = I (NovaPrefs_ResetKeyBindings 0x004b4400).
   bool mission_info = false;
-  // Edge-triggered normal arrival command: Return. When the currently selected
-  // ordinary stellar is inside the 250-unit arrival envelope, this follows the
-  // ticker-text / Spaceport path in Stellar_HandleStellarEntryAndExit instead
-  // of opening the target-action interaction dialog.
+  // Edge-triggered normal arrival command: binding slot 0x05 (default DIK
+  // 0x26 = L). When the currently selected ordinary stellar is inside the
+  // 250-unit arrival envelope, this follows the ticker-text / Spaceport path
+  // in Stellar_HandleStellarEntryAndExit instead of opening the target-action
+  // interaction dialog.
   bool land = false;
   // Edge-triggered HUD/panel dismiss (binding slot 6, default DIK 0x1c =
   // Return; Ghidra Ship_HandlePlayerShipCore 0x00450ae7): clears the transient
@@ -130,10 +130,11 @@ struct FlightInput {
   // selection and resets travel_transfer_mode. Resolved from the persisted
   // binding table by the spaceflight loop.
   bool clear_target = false;
-  // Edge-triggered board command: 'b' runs Player_HandleBoardTargetCommand
-  // (0x0045a3d0) against the primary ship target — disabled-ship validation
-  // (range / relative velocity / heading / crew) and the boarding-plunder
-  // window. Mirrors the original's g_playerBoardTargetCommandLatch channel.
+  // Edge-triggered board command: binding slot 0x10 (default DIK 0x30 = B)
+  // runs Player_HandleBoardTargetCommand (0x0045a3d0) against the primary
+  // ship target — disabled-ship validation (range / relative velocity /
+  // heading / crew) and the boarding-plunder window. Mirrors the original's
+  // g_playerBoardTargetCommandLatch channel.
   bool board = false;
   // Cycle the stellar target. This is a clean-room binding for the original's
   // target-selection command channel; Tab advances through the current
@@ -239,7 +240,11 @@ public:
   // ASCII and non-printable physical keys use TextKey::physical. Quit still
   // sets quit_requested_.
   [[nodiscard]] std::optional<TextInput> PollTextEvent();
-  // Live keyboard-state flight control snapshot (held-key steering).
+  // Drains SDL events and returns the platform-sourced FlightInput fields:
+  // cursor position, the primary-click latch, and the clean-room fixed keys
+  // (Tab stellar cycle, Left/Right Ctrl escort modifier). The original
+  // binding-table commands are left false; the spaceflight loop fills them
+  // from `NovaInput_IsCommandActive` before consuming the snapshot.
   [[nodiscard]] FlightInput PollFlightInput();
   // Live held-state of an original DIK-style key code (the values stored in
   // KeyBindings::cmd_to_key, plus fixed inputs such as escort groups 1..5).
