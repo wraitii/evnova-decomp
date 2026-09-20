@@ -589,11 +589,15 @@ void NovaAi_EnterState5ReturnToSquadLeader(Ship &ship);
 
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Flips the ship hostile: sets
 // ai_state_code 0x04, clears the secondary target, targets the player, and
-// drops escort control modes 0x04/0x0D. The pers announcement arm runs first:
-// a personality ship (pers_def_slot set, no mission fleet) whose pers Flags
-// carry 0x10 plays Mission_ShowMissionShipAnnouncement once (speaker latched
-// in state.mission_speaker_ship_slot, +0xBC hail latch set), unless disabled
-// or destroyed or still pressing its previous target.
+// drops escort control modes 0x04/0x0D while parked in hold states
+// 2/3/0x0B (Ship_IsShipInHoldStateWithControlMode4Or0x0D, 0x00410e80). The pers
+// announcement arm runs first: a personality ship (pers_def_slot set, no
+// mission fleet) whose pers Flags carry 0x10 plays
+// Mission_ShowMissionShipAnnouncement once (speaker latched in
+// state.mission_speaker_ship_slot, +0xBC hail latch set), unless disabled or
+// destroyed or still pressing its previous target. BUGFIX(original): the
+// original's destroyed test reads the player slot; the port tests the ship
+// being flipped (see the definition).
 void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship);
 
 // Ghidra 0x0046b260 Ship_CanShipUseAfterburner (DB name
