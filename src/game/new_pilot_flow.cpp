@@ -730,7 +730,12 @@ void NovaShip_ResetPlayerShipState(GameState &state) {
   state.weapon_bank_cooldown.fill(0.0F);
   state.active_mission_runtime_flags = {};
   state.active_missions = {};
-  state.active_shots.clear();
+  // Ghidra Ship_ResetPlayerShipState 0x004b3dad raises the four "clear
+  // transient sprites" latches alongside g_no_asteroids_latch, so a freshly
+  // reset ship never inherits the previous game's shots, effect pools or
+  // freeflight objects. Clear them synchronously (the clean-room has no
+  // transition-frame aux pass to honour the flags).
+  NovaWeapon_ClearTransientCombatState(state);
 
   state.player_stat_modifier_pct.fill(100);
   state.target_category_command.fill(-1);

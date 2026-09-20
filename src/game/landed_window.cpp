@@ -238,6 +238,13 @@ bool Stellar_Dock(GameState &state,
   // the docked view hides the drifting field; the launch tail re-initialises
   // it.
   state.no_asteroids_latch = true;
+  // 0x00458186: the same landing entry raises the four "clear transient
+  // sprites" latches, so the departing system's shots, beam records, impact
+  // effects, fading destruction fragments and freeflight objects (mined
+  // resource-boxes, jettisoned pods) are wiped on the next transition frame.
+  // The port clears them synchronously here; the docked modal blocks the
+  // spaceflight tick, so nothing redraws them before the launch tail.
+  NovaWeapon_ClearTransientCombatState(state);
   ctx.selection = LandedService::kLaunch;
   state.travel.landed_this_frame = true;
   NovaLog::Info("landed at stellar {} ({}); {} credits remain",

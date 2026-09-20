@@ -63,9 +63,13 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
 // weapon like the Shuttle's Light Blaster is registered as sellable ownership.
 void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 
-// Ghidra Stellar_RunDockAndLaunchSequence (0x00455e10) clears transient combat
-// state at a system/stellar boundary. This does not alter weapon ownership or
-// ammo.
+// Ghidra Stellar_RunDockAndLaunchSequence (0x00455e10) clears transient
+// combat state at a system/stellar boundary. This is the port's synchronous
+// equivalent of the original's DAT_00596d29/2a/2b/2d "clear transient
+// sprites" latch group: it also wipes the fading destruction-fragment and
+// freeflight-object pools (resource-boxes, jettisoned pods). The asteroid pool
+// is handled separately through no_asteroids_latch / NovaAsteroid_InitSystem.
+// Does not alter weapon ownership or ammo.
 void NovaWeapon_ClearTransientCombatState(GameState &state);
 
 // Ghidra Weapon_InitShipWeaponBanksFromShipClass-side initializer used by the

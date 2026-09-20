@@ -830,12 +830,24 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   disabled.ship_instance_id = 2;
   disabled.armor_points = 1.0F;
 
+  // A live resource-box (mined asteroid yield) and a destruction fragment
+  // must be wiped by the landing entry: 0x00458186 raises the transition-frame
+  // clear latches alongside g_no_asteroids_latch, which the port performs
+  // synchronously in Stellar_Dock.
+  state.freeflight_objects[0].lifetime_ticks = 400.0F;
+  state.freeflight_objects[0].system_id = 0;
+  state.freeflight_objects[0].extra = 2;
+  state.freeflight_objects[0].persistent = true;
+  state.fading_effect_instances[0].lifetime_ticks = 200.0F;
+
   game::LandedContext ctx;
   REQUIRE(game::Stellar_Dock(state, ctx, 96));
   CHECK(ctx.landed);
   CHECK(ctx.stellar_id == 0x80);
   CHECK(state.travel.landed_this_frame);
   CHECK(state.player.credits == 25);
+  CHECK(state.freeflight_objects[0].lifetime_ticks < 0.0F);
+  CHECK(state.fading_effect_instances[0].lifetime_ticks < 0.0F);
   // Arrival does NOT touch the ship's meters or kinematics: the original
   // leaves them to the launch tail, after the interaction loop returns
   // (Stellar_RunDockAndLaunchSequence 0x00455f99..0x0045602f).
