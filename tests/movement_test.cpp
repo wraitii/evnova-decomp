@@ -63,6 +63,70 @@ TEST_CASE("reverse does not combine with manual turn input") {
         Catch::Approx(4.0F * std::numbers::pi_v<float> / 180.0F));
 }
 
+TEST_CASE(
+    "reverse stops reporting a turn once aligned with the reverse heading") {
+  // Regression: the reverse arm must leave turn_dir = 0 once the hull faces
+  // the reverse of its velocity; otherwise TickPlayerTurnBankAnimation keeps
+  // accumulating bank after the turnaround finishes (the original's shared
+  // auto-turn continuation, Ghidra 0x00450086, leaves sVar8 = 0 there).
+  game::PlayerShip ship;
+  ship.vel_y = -2.0F;                       // moving up -> reverse heading 180
+  ship.heading = std::numbers::pi_v<float>; // already facing the reverse
+  FlightInput input;
+  input.reverse = true;
+
+  const auto stats =
+      game::NovaPlayer_IntegrateMovement(ship, input, TestShipClass(), 1.0F);
+
+  CHECK(stats.turn_dir == 0);
+  CHECK(ship.heading == Catch::Approx(std::numbers::pi_v<float>));
+  CHECK(ship.vel_y == Catch::Approx(-2.0F));
+}
+
+TEST_CASE("inertialess reverse decays scalar speed instead of turning") {
+  // Ghidra 0x0044ffa8: for inertialess ships the reverse command retro-decays
+  // the maintained scalar speed (+0x48) by the effective thrust step and
+  // floors it at zero; it does not run the non-inertialess opposite-velocity
+  // turnaround, so the heading and turn_dir are untouched.
+  game::PlayerShip ship;
+  ship.heading = 0.0F;
+  ship.vel_x = 0.0F;
+  ship.vel_y = -2.0F;
+  ship.speed = 2.0F;
+  FlightInput input;
+  input.reverse = true;
+  game::PlayerMovementOptions opts;
+  opts.inertialess = true;
+
+  const auto stats = game::NovaPlayer_IntegrateMovement(
+      ship, input, TestShipClass(), 1.0F, opts);
+
+  CHECK(ship.heading == Catch::Approx(0.0F));
+  CHECK(stats.turn_dir == 0);
+  // 500/10000*2 = 0.1 px/tick^2 thrust step for the test class.
+  CHECK(ship.speed == Catch::Approx(1.9F));
+  // The steering block follows heading * speed, so the velocity comes down
+  // to the reduced scalar (0, -1.9) without a turn.
+  CHECK(ship.vel_x == Catch::Approx(0.0F));
+  CHECK(ship.vel_y == Catch::Approx(-1.9F));
+}
+
+TEST_CASE("inertialess reverse floors at zero and never goes negative") {
+  game::PlayerShip ship;
+  ship.vel_y = -0.05F;
+  ship.speed = 0.05F;
+  FlightInput input;
+  input.reverse = true;
+  game::PlayerMovementOptions opts;
+  opts.inertialess = true;
+
+  (void)game::NovaPlayer_IntegrateMovement(
+      ship, input, TestShipClass(), 1.0F, opts);
+
+  CHECK(ship.speed == Catch::Approx(0.0F));
+  CHECK(ship.vel_y == Catch::Approx(0.0F));
+}
+
 TEST_CASE("flight turns at the original rounded effective turn rate") {
   game::PlayerShip ship;
   game::ShipClass ship_class = TestShipClass();
