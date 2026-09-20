@@ -203,25 +203,27 @@ void NovaAi_ApplyControls(GameState &state,
 
   switch (ship.ai_control_mode) {
   case 0:
-  case 0x17:
-    // Idle: the original has no mode-0 block (thrust stays 0, heading held),
-    // and importantly does NOT touch ai_desired_speed. The entry reset above
-    // only rewrites a non-negative desired to eff_max_speed; a negative value
+    // Idle. The original's mode-0 arm is only the unconditional
+    // Ship_EscortFireAtUnprovokedTarget refresh (0x00408674): the dispatch's
+    // leading `TEST EDI,EDI; JZ` target, hit before the mode-0x12 block, with
+    // no disabled gate and no steering/speed write. Thrust stays 0 and heading
+    // is held; ai_desired_speed is NOT touched. The entry reset above only
+    // rewrites a non-negative desired to eff_max_speed, so a negative value
     // (e.g. state-15's -30 or -15 emergence speed seeded by
     // NovaAi_EnterState15EmergeFromHypergate) survives the hold intact and is
     // handed to the mode-0x0a arrival slowdown, which keeps an already-negative
     // value. Clobbering it here made gate-emergence ships reseed to -50 and
-    // fly ~1.67x too fast / ~2.8x too far (Ghidra 0x00408150 mode 0 has no
-    // desired-spec write; the auto-weapon select is the only body).
-    // TODO(decomp(0x00408150)): the original calls
-    // Ship_EscortFireAtUnprovokedTarget at the tail of control mode 0
-    // (0x0040847d). The port omits it here and runs the refresh from the
-    // post-state call in NovaAi_UpdateShipAI instead, which covers every
-    // control mode (including 0x17 and modes where the original has no call).
-    // See docs/npc_ship_behaviour.md.
-    // Mode 0x17 likewise has no steering block: state 0x14 owns the
-    // gate/wormhole handoff and velocity bookkeeping; the surrounding jump
-    // path performs the actual transfer.
+    // fly ~1.67x too fast / ~2.8x too far. EscortFire itself returns for
+    // behavior < 5, so this is a no-op for non-combat behaviors.
+    NovaAi_EscortFireAtUnprovokedTarget(state, ship);
+    break;
+
+  case 0x17:
+    // No control block at all: like any mode above 0x16, mode 0x17 falls
+    // through the dispatch to the epilogue at 0x0040c553 with no steering,
+    // desired-spec write, or refresh. State 0x14 owns the gate/wormhole
+    // handoff and velocity bookkeeping; the surrounding jump path performs the
+    // actual transfer.
     break;
 
   case 0x15:
@@ -941,27 +943,29 @@ void NovaAi_ApplyControls(GameState &state,
 
   case 0xb: {
     // Formation hold: like mode 9 but the arrival throttle is 0.5x max speed
-    // within 100 px/axis (not 0), and the formation-leader glow/offset mirror
-    // runs first. TODO(decomp): formation-offset mirroring.
+    // within 100 px/axis (not 0). The original gates the whole arm on a
+    // primary/secondary target slot existing (0x0040ab56) and the ship not
+    // being disabled (0x0040abc7) BEFORE the formation work, so a wingman that
+    // has a leader but no combat target does no formation creep here.
     if (fire_restricted) {
+      break;
+    }
+    const std::int16_t target_slot = combat_target_slot();
+    if (target_slot == -1 ||
+        !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
       break;
     }
     if (ship.formation_leader_ship_slot > 0 &&
         static_cast<std::size_t>(ship.formation_leader_ship_slot) <
             GameState::kMaxShips) {
-      // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
-      // blocks) + glow copy: modes keep their wedge position while attacking.
+      // Ship_MoveShipTowardFormationOffset (0x0040aee8) + glow copy
+      // (leader +0xc8d4): the wedge is held while attacking.
       Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
               .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
               .engine_glow_level;
-    }
-    const std::int16_t target_slot = combat_target_slot();
-    if (target_slot == -1 ||
-        !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
-      break;
     }
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
     const float target_bearing_deg =

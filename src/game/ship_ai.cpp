@@ -969,15 +969,6 @@ void NovaAi_UpdateShipAI(GameState &state,
   // _g_avg_frame_time_ms EMA (about 1.0 at 30 Hz).
   NovaAi_UpdateShipState(state, ship, now_ms, elapsed_ticks);
   NovaAi_ApplyControls(state, ship, elapsed_ticks, now_ms);
-  // TODO(decomp(0x00408150)): the original calls
-  // Ship_EscortFireAtUnprovokedTarget only inside Ship_ApplyShipAiControls, at
-  // the tail of control modes 0/1/9/0xb/0xc. This post-state call substitutes
-  // for the missing mode-0 call and runs for every control mode. The correct
-  // shape is to call it in ApplyControls' case 0 (split from 0x17) and remove
-  // this call; see docs/npc_ship_behaviour.md and the case-0 comment.
-  if (ship.ai_state_code != 0x12) {
-    NovaAi_EscortFireAtUnprovokedTarget(state, ship);
-  }
 }
 
 // ---------------------------------------------------------------------------

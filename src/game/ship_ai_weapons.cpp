@@ -513,12 +513,14 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
 }
 
 // Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget (Carbon symbol
-// AIEscortFireUnprovoked). Escort/mission post-state refresh: behaviors below
-// 5 return without touching the bank (they arm banks in their own control-mode
-// bodies); otherwise the existing primary target is revalidated -- cleared
-// when inactive or disabled -- and, when still valid, the turret/point-defense
-// selector Weapon_FireTurretAtTarget (0x0040ce00) runs (the original's tail
-// call at 0x00411596).
+// AIEscortFireUnprovoked). Escort/mission automatic-weapon refresh, called at
+// the tail of the Ship_ApplyShipAiControls mode bodies 0/1/9/0xb/0xc (see
+// docs/npc_ship_behaviour.md): behaviors below 5 return without touching the
+// bank (they arm banks in their own control-mode bodies); otherwise the
+// existing primary target is revalidated -- cleared when inactive or disabled
+// -- and, when still valid, the turret/point-defense selector
+// Weapon_FireTurretAtTarget (0x0040ce00) runs (the original's tail call at
+// 0x00411596).
 void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship) {
   if (ship.ai_behavior_code < 5) {
     return;
