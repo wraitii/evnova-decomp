@@ -1216,8 +1216,11 @@ NovaUi_SystemFactionConflictStatusText(const GameState &state,
 // original re-renders NovaUi_DrawStarmapRoutesAndMarkers into a dedicated
 // square surface with g_starmap_pan_origin swapped to the current system and
 // g_starmap_zoom swapped to g_route_map_zoom_scale; the port projects
-// directly with a temporary MapView. Background fill + border stand in for
-// the unresolved PTR_DAT_00575acc / DAT_00735658 colours (TODO(decomp)).
+// directly with a temporary MapView. The surface is filled with the per-system
+// space background colour (PTR_DAT_00575acc) and framed with the c\x9alr
+// Colors floating_map colour (DAT_00735658, supplied by the caller). The
+// 16/32-bit path draws the frame BEFORE the markers (only the 8-bit path
+// frames afterwards, 0x004a9a63 vs 0x004a9ae5); the port matches the former.
 void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
                                    NovaFontCache &font_cache,
                                    const GameState &state,
@@ -1225,7 +1228,8 @@ void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
                                    float zoom,
                                    std::int16_t selected_id,
                                    float alpha,
-                                   const NovaStarmap_MarkerIcons &icons) {
+                                   const NovaStarmap_MarkerIcons &icons,
+                                   SDL_Color border_color) {
   if (state.scenario.systems.empty() || rect.w <= 0.0F || rect.h <= 0.0F) {
     return;
   }
@@ -1247,8 +1251,7 @@ void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
   // background colour the gameplay surface is cleared with
   // (NovaRender_SetSystemSpaceBackgroundColor, PTR_DAT_00575acc -> the
   // surface at 0x0085f6e8), so the opaque overlay blends with space while
-  // hiding the world behind it. Border DAT_00735658 is a scenario-derived UI
-  // colour (loader byte at def+0x8a, 0x004c686e); grey stand-in (TODO(decomp)).
+  // hiding the world behind it.
   const auto *cur_def =
       state.scenario.System(static_cast<std::int16_t>(current_id + 0x80));
   const std::uint32_t bg = cur_def ? cur_def->bkgnd_color : 0;
@@ -1258,6 +1261,16 @@ void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
                          static_cast<std::uint8_t>(bg & 0xff),
                          SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &rect);
+
+  // Frame first (DrawContext_FrameRect16WithCurrentColor at 0x004a9a63, the
+  // non-8-bit path): in the shipped Colors record floating_map is (12,12,12),
+  // so this reads as a near-invisible outline on the black space backdrop.
+  SDL_SetRenderDrawColor(renderer,
+                         border_color.r,
+                         border_color.g,
+                         border_color.b,
+                         SDL_ALPHA_OPAQUE);
+  SDL_RenderRect(renderer, &rect);
 
   const auto mapped = BuildMappedSystems(state, view, rect);
   const std::vector<std::int16_t> mission_targets =
@@ -1273,9 +1286,6 @@ void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
              mission_targets,
              icons,
              alpha);
-
-  SDL_SetRenderDrawColor(renderer, 96, 96, 96, 255);
-  SDL_RenderRect(renderer, &rect);
 }
 
 NovaStarmap_MarkerIcons NovaStarmap_LoadMarkerIcons(SdlPlatform &platform) {

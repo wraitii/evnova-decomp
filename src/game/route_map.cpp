@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "travel.hpp"
@@ -25,6 +26,11 @@ constexpr float kZoomInStep = 1.3333F;
 constexpr float kZoomOutStep = 0.75F;
 constexpr float kZoomMax = 2.0F;
 constexpr float kZoomMin = 0.5F;
+
+// Route-map surface side as a fraction of the view width (Ghidra
+// DAT_00575a80 0x00575a80, the double 0.25 read by the only xref, the
+// `FMUL double ptr [DAT_00575a80]` at 0x004abc66).
+constexpr float kRouteMapViewScale = 0.25F;
 
 [[nodiscard]] const System *CurrentSystem(const GameState &state) {
   const std::int16_t current = state.player.current_system_id;
@@ -174,15 +180,16 @@ RouteMapClickResult RouteMap_HandleClick(GameState &state,
 }
 
 SDL_FRect RouteMap_OverlayRect(SdlPlatform &platform) {
-  // Ghidra FUN_004ab9d4: top-left square, side = round(view_width *
-  // DAT_00575a80) min 200. DAT_00575a80 is unresolved; the port uses 0.5 of
-  // the fixed 640-wide logical playfield (= 320), matching the HUD's
-  // fixed-size policy -- the original derives the side from the same fixed
-  // view, not from the window. Clicks and draws share window-point
+  // Ghidra NovaUi_InitializeFlightViewSurfaces 0x004ab9d4 (rect assembly at
+  // 0x004abc33..0x004abc73): a top-left square whose side is
+  // round((view_right - view_left) * DAT_00575a80), clamped to min 200, where
+  // DAT_00575a80 is the double 0.25 (see kRouteMapViewScale) and the width is
+  // the live render-owner width. The flight view tracks the window
+  // (SpaceflightView::DrawGameFrame uses PlaceWindow), so the logical
+  // playfield width is that view width. Clicks and draws share window-point
   // coordinates in the fullscreen flight presentation.
-  (void)platform;
-  constexpr float kPlayfieldWidth = 640.0F;
-  float side = std::round(kPlayfieldWidth * 0.5F);
+  float side =
+      std::round(platform.logical_playfield_size().x * kRouteMapViewScale);
   if (side < 200.0F) {
     side = 200.0F;
   }
@@ -214,6 +221,15 @@ void RouteMapView::Load(SdlPlatform &platform) {
     icons_ = NovaStarmap_LoadMarkerIcons(platform);
     icons_loaded_ = true;
   }
+  // Ghidra 0x004c686e: the overlay frame uses DAT_00735658, the c\x9alr
+  // Colors style floating_map colour at style +0x8a. A missing Colors record
+  // leaves the original global at its zero default (black).
+  if (const auto style = NovaResource_LoadMainMenuStyle()) {
+    border_color_ = SDL_Color{style->floating_map.red,
+                              style->floating_map.green,
+                              style->floating_map.blue,
+                              SDL_ALPHA_OPAQUE};
+  }
 }
 
 void RouteMapView::Draw(SdlPlatform &platform, const GameState &state) {
@@ -243,7 +259,8 @@ void RouteMapView::Draw(SdlPlatform &platform, const GameState &state) {
                                 state.route_map.zoom_scale,
                                 selected,
                                 alpha,
-                                icons_);
+                                icons_,
+                                border_color_);
 }
 
 } // namespace game
