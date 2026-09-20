@@ -152,7 +152,7 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   // command, but holding a turn or thrust key does nothing.
   const bool input_enabled = !opts.fire_restricted;
 
-  ship.engine_thrust = input_enabled && input.thrust && !input.reverse;
+  ship.engine_thrust = input_enabled && input.thrust;
 
   // Reverse uses the original's automatic turn-toward-velocity path instead
   // of also applying manual steering in the same tick. The face-target arm
@@ -221,9 +221,18 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
           ship.heading + std::copysign(turn_rad, delta) + kTwoPi, kTwoPi);
       stats.turn_dir = delta > 0.0F ? 1 : -1;
     }
-  } else if (input_enabled && input.thrust) {
+  }
+
+  // Forward thrust is its own block in the original (Ghidra 0x004502f1, the
+  // reordered thrust block of the joined afterburner/thrust/glow region
+  // 0x0044C9AB -> 0x0044CA6B; g_nova_control_bits[0x44], binding slot 0x15): it
+  // runs regardless of the reverse/face-target arm selected for the heading
+  // above. Chaining it to those auto-turn branches silently dropped the
+  // acceleration whenever the face-target key (A) was held -- the engine glow
+  // showed (engine_thrust) but the hull never moved.
+  if (input_enabled && input.thrust) {
     if (opts.inertialess) {
-      // Ghidra 0x0044c9ab thrust arm, inertialess variant: thrust
+      // Ghidra 0x004502f1 thrust arm, inertialess variant: thrust
       // accumulates the scalar speed (+0x48), clamped to the effective max
       // speed; the steering block below converts it into velocity.
       ship.speed =

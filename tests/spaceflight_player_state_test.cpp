@@ -112,4 +112,40 @@ TEST_CASE("destroyed player auto-ejects without a key press",
   CHECK(p.timed_action_counter == 0x15e);
 }
 
+TEST_CASE("face-target stores the ship target bearing",
+          "[player][face-target]") {
+  GameState state;
+  state.player.is_active = true;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.ShipAt(1).is_active = true;
+  state.player.primary_target_ship_slot = 1;
+  FlightInput input;
+  input.face_target = true;
+
+  // Bearing 0 = up, increasing clockwise, so a target to the right is 90.
+  state.ShipAt(1).pos_x = 100.0F;
+  state.ShipAt(1).pos_y = 0.0F;
+  CHECK(
+      PlayerTick_FaceTargetCommand(state, input, /*arm_modifier_held=*/false));
+  CHECK(state.player.ai_desired_heading_deg == 90);
+
+  // Below the player is 180; left is 270 (never negative).
+  state.ShipAt(1).pos_x = 0.0F;
+  state.ShipAt(1).pos_y = 100.0F;
+  CHECK(
+      PlayerTick_FaceTargetCommand(state, input, /*arm_modifier_held=*/false));
+  CHECK(state.player.ai_desired_heading_deg == 180);
+
+  state.ShipAt(1).pos_x = -100.0F;
+  state.ShipAt(1).pos_y = 0.0F;
+  CHECK(
+      PlayerTick_FaceTargetCommand(state, input, /*arm_modifier_held=*/false));
+  CHECK(state.player.ai_desired_heading_deg == 270);
+
+  // With no travel stellar selected, Alt still falls back to the ship target.
+  CHECK(PlayerTick_FaceTargetCommand(state, input, /*arm_modifier_held=*/true));
+  CHECK(state.player.ai_desired_heading_deg == 270);
+}
+
 } // namespace game

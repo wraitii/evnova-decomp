@@ -187,6 +187,25 @@ TEST_CASE("face-target auto-turn still runs while the player is disabled") {
   CHECK(ship.heading > 0.0F);
 }
 
+TEST_CASE("face-target auto-turn does not suppress forward thrust") {
+  // Ghidra 0x0044c9ab: the thrust block is independent of the local_265
+  // auto-turn arm, so holding the face-target key while thrusting still
+  // accelerates along the current heading (the engine glow alone is not
+  // enough -- the hull must gain velocity).
+  game::PlayerMovementOptions opts;
+  opts.face_target_armed = true;
+  game::PlayerShip ship;
+  ship.ai_desired_heading_deg = 90; // well beyond one 4-degree turn step
+  FlightInput input;
+  input.thrust = true;
+
+  (void)game::NovaPlayer_IntegrateMovement(
+      ship, input, TestShipClass(), 1.0F, opts);
+
+  CHECK(ship.engine_thrust);
+  CHECK(ship.vel_x > 0.0F); // thrust step along the rightward heading
+}
+
 // --- NPC ship movement (NovaShip_IntegrateNpcMovement; Ghidra Ship_HandleShip
 // movement block) ---
 
