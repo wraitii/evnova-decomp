@@ -356,4 +356,25 @@ TEST_CASE("news text panels use the original window-relative rects",
   CHECK(panels.body[3] - panels.body[1] == 56.0F);
 }
 
+// The Mission BBS list and its native scrollbar are DITL 0x3ee items 2 and 3
+// (UiPanel entries 2 and 3). The list rect is 195x144 (12 rows at the native
+// 12px pitch), and the 15px scrollbar strip shares its vertical extent; the
+// port maps both so long offer lists can be scrolled instead of clipped away.
+TEST_CASE("mission BBS DITL exposes the native list and scrollbar",
+          "[docked][mission]") {
+  const auto definition = NovaResource_LoadDialogDefinition(0x3ee);
+  REQUIRE(definition.has_value());
+  const auto items =
+      NovaResource_LoadDialogItems(definition->dialog_item_list_id);
+  REQUIRE(items.has_value());
+  REQUIRE(items->size() >= 3);
+  const NovaDialogItem &list = (*items)[1];
+  const NovaDialogItem &scrollbar = (*items)[2];
+  CHECK(list.right - list.left == 195);
+  CHECK(list.bottom - list.top == 144);
+  CHECK(scrollbar.right - scrollbar.left == 15);
+  CHECK(scrollbar.top == list.top);
+  CHECK(scrollbar.bottom == list.bottom);
+}
+
 } // namespace game
