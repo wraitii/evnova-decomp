@@ -65,8 +65,119 @@ NovaTextScrollView::NovaTextScrollView(NovaFontCache &fonts,
   max_scroll_ = std::max(0.0F, text_height_ - view_rect.h);
 }
 
+// Ghidra 0x00499270 NovaUi_ScrollSelectionText, immediate arm. Its
+// param_5 == 0 "smooth" arm would scale param_4 as px/sec by the elapsed 60Hz
+// ticks (x the 1/60 double at 0x005759b0); TODO(decomp(0x00499270)) skipped:
+// it is dead in the shipped binary -- every call site in the mission-offer
+// poll/run and the text-reader run/callback passes the immediate flag -- so
+// the port models only the +/-px step.
 void NovaTextScrollView::ScrollBy(float delta) {
   scroll_offset_ = std::clamp(scroll_offset_ + delta, 0.0F, max_scroll_);
+}
+
+TextScrollKey MapTextScrollKey(std::uint16_t key_code) {
+  switch (key_code) {
+  case 0x61: // normalized Up
+    return TextScrollKey::kLineUp;
+  case 0x66: // normalized Down
+    return TextScrollKey::kLineDown;
+  case 0x60: // normalized Home
+    return TextScrollKey::kHome;
+  case 0x62: // normalized PageUp
+    return TextScrollKey::kPageUp;
+  case 0x65: // normalized End
+    return TextScrollKey::kEnd;
+  case 0x67: // normalized PageDown
+    return TextScrollKey::kPageDown;
+  default:
+    return TextScrollKey::kNone;
+  }
+}
+
+// Ghidra 0x00499440 / 0x00447170 key arms, via NovaUi_ScrollSelectionText
+// (0x00499270): the line and page steps go through the +/-px path, Home/End
+// ask for an oversized step that the view clamp turns into a jump to the end.
+// The original clears the exhausted latch explicitly; the live can_*()
+// predicate makes that automatic.
+bool NovaTextScrollView::ApplyScrollKey(TextScrollKey key) {
+  const float before = scroll_offset_;
+  switch (key) {
+  case TextScrollKey::kLineUp:
+    if (can_scroll_up()) {
+      ScrollBy(-10.0F);
+    }
+    break;
+  case TextScrollKey::kLineDown:
+    if (can_scroll_down()) {
+      ScrollBy(10.0F);
+    }
+    break;
+  case TextScrollKey::kHome:
+    if (can_scroll_up()) {
+      scroll_offset_ = 0.0F;
+    }
+    break;
+  case TextScrollKey::kPageUp:
+    if (can_scroll_up()) {
+      ScrollBy(-250.0F);
+    }
+    break;
+  case TextScrollKey::kEnd:
+    if (can_scroll_down()) {
+      scroll_offset_ = max_scroll_;
+    }
+    break;
+  case TextScrollKey::kPageDown:
+    if (can_scroll_down()) {
+      ScrollBy(250.0F);
+    }
+    break;
+  case TextScrollKey::kNone:
+    break;
+  }
+  return scroll_offset_ != before;
+}
+
+void NovaTextScrollHold::Press(NovaTextScrollView &view,
+                               bool up,
+                               std::uint64_t now_ms) {
+  held_ = true;
+  up_ = up;
+  last_tick_ = (now_ms * 60U) / 1000U;
+  // The original's hold loop emits one step before it starts waiting on the
+  // 60Hz tick, so a tap shorter than a tick still moves one pixel.
+  if (up_ ? view.can_scroll_up() : view.can_scroll_down()) {
+    view.ScrollBy(up_ ? -1.0F : 1.0F);
+  }
+}
+
+bool NovaTextScrollHold::Update(NovaTextScrollView &view,
+                                bool button_down,
+                                std::uint64_t now_ms) {
+  if (!held_) {
+    return false;
+  }
+  if (!button_down) {
+    held_ = false;
+    return false;
+  }
+  const std::uint64_t tick = (now_ms * 60U) / 1000U;
+  if (tick <= last_tick_) {
+    return false;
+  }
+  const float before = view.scroll_offset();
+  bool more = true;
+  for (std::uint64_t step = last_tick_; step < tick && more; ++step) {
+    if (up_ ? view.can_scroll_up() : view.can_scroll_down()) {
+      view.ScrollBy(up_ ? -1.0F : 1.0F);
+    } else {
+      // Ran into the end of the content; stop repeating.
+      held_ = false;
+      more = false;
+    }
+  }
+  last_tick_ = tick;
+  return view.scroll_offset() != before;
 }
 
 // Ghidra 0x004bcf30 NovaTextView redraw path: the wrapped text is clipped to
@@ -364,6 +475,7 @@ void NovaUi_RunTextReaderDialog(
   };
 
   draw_frame();
+  NovaTextScrollHold scroll_hold;
   bool starmap_command_was_held = false;
   while (!platform.quit_requested()) {
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
@@ -378,28 +490,31 @@ void NovaUi_RunTextReaderDialog(
         if (Contains(layout.done_button, point)) {
           return;
         }
-        // Scroll arrows (actions 5/6, +/-10 px per NovaUi_ScrollSelectionText
-        // in the modal loop; the original gates action 5 on can-scroll-up and
-        // action 6 on can-scroll-down).
-        if (Contains(layout.arrow_down, point) &&
-            view.scroll_offset() < view.max_scroll()) {
-          view.ScrollBy(10.0F);
-        } else if (Contains(layout.arrow_up, point) &&
-                   view.scroll_offset() > 0.0F) {
-          view.ScrollBy(-10.0F);
+        // Scroll arrows (entries 5/6): Ghidra 0x00499440 enters its
+        // hold-to-repeat loop when the press lands on the arrow, gated on the
+        // maxed (up) / active (down) latch.
+        if (Contains(layout.arrow_up, point)) {
+          if (view.can_scroll_up()) {
+            scroll_hold.Press(view, true, platform.wall_ticks_ms());
+          }
+        } else if (Contains(layout.arrow_down, point)) {
+          if (view.can_scroll_down()) {
+            scroll_hold.Press(view, false, platform.wall_ticks_ms());
+          }
         }
         continue;
       }
       if (input->key == TextKey::physical) {
-        // Port convenience: DIK arrows scroll (the original scrolls only via
-        // the arrow buttons).
-        if (input->key_code == 0x61) { // normalized Up
-          view.ScrollBy(-10.0F);
-        } else if (input->key_code == 0x66) { // normalized Down
-          view.ScrollBy(10.0F);
-        }
+        // Ghidra 0x00499440: Up/Down scroll +/-10px (actions 5/6) and
+        // Home/End/PageUp/PageDown jump to an end / move 250px, gated on the
+        // maxed/active latches.
+        (void)view.ApplyScrollKey(MapTextScrollKey(input->key_code));
       }
     }
+    // Hold-to-repeat pump (0x00499440): 1px per 60Hz tick while the button
+    // stays down over an arrow.
+    (void)scroll_hold.Update(
+        view, platform.PrimaryMouseDown(), platform.wall_ticks_ms());
     // Action 4: the map command (slot 9, default M) opens the starmap when
     // allow_starmap is set (the mission brief passes it). Edge-triggered so
     // the map does not reopen while the key stays held. TODO(decomp) skipped:

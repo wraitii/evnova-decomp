@@ -719,6 +719,10 @@ action = "click"
 element = "mission.629"
 
 [[steps]]
+action = "screenshot"
+name = "mission-bbs-tutorial-offer"
+
+[[steps]]
 action = "click"
 element = "take"
 
@@ -726,22 +730,12 @@ element = "take"
 action = "wait"
 expect = { "missions.missions.0.template_id" = 629, "ui.window" = "text_reader" }
 
+# Ghidra 0x0043c470: a successful accept exits the BBS after the acceptance
+# briefing, returning straight to the spaceport (no list rebuild, no second
+# mission in the same visit).
 [[steps]]
 action = "click"
 element = "done"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "mission_bbs" }
-
-[[steps]]
-action = "screenshot"
-name = "mission-bbs-tutorial-offer"
-
-# Leave the BBS without taking a second mission.
-[[steps]]
-action = "click"
-element = "decline"
 
 [[steps]]
 action = "wait"

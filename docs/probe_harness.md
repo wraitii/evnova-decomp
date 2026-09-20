@@ -243,6 +243,13 @@ their controls too —
 it is 3–5 lines next to the layout struct plus one `ProbeUiAutoClear` guard,
 and doubles as documentation of the dialog's controls.
 
+An injected click is a **motion + button-down only** (no button-up), and
+`SDL_PushEvent` does not update SDL's live mouse state. Hold-to-repeat widgets
+that read `SdlPlatform::PrimaryMouseDown()` (the text-view scroll arrows,
+Ghidra `0x00447170`/`0x00499440`) therefore see an injected click as a
+discrete 1px step, not a hold; exercise page jumps with the keyboard
+(Home/End/PageUp/PageDown) or click repeatedly instead.
+
 ### State queries
 
 `summary` (default), `player`, `missions`, `ships` (active NPCs in the

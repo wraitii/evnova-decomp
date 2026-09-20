@@ -59,9 +59,11 @@ of `SpaceflightView &`/`HudRenderer &`, so they open from docked context too;
 `SdlAudio &` is threaded through the docked dispatch so the mission computer
 plays its cues.
 
-What is left is list-control fidelity (T3/T7), the shared reader/offer
-custom-art path (T4, exercised by many shipped missions), and offer
-scroll/arrow polish (T5).
+What is left is the shared reader/offer custom-art path (T4, exercised by
+many shipped missions). The native list control (T3) and shared row painter
+(T7) landed in commit 6987616, the offer/reader scroll arrows (T5) are done,
+and a successful BBS accept now exits the window (0x0043c470) instead of
+rebuilding the list.
 
 ## Verified original behavior (decompile evidence)
 
@@ -72,7 +74,9 @@ scroll/arrow polish (T5).
 - **action 9** — player special window, requested on player-special command (`_76_2_`).
 - **action 10** — mission computer, requested on mission-computer command (`_106_2_`). BBS caller only opens it when ≥1 active mission lacks flags 0x400 (the visible filter).
 - **action 7** — leave.
-- **action 1** — accept (`Mission_ActivateMissionAtSlot`); on failure the description is reloaded.
+- **action 1** — accept (`Mission_ActivateMissionAtSlot`); on success the run
+  loop's exit flag is set, so the BBS closes after the acceptance UI; on
+  failure the description is reloaded and the window stays open.
 - Arrow/Tab keys (Mac keycodes 9/10/11) walk the native list selection.
 
 ### Offer poll → action codes (`0x00442510` tail)
@@ -140,24 +144,23 @@ Implemented: `NovaUi_PollMissionComputerWindow`,
 `NovaUi_DrawMissionComputerWindow`, `NovaUi_RebuildMissionComputerList`.
 
 ### T3 — Native list control (BBS + mission computer)
-**What the original does.** Both mission lists are the game's reusable Mac
-list widget (`DAT_00774aec`), not a hand-drawn column. The list owns a scroll
-offset and a native scrollbar (a DITL entry in DLOG 0x3ee), keeps the selected
-row index (`g_selected_misn_slot_index` for the BBS, `DAT_0077430a` for the
-mission computer), and exposes helpers the poller calls:
-`FUN_004d1cd0`/`FUN_004d1f50` select a row and compute its rect,
-`FUN_004d1fb0` scrolls the list just enough to bring the selected row into
-view, and `FUN_004d1db0` maps a mouse point back to a row. Tab / Up / Down walk
-the list and auto-scroll it.
+**Implemented** (commit 6987616) via the shared clean-room `NovaListControl`
+(`src/game/nova_list_control.cpp`, Ghidra `NovaList_Create` 0x004d1a60,
+`NovaList_GetRowRect` 0x004d1f50, `NovaList_HitTestPoint` 0x004d1db0,
+`NovaList_ScrollByRows` 0x004d1fb0, `NovaList_ScrollSelectionIntoView`
+0x004d1d40, `NovaList_Draw` 0x004d2010). Both windows own a scroll offset,
+clamp it, map clicks through it, move Tab/Up/Down and j/k and scroll the
+selection into view, and draw a native scrollbar (frame, trough, chevrons,
+proportional thumb): the BBS uses its DITL `0x3ee` UiPanel entry-3 strip, the
+mission computer the `0xf`-narrowed right edge from `0x00445dc0`. Thumb
+dragging is not reproduced (`TODO(decomp)`); offers past the view are now
+reachable.
 
-**What the port does now.** Draws every row from the top of the list rect at
-the fixed 12px pitch and clips; selection is j/k plus click.
-
-**What is missing and why it matters.** No scroll offset or scrollbar, no
->visible-row paging, and no scroll-into-view when the selection moves. When a
-stellar offers more missions than the list rect fits, the later missions are
-drawn outside the clip and cannot be selected at all. This is the main
-remaining visible gap in both windows.
+**Original.** Both mission lists are the game's reusable Mac list widget
+(`DAT_00774aec`), not a hand-drawn column: it owns the scroll offset and native
+scrollbar, keeps the selected row index (`g_selected_misn_slot_index` for the
+BBS, `DAT_0077430a` for the mission computer), and exposes the helpers above;
+Tab / Up / Down walk the list and auto-scroll it.
 
 ### T4 — Reader / offer custom art (`dialog_variant`)
 The desc's trailing u16 field (`NovaStellarDescription::dialog_variant`) is a
@@ -188,30 +191,43 @@ on `g_pref_quicktime_movies`. The port has no movie player — QuickTime is one 
 the intended platform replacements — so this belongs in `decomp-skipped.tsv` as
 a `qt`/platform skip, not a TODO.
 
-### T5 — Offer text-scroll arrows (hold-to-repeat, page keys)
-**What the original does** (0x00447170): while the mouse button is held on the
-up-arrow DITL entry it loops, scrolling the text view 1px per 60Hz tick and
-repainting, and it only allows scrolling when the view reports
-`g_selection_editor_maxed` (can scroll up) or `g_selection_editor_active` (can
-scroll down). The keyboard maps Up/Down to actions 9/10 and Home/End/PageUp/
-PageDown (key codes 0x91..0x94) to large jumps via `NovaUi_ScrollSelectionText`
-(±9999/±0xfa).
+### T5 — Text-scroll arrows (hold-to-repeat, page keys)
+**Implemented.** The shared `NovaTextScrollView`/`NovaTextScrollHold`
+(`src/game/selection_text_dialog.*`) now back **both** the offer window
+(`0x00447170`) and the generic text reader (`0x00499440`) — the two callbacks
+are the same machine:
+- Keyboard: normalized Up/Down scroll ±10px (offer actions 9/10, reader
+actions 5/6); Home/End jump to an end; PageUp/PageDown move `0xfa` (250)px.
+The old offer DIK `0xc8`/`0xd0` codes never matched a `TextInput` (normalized
+Up/Down are `0x61`/`0x66`).
+- Every scroll action is gated on the live `g_selection_editor_maxed`
+(can-scroll-up) / `g_selection_editor_active` (can-scroll-down) latches, which
+the port computes as `scroll_offset > 0` / `< max_scroll`.
+- Mouse: a press on an arrow emits the first 1px step and, while the button
+stays down, repeats 1px per 60Hz tick. `SdlPlatform::PrimaryMouseDown()` reads
+SDL's real button state, so probe-injected clicks (press-only) stay discrete.
+- The arrows are still drawn disabled from the live latches (unchanged).
 
-**What the port does now.** Each click scrolls 10px once, and DIK Up/Down
-scroll 10px; the arrows are shown/hidden from the current scroll offset rather
-than the maxed/active latches.
+- The arrows are still drawn disabled from the live latches (unchanged).
+- Keyboard auto-repeat: the original's polls route Mac autoKey (event type 5)
+  through the same handler as key-down (type 3) — `0x00499440`/`0x00447170`
+  both test `type == 3 || type == 5` — so a held scroll key repeats its
+  discrete ±10px/jump step at the OS repeat rate. `SdlPlatform::PollTextEvent`
+  now surfaces SDL `event.key.repeat` events (previously dropped) and tags
+  them `TextInput::repeat`; the scroll handlers consume them unchanged. The
+  `maxed`/`active` gates still auto-stop at the ends.
 
-**What is missing.** Hold-to-repeat on the arrow buttons, maxed/active gating
-of their enabled state, and the page-scroll keys.
+Remaining gap: the smooth `NovaUi_ScrollSelectionText` `param_5 == 0` path is
+unused by both callers.
 
 ### T7 — Shared list-row painter
-`NovaUi_DrawListRowCallback` (0x00448a30) is the callback the native list
-widget invokes per row: it paints the row from the c.lr palette
-(`list_background`/`list_hilite`/`list_text`), draws the label with the shared
-screen font, and applies the row clip. The port already reads the same palette
-but paints rows inline in each window. Folding that into one helper only makes
-sense together with T3, so the list control and both mission lists share the
-exact row painting.
+**Implemented** (commit 6987616): `NovaUi_DrawListRow`
+(`src/game/nova_list_control.cpp`, Ghidra `NovaUi_DrawListRowCallback`
+0x00448a30) is the single per-row painter the native list widget invokes: it
+fills from the c.lr palette (`list_background`/`list_hilite`/`list_text`),
+draws the label with the shared screen font, and applies the row clip. The BBS
+(`DrawMissionBbsContents`) and the mission computer both call it; the failed
+`0xa5` marker is part of the row string, as in the original.
 
 ## Testing / probe
 
@@ -227,7 +243,9 @@ exact row painting.
   → abort, and offer → starmap preselect.
 - **Unit tests**: `tests/mission_test.cpp` covers list evaluation, activation,
   wildcards, and offer/decline context; `tests/docked_dialog_test.cpp` covers
-  DLOG/DITL layouts. Add layout assertions for DLOG `0x3fc` if T4 lands.
+  DLOG/DITL layouts; `tests/selection_text_dialog_test.cpp` covers the
+  `TextScrollKey` mapping, line/page/jump scrolling and gating, and the
+  hold-to-repeat tick math. Add layout assertions for DLOG `0x3fc` if T4 lands.
 - Validate with `cmake --build build/release` and
   `ctest --test-dir build/release --output-on-failure`; comment-only changes
   need no build. Probe/scenario runs need host approval — ask before using the
@@ -247,10 +265,7 @@ exact row painting.
 
 ## Recommended sequencing
 
-1. **T3 (+T7)** — native list control and the shared row painter; long mission
-   lists are currently unreachable.
-2. **T4** — thread the desc variant PICT through the text reader and add the
+1. **T4** — thread the desc variant PICT through the text reader and add the
    offer `0x3fc`/`0x2150` arm; many shipped missions lose their briefing art
    and get the wrong offer window today. Record the status movie as a platform
    skip.
-3. **T5** — hold-to-repeat scroll arrows and page keys; small and isolated.

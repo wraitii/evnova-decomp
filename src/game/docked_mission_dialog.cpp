@@ -523,18 +523,12 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
   std::size_t selected = 0;
   std::string status;
   // Native list control (Ghidra 0x004d1a60 / 0x0043cc20): owns the scroll
-  // offset and derives the visible row count from the DITL list rect.
+  // offset and derives the visible row count from the DITL list rect. The
+  // original rebuilds it only on window entry
+  // (Stellar_RebuildTravelDestinationList), so the row set is fixed for the
+  // window's lifetime.
   NovaListControl list_control(
       layout->list, kMissionListRowPitch, missions.page_zero.size());
-  const auto sync_list_control = [&]() {
-    list_control.SetRowCount(missions.page_zero.size());
-    if (missions.page_zero.empty()) {
-      selected = 0;
-    } else if (selected >= missions.page_zero.size()) {
-      selected = missions.page_zero.size() - 1;
-    }
-    list_control.EnsureVisible(selected);
-  };
   const auto move_selection = [&](std::ptrdiff_t delta) {
     if (missions.page_zero.empty()) {
       return;
@@ -554,10 +548,8 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
   bool starmap_command_was_held = false;
   bool player_info_command_was_held = false;
   bool mission_computer_command_was_held = false;
-  // The active mission list is re-evaluated when a mission is accepted, so
-  // recompute the published controls every frame. Each available row is
-  // addressable by its zero-based template id (matching the
-  // `missions.missions.N.template_id` state field) so a probe scenario can
+  // Each available row is addressable by its zero-based template id (matching
+  // the `missions.missions.N.template_id` state field) so a probe scenario can
   // click a specific mission instead of relying on the default first row.
   const auto publish_probe_ui = [&]() {
     const auto probe_rect = [&platform](SDL_FRect rect) {
@@ -622,9 +614,13 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
     publish_probe_ui();
     platform.Present();
 
-    auto accept = [&]() {
+    // Ghidra 0x0043c470: after a successful Mission_ActivateMissionAtSlot
+    // (whose acceptance UI runs synchronously) the original sets the
+    // window-exit flag, so the BBS closes. It never rebuilds the list here; the
+    // previous re-evaluation rerolled every definition's random destination.
+    auto accept = [&]() -> bool {
       if (missions.page_zero.empty() || selected >= missions.page_zero.size()) {
-        return;
+        return false;
       }
       const auto mission_id = missions.page_zero[selected];
       if (Mission_ActivateAtSlot(
@@ -632,12 +628,10 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
               mission_id,
               stellar_id,
               MakeAcceptanceSink(platform, state, render_background))) {
-        status = "Mission accepted";
-        missions = Mission_EvaluateMissionLists(state);
-        sync_list_control();
-      } else {
-        status = "Mission could not be accepted";
+        return true;
       }
+      status = "Mission could not be accepted";
+      return false;
     };
 
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
@@ -645,7 +639,9 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
         return LandedExit::kServiceComplete;
       }
       if (input->key == TextKey::enter) {
-        accept();
+        if (accept()) {
+          return LandedExit::kServiceComplete;
+        }
         continue;
       }
       if (input->key == TextKey::primary) {
@@ -686,7 +682,9 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
         // Ghidra 0x004a1130 NovaUi_HitTestMissionBbsActionButtons runs inline
         // here (Accept = window entry 1, Leave = entry 7).
         if (!handled && contains(layout->take, point)) {
-          accept();
+          if (accept()) {
+            return LandedExit::kServiceComplete;
+          }
         } else if (!handled && contains(layout->decline, point)) {
           return LandedExit::kServiceComplete;
         }
@@ -717,7 +715,9 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
       } else if (key == 'k') {
         move_selection(-1);
       } else if (key == 'a') {
-        accept();
+        if (accept()) {
+          return LandedExit::kServiceComplete;
+        }
       }
     }
 
@@ -746,10 +746,10 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
       if (RunNestedMissionStarmap(platform, state, preselect)) {
         return LandedExit::kQuit;
       }
-      // The mission list may have changed (an offer resolved while the map was
-      // open); refresh it and clamp the selection.
-      missions = Mission_EvaluateMissionLists(state);
-      sync_list_control();
+      // Ghidra 0x0043c470 action 6 does not rebuild the list (and no time
+      // advances while the modal map is open). The port previously
+      // re-evaluated here, which rerolled every definition's random
+      // destination.
     }
     starmap_command_was_held = starmap_held;
     const bool player_info_held =
@@ -1024,6 +1024,7 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   NovaFontCache font_cache;
   // Shared read-only text view (NovaTextView 0x004bcd90) over DITL entry 3.
   NovaTextScrollView view(font_cache, text, text_rect);
+  NovaTextScrollHold scroll_hold;
   // One window frame over the docked backing store. The original's draw
   // callback (NovaUi_DrawMissionShipInteractionWindow 0x00447680) fills the
   // window, blits the main art top-anchored (clipped), then the top and
@@ -1163,24 +1164,26 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
               MakeAcceptanceSink(platform, state, render_background));
           return MissionOfferResult::kDeclined;
         }
-        // Arrow buttons (entries 9/10), NovaUi_ScrollSelectionText ±10px per
-        // action in 0x00442510. The original gates action 9 on the maxed
-        // latch and action 10 on the scrolled latch; the clamp covers both.
-        if (Contains(scroll_down_rect, point)) {
-          view.ScrollBy(10.0F);
-        } else if (Contains(scroll_up_rect, point)) {
-          view.ScrollBy(-10.0F);
+        // Arrow buttons (entries 9/10): Ghidra 0x00447170 enters its
+        // hold-to-repeat loop when the press lands on the arrow, gated on the
+        // maxed (up) / active (down) latch.
+        if (Contains(scroll_up_rect, point)) {
+          if (view.can_scroll_up()) {
+            scroll_hold.Press(view, true, platform.wall_ticks_ms());
+          }
+        } else if (Contains(scroll_down_rect, point)) {
+          if (view.can_scroll_down()) {
+            scroll_hold.Press(view, false, platform.wall_ticks_ms());
+          }
         }
         continue;
       }
       if (input->key == TextKey::physical) {
-        // Port convenience: DIK arrows scroll the view (the original scrolls
-        // only via the two arrow buttons).
-        if (input->key_code == 0xc8) { // DIK_UP
-          view.ScrollBy(-10.0F);
-        } else if (input->key_code == 0xd0) { // DIK_DOWN
-          view.ScrollBy(10.0F);
-        }
+        // Ghidra 0x00447170: Up/Down scroll +/-10px (actions 9/10) and
+        // Home/End/PageUp/PageDown jump to an end / move 250px, gated on the
+        // maxed/active latches. The old DIK 0xc8/0xd0 codes never matched a
+        // TextInput (the normalized Up/Down are 0x61/0x66).
+        (void)view.ApplyScrollKey(MapTextScrollKey(input->key_code));
       }
     }
 
@@ -1217,6 +1220,10 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
           platform, audio, state, render_background);
     }
     mission_computer_command_was_held = mission_computer_held;
+    // Hold-to-repeat pump (0x00447170): 1px per 60Hz tick while the button
+    // stays down over an arrow.
+    (void)scroll_hold.Update(
+        view, platform.PrimaryMouseDown(), platform.wall_ticks_ms());
     draw_frame();
     platform.PaceFrame();
   }

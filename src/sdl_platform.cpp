@@ -599,18 +599,32 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
       mouse_position_ = placement_.ToAuthored(mouse_window_point_);
       return TextInput{TextKey::primary, '\0', 0xffff, alt};
     }
-    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+    if (event.type == SDL_EVENT_KEY_DOWN) {
+      // OS key repeats are surfaced, not dropped: the original's event poll
+      // routes Mac autoKey (type 5) through the same handlers as key-down
+      // (type 3), e.g. the text-reader/offer scroll arms at 0x00499440 and
+      // 0x00447170. `repeat` lets a one-shot caller distinguish if needed.
+      const bool repeat = event.key.repeat;
       switch (event.key.key) {
       case SDLK_RETURN:
       case SDLK_KP_ENTER:
-        return TextInput{
-            TextKey::enter, '\0', OriginalKeyCode(event.key.scancode)};
+        return TextInput{TextKey::enter,
+                         '\0',
+                         OriginalKeyCode(event.key.scancode),
+                         false,
+                         repeat};
       case SDLK_ESCAPE:
-        return TextInput{
-            TextKey::escape, '\0', OriginalKeyCode(event.key.scancode)};
+        return TextInput{TextKey::escape,
+                         '\0',
+                         OriginalKeyCode(event.key.scancode),
+                         false,
+                         repeat};
       case SDLK_BACKSPACE:
-        return TextInput{
-            TextKey::backspace, '\0', OriginalKeyCode(event.key.scancode)};
+        return TextInput{TextKey::backspace,
+                         '\0',
+                         OriginalKeyCode(event.key.scancode),
+                         false,
+                         repeat};
       default:
         break;
       }
@@ -622,11 +636,12 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
         return TextInput{TextKey::character,
                          static_cast<char>(sym),
                          OriginalKeyCode(event.key.scancode),
-                         alt};
+                         alt,
+                         repeat};
       }
       if (const auto key_code = OriginalKeyCode(event.key.scancode);
           key_code != 0xffff) {
-        return TextInput{TextKey::physical, '\0', key_code};
+        return TextInput{TextKey::physical, '\0', key_code, false, repeat};
       }
     }
   }
@@ -821,6 +836,10 @@ void SdlPlatform::ApplyProbeExecutionSettings(bool enabled,
 // window point and the current placement. Recomputing it on placement changes
 // keeps hit-testing correct even when the cursor does not move.
 SDL_FPoint SdlPlatform::mouse_position() const { return mouse_position_; }
+
+bool SdlPlatform::PrimaryMouseDown() const {
+  return (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0;
+}
 
 SDL_FPoint SdlPlatform::mouse_window_point() const {
   return mouse_window_point_;
