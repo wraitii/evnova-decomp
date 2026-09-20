@@ -158,7 +158,7 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
 }
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, destruction slice. See the header
-// for scope notes. Constants decoded from data: g_cloak_fade_passive_decay
+// for scope notes. Constants decoded from data: k_unit_f32
 // (0x00575318) = 1.0 tick, destroyed-finale threshold DAT_0057531c = 2.0,
 // player death-timer scale _DAT_00575378 = 3.0, blast radius scale/addend
 // g_hull_blast_radius_scale_f64/_addend_f64 (0x00575380/88) = 0.075/50.0,
@@ -722,7 +722,7 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
 // Ghidra 0x00428340 Ship_UpdateVisualState, cloak-fade slice. See the header
 // for scope notes. Constants decoded from data: g_cloak_fade_rate_default
 // (0x00575308) = 1.5, g_cloak_fade_rate_flags2_swarming (0x0057530c) = 0.75,
-// g_cloak_fade_progress_max (0x00575314) = 32.0, g_cloak_fade_passive_decay
+// g_cloak_fade_progress_max (0x00575314) = 32.0, k_unit_f32
 // (0x00575318) = 1.0. The original indexes g_ship_class_defs directly; the
 // port's defensive class lookup only changes behavior for hulls the
 // Ship_HandleShip prologue would already have deactivated.

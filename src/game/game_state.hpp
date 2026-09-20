@@ -812,11 +812,14 @@ struct TravelState {
   // fresh pilot starts at -3 (0xfffd, new-game state reset 0x0048a600). The
   // hint overlay texts themselves (the DAT_0072exxxcc queue) are TODO(decomp).
   std::int16_t travel_hint_state = -3;
-  // Hold-phase elapsed time in 30 Hz simulation ticks. The fire lands once the
-  // hold passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks) AND the Warp
-  // up cue has finished playing (the original's NovaAudio_CountActiveByHandle
-  // gate, mirrored through hold_audio_latch).
-  float hold_ticks = 0.0F;
+  // The hold-phase clock is the player ship's ai_station_hold_timer (seeded to
+  // 2.0 at hold-begin, 0x0044c548, and incremented each 30 Hz tick): the fire
+  // lands once it passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks)
+  // AND the Warp up cue has finished playing (the original's
+  // NovaAudio_CountActiveByHandle gate, mirrored through hold_audio_latch).
+  // The escort jump sync (Ship_SyncJumpStateToSquad 0x00422340) and the
+  // player-led jump spin-up (Ship_HandleShip 0x00433050) read the same field,
+  // so it cannot live as a separate travel-local.
   bool hold_audio_latch = false;
   // Rising-edge latch for the "entered jump range" cue (Ghidra DAT_007cab34):
   // set while a plotted (mode-3) jump is armed and the ship is far enough
@@ -1866,10 +1869,28 @@ struct GameState {
   // FUN_004b0740: NovaSound_LoadDecodedById(0x80/0x81/0x82) into the jump
   // handles g_random_encounter_fleet_defs[0].availability_expression
   // +0x8c/+0x90/+0x94).
-  // snd 128 Warp up is played during the pre-jump hold; snd 130 Warp out at
-  // fire/arrival. Empty means the travel state uses its fallback timing.
+  // snd 128 Warp up is played during the pre-jump hold; snd 129 is the
+  // noengine/x2 variant selected when g_x2_mode_active is set; snd 130 Warp
+  // out at fire/arrival. Empty means the travel state uses its fallback
+  // timing.
   std::optional<NovaSoundData> warp_up_sound;
+  std::optional<NovaSoundData> warp_up_x2_sound;
   std::optional<NovaSoundData> warp_out_sound;
+
+  // Ghidra 0x007354c0/0x007354c2 g_hyperspace_jump_duration_engine_60hz /
+  // ..._noengine_60hz: the Warp up cue lengths in 1/60 s ticks, computed at
+  // preload from the matching snd header as numFrames * 60 / sampleRate
+  // (NovaAudio_PreloadGameplayData 0x004b0740). Both slots start at the 0x15e
+  // (350) missing-resource fallback; the shipped cues decode to 364 (engine,
+  // snd 128) and 252 (noengine, snd 129).
+  std::int16_t jump_duration_engine_60hz = 350;
+  std::int16_t jump_duration_noengine_60hz = 350;
+  // Ghidra g_x2_mode_active (0x00596d34): selects the noengine cue and the x2
+  // ramp clock scales. The port has not reconstructed the original's x2
+  // scheduler yet, so this stays false (ramp scale 1.0); the probe x2 key
+  // divergence (SdlPlatform::ServiceX2SpeedDivergence) scales the whole clock
+  // instead and must not set this flag, or the x2 scale would apply twice.
+  bool x2_mode_active = false;
 };
 
 // Ghidra 0x004688e0 Ship_IsShipDestroyed: death timer running or armor gone.

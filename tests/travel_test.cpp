@@ -12,6 +12,7 @@
 #include "game/outfit.hpp"
 #include "game/preferences.hpp"
 #include "game/scenario_data.hpp"
+#include "game/ship_ai.hpp"
 #include "game/spaceflight.hpp"
 #include "game/spaceflight_view.hpp"
 #include "game/targeting.hpp"
@@ -656,6 +657,93 @@ TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
   CHECK(state.player.current_system_id == 1);
 }
 
+// Regression: the jump hold must seed the PLAYER's ai_station_hold_timer
+// (0x0044c548) and stamp ai_mode_start_time_ms (0x0044c54f).
+// Ship_SyncJumpStateToSquad copies that timer to attached escorts and enters
+// them into state 0x0B, and the player-led jump spin-up in Ship_HandleShip
+// (0x00433050) reads both fields to ramp the escort's departure. Before the
+// fix the port kept the hold clock in a travel-local, so escorts stopped with
+// the player but never aligned or jumped.
+TEST_CASE("jump hold clocks player station timer so escorts sync") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_y = -3000.0F; // beyond the no-jump radius
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+
+  // One attached escort (behavior 6, no stellar attachment); no others.
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    state.ShipAt(slot).is_active = false;
+  }
+  auto &escort = state.ShipAt(1);
+  escort.is_active = true;
+  escort.ship_instance_id = 1;
+  escort.ship_class_id = 0;
+  escort.current_system_id = 0;
+  escort.ai_behavior_code = 6;
+  escort.squad_leader_ship_slot = 0;
+  escort.defense_fleet_home_stellar_id = -1;
+  escort.mission_fleet_slot = -1;
+  escort.ai_station_hold_timer = -1.0F;
+  escort.armor_points = 1000.0F;
+  escort.shield_points = 0.0F;
+
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.engaging);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+
+  // Hold-begin seeds the timer to 2.0. The per-tick squad sync then mirrors it
+  // into the escort and enters state 0x0B.
+  CHECK(state.player.ai_station_hold_timer == Catch::Approx(2.0F));
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  CHECK(state.player.ai_station_hold_timer > 1.0F);
+  CHECK(escort.ai_station_hold_timer > 1.0F);
+  CHECK(escort.ai_state_code == 0x0b);
+
+  // The player's desired heading must track the map jump bearing (the original
+  // stores it at 0x0044eeb3). The escort mode-0xD spin-up reads it via
+  // leader_delta / the leader-desired fallback, so a stale 0 made every escort
+  // aim straight up.
+  const auto *src = state.scenario.System(0x80);
+  const auto *dst = state.scenario.System(0x81);
+  REQUIRE(src != nullptr);
+  REQUIRE(dst != nullptr);
+  int expected_deg = static_cast<int>(
+      std::lround(std::atan2(static_cast<float>(dst->pos_x - src->pos_x),
+                             -static_cast<float>(dst->pos_y - src->pos_y)) *
+                  (180.0F / 3.14159265358979323846F)));
+  expected_deg = ((expected_deg % 360) + 360) % 360;
+  CAPTURE(expected_deg);
+  CHECK(state.player.ai_desired_heading_deg == expected_deg);
+
+  // Let the player finish turning onto the bearing, then run the escort's
+  // mode-0xD controls: it must aim at the player's heading, not 0/up.
+  for (int f = 0; f < 200; ++f) {
+    NovaTravel_Tick(state,
+                    /*travel_input=*/false,
+                    16.67F,
+                    /*warp_up_sound_active=*/true);
+  }
+  escort.ai_control_mode = 0x0d;
+  game::NovaAi_ApplyControls(state, escort, 0.5F);
+  CHECK(std::abs(static_cast<int>(escort.ai_desired_heading_deg) -
+                 expected_deg) <= 1);
+
+  // The clock keeps running through the hold (the escort spin-up reads it) and
+  // is cleared once the fire lands.
+  for (int f = 0; f < 400 && !state.travel.just_completed; ++f) {
+    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  }
+  CHECK(state.travel.just_completed);
+  CHECK(state.player.ai_station_hold_timer < 0.0F);
+}
+
 // The original stop gate uses the x87 FIST correction idiom to truncate each
 // velocity component toward zero. A component below 2 therefore starts the
 // cue even when rounding-to-nearest would produce 2.
@@ -1162,6 +1250,24 @@ TEST_CASE(
   CHECK(NovaTravel_PlayerInJumpRange(state));
 }
 
+// Stellar_GetJumpSequenceDuration60Hz (0x0046efb0) returns the engine cue
+// (snd 128, shipped 364) normally and the noengine cue (snd 129, shipped 252)
+// while g_x2_mode_active is set; both keep the 350 missing-resource fallback.
+TEST_CASE("jump sequence duration selects the x2 noengine cue and fallback",
+          "[travel]") {
+  GameState state;
+  state.jump_duration_engine_60hz = 364;
+  state.jump_duration_noengine_60hz = 252;
+  CHECK(game::NovaTravel_JumpSequenceDuration60Hz(state) ==
+        Catch::Approx(364.0F));
+  state.x2_mode_active = true;
+  CHECK(game::NovaTravel_JumpSequenceDuration60Hz(state) ==
+        Catch::Approx(252.0F));
+  state.jump_duration_noengine_60hz = 350; // missing/broken cue fallback
+  CHECK(game::NovaTravel_JumpSequenceDuration60Hz(state) ==
+        Catch::Approx(350.0F));
+}
+
 // The scanner's hyperspace-committed guard (Ghidra 0x00401800) now uses the
 // decoded ShipClassDef.jump_duration_multiplier instead of a pinned 1.0.
 // Onset: tunnel_elapsed_60hz > 35 * (364*0.01) / multiplier^2.
@@ -1170,6 +1276,7 @@ TEST_CASE("jump onset guard scales with the class jump multiplier",
   GameState state;
   state.scenario.ships.resize(1);
   state.player.ship_class_id = 0;
+  state.jump_duration_engine_60hz = 364; // shipped snd 128 cue
 
   state.scenario.ships[0].jump_duration_multiplier = 1.3F;
   state.travel.tunnel_elapsed_60hz = 100.0F; // onset = 127.4/1.69 = 75.4

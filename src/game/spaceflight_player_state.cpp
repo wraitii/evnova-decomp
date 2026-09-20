@@ -47,8 +47,8 @@ constexpr float kPlayerFireRestrictedVelocityDamp = 0.995F;
 constexpr float kRecentlyHitRegenCutoff = 0.0F;
 // k_one_f32 (0x0057555c, float): death-timer countdown step per original
 // spaceflight call. The NPC arm of Ship_HandleShip
-// (0x00433050) uses the equal-valued g_cloak_fade_passive_decay (0x00575318)
-// for the same step. The port time-adjusts both against the original loop's
+// (0x00433050) uses the equal-valued k_unit_f32 (0x00575318) for the same
+// step. The port time-adjusts both against the original loop's
 // 21 ms minimum frame duration.
 constexpr float kJumpTurnaroundTurnRateAddend = 1.0F;
 // DAT_00575558 (0x00575558, read as a float; bytes 00 00 70 c3 = -240.0): the

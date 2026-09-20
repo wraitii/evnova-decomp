@@ -410,12 +410,13 @@ void NovaTravel_ProcessArrivalPayroll(
 void NovaTravel_UpdateEngagementProgress(GameState &state);
 
 // Ghidra 0x0046efb0 Stellar_GetJumpSequenceDuration60Hz: the hyperspace jump
-// tunnel / 'Warp up' cue length in 1/60 s ticks (snd 128 at 22050 Hz is
-// 6.078 s = 364 ticks). Shared by the player tunnel and the NPC mode-4 jump
-// spin-up. Only the engine-enabled shipped variant is modelled; the
-// voice-slot noengine variant (252) and the missing-resource fallback (350)
-// are deferred (TODO(decomp(0x0046efb0))).
-[[nodiscard]] float NovaTravel_JumpSequenceDuration60Hz();
+// tunnel / 'Warp up' cue length in 1/60 s ticks. Returns the engine variant
+// (snd 128, shipped 364) normally, or the noengine variant (snd 129, shipped
+// 252) while g_x2_mode_active is set. Both are derived at preload from the
+// decoded cue headers; a missing/broken cue keeps the 350 fallback (0x15e).
+// Shared by the player tunnel, the NPC mode-4 spin-up deadline and the NPC
+// Ship_HandleShip jump ramp.
+[[nodiscard]] float NovaTravel_JumpSequenceDuration60Hz(const GameState &state);
 
 // ShipClassDef.jump_duration_multiplier for the player's current hull; the
 // ramp clock and the 'Warp up' cue duration scale both use it; the SDL call

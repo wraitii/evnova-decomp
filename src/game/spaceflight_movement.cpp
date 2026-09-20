@@ -795,11 +795,20 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   bool jump_glow_active = false;
   if (jump_spinup_control) {
     constexpr float kJumpVelocityDamp = 0.8F; // DAT_00575488
-    // 0x575498 = 35.0 is the unled/escort offset; the player-led branch uses
-    // 0x575490 = 45.0 and is a deferred gap.
-    constexpr float kJumpProgressSubtract = 35.0F; // DAT_00575498
-    constexpr float kJumpProgressCap = 50.0F;      // DAT_00575388
-    constexpr float kJumpDurationScale = 0.01F;    // DOUBLE_00575368
+    // Unled ships subtract 35.0 (0x575498); player-led escorts
+    // (squad_leader_ship_slot == 0) subtract 45.0 (0x575490). The player-led
+    // arm only runs while the player's hold timer is above
+    // k_unit_f32 (1.0, 0x575318), and it reads the player's own class
+    // multiplier and mode-start stamp.
+    constexpr float kJumpProgressSubtract = 35.0F;          // DAT_00575498
+    constexpr float kJumpPlayerLedProgressSubtract = 45.0F; // DAT_00575490
+    // k_unit_f32 (0x575318) is a shared 1.0 constant (unit decrement in the
+    // fade countdowns elsewhere); here it is the player hold-timer threshold.
+    constexpr float kUnitFloat = 1.0F;
+    constexpr float kJumpProgressCap = 50.0F;   // DAT_00575388
+    constexpr float kJumpDurationScale = 0.01F; // DOUBLE_00575368
+    constexpr float kX2UnledScale = 0.5F;       // 0x3fe00000
+    constexpr float kX2PlayerLedScale = 0.667F; // 0x3fe55810
 
     ship.vel_x *= kJumpVelocityDamp;
     ship.vel_y *= kJumpVelocityDamp;
@@ -815,16 +824,34 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       // turning, so the jump-speed ramp begins only after alignment.
       ship.ai_mode_start_time_ms = state.tick_60hz;
     } else {
-      // The original uses elapsed 60 Hz ticks multiplied by the ship-class
-      // jump_duration_multiplier, divided by duration_60hz * 0.01, then
-      // subtracts 35 / multiplier. TODO(decomp(0x004347e8)) skipped: NPC jump
-      // ramp class multiplier (the port uses the 1.0 base).
-      const float elapsed_jump_60hz =
-          static_cast<float>(state.tick_60hz - ship.ai_mode_start_time_ms);
-      float jump_progress =
-          elapsed_jump_60hz /
-              (NovaTravel_JumpSequenceDuration60Hz() * kJumpDurationScale) -
-          kJumpProgressSubtract;
+      // Ship_HandleShip 0x004347e8: progress = elapsed_60hz * scale *
+      // jump_duration_multiplier / (duration_60hz * 0.01) - offset /
+      // multiplier, where the class multiplier scales both the clock and the
+      // offset. x2 mode halves the unled clock (0.5) and scales the
+      // player-led clock by 0.667.
+      const float duration_60hz = NovaTravel_JumpSequenceDuration60Hz(state);
+      float jump_progress = 0.0F;
+      if (ship.squad_leader_ship_slot == 0) {
+        const Ship &leader = state.player;
+        if (kUnitFloat < leader.ai_station_hold_timer) {
+          const float player_multiplier =
+              NovaTravel_PlayerJumpDurationMultiplier(state);
+          const float elapsed_jump_60hz = static_cast<float>(
+              state.tick_60hz - leader.ai_mode_start_time_ms);
+          const float scale = state.x2_mode_active ? kX2PlayerLedScale : 1.0F;
+          jump_progress = elapsed_jump_60hz * scale * player_multiplier /
+                              (duration_60hz * kJumpDurationScale) -
+                          kJumpPlayerLedProgressSubtract / player_multiplier;
+        }
+      } else {
+        const float class_multiplier = ship_class.jump_duration_multiplier;
+        const float elapsed_jump_60hz =
+            static_cast<float>(state.tick_60hz - ship.ai_mode_start_time_ms);
+        const float scale = state.x2_mode_active ? kX2UnledScale : 1.0F;
+        jump_progress = elapsed_jump_60hz * scale * class_multiplier /
+                            (duration_60hz * kJumpDurationScale) -
+                        kJumpProgressSubtract / class_multiplier;
+      }
       jump_progress = std::clamp(jump_progress, 0.0F, kJumpProgressCap);
       if (jump_progress > 0.0F) {
         // Ghidra's Math_AddPolarVelocity is passed &ship->pos_x here
