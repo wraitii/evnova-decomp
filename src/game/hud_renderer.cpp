@@ -27,6 +27,7 @@
 namespace game {
 
 using evnova::util::GroupThousands;
+using evnova::util::UpperFirstAscii;
 
 // The HudRenderer owns a screen-font cache (NovaFontCache); its destructor must
 // live where that type is complete, so it is defined here rather than inline.
@@ -1130,18 +1131,12 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
   }
 
   // Credits row: the label is the "credits" pstring (DAT_0072f1cc = STR#
-  // 0x7d2 pool 0x20) whose first character the original translates through
-  // NovaCommand_TranslateByInputMap (0x004d6260 = a per-thread 256-byte
-  // command-token -> bound-key table, NOT the port's same-named main-menu
-  // mapping in nova_app.cpp), so the leading letter shows the key bound to
-  // the credits command. The default binding is 'c', so the literal matches
-  // normal play; reproducing a rebind needs that table.
-  // TODO(decomp(0x004612c0)) skipped: NovaCommand_TranslateByInputMap key
-  // translation (per-thread command->key table not reconstructed).
-  std::string credits_label = PoolString(kMiscStringsId, 0x21, "credits");
-  if (!credits_label.empty()) {
-    credits_label[0] = 'c';
-  }
+  // 0x7d2 pool 0x20) whose first byte the original passes through the
+  // MetroWerks C-locale toupper (MWRuntime_ToUpper 0x004d6260), so the row
+  // reads "Credits:". This was previously misread as an input/keybinding
+  // table and drawn as lowercase "credits:".
+  std::string credits_label =
+      UpperFirstAscii(PoolString(kMiscStringsId, 0x21, "credits"));
   credits_label += ":";
   DrawPanelTextAt(platform,
                   font,

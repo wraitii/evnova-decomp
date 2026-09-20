@@ -3,16 +3,19 @@
 #include "brgr_archive.hpp"
 #include "compatibility.hpp"
 #include "hud_overlay.hpp"
+#include "impact_effects.hpp"
 #include "log.hpp"
 #include "mission.hpp"
 #include "mission_trace.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "rank.hpp"
+#include "ship_ai.hpp"
+#include "targeting.hpp"
 #include "travel.hpp"
 #include "weapon.hpp"
 
 #include <cctype>
-#include <charconv>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -25,8 +28,13 @@ namespace {
 constexpr std::int16_t kResourceIdBase = 0x80;
 constexpr std::uint32_t kStringTableType = 0x53545223U;
 
-[[nodiscard]] bool IsDigit(char value) {
-  return std::isdigit(static_cast<unsigned char>(value)) != 0;
+// The original runs every script byte through the MetroWerks C-locale toupper
+// (MWRuntime_ToUpper 0x004d6260, once misnamed NovaCommand_TranslateByInputMap)
+// before dispatching. It is an uppercase fold for ASCII letters and identity
+// otherwise (the shipped scripts mix `R(b279 b316)` and
+// `d358 R(g374 g261)`), so the clean room uses std::toupper.
+[[nodiscard]] char TranslateScriptChar(char value) {
+  return static_cast<char>(std::toupper(static_cast<unsigned char>(value)));
 }
 
 [[nodiscard]] std::optional<std::string>
@@ -62,6 +70,15 @@ void ReplaceShipTitleMarkers(std::string &title, std::string_view old_name) {
   }
 }
 
+// Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine, cases 'C'/'E'/'H'
+// (0x00449824..0x00449978). The original reconciles the outfit pool before the
+// swap, drops non-persistent owned outfits for H (Flags 0x24 clear -- 0x04
+// "persistent when trading ships" OR 0x20 "persistent for mission set
+// operators"), rebuilds the banks from the surviving loadout, changes class,
+// adds the new class's stock weapons on top of the retained loadout plus its
+// DefaultItems, reconciles, clamps every owned count, rebuilds the banks once
+// more, then repairs a disabled player hull one armor point at a time until it
+// is no longer disabled, and reinstalls the gameplay interface layout.
 [[nodiscard]] bool
 ChangePlayerShip(GameState &state, std::int32_t resource_id, char opcode) {
   if (resource_id < kResourceIdBase || resource_id >= 0x380) {
@@ -69,52 +86,87 @@ ChangePlayerShip(GameState &state, std::int32_t resource_id, char opcode) {
   }
   const auto class_id =
       static_cast<std::int16_t>(resource_id - kResourceIdBase);
-  const auto *ship =
+  const ShipClass *ship =
       state.scenario.Ship(static_cast<std::int16_t>(resource_id));
   if (ship == nullptr) {
     return false;
   }
-  state.player.ship_class_id = class_id;
 
-  // C preserves the installed loadout. E adds the new class's defaults. H
-  // additionally drops outfits without the Bible's Persistent flag.
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
   if (opcode == 'H') {
     for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
                             i < state.scenario.outfits.size();
          ++i) {
-      if (!state.scenario.outfits[i].persistent_on_ship_swap) {
+      if ((state.scenario.outfits[i].flags & 0x24U) == 0) {
         state.inventory.outfit_owned_count[i] = 0;
       }
     }
   }
+  NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+  state.player.ship_class_id = class_id;
+
+  // C preserves the installed loadout. E adds the new class's defaults on top.
+  // H additionally dropped non-persistent outfits above.
   if (opcode == 'E' || opcode == 'H') {
+    NovaWeapon_AddShipClassStockBanks(state, class_id);
     for (std::size_t i = 0; i < ship->default_outfit_ids.size(); ++i) {
-      if (ship->default_outfit_ids[i] >= 0 &&
-          ship->default_outfit_counts[i] > 0) {
-        (void)Outfit_AddInstalledOutfit(
-            state, ship->default_outfit_ids[i], ship->default_outfit_counts[i]);
+      const std::int16_t outfit_id = ship->default_outfit_ids[i];
+      const std::int16_t count = ship->default_outfit_counts[i];
+      if (outfit_id < 0 || count <= 0) {
+        continue;
+      }
+      const auto index = static_cast<std::size_t>(outfit_id);
+      if (index < state.inventory.outfit_owned_count.size()) {
+        state.inventory.outfit_owned_count[index] = static_cast<std::int16_t>(
+            state.inventory.outfit_owned_count[index] + count);
       }
     }
-    NovaWeapon_SeedBanksFromShipStock(state, class_id);
     NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+    for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
+                            i < state.scenario.outfits.size();
+         ++i) {
+      if (state.inventory.outfit_owned_count[i] <= 0) {
+        continue;
+      }
+      const OutfitOwnership ownership =
+          Outfit_ClampOwnedCountToLimits(state, static_cast<std::int16_t>(i));
+      if (ownership.max_allowed > 0 &&
+          ownership.max_allowed < state.inventory.outfit_owned_count[i]) {
+        state.inventory.outfit_owned_count[i] = ownership.max_allowed;
+      }
+    }
   }
+  NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+
+  // 0x00449932..0x00449978: repair armor +1.0 (DAT_00575530 = 1.0f) while the
+  // hull still reads disabled, so a class swap out of a crippled hull does not
+  // leave it stuck.
+  while (NovaAiShip_IsDisabled(state, state.player) &&
+         state.player.armor_points <
+             NovaAi_ComputeMaxArmorPoints(state, state.player)) {
+    state.player.armor_points += 1.0F;
+  }
+  // Ui_InstallGameplayInterfaceLayout (0x004cda50): the script engine has no
+  // renderer, so raise the flag the spaceflight loop consumes.
+  state.gameplay_interface_dirty = true;
   state.InvalidateDerivedStatCaches();
   return true;
 }
 
-// Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine, cases M and N
-// (0x0044997a..0x00449c26). Both clear ai_secondary_target_slot and re-home the
-// player's attached ships. M positions at the destination's first nav stellar
-// when not docked (0x00449a00), or stashes that stellar for the launch tail
-// when docked (0x004499d8..0x004499f5, snapped at 0x00455fa6). N never touches
-// the player position and latches g_skip_player_reposition_once while docked
-// (0x00449bda).
-//
-// BUGFIX(original): the Bible documents M as centring on the first
-// stellar/system centre, but with no NavDef (245 stock systems) the windows
-// build skips the flying reposition entirely, so M behaves like N. Under
-// kApplyOriginalBugFixes the port centres on the in-system origin (0,0); the
-// system's galaxy-map position is a different frame.
+// The non-transition tail shared by M and N (0x0044a3c0/0x0044a400); N runs it
+// even when the system id was out of range.
+void RefreshTransientStateAfterMove(GameState &state);
+
+// Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine, cases 'M' and 'N'
+// (0x0044997a..0x00449c26). Both set the player's current system, clear
+// ai_secondary_target_slot, and re-home attached ships (squad leader slot 0).
+// M additionally positions at the destination's first nav stellar when flying,
+// or stashes that stellar for the launch tail when docked. N never touches the
+// position and latches g_skip_player_reposition_once. The non-transition tail
+// (0x0044a3c0/0x0044a400) clears the transient combat latches, drops the
+// primary target, refreshes the stellar display state and re-arms mission
+// spawn state; the docked tail rewrites the mission locator lists (the clean
+// room rebuilds those lists lazily, so there is nothing to clear).
 [[nodiscard]] bool
 MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
   if (resource_id < kResourceIdBase || resource_id >= kResourceIdBase + 0x800) {
@@ -122,7 +174,7 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
   }
   const auto system_id =
       static_cast<std::int16_t>(resource_id - kResourceIdBase);
-  const auto *system =
+  const System *system =
       state.scenario.System(static_cast<std::int16_t>(resource_id));
   if (system == nullptr) {
     return false;
@@ -131,19 +183,19 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
   state.player.ai_secondary_target_slot = -1;
   if (opcode == 'M') {
     bool placed = false;
-    for (const auto stellar_resource_id : system->nav_defs) {
-      if (stellar_resource_id < kResourceIdBase) {
+    for (const std::int16_t nav : system->nav_defs) {
+      if (nav < kResourceIdBase) {
         continue;
       }
-      const auto *stellar = state.scenario.Stellar(stellar_resource_id);
+      const Stellar *stellar = state.scenario.Stellar(nav);
       if (stellar == nullptr) {
         continue;
       }
       if (state.system_transition_active) {
-        // Docked: queue the destination's first nav for the launch tail
-        // (0x004499e1..0x004499f5).
+        // Docked: queue the destination's first nav (a 0-based stellar index)
+        // for the launch tail (0x004499e1..0x004499f5).
         state.player.ai_secondary_target_slot =
-            static_cast<std::int16_t>(stellar_resource_id - kResourceIdBase);
+            static_cast<std::int16_t>(nav - kResourceIdBase);
       } else {
         state.player.pos_x = static_cast<float>(stellar->pos_x);
         state.player.pos_y = static_cast<float>(stellar->pos_y);
@@ -161,8 +213,9 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
       state.player.vel_x = 0.0F;
       state.player.vel_y = 0.0F;
     }
-  } else if (state.system_transition_active) {
-    // 0x00449bda: docked N suppresses the launch tail's stellar snap.
+  } else {
+    // 0x00449bda: docked N suppresses the launch tail's stellar snap. The
+    // original sets it whenever the system id is valid, docked or not.
     state.skip_player_reposition_once = true;
   }
   // 0x00449aa5..0x00449ae3: attached ships (squad leader slot 0) re-home to
@@ -173,387 +226,417 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
       attached.current_system_id = state.player.current_system_id;
     }
   }
-  // 0x0044a3c0 (case 'M') / 0x0044a400 (case 'N'): an in-flight relocation
-  // raises the four transition-frame clear latches alongside
-  // g_no_asteroids_latch, so the old system's shots, effect pools and
-  // freeflight objects do not follow the player. A docked relocation instead
-  // rewrites the mission locator lists and raises no latches (that list reset
-  // is not reconstructed here), so only clear when not transitioning.
-  if (!state.system_transition_active) {
-    NovaWeapon_ClearTransientCombatState(state);
-  }
+  // 0x0044a3c0 (case 'M') / 0x0044a400 (case 'N'): the transition-frame
+  // clear latches, manual target clear, display-state refresh and
+  // mission-spawn re-arm only run while flying.
+  RefreshTransientStateAfterMove(state);
   return true;
+}
+
+// The non-transition tail shared by M and N (0x0044a3c0/0x0044a400); N runs it
+// even when the system id was out of range.
+void RefreshTransientStateAfterMove(GameState &state) {
+  if (state.system_transition_active) {
+    return;
+  }
+  NovaWeapon_ClearTransientCombatState(state);
+  state.player.primary_target_ship_slot = -1;
+  NovaTargeting_UpdateStellarAvailability(state);
+  Mission_RefreshActiveMissionSpawnState(state);
+}
+
+// Runs one armed command. Mirrors the original switch body exactly; the parser
+// above decides when a token executes. Returns true when the command letter is
+// a known opcode (even if its operand is out of range), false when the letter
+// is unmodelled. `action_out` carries the trace description.
+[[nodiscard]] bool
+ExecuteMissionScriptCommand(GameState &state,
+                            char command,
+                            std::int16_t operand,
+                            const MissionScriptContext &context,
+                            const MissionAcceptanceSink &acceptance,
+                            std::size_t command_offset,
+                            std::string_view &action_out) {
+  action_out = "unmodelled opcode";
+  switch (command) {
+  case ' ':
+  case '!':
+  case '^': {
+    // The original writes g_nova_control_bits[operand] for any
+    // (short)operand < 10000, including negative (out-of-bounds) values. The
+    // clean room keeps the < 10000 upper bound and drops negatives.
+    if (operand < 0 || static_cast<std::size_t>(operand) >=
+                           PilotControlState::kControlBitCount) {
+      return true;
+    }
+    const auto bit = static_cast<std::uint32_t>(operand);
+    const bool old_value = state.control.ControlBit(bit);
+    const bool value = command == '^'   ? !old_value
+                       : command == '!' ? false
+                                        : true;
+    state.control.SetControlBit(bit, value);
+    MissionTrace::LogScriptBit(context.source,
+                               context.mission_slot,
+                               command_offset,
+                               command == ' ' ? 'b' : command,
+                               bit,
+                               old_value,
+                               value);
+    action_out = command == ' '   ? "set control bit"
+                 : command == '!' ? "clear control bit"
+                                  : "toggle control bit";
+    return true;
+  }
+  case 'A': {
+    action_out = "reset active mission";
+    if (operand >= kResourceIdBase && operand < 0x468) {
+      const auto mission_id =
+          static_cast<std::int16_t>(operand - kResourceIdBase);
+      for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+        if (!state.active_mission_runtime_flags[slot].is_active ||
+            state.active_missions[slot].mission_template_id != mission_id) {
+          continue;
+        }
+        // The original runs the OnAbort payload and releases the mission fleet
+        // (0x004497b4 calls Mission_ClearMisnSlotAssignments(slot, 1)).
+        Mission_ClearMisnSlotAssignments(
+            state, static_cast<std::int16_t>(slot), true, 0, acceptance);
+      }
+    }
+    return true;
+  }
+  case 'F': {
+    action_out = "fail active mission";
+    if (operand >= kResourceIdBase && operand < 0x468) {
+      const auto mission_id =
+          static_cast<std::int16_t>(operand - kResourceIdBase);
+      for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+        if (state.active_mission_runtime_flags[slot].is_active &&
+            state.active_missions[slot].mission_template_id == mission_id) {
+          state.active_mission_runtime_flags[slot].is_failed = true;
+        }
+      }
+    }
+    return true;
+  }
+  case 'D':
+    action_out = "remove outfit";
+    if (operand >= kResourceIdBase && operand < 0x280) {
+      const auto index = static_cast<std::size_t>(operand - kResourceIdBase);
+      NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+      state.inventory.outfit_owned_count[index] = std::max<std::int16_t>(
+          0,
+          static_cast<std::int16_t>(state.inventory.outfit_owned_count[index] -
+                                    1));
+      NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+    }
+    return true;
+  case 'G':
+    action_out = "grant outfit";
+    if (operand >= kResourceIdBase && operand < 0x280) {
+      NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+      // Ghidra 0x00427770 Outfit_GrantOutfitToPlayer: mission outfit grants
+      // run the same on-acquire effects (map reveal / paint / clean-record) as
+      // a shop take.
+      (void)NovaOutfit_GrantOutfitToPlayer(
+          state, static_cast<std::int16_t>(operand - kResourceIdBase));
+      NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+    }
+    return true;
+  case 'S':
+    action_out = "activate mission";
+    if (operand >= kResourceIdBase && operand < 0x468) {
+      const auto mission_id =
+          static_cast<std::int16_t>(operand - kResourceIdBase);
+      // 0x00449c3c: the activation is wrapped in
+      // g_travel_scene_ctx = (g_is_system_transition_active == 0), restored
+      // afterwards, and resolves the mission's locator targets first.
+      const bool saved_travel_scene = state.in_travel_scene;
+      state.in_travel_scene = !state.system_transition_active;
+      Mission_ResolveMissionStellarTargets(state, mission_id);
+      (void)Mission_ActivateAtSlot(
+          state, mission_id, state.player.ai_secondary_target_slot, acceptance);
+      state.in_travel_scene = saved_travel_scene;
+    }
+    return true;
+  case 'C':
+  case 'E':
+  case 'H':
+    action_out = command == 'C'   ? "switch ship class (keep loadout)"
+                 : command == 'E' ? "switch ship class (add default outfits)"
+                                  : "switch ship class (defaults, drop "
+                                    "non-persistent)";
+    (void)ChangePlayerShip(state, operand, command);
+    return true;
+  case 'K':
+  case 'L':
+    action_out = command == 'K' ? "activate rank" : "deactivate rank";
+    if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x80) {
+      const auto rank_slot =
+          static_cast<std::int16_t>(operand - kResourceIdBase);
+      if (command == 'K') {
+        Rank_Activate(state, rank_slot);
+      } else {
+        Rank_Deactivate(state, rank_slot);
+      }
+    }
+    return true;
+  case 'M':
+    action_out = "move player to system, center on first nav";
+    (void)MovePlayer(state, operand, 'M');
+    return true;
+  case 'N':
+    action_out = "move player to system center";
+    // The original's non-transition tail runs even when the system id is
+    // invalid (the update block sits outside the range guard).
+    if (operand < kResourceIdBase || operand >= kResourceIdBase + 0x800) {
+      RefreshTransientStateAfterMove(state);
+      return true;
+    }
+    (void)MovePlayer(state, operand, 'N');
+    return true;
+  case 'P':
+    action_out = "queue transient sound";
+    // Ghidra 0x00449370: g_pending_transient_sound_id = (short)operand (a
+    // single slot, overwritten by any later P in the same script).
+    state.pending_transient_sound_id = operand;
+    return true;
+  case 'Q': {
+    action_out = "stage pending overlay message";
+    // Ghidra 0x00449370 'Q': Resource_LoadRandomStringEntry fills the
+    // 256-byte g_pending_overlay_message buffer (0x007354d0); with a live
+    // payload context slot (0..15) the original then expands mission text
+    // tags through Stellar_BuildTravelDestinationDescription. The message is
+    // NOT shown here -- the launch tail (Stellar_RunDockAndLaunchSequence
+    // 0x00456134) shows and clears it. A live docked BBS sees the staged
+    // buffer on its next poll (NovaUi_PollMissionBbsWindow 0x00440c90) and
+    // force-leaves with action 7.
+    if (auto message = LoadRandomStringListEntry(state.rng, operand)) {
+      const std::int16_t context_slot = state.script_mission_context_slot;
+      if (context_slot >= 0 && context_slot < 0x10) {
+        *message = Mission_ExpandMissionWildcards(
+            state, *message, false, context_slot);
+      }
+      state.pending_overlay_message = std::move(*message);
+    }
+    // Missing STR# data is an asset-loading issue, not a script syntax
+    // failure; the original still stages an empty buffer.
+    return true;
+  }
+  case 'T': {
+    action_out = "rename ship from string list";
+    const auto old_name = state.player.ship_name;
+    // The original only rewrites the name when the loaded pstring is
+    // non-empty (0x00449e6c tests the length byte), so an empty STR entry
+    // leaves the current name alone rather than blanking it.
+    if (auto title = LoadRandomStringListEntry(state.rng, operand);
+        title && !title->empty()) {
+      ReplaceShipTitleMarkers(*title, old_name);
+      state.player.ship_name = std::move(*title);
+    }
+    return true;
+  }
+  case 'U':
+    action_out = "restore stellar";
+    if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
+      const auto stellar_index =
+          static_cast<std::size_t>(operand - kResourceIdBase);
+      if (stellar_index < state.scenario.stellars.size()) {
+        Stellar &stellar = state.scenario.stellars[stellar_index];
+        stellar.destroyed_days_remaining = -1;
+        stellar.strength = stellar.strength_capacity;
+      }
+    }
+    return true;
+  case 'Y':
+    action_out = "destroy stellar";
+    if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
+      const auto stellar_index =
+          static_cast<std::size_t>(operand - kResourceIdBase);
+      if (stellar_index < state.scenario.stellars.size()) {
+        Stellar &stellar = state.scenario.stellars[stellar_index];
+        // 0x0044a228: blow up the body in place only when the player is
+        // watching, the body is still active and it has an explosion type.
+        if (state.player.current_system_id == stellar.system_id &&
+            !NovaTargeting_IsStellarActive(stellar) &&
+            stellar.explosion_type != -1) {
+          NovaEffects_SpawnAreaImpact(state,
+                                      static_cast<float>(stellar.pos_x),
+                                      static_cast<float>(stellar.pos_y),
+                                      stellar.explosion_type,
+                                      0,
+                                      true);
+        }
+        // A negative schedule seed pins the regeneration at one day.
+        stellar.destroyed_days_remaining =
+            stellar.schedule_days < 0 ? 1 : stellar.schedule_days;
+        stellar.strength = -1;
+      }
+    }
+    return true;
+  case 'X':
+    action_out = "reveal system";
+    if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
+      // Ghidra 0x00449370 'X': the original only writes discovery_state
+      // (min 1); the galaxy-map reveal is that same write.
+      NovaSystem_MarkSystemVisited(
+          state, static_cast<std::int16_t>(operand - kResourceIdBase), 1);
+    }
+    return true;
+  default:
+    return false;
+  }
 }
 
 } // namespace
 
+// Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine.
+//
+// The original walks the script one byte at a time with a small state machine:
+// command (local_119), number accumulator (local_14), executed-token counter
+// (local_124), the R branch choice (local_128, -1 = none) and a per-iteration
+// "execute now" flag (local_118 low byte). An opcode letter arms `command` and
+// zeroes the accumulator; a 'b' (only when no opcode is armed) selects the
+// control-bit set form ' '; an 'R' resets the token counter and draws a 0/1
+// branch. Digits accumulate into the number. Any other byte is a delimiter:
+// it executes the pending command, then resets. The R pair is skipped by a
+// two-byte skip at the first delimiter when branch 0 wins (so the first
+// alternative's leading byte is swallowed) and by comparing the executed-token
+// counter to the chosen branch. A trailing token executes at the NUL
+// terminator, so the loop runs one byte past the end of the string.
 void Mission_ExecuteScript(GameState &state,
                            std::string_view script,
                            const MissionScriptContext &context,
                            const MissionAcceptanceSink &acceptance) {
   MissionTrace::LogScript(context.source, context.mission_slot, script);
 
-  std::function<void(std::size_t, std::size_t)> execute_range;
-  execute_range = [&](std::size_t begin, std::size_t end) {
-    std::size_t cursor = begin;
-    while (cursor < end) {
-      while (cursor < end &&
-             (std::isspace(static_cast<unsigned char>(script[cursor])) != 0 ||
-              script[cursor] == ',' || script[cursor] == ';')) {
-        ++cursor;
+  const std::int32_t length = static_cast<std::int32_t>(script.size());
+  std::int32_t cursor = 0;
+  std::int32_t number = 0;
+  char command = '?';
+  int token_index = 0;
+  int random_branch = -1;
+  std::int32_t command_offset = 0;
+
+  while (true) {
+    const char raw =
+        cursor < length ? script[static_cast<std::size_t>(cursor)] : '\0';
+    bool execute = false;
+    const char translated = TranslateScriptChar(raw);
+    switch (translated) {
+    case '!':
+    case 'A':
+    case 'C':
+    case 'D':
+    case 'E':
+    case 'F':
+    case 'G':
+    case 'H':
+    case 'K':
+    case 'L':
+    case 'M':
+    case 'N':
+    case 'P':
+    case 'Q':
+    case 'S':
+    case 'T':
+    case 'U':
+    case 'X':
+    case 'Y':
+    case '^':
+      number = 0;
+      command = translated;
+      command_offset = cursor;
+      break;
+    case 'B':
+      number = 0;
+      command_offset = cursor;
+      if (command == '?') {
+        command = ' ';
       }
-      if (cursor >= end) {
-        return;
-      }
-      const auto command_offset = cursor;
-      char modifier = '\0';
-      if (script[cursor] == '!' || script[cursor] == '^') {
-        modifier = script[cursor++];
-      }
-      if (cursor < end && (script[cursor] == 'b' || script[cursor] == 'B')) {
-        ++cursor;
-        const auto number_begin = cursor;
-        while (cursor < end && IsDigit(script[cursor])) {
-          ++cursor;
-        }
-        if (number_begin == cursor) {
-          NovaLog::Warn("mission script {} +{}: control bit is missing its "
-                        "number",
-                        context.source,
-                        command_offset);
-          continue;
-        }
-        std::uint32_t bit = 0;
-        const auto parsed = std::from_chars(
-            script.data() + number_begin, script.data() + cursor, bit);
-        if (parsed.ec != std::errc{} ||
-            bit >= PilotControlState::kControlBitCount) {
-          NovaLog::Warn("mission script {} +{}: control bit is out of range",
-                        context.source,
-                        command_offset);
-          continue;
-        }
-        const bool old_value = state.control.ControlBit(bit);
-        const bool value = modifier == '^' ? !old_value : modifier != '!';
-        state.control.SetControlBit(bit, value);
-        MissionTrace::LogScriptBit(context.source,
-                                   context.mission_slot,
-                                   command_offset,
-                                   modifier,
-                                   bit,
-                                   old_value,
-                                   value);
-        continue;
-      }
-      if (modifier != '\0') {
-        NovaLog::Warn("mission script {} +{}: ! and ^ modifiers require a "
-                      "b-prefixed control bit",
-                      context.source,
-                      command_offset);
-        continue;
-      }
-      if (cursor < end && (script[cursor] == 'r' || script[cursor] == 'R')) {
-        ++cursor;
-        while (cursor < end &&
-               std::isspace(static_cast<unsigned char>(script[cursor])) != 0) {
-          ++cursor;
-        }
-        if (cursor >= end || script[cursor] != '(') {
-          NovaLog::Warn("mission script {} +{}: R requires parenthesized "
-                        "alternatives",
-                        context.source,
-                        command_offset);
-          continue;
-        }
-        const auto content_begin = ++cursor;
-        int depth = 1;
-        while (cursor < end && depth != 0) {
-          if (script[cursor] == '(')
-            ++depth;
-          if (script[cursor] == ')')
-            --depth;
-          ++cursor;
-        }
-        if (depth != 0) {
-          NovaLog::Warn("mission script {} +{}: unterminated R expression",
-                        context.source,
-                        command_offset);
-          return;
-        }
-        const auto content_end = cursor - 1;
-        std::size_t split = content_begin;
-        while (split < content_end &&
-               std::isspace(static_cast<unsigned char>(script[split])) == 0) {
-          ++split;
-        }
-        if (split == content_end) {
-          NovaLog::Warn("mission script {} +{}: R requires two alternatives",
-                        context.source,
-                        command_offset);
-          continue;
-        }
-        while (split < content_end &&
-               std::isspace(static_cast<unsigned char>(script[split])) != 0) {
-          ++split;
-        }
-        std::uniform_int_distribution<int> pick(0, 1);
-        if (pick(state.rng) == 0) {
-          execute_range(content_begin, split);
+      break;
+    case 'R':
+      token_index = 0;
+      command = '?';
+      command_offset = cursor;
+      random_branch = RandomBelow(state, 2);
+      break;
+    default:
+      if (raw < '0' || raw > '9') {
+        if (random_branch == -1 || token_index != random_branch) {
+          execute = true;
         } else {
-          execute_range(split, content_end);
-        }
-        continue;
-      }
-
-      if (cursor >= end ||
-          std::isalpha(static_cast<unsigned char>(script[cursor])) == 0) {
-        NovaLog::Warn("mission script {} +{}: expected mission script opcode",
-                      context.source,
-                      command_offset);
-        ++cursor;
-        continue;
-      }
-      const char opcode = static_cast<char>(
-          std::toupper(static_cast<unsigned char>(script[cursor++])));
-      const auto number_begin = cursor;
-      while (cursor < end && IsDigit(script[cursor])) {
-        ++cursor;
-      }
-      if (number_begin == cursor) {
-        NovaLog::Warn(
-            "mission script {} +{}: mission opcode is missing its number",
-            context.source,
-            command_offset);
-        continue;
-      }
-      std::int32_t operand = 0;
-      const auto parsed = std::from_chars(
-          script.data() + number_begin, script.data() + cursor, operand);
-      if (parsed.ec != std::errc{}) {
-        NovaLog::Warn("mission script {} +{}: invalid mission script number",
-                      context.source,
-                      command_offset);
-        continue;
-      }
-
-      bool applied = false;
-      bool known_opcode = true;
-      std::string_view action = "unmodelled opcode";
-      switch (opcode) {
-      case 'A':
-      case 'F': {
-        action = opcode == 'F' ? "fail active mission" : "reset active mission";
-        if (operand >= kResourceIdBase && operand < 0x468) {
-          const auto mission_id =
-              static_cast<std::int16_t>(operand - kResourceIdBase);
-          for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions;
-               ++slot) {
-            auto &active = state.active_missions[slot];
-            auto &runtime = state.active_mission_runtime_flags[slot];
-            if (!runtime.is_active || active.mission_template_id != mission_id)
-              continue;
-            if (opcode == 'F')
-              runtime.is_failed = true;
-            else {
-              active = {};
-              runtime = {};
-            }
-            applied = true;
-          }
-        }
-        // The original treats A/F on an inactive mission as a no-op.
-        applied = operand >= kResourceIdBase && operand < 0x468;
-        break;
-      }
-      case 'D':
-        action = "remove outfit";
-        if (operand >= kResourceIdBase && operand < 0x280) {
-          (void)Outfit_RemoveOutfit(
-              state, static_cast<std::int16_t>(operand - kResourceIdBase), 1);
-          applied = true;
-        }
-        break;
-      case 'G':
-        action = "grant outfit";
-        if (operand >= kResourceIdBase && operand < 0x280) {
-          // Ghidra 0x00427770 Outfit_GrantOutfitToPlayer: mission outfit
-          // grants run the same on-acquire effects (map reveal / paint /
-          // clean-record) as a shop take.
-          (void)NovaOutfit_GrantOutfitToPlayer(
-              state, static_cast<std::int16_t>(operand - kResourceIdBase));
-          applied = true;
-        }
-        break;
-      case 'S':
-        action = "activate mission";
-        if (operand >= kResourceIdBase && operand < 0x468) {
-          // The original's activation reads ai_secondary_target_slot (the
-          // current travel/landed stellar) for its briefing check, and shows
-          // the Brief/LoadCarg acceptance dialogs inline; forward the sink so
-          // a script-started mission still presents them.
-          // TODO(decomp(0x00449370)) skipped: the original wraps the call in
-          // g_travel_scene_ctx = (g_is_system_transition_active == 0), then
-          // restores the previous value -- i.e. state.in_travel_scene =
-          // !state.travel.engaging around the activation. The port leaves
-          // in_travel_scene as the landing pass set it, so any travel-scene-
-          // gated branch inside Mission_ActivateMissionAtSlot (destination
-          // window / overlay) is not reproduced on the script-S path.
-          (void)Mission_ActivateAtSlot(
-              state,
-              static_cast<std::int16_t>(operand - kResourceIdBase),
-              state.player.ai_secondary_target_slot,
-              acceptance);
-          applied = true;
-        }
-        break;
-      case 'C':
-        action = "switch ship class (keep loadout)";
-        applied = ChangePlayerShip(state, operand, opcode);
-        break;
-      case 'E':
-        action = "switch ship class (add default outfits)";
-        applied = ChangePlayerShip(state, operand, opcode);
-        break;
-      case 'H':
-        action = "switch ship class (defaults, drop non-persistent)";
-        applied = ChangePlayerShip(state, operand, opcode);
-        break;
-      case 'K':
-      case 'L':
-        action = opcode == 'K' ? "activate rank" : "deactivate rank";
-        if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x80) {
-          const auto rank_slot =
-              static_cast<std::int16_t>(operand - kResourceIdBase);
-          if (opcode == 'K') {
-            Rank_Activate(state, rank_slot);
+          if (token_index == 0) {
+            ++cursor;
           } else {
-            Rank_Deactivate(state, rank_slot);
+            ++token_index;
           }
-          applied = true;
+          random_branch = -1;
+          command = '?';
         }
-        break;
-      case 'M':
-        action = "move player to system, center on first nav";
-        applied = MovePlayer(state, operand, opcode);
-        break;
-      case 'N':
-        action = "move player to system center";
-        applied = MovePlayer(state, operand, opcode);
-        break;
-      case 'P':
-        action = "queue transient sound";
-        if (operand >= 0 && operand <= 0xffff) {
-          // Ghidra 0x00449370: g_pending_transient_sound_id = operand (a
-          // single slot, overwritten by any later P in the same script).
-          state.pending_transient_sound_id = static_cast<std::int16_t>(operand);
-          applied = true;
-        }
-        break;
-      case 'Q': {
-        action = "stage pending overlay message";
-        // Ghidra 0x00449370 'Q': Resource_LoadRandomStringEntry fills the
-        // 256-byte g_pending_overlay_message buffer (0x007354d0); with a live
-        // payload context slot (0..15) the original then expands mission text
-        // tags through Stellar_BuildTravelDestinationDescription. The message
-        // is NOT shown here -- the launch tail (Stellar_RunDockAndLaunch-
-        // Sequence 0x00456134) shows and clears it. A live docked BBS sees the
-        // staged buffer on its next poll (NovaUi_PollMissionBbsWindow
-        // 0x00440c90) and force-leaves with action 7.
-        if (operand >= 0 && operand <= 0x7fff) {
-          if (auto message = LoadRandomStringListEntry(
-                  state.rng, static_cast<std::int32_t>(operand))) {
-            const std::int16_t context_slot = state.script_mission_context_slot;
-            if (context_slot >= 0 && context_slot < 0x10) {
-              *message = Mission_ExpandMissionWildcards(
-                  state, *message, false, context_slot);
-            }
-            state.pending_overlay_message = std::move(*message);
-          }
-          // Missing STR# data is an asset-loading issue, not a script syntax
-          // failure; the original still stages an empty buffer.
-          applied = true;
-        }
-        break;
+      } else {
+        number = number * 10 + (raw - '0');
       }
-      case 'T': {
-        action = "rename ship from string list";
-        const auto old_name = state.player.ship_name;
-        if (auto title = LoadRandomStringListEntry(state.rng, operand)) {
-          ReplaceShipTitleMarkers(*title, old_name);
-          state.player.ship_name = std::move(*title);
-          applied = true;
-        }
-        break;
-      }
-      case 'U':
-        action = "restore stellar";
-        if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
-          const auto stellar_index =
-              static_cast<std::size_t>(operand - kResourceIdBase);
-          if (stellar_index < state.scenario.stellars.size()) {
-            auto &stellar = state.scenario.stellars[stellar_index];
-            stellar.is_destroyed = false;
-            applied = true;
-          }
-        }
-        break;
-      case 'Y':
-        action = "destroy stellar";
-        if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
-          const auto stellar_index =
-              static_cast<std::size_t>(operand - kResourceIdBase);
-          if (stellar_index < state.scenario.stellars.size()) {
-            auto &stellar = state.scenario.stellars[stellar_index];
-            stellar.is_destroyed = true;
-            applied = true;
-          }
-        }
-        break;
-      case 'X':
-        action = "reveal system";
-        if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
-          // Ghidra 0x00449370 'X': the original only writes discovery_state
-          // (min 1); the galaxy-map reveal is that same write.
-          NovaSystem_MarkSystemVisited(
-              state, static_cast<std::int16_t>(operand - kResourceIdBase), 1);
-          applied = true;
-        }
-        break;
-      default:
-        known_opcode = false;
-        break;
-      }
+      break;
+    }
 
-      if (applied) {
-        MissionTrace::LogCommand(context.source,
-                                 context.mission_slot,
-                                 command_offset,
-                                 opcode,
-                                 operand,
-                                 action);
-      } else if (known_opcode) {
-        NovaLog::Warn("mission script {} +{}: operand {} invalid for opcode {}",
-                      context.source,
-                      command_offset,
-                      operand,
-                      opcode);
-      } else if (MissionTrace::Enabled()) {
-        // Unmodelled opcodes are expected while the grammar is reconstructed;
-        // surface them only when tracing so ordinary play stays quiet.
-        NovaLog::Todo("mission script {} +{}: opcode {} (operand {}) is not "
-                      "modelled",
-                      context.source,
-                      command_offset,
-                      opcode,
-                      operand);
+    if (execute) {
+      std::string_view action;
+      const bool recognized =
+          ExecuteMissionScriptCommand(state,
+                                      command,
+                                      static_cast<std::int16_t>(number),
+                                      context,
+                                      acceptance,
+                                      static_cast<std::size_t>(command_offset),
+                                      action);
+      if (command != '?') {
+        if (recognized && command != ' ' && command != '!' && command != '^') {
+          MissionTrace::LogCommand(context.source,
+                                   context.mission_slot,
+                                   static_cast<std::size_t>(command_offset),
+                                   command,
+                                   static_cast<std::int16_t>(number),
+                                   action);
+        } else if (!recognized && MissionTrace::Enabled()) {
+          NovaLog::Todo("mission script {} +{}: opcode {} (operand {}) is not "
+                        "modelled",
+                        context.source,
+                        command_offset,
+                        command,
+                        static_cast<std::int16_t>(number));
+        }
+        command = '?';
+        ++token_index;
       }
     }
-  };
 
-  execute_range(0, script.size());
+    ++cursor;
+    if (cursor > length) {
+      return;
+    }
+  }
 }
 
 // Ghidra 0x00448020 Mission_ExecuteReactionScript.
+//
+// BUGFIX(original), currently ungated: the original copies the script into the
+// one global g_reaction_script_buffer (DAT_007c8a10) and the engine re-reads
+// that buffer every byte. The S opcode activates a mission, which runs its
+// OnAccept payload through Mission_RunMisnScriptPayload into that same buffer,
+// so a non-empty payload replaces the remainder of the outer script mid-scan.
+// That is the recorded engine bug "a mission that aborts itself in OnAccept and
+// starts another mission displays the second briefing twice"
+// (docs/known_original_bugs.md); the reused buffer lets the outer scan re-run
+// bytes of the nested payload. The clean room threads an explicit
+// std::string_view, so an outer script that starts a mission with an OnAccept
+// payload keeps running its remaining opcodes and the second briefing is shown
+// once.
+//
+// TODO(decomp): neither the shared mutable buffer nor the engine's per-byte
+// length re-read is reproduced, and there is deliberately no
+// kApplyOriginalBugFixes gate for the broken path yet; reproducing it would
+// need both.
 void Mission_ExecuteReactionScript(GameState &state,
                                    std::string_view script,
                                    const MissionScriptContext &context,
@@ -579,8 +662,8 @@ void Mission_RunMisnScriptPayload(GameState &state,
     return;
   }
   // g_script_mission_context_slot is a real global in the original, so a
-  // nested payload (the engine's S opcode -> Mission_ActivateAtSlot) clobbers
-  // it and clears it again on return. Model it as state rather than a
+  // nested payload (the engine's S opcode -> Mission_ActivateMissionAtSlot)
+  // clobbers it and clears it again on return. Model it as state rather than a
   // parameter so an outer Q after an S sees no context, exactly like the
   // original. The original does no range validation on the slot; the engine's
   // Q case only consults slots 0..15.

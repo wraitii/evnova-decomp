@@ -437,6 +437,15 @@ struct Ship {
   // nearest travel point on the arrival/last-known system).
   std::int16_t travel_transfer_mode = 0;      // +0x2A (provisional offset)
   std::int16_t primary_target_ship_slot = -1; // +0x70
+  // Ghidra ShipState +0x6C. The original normalizes this to a 0-based
+  // g_stellar_defs index at load (loader 0x004bd3c0 subtracts 0x80), so the
+  // player path stores 0-based (Stellar_Dock records it, the launch tail reads
+  // slot + 0x80) and the pilot save persists it 0-based. TODO(decomp): the
+  // port's AI path instead stores a 0x80-based resource id
+  // (NovaAi_SelectRandomAdjacentTravelStellar returns nav_defs,
+  // NovaAi_CompleteNpcJump compares against nav_defs). The conventions are
+  // self-consistent per path but must not cross; escort_formation copies this
+  // field between ships, so a player-as-leader copy is the risky edge.
   std::int16_t ai_secondary_target_slot =
       -1; // +0x6C (also a travel/stellar slot)
   // Squad leader / behavior anchor (Ghidra ShipState +0x9A
@@ -1485,6 +1494,13 @@ struct GameState {
   // sound id, or -1. The original overwrites a single slot, so this is scalar
   // rather than a queue. TODO(decomp): no UI/audio consumer is wired yet.
   std::int16_t pending_transient_sound_id = -1;
+  // Ghidra Ui_InstallGameplayInterfaceLayout (0x004cda50) is called directly
+  // by the mission-script C/E/H operators after a ship-class swap; the clean
+  // room has no renderer in the script engine, so the operators raise this
+  // flag and the spaceflight loop reinstalls the HUD layer before the next
+  // frame (see NovaFrame_SpaceflightLoop). The capture/ship-yard callers
+  // still call HudRenderer::Install directly.
+  bool gameplay_interface_dirty = false;
   // Ghidra g_pending_overlay_message (0x007354d0), a 256-byte Pascal-string
   // buffer. The mission-script Q opcode composes the message (with mission
   // tags expanded) and stages it here; the launch tail (Stellar_RunDockAnd-

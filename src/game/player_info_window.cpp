@@ -34,6 +34,7 @@
 namespace game {
 
 using evnova::util::GroupThousands;
+using evnova::util::UpperFirstAscii;
 
 namespace {
 
@@ -609,12 +610,13 @@ void DrawGeneralPage(SdlPlatform &platform,
            std::to_string(max_speed));
 
   // Row +0x5c: credits on the RIGHT column (label = the STR# 0x21 "credits"
-  // pstring whose first char is input-map translated, plus the ":" spacer
+  // pstring whose first byte the original passes through the MetroWerks
+  // C-locale toupper MWRuntime_ToUpper 0x004d6260, plus the ":" spacer
   // 0056d168), shield status on the LEFT.
   draw_row(label_y + 5 * kGridRowStride,
            kGridRightLabelX,
            kGridRightValueX,
-           MiscString(kStrCreditsWord, "credits") + ":",
+           UpperFirstAscii(MiscString(kStrCreditsWord, "credits")) + ":",
            GroupThousands(state.player.credits));
 
   // Shield / armor / energy rows. Labels are the runtime pstrings
@@ -820,7 +822,8 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
                   GroupThousands(trade_in) + " " +
                   MiscString(kStrCreditsWord, "credits") + "\r";
       }
-      texts.extras = MiscString(kStrExtrasHeader, "") + "\r\r" + extras;
+      texts.extras =
+          UpperFirstAscii(MiscString(kStrExtrasHeader, "") + "\r\r" + extras);
     }
   }
 
@@ -854,8 +857,8 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
       outfits.push_back(FormatOutfitSummaryGroup(state, group));
     }
     if (!rank_names.empty() || !outfits.empty()) {
-      texts.honors = MiscString(kStrHonorsHeader, "") + "\r\r" +
-                     JoinHonorsEntries(rank_names, outfits);
+      texts.honors = UpperFirstAscii(MiscString(kStrHonorsHeader, "") + "\r\r" +
+                                     JoinHonorsEntries(rank_names, outfits));
     }
   }
 

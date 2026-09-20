@@ -1840,8 +1840,9 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
 }
 
 // Ghidra: 0x004872a0 NovaCommand_DispatchToMode. Maps polled main-menu command
-// tokens to model actions (the true 0x004d6260 NovaCommand_TranslateByInputMap
-// is the per-thread bound-key table lookup, which the port does not need).
+// tokens to model actions. (The old 0x004d6260 NovaCommand_TranslateByInputMap
+// label was a misnomer: that function is the MetroWerks C-locale toupper,
+// MWRuntime_ToUpper, which the main loop uses only to fold command events.)
 std::optional<GameModeAction> NovaCommand_DispatchToMode(char command) {
   switch (command) {
   case 'n':

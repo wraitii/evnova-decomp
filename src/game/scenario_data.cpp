@@ -2512,10 +2512,29 @@ private:
     char c = Peek();
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
       Consume();
-    } else if (c == '0' || c == '1') {
-      // Literal boolean: consume only the digit (a following digit would not
-      // be a valid token start in Nova expressions).
+    } else if (c >= '0' && c <= '9') {
+      // Digit run. A lone 0/1 is the literal boolean; a longer run is the
+      // original tokenizer's '#' compare-value token (NovaExpression_-
+      // EvaluateToken 0x00448be0 consumes all digits and returns '#'), which
+      // in boolean position is a no-op there. Consume the WHOLE run here so a
+      // malformed token (e.g. the shipped mission 428 AvailBits
+      // `!(b511 | b515) & !((b50 | 467) | b6666)`, where 467 is a missing-b
+      // typo) does not desync the parser and silently drop the rest of the
+      // expression. Divergence: the clean room evaluates such a run as false,
+      // while the original's '#' token is a no-op (it leaves the accumulator
+      // and a pending '!' untouched). That is visible only when the run is the
+      // right operand of `&` (`1 & 467` -> 1) or the direct operand of `!`
+      // (`!467` -> false, not true); no shipped expression uses either, and a
+      // run compared with `<`/`>`/`=` is still handled by ParseCountedSet.
       Consume();
+      bool multi_digit = false;
+      while (Peek() >= '0' && Peek() <= '9') {
+        Consume();
+        multi_digit = true;
+      }
+      if (multi_digit) {
+        return 0;
+      }
       return c == '1' ? 1 : 0;
     } else {
       // Unknown token: advance one char and treat as false.
@@ -2580,60 +2599,6 @@ bool NovaControlExpression_Evaluate(std::string_view expression,
     return true; // blank test expression evaluates to true
   }
   return ExprParser{expression, state}.Eval();
-}
-
-void NovaControlExpression_ExecuteSet(
-    std::string_view expression, const ControlExpressionMutation &mutation) {
-  if (!mutation.set_control_bit) {
-    return;
-  }
-  // Set expressions are a stream of directives.  The landing-store scripts
-  // observed in the scenario use B<number> to set a control bit; accepting an
-  // explicit ! or =0 form also makes clearing state unambiguous.  Other
-  // directive families are left untouched until their state targets are
-  // reconstructed rather than being guessed as inventory mutations.
-  for (std::size_t pos = 0; pos < expression.size();) {
-    while (pos < expression.size() &&
-           (expression[pos] == ' ' || expression[pos] == ',' ||
-            expression[pos] == ';')) {
-      ++pos;
-    }
-    bool value = true;
-    if (pos < expression.size() && expression[pos] == '!') {
-      value = false;
-      ++pos;
-    }
-    if (pos >= expression.size() ||
-        (expression[pos] != 'B' && expression[pos] != 'b')) {
-      while (pos < expression.size() && expression[pos] != ',' &&
-             expression[pos] != ';') {
-        ++pos;
-      }
-      continue;
-    }
-    ++pos;
-    const std::size_t number_start = pos;
-    std::uint32_t bit = 0;
-    while (pos < expression.size() && expression[pos] >= '0' &&
-           expression[pos] <= '9') {
-      bit = bit * 10U + static_cast<std::uint32_t>(expression[pos] - '0');
-      ++pos;
-    }
-    if (pos == number_start) {
-      continue;
-    }
-    if (pos < expression.size() && expression[pos] == '=') {
-      ++pos;
-      if (pos < expression.size() && expression[pos] == '0') {
-        value = false;
-        ++pos;
-      } else if (pos < expression.size() && expression[pos] == '1') {
-        value = true;
-        ++pos;
-      }
-    }
-    mutation.set_control_bit(bit, value);
-  }
 }
 
 } // namespace game

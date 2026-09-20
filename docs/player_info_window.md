@@ -185,8 +185,9 @@ blit the window surface to the gameplay context, restore.
 
 All wording comes from STR# 0x7d2 (misc strings) / 0x89 (number words);
 counts pluralise through the "ton"/"tons" pool `DAT_0072d3cc/.4cc` and
-`Ship_FormatLocalizedCountWord`. Key bindings inside the first sentence are
-translated through `NovaCommand_TranslateByInputMap`.
+`Ship_FormatLocalizedCountWord`. The first byte of each built summary is run
+through the MetroWerks C-locale toupper `MWRuntime_ToUpper` (0x004d6260, once
+misnamed `NovaCommand_TranslateByInputMap`), capitalizing the leading letter.
 
 - **Cargo text** (0x7d5278): header STR# 0x16a "Other cargo:" + mass check
   (`Ship_ComputeShipTotalCargoCapacity` vs `Player_ComputeFleetCargoCapacity` → 0x16e

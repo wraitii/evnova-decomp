@@ -36,4 +36,15 @@ namespace detail {
   return detail::GroupDigits(std::to_string(value));
 }
 
+// Capitalizes a leading ASCII letter, matching the MetroWerks C-locale
+// MWRuntime_ToUpper (Ghidra 0x004d6260): only 'a'..'z' change and every other
+// byte, including the >= 0x80 range, is left alone. Several original UI paths
+// run the first character of a label or count word through that runtime call.
+[[nodiscard]] inline std::string UpperFirstAscii(std::string text) {
+  if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') {
+    text[0] = static_cast<char>(text[0] - 'a' + 'A');
+  }
+  return text;
+}
+
 } // namespace evnova::util

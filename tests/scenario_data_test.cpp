@@ -406,6 +406,20 @@ TEST_CASE("nova control bit expression evaluator", "[scenario][control]") {
   CHECK(NovaControlExpression_Evaluate("[b1 b2] = 2", s2));
   CHECK_FALSE(NovaControlExpression_Evaluate("[b1 b3] = 2", s2));
   CHECK(NovaControlExpression_Evaluate("[b1 b2] > 0", s2));
+
+  // Shipped mission 428 (Federation Resupply;Fed1) has AvailBits
+  // "!(b511 | b515) & !((b50 | 467) | b6666)": the `467` is missing its `b`
+  // prefix. The original tokenizer parses a bare digit run as a '#'
+  // compare-value token, which is a no-op in boolean position, so the
+  // expression is equivalent to "!(b511 | b515) & !(b50 | b6666)". The
+  // evaluator must consume the whole run so the trailing b6666 is still
+  // parsed (a one-digit-at-a-time fallback desyncs and drops the rest).
+  ControlExpressionState s3;
+  s3.get_control_bit = [](std::uint32_t bit) {
+    return bit == 6666; // only the bit after the malformed token is set
+  };
+  CHECK_FALSE(NovaControlExpression_Evaluate(
+      "!(b511 | b515) & !((b50 | 467) | b6666)", s3));
 }
 
 TEST_CASE("government table loads and decodes the Federation class",

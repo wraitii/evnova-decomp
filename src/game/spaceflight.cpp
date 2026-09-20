@@ -1637,6 +1637,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Port stand-in for NovaTime_GetTickCount60Hz's g_frame_tick_count_60hz
     // (see GameState::tick_60hz): re-derived from the wall clock each frame.
     state.tick_60hz = static_cast<std::uint32_t>(host_now_ms * 60ULL / 1000ULL);
+    // A mission-script C/E/H class swap raises gameplay_interface_dirty in
+    // place of the original's direct Ui_InstallGameplayInterfaceLayout call
+    // (0x004cda50); resolve the new government interface/cockpit art before
+    // this frame is drawn.
+    if (state.gameplay_interface_dirty) {
+      hud.Install(platform, state);
+      state.gameplay_interface_dirty = false;
+    }
     // Keep the gameplay viewport half-size current (g_viewport_center_x/y);
     // asteroid spawn scatters over it.
     view.SyncGameplayViewport(platform, state);
