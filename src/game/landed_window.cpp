@@ -1415,9 +1415,13 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
       state,
       ctx.stellar_id,
       static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
-      [&](const std::string &text) {
-        NovaUi_RunTextReaderDialog(
-            platform, state, text, false, render_background);
+      [&](const MissionDialogText &message) {
+        NovaUi_RunTextReaderDialog(platform,
+                                   state,
+                                   message.text,
+                                   false,
+                                   render_background,
+                                   message.dialog_variant);
       });
   (void)Mission_TriggerLandingInteractions(
       state,

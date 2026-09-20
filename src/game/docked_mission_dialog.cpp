@@ -777,8 +777,11 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
 // slice and 0x00447680 NovaUi_DrawMissionShipInteractionWindow draw slice run
 // inline in this function and its draw_frame lambda below. Window DLOG 0x3f8
 // (DITL 1016: entry 1 = accept button, entry 2 = decline button, entry 3 =
-// read-only text view); background = PICT 0x214a (main art, top-anchored) with
-// strips 0x2149 (top) and 0x214b (bottom). Button captions come from the mïsn
+// read-only text view, entries 9/10 = scroll arrows); background = PICT 0x214a
+// (main art, top-anchored) with strips 0x2149 (top) and 0x214b (bottom). When
+// the dësc variant is >= 0x80 the original switches to DLOG 0x3fc (DITL 1020)
+// with single backdrop PICT 0x2150 and blits the variant PICT into entry 8.
+// Button captions come from the mïsn
 // payload +0x75f/+0x77f, which the original truncates at the first
 // non-lowercase byte and replaces with STR# 0x96 entries 0x32/0x1b (accept) and
 // 0x33 (decline) when empty.
@@ -789,18 +792,19 @@ namespace {
 // g_selection_dialog_text: desc load (which runs the placeholder pass at
 // load time, 0x004c6d50) + the wildcard pass. `active_slot >= 0` selects the
 // active arm of the wildcard pass (mission_id = active slot).
-[[nodiscard]] std::string LoadMissionText(const GameState &state,
-                                          std::uint16_t desc_id,
-                                          bool offering_arm,
-                                          std::int16_t mission_id) {
-  std::string text;
+[[nodiscard]] MissionDialogText LoadMissionText(const GameState &state,
+                                                std::uint16_t desc_id,
+                                                bool offering_arm,
+                                                std::int16_t mission_id) {
+  MissionDialogText message;
   if (const auto desc = NovaResource_LoadDescription(desc_id)) {
-    text = desc->text;
-    Mission_ExpandStringPlaceholders(state, text);
-    text =
-        Mission_ExpandMissionWildcards(state, text, offering_arm, mission_id);
+    message.text = desc->text;
+    message.dialog_variant = desc->dialog_variant;
+    Mission_ExpandStringPlaceholders(state, message.text);
+    message.text = Mission_ExpandMissionWildcards(
+        state, message.text, offering_arm, mission_id);
   }
-  return text;
+  return message;
 }
 
 [[nodiscard]] std::optional<std::size_t>
@@ -839,25 +843,33 @@ void NovaMission_RunAcceptanceDialogs(
   const std::optional<std::size_t> slot =
       FindActiveMissionSlot(state, mission_def);
   if (def->initial_briefing_id >= 0x80) {
-    const std::string text =
+    const MissionDialogText message =
         LoadMissionText(state,
                         static_cast<std::uint16_t>(def->initial_briefing_id),
                         false,
                         slot ? static_cast<std::int16_t>(*slot) : -1);
-    if (!text.empty()) {
-      NovaUi_RunTextReaderDialog(
-          platform, state, text, true, render_background);
+    if (!message.text.empty()) {
+      NovaUi_RunTextReaderDialog(platform,
+                                 state,
+                                 message.text,
+                                 true,
+                                 render_background,
+                                 message.dialog_variant);
     }
   }
   if (def->pickup_mode == 0 && def->text_description_ids[2] >= 0x80) {
-    const std::string text = LoadMissionText(
+    const MissionDialogText message = LoadMissionText(
         state,
         static_cast<std::uint16_t>(def->text_description_ids[2]),
         false,
         slot ? static_cast<std::int16_t>(*slot) : -1);
-    if (!text.empty()) {
-      NovaUi_RunTextReaderDialog(
-          platform, state, text, false, render_background);
+    if (!message.text.empty()) {
+      NovaUi_RunTextReaderDialog(platform,
+                                 state,
+                                 message.text,
+                                 false,
+                                 render_background,
+                                 message.dialog_variant);
     }
   }
 }
@@ -903,9 +915,11 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   // Ship_ExpandStringPlaceholders 0x0044a4d0), then the wildcard pass composes
   // the final offer text (Stellar_BuildTravelDestinationDescription).
   std::string text;
+  std::int16_t desc_variant = 0;
   const std::uint16_t desc_id = static_cast<std::uint16_t>(mission_def + 4000);
   if (const auto desc = NovaResource_LoadDescription(desc_id)) {
     text = desc->text;
+    desc_variant = desc->dialog_variant;
     Mission_ExpandStringPlaceholders(state, text);
     text = Mission_ExpandMissionWildcards(state, text, true, mission_def);
   }
@@ -920,25 +934,26 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     return MissionOfferResult::kAccepted;
   }
 
-  const auto dlog = NovaResource_LoadDialogDefinition(0x3f8);
+  // Art variant (0x00442510): variant >= 0x80 selects DLOG 0x3fc and the
+  // single backdrop PICT 0x2150, and the draw callback (0x00447680) blits the
+  // variant PICT into DITL entry 8. Variant < 0x80 uses DLOG 0x3f8 with the
+  // 0x2149/0x214a/0x214b strips. g_selection_dialog_variant is an unsigned
+  // 16-bit PICT id, so the comparison is unsigned.
+  const bool art_variant_mode =
+      static_cast<std::uint16_t>(desc_variant) >= 0x80;
+  const auto dlog =
+      NovaResource_LoadDialogDefinition(art_variant_mode ? 0x3fc : 0x3f8);
   const auto items =
       dlog ? NovaResource_LoadDialogItems(dlog->dialog_item_list_id)
            : std::nullopt;
   if (!dlog || !items) {
     // The original bails with return 0 (declined) when the window resource is
     // unusable.
-    NovaLog::Todo("mission offer DLOG/DITL 0x3f8 unavailable; declining offer "
+    NovaLog::Todo("mission offer DLOG/DITL {:#x} unavailable; declining offer "
                   "for misn def {}",
+                  art_variant_mode ? 0x3fc : 0x3f8,
                   mission_def);
     return MissionOfferResult::kDeclined;
-  }
-  // TODO(decomp(0x00442510)) skipped: variant >= 0x80 switches to DLOG 0x3fc
-  // + PICT 0x2150. dësc 4123 (the tutorial offer) has variant 0.
-  if (const auto desc = NovaResource_LoadDescription(desc_id);
-      desc && desc->dialog_variant >= 0x80) {
-    NovaLog::Todo("mission offer dësc {} uses the >= 0x80 art variant "
-                  "(DLOG 0x3fc path); rendering the 0x3f8 window instead",
-                  desc_id);
   }
 
   const float win_w = static_cast<float>(dlog->right - dlog->left);
@@ -966,6 +981,9 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   // and down to item 9.
   const SDL_FRect scroll_up_rect = item_rect(8);
   const SDL_FRect scroll_down_rect = item_rect(9);
+  // Entry 8 (DITL item 7) is the variant PICT target in the 0x3fc arm
+  // (0x00447680: UiPanel_GetEntryInfo(window, 8)).
+  const SDL_FRect variant_rect = item_rect(7);
 
   platform.SetPlacement(
       PlaceContained({win_w, win_h}, platform.logical_playfield_size()));
@@ -1012,12 +1030,34 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   }
 
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
-  auto art_main = LoadPictTexture(platform, 0x214a);
-  auto art_top = LoadPictTexture(platform, 0x2149);
-  auto art_bottom = LoadPictTexture(platform, 0x214b);
-  if (art_main == nullptr || art_top == nullptr || art_bottom == nullptr) {
-    NovaLog::Todo("mission offer window art PICTs 0x2149/0x214a/0x214b "
-                  "incomplete; using a flat window fill");
+  // Variant < 0x80: main 0x214a + top strip 0x2149 + bottom strip 0x214b.
+  // Variant >= 0x80: single backdrop 0x2150 + the variant PICT into entry 8.
+  std::unique_ptr<SdlTexture> art_main;
+  std::unique_ptr<SdlTexture> art_top;
+  std::unique_ptr<SdlTexture> art_bottom;
+  std::unique_ptr<SdlTexture> art_variant;
+  std::unique_ptr<SdlTexture> art_variant_pict;
+  if (art_variant_mode) {
+    art_variant = LoadPictTexture(platform, 0x2150);
+    art_variant_pict =
+        LoadPictTexture(platform, static_cast<std::uint16_t>(desc_variant));
+    if (art_variant == nullptr) {
+      NovaLog::Todo("mission offer art backdrop PICT 0x2150 missing; using a "
+                    "flat window fill");
+    }
+    if (art_variant_pict == nullptr) {
+      NovaLog::Todo("mission offer variant PICT {:#x} missing; entry 8 stays "
+                    "unpainted",
+                    static_cast<std::uint16_t>(desc_variant));
+    }
+  } else {
+    art_main = LoadPictTexture(platform, 0x214a);
+    art_top = LoadPictTexture(platform, 0x2149);
+    art_bottom = LoadPictTexture(platform, 0x214b);
+    if (art_main == nullptr || art_top == nullptr || art_bottom == nullptr) {
+      NovaLog::Todo("mission offer window art PICTs 0x2149/0x214a/0x214b "
+                    "incomplete; using a flat window fill");
+    }
   }
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
@@ -1046,34 +1086,56 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     const SDL_FRect window{origin.x, origin.y, win_w, win_h};
     SDL_SetRenderDrawColor(platform.renderer(), 16, 40, 72, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(platform.renderer(), &window);
-    if (art_main != nullptr) {
-      float w = 0.0F;
-      float h = 0.0F;
-      SDL_GetTextureSize(art_main->get(), &w, &h);
-      const SDL_FRect main_rect{
-          origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
-      SDL_RenderTexture(
-          platform.renderer(), art_main->get(), nullptr, &main_rect);
-    }
-    if (art_top != nullptr) {
-      float w = 0.0F;
-      float h = 0.0F;
-      SDL_GetTextureSize(art_top->get(), &w, &h);
-      const SDL_FRect top_rect{
-          origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
-      SDL_RenderTexture(
-          platform.renderer(), art_top->get(), nullptr, &top_rect);
-    }
-    if (art_bottom != nullptr) {
-      float w = 0.0F;
-      float h = 0.0F;
-      SDL_GetTextureSize(art_bottom->get(), &w, &h);
-      const SDL_FRect bottom_rect{origin.x,
-                                  origin.y + win_h - std::min(h, win_h),
-                                  std::min(w, win_w),
-                                  std::min(h, win_h)};
-      SDL_RenderTexture(
-          platform.renderer(), art_bottom->get(), nullptr, &bottom_rect);
+    if (art_variant_mode) {
+      // Single art backdrop 0x2150 filling the window, then the variant PICT
+      // into entry 8 (0x00447680).
+      if (art_variant != nullptr) {
+        float w = 0.0F;
+        float h = 0.0F;
+        SDL_GetTextureSize(art_variant->get(), &w, &h);
+        const SDL_FRect variant_backdrop{
+            origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
+        SDL_RenderTexture(platform.renderer(),
+                          art_variant->get(),
+                          nullptr,
+                          &variant_backdrop);
+      }
+      if (art_variant_pict != nullptr) {
+        SDL_RenderTexture(platform.renderer(),
+                          art_variant_pict->get(),
+                          nullptr,
+                          &variant_rect);
+      }
+    } else {
+      if (art_main != nullptr) {
+        float w = 0.0F;
+        float h = 0.0F;
+        SDL_GetTextureSize(art_main->get(), &w, &h);
+        const SDL_FRect main_rect{
+            origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
+        SDL_RenderTexture(
+            platform.renderer(), art_main->get(), nullptr, &main_rect);
+      }
+      if (art_top != nullptr) {
+        float w = 0.0F;
+        float h = 0.0F;
+        SDL_GetTextureSize(art_top->get(), &w, &h);
+        const SDL_FRect top_rect{
+            origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
+        SDL_RenderTexture(
+            platform.renderer(), art_top->get(), nullptr, &top_rect);
+      }
+      if (art_bottom != nullptr) {
+        float w = 0.0F;
+        float h = 0.0F;
+        SDL_GetTextureSize(art_bottom->get(), &w, &h);
+        const SDL_FRect bottom_rect{origin.x,
+                                    origin.y + win_h - std::min(h, win_h),
+                                    std::min(w, win_w),
+                                    std::min(h, win_h)};
+        SDL_RenderTexture(
+            platform.renderer(), art_bottom->get(), nullptr, &bottom_rect);
+      }
     }
 
     // Text view: dark fill + wrapped offer text, scrolled inside a clip to
@@ -1147,14 +1209,18 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
           // tokens fall back to their [Error] sentinels while player tokens
           // still resolve.
           if (def->slot_aux_text_id >= 0x80) {
-            const std::string followup_text = LoadMissionText(
+            const MissionDialogText followup = LoadMissionText(
                 state,
                 static_cast<std::uint16_t>(def->slot_aux_text_id),
                 false,
                 -1);
-            if (!followup_text.empty()) {
-              NovaUi_RunTextReaderDialog(
-                  platform, state, followup_text, false, render_background);
+            if (!followup.text.empty()) {
+              NovaUi_RunTextReaderDialog(platform,
+                                         state,
+                                         followup.text,
+                                         false,
+                                         render_background,
+                                         followup.dialog_variant);
             }
           }
           Mission_ExecuteReactionScript(

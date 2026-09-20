@@ -66,9 +66,11 @@ void RunPostIntroTextReader(SdlPlatform &platform,
     return;
   }
   std::string text;
+  std::int16_t dialog_variant = 0;
   if (const auto desc = NovaResource_LoadDescription(static_cast<std::uint16_t>(
           state.intro_cinematic.intro_text_desc_id))) {
     text = desc->text;
+    dialog_variant = desc->dialog_variant;
     // Ui_LoadSelectionDialogResource's placeholder pass runs at load time,
     // before the wildcard pass (0x004c6d50 -> 0x0044a4d0 -> 0x004444f0).
     Mission_ExpandStringPlaceholders(state, text);
@@ -82,7 +84,8 @@ void RunPostIntroTextReader(SdlPlatform &platform,
   }
   // g_selection_dialog_over_static_surface = 1 in the original: the reader
   // redraws the dark space background rather than the live frame.
-  NovaUi_RunTextReaderDialog(platform, state, text, false, render_background);
+  NovaUi_RunTextReaderDialog(
+      platform, state, text, false, render_background, dialog_variant);
 }
 
 // Per-iteration input poll of the intro wait loop. Mirrors the original's

@@ -59,11 +59,13 @@ of `SpaceflightView &`/`HudRenderer &`, so they open from docked context too;
 `SdlAudio &` is threaded through the docked dispatch so the mission computer
 plays its cues.
 
-What is left is the shared reader/offer custom-art path (T4, exercised by
-many shipped missions). The native list control (T3) and shared row painter
-(T7) landed in commit 6987616, the offer/reader scroll arrows (T5) are done,
-and a successful BBS accept now exits the window (0x0043c470) instead of
-rebuilding the list.
+The shared reader/offer custom-art path (T4) landed: both the text reader and
+the offer window honor the dësc `dialog_variant`, so the ~68 shipped missions
+with variant briefings render their art and the 10 shipped offers in the
+`mission_id + 4000` range use the 0x3fc layout. The native list control (T3)
+and shared row painter (T7) landed in commit 6987616, the offer/reader scroll
+arrows (T5) are done, and a successful BBS accept now exits the window
+(0x0043c470) instead of rebuilding the list.
 
 ## Verified original behavior (decompile evidence)
 
@@ -96,8 +98,8 @@ rebuilding the list.
   derivation (`0x00442510` lines ~87..167).
 - **status-string panel** (`g_selection_dialog_status_str`): when set (and no
   control bit / flag blocks it) the original plays the status movie
-  (`Ui_PlayMovieFileModal`, the dësc trailing pstring). QuickTime is a platform
-  replacement; see task T4. Not ported.
+  (`Ui_PlayMovieFileModal` 0x0049db00, the dësc trailing pstring). QuickTime is
+  a platform replacement; recorded as a `qt` skip in `decomp-skipped.tsv`.
 - **`DAT_00773ee9 == 0 && offer text empty`** → auto-accept with no window.
   Already ported.
 
@@ -163,8 +165,9 @@ BBS, `DAT_0077430a` for the mission computer), and exposes the helpers above;
 Tab / Up / Down walk the list and auto-scroll it.
 
 ### T4 — Reader / offer custom art (`dialog_variant`)
-The desc's trailing u16 field (`NovaStellarDescription::dialog_variant`) is a
-**PICT resource id** — the bar (`0x0047c8e0`) and shipyard/outfitter dialogs
+**Implemented.** The desc's trailing u16 field
+(`NovaStellarDescription::dialog_variant`) is a **PICT resource id** — the bar
+(`0x0047c8e0`) and shipyard/outfitter dialogs
 already load it directly as custom art (`Resource_LoadPictAsImage(variant)`).
 When it is `>= 0x80`:
 - the **text reader** (used for mission briefings, success/failure, etc.) runs
@@ -179,17 +182,21 @@ This is not plug-in-only. In the shipped data, 68 mission definitions have at
 least one variant text resource (briefings alone use ~25 distinct PICTs in the
 `0x138b`–`0x18a9` range), and 10 shipped offers (`mission_id + 4000`) carry a
 variant PICT — e.g. missions 192, 233, 345, 468, 485, 557, 581, 591, 602, 620.
-The port currently ignores the field: the reader always uses the `0xbbb` strip
-and the offer always uses `0x3f8`/`0x2149`-`0x214b`, so those missions lose
-their briefing art and get the wrong offer layout. To port it, thread the desc's
-variant PICT id into `NovaUi_RunTextReaderDialog` and add the `0x3fc`/`0x2150`
-offer arm.
+The port threads the field: `NovaUi_RunTextReaderDialog` takes a
+`dialog_variant` parameter (>= 0x80 runs DLOG 0xbbc + backdrop PICT 0x214f and
+blits the variant PICT into DITL entry 2, with the auto-size arm disabled) and
+`NovaMission_RunOfferWindow` switches to DLOG 0x3fc + backdrop PICT 0x2150 and
+blits the variant PICT into DITL entry 8. The variant is carried from the
+dësc at every desc-based caller: mission briefings and the pickup/LoadCarg
+dialog (via `LoadMissionText`), the offer-decline follow-up, the success and
+failure debriefs (through `MissionDebriefSink`), About/Acknowledgements, and
+the intro epilogue.
 
 Separately, the desc's trailing `status` pstring is a QuickTime filename the
 original plays at open/exit through `Ui_PlayMovieFileModal` (0x0049db00), gated
 on `g_pref_quicktime_movies`. The port has no movie player — QuickTime is one of
-the intended platform replacements — so this belongs in `decomp-skipped.tsv` as
-a `qt`/platform skip, not a TODO.
+the intended platform replacements — so it is recorded in `decomp-skipped.tsv`
+as a `qt` skip (along with `Ui_LoadDescAndPlayMovie` 0x0049e3c0).
 
 ### T5 — Text-scroll arrows (hold-to-repeat, page keys)
 **Implemented.** The shared `NovaTextScrollView`/`NovaTextScrollHold`
@@ -245,7 +252,8 @@ draws the label with the shared screen font, and applies the row clip. The BBS
   wildcards, and offer/decline context; `tests/docked_dialog_test.cpp` covers
   DLOG/DITL layouts; `tests/selection_text_dialog_test.cpp` covers the
   `TextScrollKey` mapping, line/page/jump scrolling and gating, and the
-  hold-to-repeat tick math. Add layout assertions for DLOG `0x3fc` if T4 lands.
+  hold-to-repeat tick math. `tests/desc_probe.cpp` pins the DLOG `0x3fc` and
+  `0xbbc` variant-art ordinals (offer entry 8 = item 7, reader entry 2 = item 1).
 - Validate with `cmake --build build/release` and
   `ctest --test-dir build/release --output-on-failure`; comment-only changes
   need no build. Probe/scenario runs need host approval — ask before using the
@@ -265,7 +273,7 @@ draws the label with the shared screen font, and applies the row clip. The BBS
 
 ## Recommended sequencing
 
-1. **T4** — thread the desc variant PICT through the text reader and add the
-   offer `0x3fc`/`0x2150` arm; many shipped missions lose their briefing art
-   and get the wrong offer window today. Record the status movie as a platform
-   skip.
+All planned tasks (T0–T8) are implemented. Remaining mission-dialog gaps are
+recorded in `decomp-progress.tsv`: the offer mission-ship/hail branches, exact
+list-row/preview rect derivation, thumb dragging, and the platform movie skip
+(`Ui_PlayMovieFileModal`).
