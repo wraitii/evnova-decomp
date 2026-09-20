@@ -422,10 +422,11 @@ bool NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
   return ship_class->speed < target_class->speed;
 }
 
-// Ghidra 0x00412090 Ship_ScoreAssistTargetForShip. The original's first
-// argument is the candidate and its second argument is the assisting helper.
-// In particular, the cloak predicate is asymmetric and must receive those
-// roles in this order.
+// Ghidra 0x00412090 Ship_ScoreAssistTargetForShip. `candidate` is the target
+// being scored and `helper` the ship that would assist against it; the
+// original's source parameter names (`ship`, `target_ship`) are inverted
+// relative to those roles. The cloak predicate is asymmetric and must receive
+// them as (candidate, helper), matching the original (ship, target_ship).
 std::int32_t NovaAi_ScoreAssistTargetForShip(const GameState &state,
                                              const Ship &candidate,
                                              const Ship &helper,
@@ -444,9 +445,11 @@ std::int32_t NovaAi_ScoreAssistTargetForShip(const GameState &state,
   }
 
   bool target_context_ok = false;
-  // The original tests the HELPER's leader slot here (0x00412113, EBP =
-  // target_ship/helper) before calling ShouldKeepPressingTarget(candidate)
-  // (0x00412280, ESI = ship/candidate).
+  // Target-context gate (0x00412113): tests the HELPER's leader slot. When
+  // that leader is the player (slot 0), the candidate must itself be pressing
+  // the player (0x00412280); otherwise the candidate must be engaging the
+  // helper's leader, so the helper's leader is the acquiree and the candidate
+  // the acquirer.
   if (helper.squad_leader_ship_slot == 0) {
     target_context_ok = NovaAiShip_ShouldKeepPressingTarget(state, candidate);
   } else if (helper.squad_leader_ship_slot >= 0 &&

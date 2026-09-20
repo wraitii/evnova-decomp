@@ -1385,6 +1385,52 @@ TEST_CASE("combat-odds player scaling uses the pinned base strength") {
   CHECK(odds(25600, 50) == Catch::Approx(2.0F));
 }
 
+// The 0x004133f0 gate passes (candidate = ship, acquirer = player) to
+// Ship_IsShipAcquirableAsTarget and tests its low byte: the player's rating-
+// scaled strength is added to the hostile numerator only when the ship's
+// government carries no player rank/commission (policy flag 0 clear) AND the
+// ship is threatening the player squad.
+TEST_CASE("combat-odds player contribution is suppressed for rank-friendly "
+          "governments") {
+  GameState state;
+  state.scenario.ships.resize(3);
+  state.scenario.ships[0].strength = 2;   // class-0 base (pinned divisor)
+  state.scenario.ships[1].strength = 100; // NPC
+  state.scenario.ships[2].strength = 100; // player
+
+  // Player holds a rank/commission with government 0 -> policy flag 0 set.
+  state.scenario.governments.resize(1);
+  state.scenario.governments[0].policy_flags[0] = 1;
+
+  game::Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 1;
+  npc.faction_or_government_id = 0;
+  npc.primary_target_ship_slot = 0; // actively threatening the player
+  npc.ai_state_code = 4;
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.mission_fleet_slot = -1;
+  npc.defense_fleet_home_stellar_id = -1;
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.ship_class_id = 2;
+  state.player.armor_points = 100.0F;
+  state.player.shield_points = 100.0F;
+  state.player_combat_rating_points = 100000; // would clamp to 2x if counted
+
+  game::NovaAi_UpdateShipCombatOddsScore(state, npc);
+  // Flag set -> ship not acquirable by the player -> player term suppressed.
+  CHECK(npc.ai_odds_score == Catch::Approx(0.0F));
+
+  // Clearing the flag re-enables it: 2 * 100 / 100 = 2.0.
+  state.scenario.governments[0].policy_flags[0] = 0;
+  game::NovaAi_UpdateShipCombatOddsScore(state, npc);
+  CHECK(npc.ai_odds_score == Catch::Approx(2.0F));
+}
+
 // Ship_ApplyShipAiControls (0x00408150) reaches for the +0xC8DA last
 // lead-fired bank in the mode-6/7/0xe aim blocks: mode 6 leads with the active
 // bank when its weapon mode is {-1,6} and otherwise falls back to +0xC8DA,
@@ -2991,4 +3037,83 @@ TEST_CASE(
   ship.boarded_target_latch = 0;
   state.active_mission_runtime_flags[0].is_active = false;
   CHECK_FALSE(game::NovaAiShip_IsDisabled(state, ship));
+}
+
+// 0x00410900 Ship_EnterShipAiState0x04_TargetRandomRelativeToSquadLeader passes
+// the SQUAD LEADER as Ship_IsShipAcquirableAsTarget's `candidate` and the
+// randomly picked ship as its `acquirer` (disasm 0x0041099a): eligibility means
+// the pick is already engaged with the leader's squad, not that the leader
+// targets the pick. The two cases pin each direction -- a pick attacking the
+// leader (admitted) and a pick the leader targets (rejected).
+TEST_CASE("state-4 relative-to-leader target gate keeps the original "
+          "acquirer/candidate order") {
+  constexpr std::int16_t kSystemId = 5;
+
+  // Seed whose first [0,64) draw lands on slot 3 (the only eligible pick), so
+  // the random selection terminates deterministically on that slot.
+  std::uint32_t pick_seed = 1;
+  for (;; ++pick_seed) {
+    std::mt19937 probe(pick_seed);
+    if (std::uniform_int_distribution<std::int32_t>{0, 63}(probe) == 3) {
+      break;
+    }
+  }
+
+  auto setup = [&](GameState &state,
+                   std::int16_t leader_target,
+                   std::int16_t pick_target) {
+    state.player.is_active = false;
+
+    game::Ship &subject = state.ShipAt(1);
+    subject.is_active = true;
+    subject.ship_instance_id = 1;
+    subject.current_system_id = kSystemId;
+    subject.squad_leader_ship_slot = 2;
+    subject.primary_target_ship_slot = -1;
+    subject.ai_behavior_code = 6;
+    subject.ai_state_code = 0;
+
+    game::Ship &leader = state.ShipAt(2);
+    leader.is_active = true;
+    leader.ship_instance_id = 2;
+    leader.current_system_id = kSystemId;
+    leader.squad_leader_ship_slot = -1;
+    leader.primary_target_ship_slot = leader_target;
+    leader.ai_state_code = 4;
+
+    game::Ship &pick = state.ShipAt(3);
+    pick.is_active = true;
+    pick.ship_instance_id = 3;
+    pick.current_system_id = kSystemId;
+    pick.squad_leader_ship_slot = -1;
+    pick.primary_target_ship_slot = pick_target;
+    pick.ai_state_code = 4;
+
+    state.rng.seed(pick_seed);
+  };
+
+  // The pick is attacking the leader (pick.primary_target == leader): the
+  // original admits it (acquirer = pick, candidate = leader), so the subject
+  // acquires slot 3.
+  {
+    GameState state;
+    setup(state, /*leader_target=*/-1, /*pick_target=*/2);
+    game::NovaAi_EnterState4TargetRandomRelativeToSquadLeader(state,
+                                                              state.ShipAt(1));
+    CHECK(state.ShipAt(1).primary_target_ship_slot == 3);
+    CHECK(state.ShipAt(1).ai_state_code == 4);
+  }
+
+  // The leader is attacking the pick but the pick targets nobody (leader.
+  // primary_target == pick, pick.primary_target == -1): the swapped order
+  // would admit it, but the original rejects it (the pick is not engaged with
+  // the leader's squad) and clears the primary target without a state change.
+  {
+    GameState state;
+    setup(state, /*leader_target=*/3, /*pick_target=*/-1);
+    game::NovaAi_EnterState4TargetRandomRelativeToSquadLeader(state,
+                                                              state.ShipAt(1));
+    CHECK(state.ShipAt(1).primary_target_ship_slot == -1);
+    CHECK(state.ShipAt(1).ai_state_code == 0);
+  }
 }

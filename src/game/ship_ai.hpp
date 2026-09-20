@@ -217,8 +217,10 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship);
 NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
                                             const Ship &ship);
 
-// Ghidra 0x00412090 Ship_ScoreAssistTargetForShip. Scores one candidate for an
-// assist/response ship; returns 0 when the candidate is not eligible.
+// Ghidra 0x00412090 Ship_ScoreAssistTargetForShip. Scores `candidate` as a
+// potential target for `helper`; returns 0 when the candidate is not eligible.
+// The original's own parameter names (`ship`, `target_ship`) are inverted
+// relative to these roles.
 [[nodiscard]] std::int32_t
 NovaAi_ScoreAssistTargetForShip(const GameState &state,
                                 const Ship &candidate,

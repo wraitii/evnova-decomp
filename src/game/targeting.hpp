@@ -141,12 +141,13 @@ NovaTargeting_ShipAtCloakVisibilityThreshold(const Ship &ship);
 
 // Ghidra 0x0040faa0 Ship_IsShipAcquirableAsTarget: pairwise predicate for
 // whether `acquirer` should validly acquire `candidate` as a target. The
-// player branch (acquirer.ship_instance_id == 0) returns true when the
-// candidate's government policy flag 0 is set or the candidate threatens the
-// player squad; the NPC branch keeps the candidate when it is the
-// acquirer's primary target (or another active ship targets it while the
-// acquirer tracks that ship) and the acquirer is not in a disengage/retreat
-// AI state.
+// player branch (acquirer.ship_instance_id == 0) returns true only when the
+// candidate's government policy flag 0 is CLEAR (no player rank/commission)
+// AND the candidate threatens the player squad -- the original writes the flag
+// byte to AL and all callers test AL. The NPC branch keeps the candidate when
+// it is the acquirer's primary target (or another active ship targets it
+// while the acquirer tracks that ship) and the acquirer is not in a
+// disengage/retreat AI state.
 [[nodiscard]] bool NovaTargeting_IsShipAcquirableAsTarget(
     const GameState &state, const Ship &candidate, const Ship &acquirer);
 
