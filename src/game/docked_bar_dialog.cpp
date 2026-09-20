@@ -266,6 +266,7 @@ std::string BarCommodityName(std::int16_t commodity) {
 
 // Ghidra 0x0047c8e0 NovaUi_RunTravelDestinationServicesWindow.
 LandedExit RunBarDialog(SdlPlatform &platform,
+                        SdlAudio &audio,
                         GameState &state,
                         std::int16_t stellar_id,
                         const std::function<void()> &render_background) {
@@ -456,8 +457,12 @@ LandedExit RunBarDialog(SdlPlatform &platform,
         1,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
         [&](std::int16_t mission_def) {
-          return NovaMission_RunOfferWindow(
-              platform, state, mission_def, stellar_id, draw_bar_contents);
+          return NovaMission_RunOfferWindow(platform,
+                                            audio,
+                                            state,
+                                            mission_def,
+                                            stellar_id,
+                                            draw_bar_contents);
         });
   };
 
@@ -507,6 +512,7 @@ LandedExit RunBarDialog(SdlPlatform &platform,
       // (g_shipyard_purchase_mode = 1).
       if (NovaShip_CanPlayerHaveMoreEscorts(state)) {
         (void)RunStoreDialog(platform,
+                             audio,
                              state,
                              LandedService::kShipyard,
                              stellar_id,

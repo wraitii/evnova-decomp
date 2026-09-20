@@ -1406,6 +1406,7 @@ RunShipPurchaseConfirmation(SdlPlatform &platform,
 // the 0x004956a0/0x00495c80 detail window runs in RunShipyardInfoDialog above
 // (opened by the Info action button).
 LandedExit RunStoreDialog(SdlPlatform &platform,
+                          SdlAudio &audio,
                           GameState &state,
                           LandedService service,
                           std::int16_t stellar_id,
@@ -1479,6 +1480,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
         [&](std::int16_t mission_def) {
           return NovaMission_RunOfferWindow(platform,
+                                            audio,
                                             state,
                                             mission_def,
                                             stellar_id,

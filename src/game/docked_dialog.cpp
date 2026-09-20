@@ -218,6 +218,7 @@ std::uint16_t NovaLanded_SubWindowFramePict(LandedService service) {
 
 LandedExit
 NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
+                              SdlAudio &audio,
                               GameState &state,
                               LandedService service,
                               std::int16_t stellar_id,
@@ -225,18 +226,20 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
   const SdlPlatform::ScopedPlacement restore_placement(
       platform, platform.current_placement());
   if (service == LandedService::kMissionBbs) {
-    return RunMissionBbsWindow(platform, state, stellar_id, render_background);
+    return RunMissionBbsWindow(
+        platform, audio, state, stellar_id, render_background);
   }
   if (service == LandedService::kBar) {
-    return RunBarDialog(platform, state, stellar_id, render_background);
+    return RunBarDialog(platform, audio, state, stellar_id, render_background);
   }
   if (service == LandedService::kBuySellCargo) {
-    return RunTradeCenterDialog(platform, state, stellar_id, render_background);
+    return RunTradeCenterDialog(
+        platform, audio, state, stellar_id, render_background);
   }
   if (service == LandedService::kOutfit ||
       service == LandedService::kShipyard) {
     return RunStoreDialog(
-        platform, state, service, stellar_id, render_background);
+        platform, audio, state, service, stellar_id, render_background);
   }
   NovaLog::Info("opening docked sub-window dialog '{}' at stellar {}",
                 SubWindowHeading(service),

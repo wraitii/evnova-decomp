@@ -404,6 +404,7 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
 // Ghidra 0x0048c730 NovaUi_RunTradeCenterWindow modal loop.
 LandedExit
 RunTradeCenterDialog(SdlPlatform &platform,
+                     SdlAudio &audio,
                      GameState &state,
                      std::int16_t stellar_id,
                      const std::function<void()> &render_background) {
@@ -458,6 +459,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
         [&](std::int16_t mission_def) {
           return NovaMission_RunOfferWindow(platform,
+                                            audio,
                                             state,
                                             mission_def,
                                             stellar_id,

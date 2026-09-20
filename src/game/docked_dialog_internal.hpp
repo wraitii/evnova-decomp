@@ -58,27 +58,32 @@ RunStoreQuantityPrompt(SdlPlatform &platform,
 // hire_mode set.
 [[nodiscard]] LandedExit
 RunStoreDialog(SdlPlatform &platform,
+               SdlAudio &audio,
                GameState &state,
                LandedService service,
                std::int16_t stellar_id,
                const std::function<void()> &render_background,
                bool hire_mode = false);
 
-// Per-service modals orchestrated by NovaLanded_RunSubWindowDialog.
+// Per-service modals orchestrated by NovaLanded_RunSubWindowDialog. Each takes
+// the shared SdlAudio so a nested mission-computer window can play its cues.
 [[nodiscard]] LandedExit
 RunMissionBbsWindow(SdlPlatform &platform,
+                    SdlAudio &audio,
                     GameState &state,
                     std::int16_t stellar_id,
                     const std::function<void()> &render_background);
 
 [[nodiscard]] LandedExit
 RunBarDialog(SdlPlatform &platform,
+             SdlAudio &audio,
              GameState &state,
              std::int16_t stellar_id,
              const std::function<void()> &render_background);
 
 [[nodiscard]] LandedExit
 RunTradeCenterDialog(SdlPlatform &platform,
+                     SdlAudio &audio,
                      GameState &state,
                      std::int16_t stellar_id,
                      const std::function<void()> &render_background);

@@ -456,10 +456,9 @@ void Mission_ExecuteScript(GameState &state,
         // payload context slot (0..15) the original then expands mission text
         // tags through Stellar_BuildTravelDestinationDescription. The message
         // is NOT shown here -- the launch tail (Stellar_RunDockAndLaunch-
-        // Sequence 0x00456134) shows and clears it. TODO(decomp(0x00440c90))
-        // skipped: the Mission BBS poll callback's staged-message early exit
-        // (g_pending_overlay_message[0] != 0 -> action 7) that force-leaves
-        // the docked BBS after a scripted Q is not modelled.
+        // Sequence 0x00456134) shows and clears it. A live docked BBS sees the
+        // staged buffer on its next poll (NovaUi_PollMissionBbsWindow
+        // 0x00440c90) and force-leaves with action 7.
         if (operand >= 0 && operand <= 0x7fff) {
           if (auto message = LoadRandomStringListEntry(
                   state.rng, static_cast<std::int32_t>(operand))) {
