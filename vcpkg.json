@@ -8,10 +8,6 @@
       "name": "sdl3-ttf",
       "features": ["harfbuzz"]
     },
-    {
-      "name": "sdl3-mixer",
-      "features": ["mpg123"]
-    },
     "catch2",
     "fmt"
   ]

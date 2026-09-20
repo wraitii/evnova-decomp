@@ -33,8 +33,8 @@ constexpr std::size_t kLogBufferLines = 1000;
 // stderr can be a detached, closed or absent handle when the process is started
 // by a windowed launcher (or Wine/CrossOver starts this console-subsystem
 // binary with no attached console). fmt::print(FILE*, ...) throws
-// std::system_error when the underlying fwrite fails, so a single lost log line
-// used to escape Write() as an uncaught exception and abort the process. Build
+// std::system_error when the underlying fwrite fails, so a failed sink write
+// would escape Write() as an uncaught exception and abort the process. Build
 // the line in memory and treat the sink writes as best-effort instead.
 void WriteBestEffort(std::FILE *stream, std::string_view text) {
   if (stream == nullptr) {

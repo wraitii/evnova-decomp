@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 
-# SDL3_ttf/SDL3_mixer's CMake config adds their vcpkg libdir as a link directory,
-# which CMake turns into an LC_RPATH pointing into the build tree. Every dependency
-# is linked statically, so no rpath is needed; suppress it so a binary copied out of
-# the build tree does not carry developer-specific paths.
+# SDL3_ttf's CMake config adds its vcpkg libdir as a link directory, which
+# CMake turns into an LC_RPATH pointing into the build tree. Every dependency
+# is linked statically, so no rpath is needed; suppress it so a binary copied out
+# of the build tree does not carry developer-specific paths.
 if(APPLE)
     set(CMAKE_SKIP_BUILD_RPATH TRUE)
 endif()
@@ -72,7 +72,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang|Clang|GNU")
 endif()
 
 find_package(SDL3 CONFIG REQUIRED)
-find_package(SDL3_mixer CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 
 add_subdirectory(src)

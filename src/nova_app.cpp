@@ -1018,8 +1018,8 @@ int NovaProgramEntry() {
   // Port-only top-level guard: the original always ran with a console and
   // standard handles present, but a windowed launcher can start this
   // console-subsystem binary detached. Log any escaped exception through the
-  // now non-throwing logger and exit with a failure code instead of aborting
-  // with no diagnostic.
+  // non-throwing logger and exit with a failure code instead of aborting with
+  // no diagnostic.
   try {
     return NovaApp_Run(runtime);
   } catch (const std::exception &e) {
@@ -1194,11 +1194,11 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   }
 
   // Background music. The shipped bass track is the MP3 in the Nova Files
-  // folder (the original streams a :Music:SongNN path through a codec;
-  // SDL3_mixer decodes the MP3 for us). The music device/format is set up here,
-  // matching NovaAudio_Initialize(8,0) running before the splash frames in the
-  // original; Play() is deferred until the second splash becomes active, then
-  // the same stream carries through into the main menu.
+  // folder (the original streams a :Music:SongNN path through a codec; the port
+  // decodes the MP3 with dr_mp3 and loops the PCM). The music device/format is
+  // set up here, matching NovaAudio_Initialize(8,0) running before the splash
+  // frames in the original; Play() is deferred until the second splash becomes
+  // active, then the same stream carries through into the main menu.
   if (!runtime.music.Initialize()) {
     NovaLog::Warn("continuing without background music (menu bass is silent)");
   } else if (const auto music_path =

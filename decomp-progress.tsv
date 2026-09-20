@@ -2009,7 +2009,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0052BBE4	NetQuerySocket_FUN_0052bbe4		0%	
 0x0052BC39	MemOrStream_FUN_0052bc39		0%	
 0x0052BEA5	MemOrStream_FUN_0052bea5		0%	
-0x00534380	NovaMusic_SwitchBackgroundTrack	src/sdl_music.cpp	100%	background 'bass' music playback via SDL3_mixer
+0x00534380	NovaMusic_SwitchBackgroundTrack	src/sdl_music.cpp	100%	Background 'bass' music playback via the vendored dr_mp3 decoder and a dedicated looping SDL audio stream, avoiding an SDL3_mixer/mpg123 LGPL-2.1 runtime dependency.
 0x00534930	SplayTree_Insert		0%	
 0x00534D00	AtExit_RunRegisteredCbs		0%	
 0x0054D7E0	AsyncFileStream_Open		0%	
