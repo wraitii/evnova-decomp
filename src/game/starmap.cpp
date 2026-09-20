@@ -15,6 +15,7 @@
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
+#include "ui_dialog.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -23,6 +24,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -38,7 +40,6 @@ using starmap_detail::MappedSystem;
 using starmap_detail::MapView;
 using starmap_detail::PoliticalOverlay;
 using starmap_detail::StarmapGeometry;
-using starmap_detail::SystemOnMap;
 
 // ---- Window geometry (native DLOG authoring space) -------------------------
 // The starmap window is the EV Nova DLOG 0x7d0 dialog: a 601x513 frame whose
@@ -701,8 +702,7 @@ void DrawSidePanels(SdlPlatform &platform,
                     const GameState &state,
                     const StarmapGeometry &geometry,
                     const StarmapStrings &strings,
-                    std::int16_t selected_id,
-                    const std::string *search_query) {
+                    std::int16_t selected_id) {
   const float s = 1.0F;
   const SDL_FRect &side = geometry.side;
   const SDL_FRect &bar = geometry.bar;
@@ -897,17 +897,6 @@ void DrawSidePanels(SdlPlatform &platform,
   }
 
   // ---- Bottom bar ----
-  // An active inline Find shows the typed query (the original runs a modal
-  // search dialog, DLOG 0xbbd; the clean-room keeps an inline stand-in).
-  if (search_query != nullptr) {
-    DrawTextAt(platform,
-               font_cache,
-               bar.x + 10.0F * s,
-               bar.y + 24.0F * s,
-               10.0F,
-               kColorWhite,
-               "Find: " + *search_query + "_");
-  }
   // "Ports:" + the usable nav stellar display names, comma-separated,
   // wrapping once (0x004a6140). Until visited the value reads "<Unknown>".
   DrawTextAt(platform,
@@ -1125,15 +1114,18 @@ void DrawButtons(SdlPlatform &platform,
                  const ServicesButtonArt &button_art,
                  const StarmapGeometry &geometry,
                  bool show_borders,
+                 bool route_has_hops,
                  double zoom,
                  std::optional<std::size_t> hovered) {
   constexpr SDL_Color kButtonLabelNormal{255, 255, 255, 255};
   constexpr SDL_Color kButtonLabelGrey{128, 128, 128, 255};
   // The zoom buttons grey out exactly on the original's enable gates
-  // (DAT_007dc742 = zoom > 2.0, DAT_007dc743 = zoom < 1.1).
+  // (DAT_007dc742 = zoom > 2.0, DAT_007dc743 = zoom < 1.1); Clear Route greys
+  // out unless a route is plotted (DAT_007dc744, NovaUi_DrawStarmapButtons
+  // 0x0049f1f0).
   const std::array<std::pair<StarmapButton, bool>, 6> buttons{{
       {StarmapButton::kShowBorders, true},
-      {StarmapButton::kClearRoute, true},
+      {StarmapButton::kClearRoute, route_has_hops},
       {StarmapButton::kFind, true},
       {StarmapButton::kZoomOut, zoom < kZoomOutLimit},
       {StarmapButton::kZoomIn, zoom > kZoomInLimit},
@@ -1192,6 +1184,48 @@ std::vector<std::int16_t> BuildMissionTargetSystems(const GameState &state) {
     }
   }
   return out;
+}
+
+// Ghidra 0x004aab30 NovaUi_RunStarmapSearchDialog: the modal Find box (DLOG
+// 0xbbd, row 5 = edit text, activation 1 = Find, 3 = Cancel).
+// `render_background` is redrawn behind the box each frame. Returns the chosen
+// system, or nullopt on cancel / no match. The caller applies the selection and
+// re-centres the map, mirroring the original's pan update.
+std::optional<std::int16_t>
+RunStarmapSearchDialog(SdlPlatform &platform,
+                       NovaFontCache &font_cache,
+                       const GameState &state,
+                       const std::function<void()> &render_background) {
+  auto window = UiWindow_CreateFromDialogResource(platform, 0xbbd);
+  if (!window) {
+    NovaLog::Todo("starmap search DLOG 0xbbd unavailable; Find is a no-op");
+    return std::nullopt;
+  }
+  UiPanel_SetEntryTextPascal(*window, 5, "");
+  ProbeUiAutoClear probe_ui_guard(platform);
+  short code = -1;
+  bool accepted = false;
+  while (!accepted && !platform.quit_requested()) {
+    UiWindow_RunInteractionLoop(
+        platform, font_cache, *window, &code, render_background);
+    if (code == 1) {
+      accepted = true;
+    } else if (code == 3) {
+      return std::nullopt;
+    }
+    code = -1;
+  }
+  if (!accepted || platform.quit_requested()) {
+    return std::nullopt;
+  }
+  const std::int16_t match = starmap_detail::FindBestSystemMatch(
+      state, UiPanel_GetEntryTextPascal(*window, 5));
+  if (match < 0) {
+    // 0x004aab30 failure path: no candidate, or a sub-2-character match shared
+    // by more than one system (the original plays the 0x160 UI sound).
+    return std::nullopt;
+  }
+  return match;
 }
 
 } // namespace
@@ -1411,33 +1445,6 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   // synced back at the .prf save points. The port defaults it ON because its
   // overlay is cheap (the original defaulted OFF).
   bool &show_borders = state.starmap_show_borders;
-  bool search_active = false;
-  std::string search_query;
-
-  const auto search_select = [&](const std::string &query) {
-    if (query.empty()) {
-      return;
-    }
-    std::string lower = query;
-    std::transform(
-        lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
-          return static_cast<char>(std::tolower(c));
-        });
-    for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
-      if (!SystemOnMap(state, static_cast<std::int16_t>(i))) {
-        continue;
-      }
-      std::string name = state.scenario.systems[i].name;
-      std::transform(
-          name.begin(), name.end(), name.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-          });
-      if (name.compare(0, lower.size(), lower) == 0) {
-        selected_id = static_cast<std::int16_t>(i);
-        return;
-      }
-    }
-  };
 
   // Tab / Backslash have no map function in the original: the route-editing
   // trigger is Shift+click (pane-action commands 0x2a/0x36 = LShift/RShift,
@@ -1484,8 +1491,11 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
     }
   };
 
-  while (!platform.quit_requested()) {
-    const auto mapped = BuildMappedSystems(state, view, panel);
+  // Draws one full starmap frame. Shared with the Find modal's background
+  // redraw so the map stays visible behind the search box. `mapped` is owned
+  // by the loop because the click hit-test below also reads it.
+  std::vector<MappedSystem> mapped;
+  const auto draw_starmap = [&](std::optional<std::size_t> hovered) {
     if (flight_view != nullptr && hud != nullptr) {
       DrawLiveChrome(platform,
                      state,
@@ -1524,14 +1534,22 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
                  mission_targets,
                  icons);
     }
-    DrawSidePanels(platform,
-                   font_cache,
-                   state,
-                   geometry,
-                   strings,
-                   selected_id,
-                   search_active ? &search_query : nullptr);
+    DrawSidePanels(platform, font_cache, state, geometry, strings, selected_id);
+    DrawButtons(platform,
+                font_cache,
+                button_art,
+                geometry,
+                show_borders,
+                NovaStarmap_RouteHasHops(state),
+                static_cast<double>(view.zoom),
+                hovered);
+  };
 
+  while (!platform.quit_requested()) {
+    // Ghidra 0x0049eef0 UiPanel_TrackSixEntryMouseSelection (hover half):
+    // the six-button row highlights the entry under the cursor, gated by the
+    // same enable flags the draw pass uses. The press/release tracking half is
+    // folded into the click dispatch below.
     std::optional<std::size_t> hovered_button;
     {
       const SDL_FPoint mp = platform.mouse_position();
@@ -1544,42 +1562,21 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
         }
       }
     }
-    DrawButtons(platform,
-                font_cache,
-                button_art,
-                geometry,
-                show_borders,
-                static_cast<double>(view.zoom),
-                hovered_button);
+    mapped = BuildMappedSystems(state, view, panel);
+    draw_starmap(hovered_button);
     platform.Present();
 
     // One batch of raw editable keys / clicks.
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
       switch (in->key) {
       case TextKey::escape:
-        if (search_active) {
-          search_active = false;
-          search_query.clear();
-        } else {
-          return close_with_selection();
-        }
-        break;
+        return close_with_selection();
 
       case TextKey::enter:
-        if (search_active) {
-          search_active = false;
-        } else {
-          return close_with_selection();
-        }
-        break;
+        return close_with_selection();
 
       case TextKey::character: {
         const char ch = in->character;
-        if (search_active) {
-          search_query.push_back(ch);
-          search_select(search_query);
-          break;
-        }
         if (ch == 'q' || ch == 'x') {
           return close_with_selection();
         }
@@ -1607,13 +1604,30 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
               overlay_needs_rebuild = true;
               break;
             case StarmapButton::kClearRoute:
-              NovaStarmap_ClearRoute(state);
-              selected_id = state.player.current_system_id;
+              // Disabled (and unclickable) unless a route is plotted, matching
+              // NovaUi_DrawStarmapButtons / UiPanel_TrackSixEntryMouseSelection
+              // (DAT_007dc744).
+              if (NovaStarmap_RouteHasHops(state)) {
+                NovaStarmap_ClearRoute(state);
+              }
               break;
-            case StarmapButton::kFind:
-              search_active = true;
-              search_query.clear();
+            case StarmapButton::kFind: {
+              const auto match =
+                  RunStarmapSearchDialog(platform, font_cache, state, [&] {
+                    draw_starmap(std::nullopt);
+                  });
+              if (match) {
+                selected_id = *match;
+                const System &found =
+                    state.scenario.systems[static_cast<std::size_t>(*match)];
+                view.pan_x = static_cast<float>(found.pos_x);
+                view.pan_y = static_cast<float>(found.pos_y);
+                state.starmap_pan_x = view.pan_x;
+                state.starmap_pan_y = view.pan_y;
+                overlay_needs_rebuild = true;
+              }
               break;
+            }
             case StarmapButton::kZoomOut:
               apply_zoom_out();
               break;
@@ -1737,7 +1751,6 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
           }
           break;
         }
-        search_active = false;
         if (shift) {
           // Shift-click: route editing (0x004a47cc) — reset at the current
           // system's slot, truncate at a plotted hop (the route ends AT the
@@ -1764,10 +1777,6 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
       }
 
       case TextKey::backspace:
-        if (search_active && !search_query.empty()) {
-          search_query.pop_back();
-          search_select(search_query);
-        }
         break;
 
       case TextKey::none:

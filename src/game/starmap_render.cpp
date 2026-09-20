@@ -9,9 +9,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace game::starmap_detail {
@@ -79,6 +82,66 @@ bool SystemOnMap(const GameState &state, std::int16_t zero_based_id) {
     return false;
   }
   return sys.discovery_state > 0 || sys.discovered_this_rebuild;
+}
+
+// Ghidra 0x004aab30 NovaUi_RunStarmapSearchDialog, normalization pass:
+// MWRuntime_FUN_004d6230 lower-cases each character and the search keeps only
+// the survivors in [a-z0-9], so "New Boston" normalizes to "newboston".
+std::string NormalizeSearchName(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const unsigned char c : text) {
+    const unsigned char lower = static_cast<unsigned char>(std::tolower(c));
+    if ((lower >= 'a' && lower <= 'z') || (lower >= '0' && lower <= '9')) {
+      out.push_back(static_cast<char>(lower));
+    }
+  }
+  return out;
+}
+
+// Ghidra 0x004aab30 scoring pass. Only visible, already-visited systems latched
+// by the last discovery rebuild are candidates (is_visible &&
+// discovery_state > 0 && discovered_this_rebuild). The winner shares the
+// longest normalized leading prefix with the query; a tie goes to the shorter
+// normalized name. A one-character match is accepted only when it is the sole
+// candidate. Returns -1 when nothing qualifies.
+std::int16_t FindBestSystemMatch(const GameState &state,
+                                 std::string_view query) {
+  const std::string wanted = NormalizeSearchName(query);
+  if (wanted.empty()) {
+    return -1;
+  }
+  std::int16_t best_id = -1;
+  std::size_t best_match = 0;
+  std::size_t best_name_len = 0;
+  std::size_t candidate_count = 0;
+  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+    const System &sys = state.scenario.systems[i];
+    if (!sys.is_visible || sys.discovery_state <= 0 ||
+        !sys.discovered_this_rebuild) {
+      continue;
+    }
+    const std::string name = NormalizeSearchName(sys.name);
+    const std::size_t limit = std::min(wanted.size(), name.size());
+    std::size_t matched = 0;
+    while (matched < limit && wanted[matched] == name[matched]) {
+      ++matched;
+    }
+    if (matched == 0) {
+      continue;
+    }
+    ++candidate_count;
+    if (best_id < 0 || matched > best_match ||
+        (matched == best_match && name.size() < best_name_len)) {
+      best_id = static_cast<std::int16_t>(i);
+      best_match = matched;
+      best_name_len = name.size();
+    }
+  }
+  if (best_id < 0 || (best_match < 2 && candidate_count != 1)) {
+    return -1;
+  }
+  return best_id;
 }
 
 namespace {

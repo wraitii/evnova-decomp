@@ -283,10 +283,11 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   ship-comm / negotiation / landed windows use) with STR# 0x96 labels, and is
   clickable matching the original's action dispatch:
   Show/Hide Borders toggles the political tint, Clear Route clears the plotted
-  destination, Find starts an inline name-prefix search (typed characters
-  select the first explored system matching, Esc cancels, Enter commits),
-  '-'/'+' step the zoom (dimmed at the limits, mirroring DAT_007dc742/743) and
-  Done closes the map.
+  destination (greyed and unclickable unless a route is plotted, mirroring
+  DAT_007dc744), Find opens the original's modal search box (DLOG 0xbbd;
+  lowercase-alphanumeric name normalization, longest leading-prefix match over
+  visited systems, the match re-centres the map), '-'/'+' step the zoom
+  (dimmed at the limits, mirroring DAT_007dc742/743) and Done closes the map.
 - Esc / Enter / q / x close the map and return to flight.
 
 Wired from `spaceflight.cpp`: the `FlightInput.starmap` ('m', edge-latched in
@@ -378,9 +379,9 @@ and are skipped.
 - The bottom buttons use the house three-state PICT button art with STR# 0x96
   labels and dispatch the original's actions (zoom in/out at the zoom limits,
   Done closes, Show/Hide Borders toggles the political overlay, Clear Route
-  clears the plotted destination, Find starts an inline name-prefix search).
-  Find is the inline stand-in for the original's modal search dialog
-  (`0x004aab30`).
+  clears the plotted destination (disabled when no route is plotted), Find
+  opens the original's modal search dialog (DLOG 0xbbd, `0x004aab30`) and
+  re-centres the map on the chosen system).
 - The political/government **overlay** (`NovaUi_DrawStarmapPoliticalOverlay`
   per-cell strength tint) is implemented as smooth fading government discs
   behind the graph: one disc per discovered, travel-reachable system with a

@@ -19,8 +19,7 @@
 // as the right-hand selected-system detail column (entry 6) and item 1 as the
 // bottom status bar (entry 2).
 //
-// Remaining divergences from the original: the inline Find stands in for the
-// modal search dialog (DLOG 0xbbd), and the destination-window route-editing
+// Remaining divergences from the original: the destination-window route-editing
 // sub-flow (DAT_007354a6 / hypergate destination selection through the map)
 // is not reconstructed. The Show/Hide Borders preference defaults ON in the
 // port (the original's overlay was slow/buggy and defaulted OFF); it is carried
