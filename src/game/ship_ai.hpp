@@ -323,14 +323,20 @@ void NovaAi_ApplyControls(GameState &state,
                           std::uint32_t now_ms);
 
 // Ghidra 0x00401000 Ship_UpdateShipAI. The top-level per-ship AI entry: applies
-// the global "heavy AI" cadence gating/skips, recomputes some stat caches,
-// dispatches to the behavior supervisor selected by ship.ai_behavior_code, then
-// runs the state machine and applies controls. `skip_heavy_ai` mirrors the
-// original's parameter and forces the reduced path. Wire this once per active
-// NPC ship per frame (it replaces Stub_AiRoutines scope-6 part 2).
+// the dispatcher's arm selection, recomputes some stat caches, dispatches to
+// the behavior supervisor selected by ship.ai_behavior_code, then runs the
+// state machine and applies controls.
+//
+// Deliberate divergence: the original throttles the heavy decision on slow
+// machines via the g_ai_update_period stagger (Frame_MeasureFrameTiming
+// 0x00432ea0 grades a divisor from the average frame time; a non-idle ship then
+// skips both the supervisor and the state machine on frames where
+// frame_counter % divisor != instance_id % divisor). The port targets the
+// maximum cadence (divisor 1, i.e. every frame) and does not model the
+// throttle. The original's second argument, which only bypasses that throttle,
+// is therefore not carried either.
 void NovaAi_UpdateShipAI(GameState &state,
                          Ship &ship,
-                         bool skip_heavy_ai,
                          std::uint32_t now_ms,
                          float elapsed_ticks = 1.0F);
 

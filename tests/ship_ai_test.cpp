@@ -289,7 +289,7 @@ TEST_CASE("escort orders obey caller cadence and bypasses") {
 
   // The order pass runs before the disabled auto-guard clears the leader.
   state.spaceflight_frame_counter = 0;
-  NovaAi_UpdateShipAI(state, leader, false, 0);
+  NovaAi_UpdateShipAI(state, leader, 0);
   // No primary target (not locked): the fixed-radius fighter rule attacks.
   CHECK(escort.escort_command_code == 2);
   CHECK(leader.squad_leader_ship_slot == -1);
@@ -300,7 +300,7 @@ TEST_CASE("escort orders obey caller cadence and bypasses") {
   leader.ai_control_mode = 0;
   escort.escort_command_code = -7;
   state.spaceflight_frame_counter = 1;
-  NovaAi_UpdateShipAI(state, leader, false, 0);
+  NovaAi_UpdateShipAI(state, leader, 0);
   CHECK(escort.escort_command_code == -7);
 
   // Entry control mode 4 bypasses the order pass even when its later state
@@ -311,14 +311,14 @@ TEST_CASE("escort orders obey caller cadence and bypasses") {
   state.player.armor_points = 0.0F;
   escort.escort_command_code = -8;
   state.spaceflight_frame_counter = 0;
-  NovaAi_UpdateShipAI(state, leader, false, 0);
+  NovaAi_UpdateShipAI(state, leader, 0);
   CHECK(escort.escort_command_code == -8);
 
   // The arrival sentinel has the same bypass and installs control mode 10.
   leader.ai_control_mode = 0;
   leader.ai_station_hold_timer = -999.0F;
   escort.escort_command_code = -9;
-  NovaAi_UpdateShipAI(state, leader, false, 0);
+  NovaAi_UpdateShipAI(state, leader, 0);
   CHECK(escort.escort_command_code == -9);
 }
 
@@ -362,7 +362,7 @@ TEST_CASE("behavior-0x01 spawn wanders to a travel stellar when idle") {
   // Prime the availability refresh for this system.
   NovaTargeting_UpdateStellarAvailability(state);
 
-  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+  NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
 
   // The wander supervisor must take the ship out of idle into a defined
   // state. The faithful selector can also pick a restricted hypergate/wormhole
@@ -387,7 +387,7 @@ TEST_CASE("behavior-0x01 spawn wanders to a travel stellar when idle") {
     CHECK(ship.ai_desired_heading_deg != 0);
     ship.heading =
         static_cast<float>(ship.ai_desired_heading_deg) * 3.14159265F / 180.0F;
-    NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+    NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
     if (ship.ai_state_code == 1) {
       CHECK(ship.ai_forward_thrust_cmd != 0.0F);
     }
@@ -427,7 +427,7 @@ TEST_CASE("behavior-0x02 promotes an established hostile contact") {
   ship.pos_y = 0.0F;
   ship.armor_points = 30.0F;
 
-  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+  NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
 
   CHECK(ship.ai_state_code == 4);
   CHECK(ship.primary_target_ship_slot == 0);
@@ -476,7 +476,7 @@ TEST_CASE("behavior-0x03 acquires a hostile player and pursues") {
   state.system_reputation[static_cast<std::size_t>(sys_idx)] = -30000;
   ship.random_ai_render_cadence = 2;
 
-  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+  NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
 
   CHECK(ship.primary_target_ship_slot == 0);
   CHECK(ship.ai_state_code == 4);
@@ -526,7 +526,7 @@ TEST_CASE("stellar-target ship prioritizes a nearby player-side contact") {
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = -1;
 
-  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+  NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
 
   CHECK(ship.primary_target_ship_slot == 0);
   CHECK(ship.ai_state_code == 4);
@@ -565,7 +565,7 @@ TEST_CASE("stellar-target ship returns to stellar travel with no contact") {
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = -1;
 
-  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+  NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
 
   CHECK(ship.ai_state_code == 1);
   CHECK(ship.ai_secondary_target_slot == stellar_id);
@@ -870,7 +870,7 @@ TEST_CASE("fire-restricted ship does not initiate travel") {
   ship.faction_or_government_id = static_cast<std::int16_t>(idx);
 
   NovaTargeting_UpdateStellarAvailability(state);
-  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+  NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
 
   // Fire-restricted ships are held idle (no travel target picked).
   CHECK(ship.ai_state_code == 0);
@@ -1766,7 +1766,6 @@ TEST_CASE("state 0x08 without its arrival sentinel returns to idle") {
 
   game::NovaAi_UpdateShipAI(state,
                             ship,
-                            /*skip_heavy_ai=*/false,
                             /*now_ms=*/0,
                             /*elapsed_ticks=*/1.0F);
 
@@ -2110,7 +2109,7 @@ TEST_CASE("capture-approach drive boards a disabled ship end-to-end",
   bool armed_at_disabled_victim = false;
   std::uint32_t now_ms = 0;
   for (int t = 0; t < 600 && !handed_off; ++t) {
-    game::NovaAi_UpdateShipAI(state, boarder, /*skip_heavy_ai=*/false, now_ms);
+    game::NovaAi_UpdateShipAI(state, boarder, now_ms);
     now_ms += 33;
     // Regression: the behavior-3 capture drive must never arm its weapons
     // against the disabled boarding victim. Ship_EscortFireAtUnprovokedTarget
@@ -2150,6 +2149,73 @@ TEST_CASE("capture-approach drive boards a disabled ship end-to-end",
       victim.armor_points ==
       Catch::Approx(static_cast<float>(vcls.base_armor) * 0.66F).margin(0.5F));
   CHECK(!game::NovaAiShip_IsDisabled(state, victim));
+}
+
+TEST_CASE("control-mode-4 jump spin-up is not re-stamped by the capture "
+          "supervisor",
+          "[ai][boarding]") {
+  // Regression for the mode-4 jump spin-up wedge: the original bypasses the
+  // behavior supervisor entirely while the entry control mode is 4/0xd
+  // (Ship_UpdateShipAI 0x00401000, disasm 0x004011de -> 0x004016b4), so a
+  // capture/plunder behavior-3 ship cannot re-stamp ai_mode_start_time_ms every
+  // frame and the spin-up completes. Before the fix the capture supervisor ran
+  // on every frame and reset the timer, leaving the ship parked forever.
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Plunderer government (flags_primary 0x1000), arming govt 0 if the stock
+  // data carries none.
+  std::size_t govt_idx = state.scenario.governments.size();
+  for (std::size_t i = 0; i < state.scenario.governments.size(); ++i) {
+    if ((state.scenario.governments[i].flags_primary & 0x1000U) != 0U) {
+      govt_idx = i;
+      break;
+    }
+  }
+  if (govt_idx == state.scenario.governments.size()) {
+    govt_idx = 0;
+    state.scenario.governments[0].flags_primary |= 0x1000U;
+  }
+
+  const int ship_class = FindClassIndex(state, [](const game::ShipClass &c) {
+    return c.base_fuel >= 100 && c.turn_rate > 0.0F;
+  });
+  REQUIRE(ship_class >= 0);
+
+  // The targetless capture travel ladder would call
+  // Ship_EnterShipAiState0x02_ClearPrimaryTarget (which re-stamps
+  // ai_mode_start_time_ms) on every frame if it were allowed to run, so keep
+  // the player inactive and place a secondary target to force that arm.
+  state.player.is_active = false;
+
+  const int slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = static_cast<std::int16_t>(ship_class);
+  ship.faction_or_government_id = static_cast<std::int16_t>(govt_idx);
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 2;
+  ship.ai_control_mode = 4;
+  ship.ai_maneuver_timer_ms = -1.0F;
+  ship.primary_target_ship_slot = -1;
+  ship.ai_secondary_target_slot = 1;
+  ship.ai_station_hold_timer = 2.0F;
+  ship.ai_mode_start_time_ms = 0;
+  ship.armor_points = 1000.0F;
+  ship.fuel_points = 1000.0F;
+  // Outside the 1000 px centre envelope so the state machine keeps control 4.
+  ship.pos_x = 5000.0F;
+  ship.pos_y = 0.0F;
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+
+  // 1000 ms after the recorded start is well past the 350 ms spin-up.
+  game::NovaAi_UpdateShipAI(state,
+                            ship,
+                            /*now_ms=*/1000);
+
+  CHECK_FALSE(ship.is_active);
+  CHECK(ship.current_system_id == -1);
 }
 
 TEST_CASE("capture warship abandons only a disabled high-AI target",
@@ -2252,7 +2318,7 @@ TEST_CASE("hailed helper repairs a disabled player via assist state 0xf",
   bool saw_helper_released = false;
   std::uint32_t now_ms = 0;
   for (int t = 0; t < 1200; ++t) {
-    game::NovaAi_UpdateShipAI(state, helper, /*skip_heavy_ai=*/false, now_ms);
+    game::NovaAi_UpdateShipAI(state, helper, now_ms);
     now_ms += 33;
     if (helper.ai_state_code == 0xf && helper.ai_secondary_target_slot == 0) {
       saw_assist_approach = true;
