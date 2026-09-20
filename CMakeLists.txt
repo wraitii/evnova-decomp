@@ -13,6 +13,15 @@ project(EscapeVelocityNova
     DESCRIPTION "A clean-room recompilation of Escape Velocity Nova"
     LANGUAGES CXX)
 
+# vcpkg's fully-static Windows triplet builds every dependency with the static
+# CRT (/MT); the application must use the same runtime or the linker reports an
+# LNK2038 RuntimeLibrary mismatch. vcpkg does not propagate that choice to the
+# consumer, and the triplet name is the only signal available here (a
+# "-static-md" triplet keeps the DLL CRT, so it is deliberately not matched).
+if(MSVC AND VCPKG_TARGET_TRIPLET MATCHES "-static$")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 option(EVNOVA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(EVNOVA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation when available" ON)
 # Precompiled header of frequently-included standard/third-party headers
