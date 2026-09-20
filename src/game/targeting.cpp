@@ -200,17 +200,20 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
 // ---------------------------------------------------------------------------
 // Player target cycling (0x00461bd0 / 0x00461f60).
 // ---------------------------------------------------------------------------
-// Per-ship "combat relevance" flag (the acStack_90 markability table built in
-// the first loop of Ship_FindNextPlayerCycleTarget). A ship is relevant when
-// it targets the player directly (squad_leader_ship_slot == 0) or targets a
-// ship that itself targets the player, provided it is not a mission-fleet
+// Per-ship "player squad" flag (the acStack_90 markability table built in the
+// first loop of Ship_FindNextPlayerCycleTarget; the Ghidra "combat-cycle"
+// annotation is a misnomer). A ship is in the player squad when its
+// squad_leader_ship_slot is 0 (attached to the player) or it follows a ship
+// that is itself attached to the player, provided it is not a mission-fleet
 // escort. The mission-fleet-escort arm (acStack_50: fleet def active byte != 0
 // and escort flag short == 1) is not modelled because mission-fleet defs are
-// not reconstructed yet (TODO(decomp)); it is always false here.
-[[nodiscard]] bool ShipIsCycleRelevant(const GameState &state,
+// not reconstructed yet (TODO(decomp)); it is always false here. The caller's
+// Ctrl modifier selects the squad half, so plain backquote cycles the ships
+// that are not the player's escorts.
+[[nodiscard]] bool ShipIsInPlayerSquad(const GameState &state,
                                        const Ship &ship) {
   if (ship.squad_leader_ship_slot == 0) {
-    return true; // directly targeting the player
+    return true; // the ship's leader is the player (an escort)
   }
   const std::int16_t target = ship.squad_leader_ship_slot;
   if (target == -1 || ship.defense_fleet_home_stellar_id != -1 ||
@@ -223,25 +226,24 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
 
 // Shared candidate test for the cycle search loops. Mirrors the filter chain
 // of Ship_FindNextPlayerCycleTarget: active, not destroyed, cloak-visibility
-// gate (cloak scanner or combat-relevant while the include-combat modifier is
-// held), same system, not AI state 0x15, untargetable class gate (scanner
-// outfit), and the relevance-vs-modifier equality (`relevant == include_combat`
-// -- no modifier cycles non-relevant ships, the modifier cycles relevant
-// ones).
-[[nodiscard]] bool
-ShipIsCycleEligible(const GameState &state,
-                    std::int16_t slot,
-                    std::int16_t system_id,
-                    bool include_combat,
-                    const PlayerScannerCapabilities &scanner,
-                    const std::array<bool, GameState::kMaxShips> &relevant) {
+// gate (cloak scanner or a player-squad ship while the Ctrl modifier is held),
+// same system, not AI state 0x15, untargetable class gate (scanner outfit),
+// and the squad-vs-modifier equality (`in_player_squad == escorts_only` -- no
+// modifier cycles non-squad ships, Ctrl cycles the player's escorts).
+[[nodiscard]] bool ShipIsCycleEligible(
+    const GameState &state,
+    std::int16_t slot,
+    std::int16_t system_id,
+    bool escorts_only,
+    const PlayerScannerCapabilities &scanner,
+    const std::array<bool, GameState::kMaxShips> &player_squad) {
   const Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
   if (!ship.is_active || NovaAiShip_IsDestroyed(ship)) {
     return false;
   }
-  const bool is_relevant = relevant[static_cast<std::size_t>(slot)];
+  const bool in_player_squad = player_squad[static_cast<std::size_t>(slot)];
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship) &&
-      !scanner.can_target_cloaked && !(is_relevant && include_combat)) {
+      !scanner.can_target_cloaked && !(in_player_squad && escorts_only)) {
     return false;
   }
   if (ship.current_system_id != system_id || ship.ai_state_code == 0x15) {
@@ -256,21 +258,21 @@ ShipIsCycleEligible(const GameState &state,
       !scanner.can_target_untargetable) {
     return false;
   }
-  return is_relevant == include_combat;
+  return in_player_squad == escorts_only;
 }
 
 std::int16_t NovaTargeting_FindNextPlayerCycleTarget(const GameState &state,
                                                      std::int16_t current_slot,
                                                      std::int16_t system_id,
-                                                     bool include_combat) {
+                                                     bool escorts_only) {
   const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
-  std::array<bool, GameState::kMaxShips> relevant{};
+  std::array<bool, GameState::kMaxShips> player_squad{};
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
-    relevant[slot] = ShipIsCycleRelevant(state, state.ShipAt(slot));
+    player_squad[slot] = ShipIsInPlayerSquad(state, state.ShipAt(slot));
   }
   const auto eligible = [&](std::int16_t slot) {
     return ShipIsCycleEligible(
-        state, slot, system_id, include_combat, scanner, relevant);
+        state, slot, system_id, escorts_only, scanner, player_squad);
   };
   if (current_slot == -1) {
     for (std::int16_t slot = 1;
@@ -296,15 +298,15 @@ std::int16_t
 NovaTargeting_FindPreviousPlayerCycleTarget(const GameState &state,
                                             std::int16_t current_slot,
                                             std::int16_t system_id,
-                                            bool include_combat) {
+                                            bool escorts_only) {
   const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
-  std::array<bool, GameState::kMaxShips> relevant{};
+  std::array<bool, GameState::kMaxShips> player_squad{};
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
-    relevant[slot] = ShipIsCycleRelevant(state, state.ShipAt(slot));
+    player_squad[slot] = ShipIsInPlayerSquad(state, state.ShipAt(slot));
   }
   const auto eligible = [&](std::int16_t slot) {
     return ShipIsCycleEligible(
-        state, slot, system_id, include_combat, scanner, relevant);
+        state, slot, system_id, escorts_only, scanner, player_squad);
   };
   if (current_slot == -1) {
     for (std::int16_t slot =

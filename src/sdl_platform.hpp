@@ -159,12 +159,12 @@ struct FlightInput {
   bool hyperspace_mode = false;
   // Cycle the ship (primary) target: binding slot 0x0a (default DIK 0x29 =
   // backquote), with the Shift modifier pair (0x2a/0x36) backwards. When
-  // cycle_ship_include_combat is held the cycle restricts itself to
-  // combat-relevant ships (ships targeting the player or a player-targeting
-  // ship).
+  // cycle_ship_escorts is held (raw DIK 0x1d/0x6b = Left/Right Ctrl) the cycle
+  // restricts itself to the player's own squad/escorts; otherwise it cycles
+  // the non-squad ships (hostiles included).
   bool cycle_ship_target_next = false;
   bool cycle_ship_target_previous = false;
-  bool cycle_ship_include_combat = false;
+  bool cycle_ship_escorts = false;
   // Select the nearest hostile combat target (binding slot 0x0b, default DIK
   // 0x13 = R), or the nearest engaged target when the 0x38/0x6f arm modifier
   // is held. Mirrors the original's "target nearest" command whose default arm

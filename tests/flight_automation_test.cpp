@@ -349,7 +349,7 @@ TEST_CASE("automation destroy cycles the target hotkey until it lands") {
   automation.Tick(state, 0, input);
   CHECK(automation.status().phase == FlightAutomationPhase::kSelect);
   CHECK(input.cycle_ship_target_next);
-  CHECK(input.cycle_ship_include_combat); // first pass is the combat half
+  CHECK_FALSE(input.cycle_ship_escorts); // first pass is the non-squad half
   CHECK_FALSE(input.fire);
 
   // Simulate the loop's own target-command pass landing on the Raider.

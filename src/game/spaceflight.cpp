@@ -683,10 +683,10 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
 void PlayerTick_ShipTargetCommands(GameState &state, const FlightInput &input) {
   PlayerCommandLatches &latches = state.command_latches;
   // Ship-target cycling: backquote (`) / Shift+backquote, with the
-  // combat-relevant-only modifier (Alt or 'k'). Mirrors the original's
-  // Ship_HandlePlayerShip cycle-target block (0x0044b120): a no-op result or
-  // a self-result clears the target, otherwise the new slot is stored and
-  // the reticle pulse is re-armed at 256.0 (0x43800000).
+  // player-squad-only modifier (raw DIK 0x1d/0x6b = Left/Right Ctrl). Mirrors
+  // the original's Ship_HandlePlayerShip cycle-target block (0x0044b120): a
+  // no-op result or a self-result clears the target, otherwise the new slot is
+  // stored and the reticle pulse is re-armed at 256.0 (0x43800000).
   const bool ship_cycle =
       input.cycle_ship_target_next || input.cycle_ship_target_previous;
   if (ship_cycle && !latches.ship_cycle_was_held) {
@@ -695,12 +695,12 @@ void PlayerTick_ShipTargetCommands(GameState &state, const FlightInput &input) {
                                         state,
                                         state.player.primary_target_ship_slot,
                                         state.player.current_system_id,
-                                        input.cycle_ship_include_combat)
+                                        input.cycle_ship_escorts)
                                   : NovaTargeting_FindPreviousPlayerCycleTarget(
                                         state,
                                         state.player.primary_target_ship_slot,
                                         state.player.current_system_id,
-                                        input.cycle_ship_include_combat);
+                                        input.cycle_ship_escorts);
     if (next == state.player.primary_target_ship_slot ||
         next == state.player.ship_instance_id) {
       state.player.primary_target_ship_slot = -1;

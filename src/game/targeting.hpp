@@ -119,7 +119,7 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 // engaged commands or a mouse click. All selection paths share the same
 // eligibility core: active, in the player's system, not destroyed, not in AI
 // state 0x15, visible through the cloak gate (unless a cloak scanner or the
-// combat-cycle modifier applies), and not flagged untargetable by the ship
+// Ctrl escort modifier applies), and not flagged untargetable by the ship
 // class (flags_secondary bit 2) unless the player owns the scanner-target-
 // untargetable outfit. Ported from the Ghidra functions listed per helper.
 
@@ -159,22 +159,22 @@ void NovaTargeting_ClearDestroyedShipReferences(GameState &state,
 // Ghidra 0x00461bd0 Ship_FindNextPlayerCycleTarget / 0x00461f60 _Previous:
 // returns the next (or previous) eligible ship slot after
 // `current_slot` within `system_id`, wrapping from slot 1 (0 is the player;
-// -1 starts the search at the first/last slot). `include_combat` mirrors the
-// original's held modifier (input commands 0x1d Left-Ctrl / 0x6b 'k'): when
-// true only combat-relevant ships (targeting the player or a ship that
-// targets the player, excluding mission-fleet escorts) are candidates;
-// otherwise only non-relevant ships are. Returns `current_slot` unchanged
-// when no candidate exists (the caller clears the target on a no-op).
+// -1 starts the search at the first/last slot). `escorts_only` mirrors the
+// original's held modifier (raw DIK 0x1d Left-Ctrl / 0x6b Right-Ctrl): when
+// true only the player's own squad (squad_leader_ship_slot == 0, or following
+// a player-attached ship, excluding mission-fleet escorts) are candidates;
+// otherwise only non-squad ships are. Returns `current_slot` unchanged when no
+// candidate exists (the caller clears the target on a no-op).
 [[nodiscard]] std::int16_t
 NovaTargeting_FindNextPlayerCycleTarget(const GameState &state,
                                         std::int16_t current_slot,
                                         std::int16_t system_id,
-                                        bool include_combat);
+                                        bool escorts_only);
 [[nodiscard]] std::int16_t
 NovaTargeting_FindPreviousPlayerCycleTarget(const GameState &state,
                                             std::int16_t current_slot,
                                             std::int16_t system_id,
-                                            bool include_combat);
+                                            bool escorts_only);
 
 // Ghidra 0x00462850 Ship_SelectNearestEngagedTarget: nearest active,
 // non-destroyed ship in the player's system that is visible through the cloak
