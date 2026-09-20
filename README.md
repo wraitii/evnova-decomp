@@ -90,6 +90,8 @@ build\release\src\evnova.exe        # Windows
 
 The optional probe/control harness ([docs/probe_harness.md](docs/probe_harness.md)) is built by default on macOS/Linux and off on Windows, since its transport is a POSIX socket server. Toggle it with `-DEVNOVA_ENABLE_PROBE=ON|OFF` when configuring.
 
+Logging always goes to stderr. Launchers that detach the console (for example a Windows bottle under Wine/CrossOver) drop that output, so set `EVNOVA_LOG_FILE=<path>` to additionally mirror the log to that file (truncated each run).
+
 ### Game data
 
 The reimplementation runs on an installed copy of the Windows CE data. That

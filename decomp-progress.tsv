@@ -1701,7 +1701,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00503E80	FUN_00503e80		0%	
 0x00503EE0	FUN_00503ee0		0%	
 0x00503EF0	NovaUtil_PrintUInt		0%	
-0x00503F30	NovaProgramEntry	src/nova_app.cpp	100%	NovaProgramEntry main wrapper
+0x00503F30	NovaProgramEntry	src/nova_app.cpp	100%	NovaProgramEntry main wrapper; port-only top-level try/catch logs escaped exceptions (original always had a console)
 0x00504026	FUN_00504026		0%	
 0x00504287	FUN_00504287		0%	
 0x005043A1	FUN_005043a1		0%	
