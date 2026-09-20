@@ -707,12 +707,14 @@ FlightInput SdlPlatform::PollFlightInput() {
       pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT);
   // Destination-system, hyperspace-mode, ship-target and nearest-target
   // commands are sampled from their persisted binding slots by the
-  // spaceflight loop (see its binding_held block). Only the shared
-  // combat-relevance modifier stays here: Alt (or the original's 'k', 0x6b)
-  // restricts the ship cycle to combat-relevant ships.
-  const bool alt_held =
-      pressed(SDL_SCANCODE_LALT) || pressed(SDL_SCANCODE_RALT);
-  input.cycle_ship_include_combat = alt_held || pressed(SDL_SCANCODE_K);
+  // spaceflight loop (see its binding_held block). Only the escort/squad
+  // modifier stays here: Ship_FindNext/PreviousPlayerCycleTarget reads the raw
+  // DIK codes 0x1d/0x6b (Left/Right Ctrl), so holding either Ctrl restricts
+  // the ship cycle to the player's own squad/escorts. Do not reuse the
+  // 0x38/0x6f Alt arm modifier here: Alt already forces the face-target/stellar
+  // channels and would silently flip the cycle into its escort half.
+  input.cycle_ship_escorts =
+      pressed(SDL_SCANCODE_LCTRL) || pressed(SDL_SCANCODE_RCTRL);
   // Primary fire (held): space. See FlightInput::fire for the mapping note.
   input.fire = pressed(SDL_SCANCODE_SPACE);
   // Secondary fire (held): Left Ctrl (the original's binding slot 3 default).

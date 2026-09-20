@@ -36,7 +36,7 @@ constexpr float kArriveVelocityDeadband = 0.05F;
 // hold station inside it and keep firing. Leaves a margin so a target drifting
 // outward still stays in range rather than straddling the reach edge.
 constexpr float kDestroyRangeFraction = 0.9F;
-// kDestroy target-cycle budget per relevance half. The backquote cycle does not
+// kDestroy target-cycle budget per squad half. The backquote cycle does not
 // wrap; a full traversal plus the pass that clears the selection to "none" is
 // at most kMaxShips+2 presses, so that bound cannot skip a matching ship.
 constexpr int kCycleTapsPerPass = static_cast<int>(GameState::kMaxShips) + 2;
@@ -578,8 +578,9 @@ void FlightAutomationController::TickDestroy(const GameState &state,
     }
   }
   if (target_id_ < 0) {
-    // Drive the backquote cycle one press at a time: first the combat-relevant
-    // half (include-combat modifier set), then the other half.
+    // Drive the backquote cycle one press at a time: first the non-squad half
+    // (no modifier), where a hostile destroy target lives, then the player's
+    // own squad/escort half (Ctrl modifier set).
     if (cycle_pass_ > 1) {
       Fail("cycled every eligible ship without finding the target");
       return;
@@ -589,7 +590,7 @@ void FlightAutomationController::TickDestroy(const GameState &state,
       cycle_taps_left_ = kCycleTapsPerPass;
       return;
     }
-    input.cycle_ship_include_combat = (cycle_pass_ == 0);
+    input.cycle_ship_escorts = (cycle_pass_ == 1);
     const bool will_press = !tap_release_;
     Tap(&FlightInput::cycle_ship_target_next, input);
     if (will_press) {

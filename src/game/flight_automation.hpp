@@ -51,8 +51,9 @@ public:
   // identifier that matches either a live ship slot or its instance id; it
   // takes precedence over the numeric-string fallback but not over a name.
   // Acquisition cycles the player's primary ship target with the backquote
-  // hotkey (input.cycle_ship_target_next), first through the combat-relevant
-  // half and then the non-relevant half, until it lands on a matching ship.
+  // hotkey (input.cycle_ship_target_next), first through the non-squad half
+  // (where a hostile target lives) and then the player's squad/escort half,
+  // until it lands on a matching ship.
   // While locked it aims at the predicted intercept of the ready primary bank
   // every frame (leading a crossing target) and fires eagerly whenever the
   // target is within the best weapon reach, so a moving target cannot outrun
@@ -131,10 +132,10 @@ private:
   std::uint64_t deadline_ms_ = 0;
   float landing_envelope_axis_range_ = -1.0F;
   bool tap_release_ = false;
-  // kDestroy acquisition cursor. `cycle_pass_` 0 selects the combat-relevant
-  // cycle half (include-combat modifier held), 1 the non-relevant half; 2 means
-  // both halves were exhausted without a match. `cycle_taps_left_` bounds each
-  // half so a no-wrap cycle cannot spin forever.
+  // kDestroy acquisition cursor. `cycle_pass_` 0 selects the non-squad cycle
+  // half (no modifier), 1 the player's squad/escort half (Ctrl modifier held);
+  // 2 means both halves were exhausted without a match. `cycle_taps_left_`
+  // bounds each half so a no-wrap cycle cannot spin forever.
   int cycle_pass_ = 0;
   int cycle_taps_left_ = 0;
 };
