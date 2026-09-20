@@ -49,6 +49,7 @@ add_library(evnova_runtime
     game/ship_comm_dialog.cpp
     game/new_pilot_flow.cpp
     game/nova_font.cpp
+    game/nova_list_control.cpp
     game/outfit.cpp
     game/pilot_file.cpp
     game/player_info_window.cpp

@@ -15,6 +15,7 @@
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "nova_font.hpp"
+#include "nova_list_control.hpp"
 #include "player_info_window.hpp"
 #include "scenario_data.hpp"
 #include "selection_text_dialog.hpp"
@@ -30,6 +31,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -38,13 +40,12 @@
 
 namespace game {
 
-using evnova::util::ToSdlColor;
-
 namespace {
 
 struct MissionBbsLayout {
   SDL_FRect frame{};
   SDL_FRect list{};
+  SDL_FRect scrollbar{};
   SDL_FRect selected_title{};
   SDL_FRect description{};
   SDL_FRect take{};
@@ -101,6 +102,9 @@ constexpr std::size_t kMissionComputerCommand = 0x28;
     case 1: // UiPanel_GetEntryInfo entry 2: native mission list
       layout.list = item_rect(item);
       break;
+    case 2: // UiPanel_GetEntryInfo entry 3: native list scrollbar
+      layout.scrollbar = item_rect(item);
+      break;
     case 0: // UiPanel_GetEntryInfo entry 1: accept/take button
       layout.take = item_rect(item);
       break;
@@ -140,6 +144,7 @@ void DrawMissionBbsContents(SdlPlatform &platform,
                             const GameState &state,
                             const MissionBbsLayout &layout,
                             const MissionListEvaluation &missions,
+                            const NovaListControl &list_control,
                             std::size_t selected,
                             std::string_view status,
                             NovaRgbColor list_text,
@@ -152,7 +157,6 @@ void DrawMissionBbsContents(SdlPlatform &platform,
   // (0x00448a30): list_background/list_hilite fill the row and list_text is
   // the label. The title/description panels keep the fill+InvertRect black.
   constexpr SDL_Color kPanelBlack{0, 0, 0, 255};
-  const SDL_Color list_text_sdl = ToSdlColor(list_text);
   // Window furniture colours (Settings_InitColors 0x004ad7c0, triples
   // consumed by NovaUi_DrawMissionBbsWindow 0x00441620): the heading
   // band uses the 0xc000 grey DAT_00733b50, the date the 0x4000 grey
@@ -179,18 +183,19 @@ void DrawMissionBbsContents(SdlPlatform &platform,
                 layout.header.x,
                 layout.header.y + 12.0F,
                 heading);
-  if (layout.list.w > 0.0F && !rows.empty()) {
-    const SDL_Rect list_clip{static_cast<int>(layout.list.x),
-                             static_cast<int>(layout.list.y),
-                             static_cast<int>(layout.list.w),
-                             static_cast<int>(layout.list.h)};
+  if (!rows.empty()) {
+    const SDL_Rect list_clip{static_cast<int>(list_control.content_rect().x),
+                             static_cast<int>(list_control.content_rect().y),
+                             static_cast<int>(list_control.content_rect().w),
+                             static_cast<int>(list_control.content_rect().h)};
     SDL_SetRenderClipRect(renderer, &list_clip);
-    const float row_pitch = kMissionListRowPitch;
-    const float text_x = layout.list.x + 4.0F;
-    for (std::size_t row = 0;
-         row < rows.size() &&
-         layout.list.y + row * row_pitch < layout.list.y + layout.list.h;
-         ++row) {
+    const SDL_FRect content = list_control.content_rect();
+    for (std::size_t row = 0; row < rows.size(); ++row) {
+      const SDL_FRect row_rect = list_control.RowRect(row);
+      if (row_rect.y >= content.y + content.h ||
+          row_rect.y + row_rect.h <= content.y) {
+        continue;
+      }
       const auto mission_id = rows[row];
       const auto *definition =
           state.scenario.Mission(static_cast<std::int16_t>(mission_id + 0x80));
@@ -199,27 +204,22 @@ void DrawMissionBbsContents(SdlPlatform &platform,
               ? Mission_ExpandMissionWildcards(
                     state, definition->display_name, true, rows[row])
               : "Mission " + std::to_string(mission_id);
-      const float row_top = layout.list.y + row * row_pitch;
-      const float baseline = row_top + kMissionListFontSize;
-      const SDL_FRect row_rect{
-          layout.list.x, row_top, layout.list.w, row_pitch};
-      const SDL_Color row_color =
-          ToSdlColor(row == selected ? list_hilite : list_background);
-      SDL_SetRenderDrawColor(
-          renderer, row_color.r, row_color.g, row_color.b, row_color.a);
-      SDL_RenderFillRect(renderer, &row_rect);
-      NovaText_Draw(platform,
-                    font_cache,
-                    NovaFontFamily::kGeneva,
-                    kMissionListFontSize,
-                    kNovaFontStyleRegular,
-                    list_text_sdl,
-                    text_x,
-                    baseline,
-                    label);
+      // NovaUi_DrawListRowCallback (0x00448a30) shared with the mission
+      // computer: c.lr fill + Geneva-9 label at the row baseline.
+      NovaUi_DrawListRow(platform,
+                         font_cache,
+                         row_rect,
+                         label,
+                         row == selected,
+                         list_text,
+                         list_background,
+                         list_hilite);
     }
     SDL_SetRenderClipRect(renderer, nullptr);
   }
+  // Native list scrollbar (FUN_004d2010) in the DITL 0x3ee UiPanel entry-3
+  // strip; hidden while the whole list fits the view.
+  NovaUi_DrawListScrollbar(platform, list_control, layout.scrollbar);
 
   // Selected-title panel (entry 5): with no selection the original fills the
   // rect black (0x00441620's g_selected_misn_slot_index == -1 arm); with a
@@ -522,6 +522,33 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
   MissionListEvaluation missions = Mission_EvaluateMissionLists(state);
   std::size_t selected = 0;
   std::string status;
+  // Native list control (Ghidra 0x004d1a60 / 0x0043cc20): owns the scroll
+  // offset and derives the visible row count from the DITL list rect.
+  NovaListControl list_control(
+      layout->list, kMissionListRowPitch, missions.page_zero.size());
+  const auto sync_list_control = [&]() {
+    list_control.SetRowCount(missions.page_zero.size());
+    if (missions.page_zero.empty()) {
+      selected = 0;
+    } else if (selected >= missions.page_zero.size()) {
+      selected = missions.page_zero.size() - 1;
+    }
+    list_control.EnsureVisible(selected);
+  };
+  const auto move_selection = [&](std::ptrdiff_t delta) {
+    if (missions.page_zero.empty()) {
+      return;
+    }
+    const auto count = static_cast<std::ptrdiff_t>(missions.page_zero.size());
+    auto row = static_cast<std::ptrdiff_t>(selected) + delta;
+    if (row < 0) {
+      row = count - 1;
+    } else if (row >= count) {
+      row = 0;
+    }
+    selected = static_cast<std::size_t>(row);
+    list_control.EnsureVisible(selected);
+  };
   // Edge latches for the rebindable sub-window commands (0x00440c90 actions
   // 6/9/10).
   bool starmap_command_was_held = false;
@@ -542,17 +569,20 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
         {"take", probe_rect(layout->take)},
         {"decline", probe_rect(layout->decline)},
         {"description", probe_rect(layout->description)}};
-    const float list_bottom = layout->list.y + layout->list.h;
+    const SDL_FRect content = list_control.content_rect();
     for (std::size_t row = 0; row < missions.page_zero.size(); ++row) {
-      const float row_top = layout->list.y + row * kMissionListRowPitch;
-      if (row_top >= list_bottom) {
-        break;
+      const SDL_FRect row_rect = list_control.RowRect(row);
+      if (row_rect.y >= content.y + content.h ||
+          row_rect.y + row_rect.h <= content.y) {
+        continue;
       }
-      const float row_height =
-          std::min(kMissionListRowPitch, list_bottom - row_top);
+      const float row_top = std::max(row_rect.y, content.y);
+      const float row_bottom =
+          std::min(row_rect.y + row_rect.h, content.y + content.h);
       rects.push_back(
           {"mission." + std::to_string(missions.page_zero[row]),
-           probe_rect({layout->list.x, row_top, layout->list.w, row_height})});
+           probe_rect(
+               {row_rect.x, row_top, row_rect.w, row_bottom - row_top})});
     }
     platform.PublishProbeUi("mission_bbs", std::move(rects));
   };
@@ -583,6 +613,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
                            state,
                            *layout,
                            missions,
+                           list_control,
                            selected,
                            status,
                            list_text,
@@ -603,10 +634,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
               MakeAcceptanceSink(platform, state, render_background))) {
         status = "Mission accepted";
         missions = Mission_EvaluateMissionLists(state);
-        if (selected >= missions.page_zero.size() &&
-            !missions.page_zero.empty()) {
-          selected = missions.page_zero.size() - 1;
-        }
+        sync_list_control();
       } else {
         status = "Mission could not be accepted";
       }
@@ -623,11 +651,35 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
       if (input->key == TextKey::primary) {
         const SDL_FPoint point = platform.mouse_position();
         bool handled = false;
-        if (contains(layout->list, point) && !missions.page_zero.empty()) {
-          const auto row = static_cast<std::size_t>((point.y - layout->list.y) /
-                                                    kMissionListRowPitch);
-          if (row < missions.page_zero.size()) {
-            selected = row;
+        // Scrollbar arm of FUN_004d1db0: the arrow caps step one row and the
+        // trough pages by the visible row count. Thumb dragging is not
+        // reproduced (TODO(decomp)).
+        switch (
+            NovaListScrollbarHitTest(list_control, layout->scrollbar, point)) {
+        case NovaListScrollbarPart::kUp:
+          list_control.ScrollRows(-1);
+          handled = true;
+          break;
+        case NovaListScrollbarPart::kDown:
+          list_control.ScrollRows(1);
+          handled = true;
+          break;
+        case NovaListScrollbarPart::kPageUp:
+          list_control.ScrollRows(-list_control.visible_rows());
+          handled = true;
+          break;
+        case NovaListScrollbarPart::kPageDown:
+          list_control.ScrollRows(list_control.visible_rows());
+          handled = true;
+          break;
+        case NovaListScrollbarPart::kThumb:
+        case NovaListScrollbarPart::kNone:
+          break;
+        }
+        // Content arm: (y - list.top) / pitch + scroll offset.
+        if (!handled && contains(layout->list, point)) {
+          if (const auto row = list_control.RowAt(point)) {
+            selected = *row;
             handled = true;
           }
         }
@@ -640,6 +692,18 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
         }
         continue;
       }
+      if (input->key == TextKey::physical) {
+        // Mac list navigation (0x00440c90: key codes 9/10/11 = Tab/Down/Up),
+        // mapped through the port's normalized key codes.
+        if (input->key_code == 0x0f) { // Tab: next row
+          move_selection(1);
+        } else if (input->key_code == 0x66) { // Down
+          move_selection(1);
+        } else if (input->key_code == 0x61) { // Up
+          move_selection(-1);
+        }
+        continue;
+      }
       if (input->key != TextKey::character) {
         continue;
       }
@@ -648,10 +712,10 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
       if (key == 'l' || key == 'q') {
         return LandedExit::kServiceComplete;
       }
-      if (key == 'j' && !missions.page_zero.empty()) {
-        selected = (selected + 1) % missions.page_zero.size();
-      } else if (key == 'k' && !missions.page_zero.empty()) {
-        selected = selected == 0 ? missions.page_zero.size() - 1 : selected - 1;
+      if (key == 'j') {
+        move_selection(1);
+      } else if (key == 'k') {
+        move_selection(-1);
       } else if (key == 'a') {
         accept();
       }
@@ -685,10 +749,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
       // The mission list may have changed (an offer resolved while the map was
       // open); refresh it and clamp the selection.
       missions = Mission_EvaluateMissionLists(state);
-      if (!missions.page_zero.empty() &&
-          selected >= missions.page_zero.size()) {
-        selected = missions.page_zero.size() - 1;
-      }
+      sync_list_control();
     }
     starmap_command_was_held = starmap_held;
     const bool player_info_held =
@@ -1403,6 +1464,27 @@ void NovaMission_RunMissionInfoWindow(
   // Native list row pitch: NovaUi_RebuildSpecialInteractionList (0x00445dc0)
   // sizes rows as DAT_0088c01c (8) x the 1.5 UI-scale double at 0x005754f8.
   constexpr float kMissionInfoRowPitch = 12.0F;
+  // Native list-control scrollbar strip: the rebuild (0x00445dc0) narrows
+  // the list's right edge by 0xf when the content is taller than the view.
+  constexpr float kMissionInfoScrollbarWidth = 15.0F;
+  const SDL_FRect info_scrollbar{layout->list.x + layout->list.w -
+                                     kMissionInfoScrollbarWidth,
+                                 layout->list.y,
+                                 kMissionInfoScrollbarWidth,
+                                 layout->list.h};
+  NovaListControl list_control(layout->list, kMissionInfoRowPitch, rows.size());
+  const auto update_list_control = [&]() {
+    list_control.SetRowCount(rows.size());
+    SDL_FRect content = layout->list;
+    if (list_control.scrollable()) {
+      content.w = std::max(1.0F, content.w - kMissionInfoScrollbarWidth);
+    }
+    list_control.SetContentRect(content);
+    if (selected >= 0) {
+      list_control.EnsureVisible(static_cast<std::size_t>(selected));
+    }
+  };
+  update_list_control();
 
   const auto draw_frame = [&]() {
     SDL_Renderer *renderer = platform.renderer();
@@ -1460,40 +1542,36 @@ void NovaMission_RunMissionInfoWindow(
               state.date, true, state.date_prefix, state.date_suffix));
     }
 
-    // Rows: black fill, selected row in the 50%-red highlight, white text
-    // throughout (NovaUi_DrawListRowCallback draws the failed 0xa5 marker as
-    // part of the row string in the shared text colour, no separate tint).
-    // Rows keep the fixed 12px native pitch and are clipped to the list rect
-    // like the original's DrawContext clipping.
-    if (layout->list.w > 0.0F && !rows.empty()) {
-      const SDL_Rect list_clip{static_cast<int>(layout->list.x),
-                               static_cast<int>(layout->list.y),
-                               static_cast<int>(layout->list.w),
-                               static_cast<int>(layout->list.h)};
+    // Rows: c.lr fill, selected row in the 50%-red highlight, white text
+    // throughout (NovaUi_DrawListRowCallback 0x00448a30 draws the failed 0xa5
+    // marker as part of the row string, no separate tint). The native 12px
+    // pitch and scroll offset come from the shared list control; rows are
+    // clipped to the content band.
+    if (!rows.empty()) {
+      const SDL_FRect content = list_control.content_rect();
+      const SDL_Rect list_clip{static_cast<int>(content.x),
+                               static_cast<int>(content.y),
+                               static_cast<int>(content.w),
+                               static_cast<int>(content.h)};
       SDL_SetRenderClipRect(renderer, &list_clip);
-      const float text_x = layout->list.x + 4.0F;
       for (std::size_t row = 0; row < rows.size(); ++row) {
-        const float row_top =
-            layout->list.y + static_cast<float>(row) * kMissionInfoRowPitch;
-        const SDL_FRect row_rect{
-            layout->list.x, row_top, layout->list.w, kMissionInfoRowPitch};
-        const bool is_selected = static_cast<int>(row) == selected;
-        const SDL_Color fill =
-            ToSdlColor(is_selected ? list_hilite : list_background);
-        SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, fill.a);
-        SDL_RenderFillRect(renderer, &row_rect);
-        NovaText_Draw(platform,
-                      font_cache,
-                      NovaFontFamily::kGeneva,
-                      kMissionInfoFontSize,
-                      kNovaFontStyleRegular,
-                      ToSdlColor(list_text),
-                      text_x,
-                      row_top + kMissionInfoFontSize,
-                      rows[row].text);
+        const SDL_FRect row_rect = list_control.RowRect(row);
+        if (row_rect.y >= content.y + content.h ||
+            row_rect.y + row_rect.h <= content.y) {
+          continue;
+        }
+        NovaUi_DrawListRow(platform,
+                           font_cache,
+                           row_rect,
+                           rows[row].text,
+                           static_cast<int>(row) == selected,
+                           list_text,
+                           list_background,
+                           list_hilite);
       }
       SDL_SetRenderClipRect(renderer, nullptr);
     }
+    NovaUi_DrawListScrollbar(platform, list_control, info_scrollbar);
 
     // Description panel (0x00446e00): the filled-rect draw paints a white
     // rect with black text and the follow-up DrawContext_InvertRect cancels
@@ -1615,6 +1693,7 @@ void NovaMission_RunMissionInfoWindow(
     rows = BuildMissionInfoRows(state);
     selected = -1;
     description.clear();
+    update_list_control();
     bool any_active = false;
     for (const auto &flags : state.active_mission_runtime_flags) {
       any_active = any_active || flags.is_active;
@@ -1674,30 +1753,65 @@ void NovaMission_RunMissionInfoWindow(
         break;
       }
       if (input->key == TextKey::physical) {
-        if (input->key_code == 0xc8 && !rows.empty()) { // DIK_UP
-          selected =
-              selected <= 0 ? static_cast<int>(rows.size()) - 1 : selected - 1;
+        // 0x00446770: Up/Down move the selection and the list control scrolls
+        // it into view. The original reads compact key codes 9/10/0xb; the
+        // port's normalized channel reports Tab/Up/Down as 0x0f/0x61/0x66.
+        const auto move = [&](int delta) {
+          if (rows.empty()) {
+            return;
+          }
+          selected += delta;
+          if (selected < 0) {
+            selected = static_cast<int>(rows.size()) - 1;
+          } else if (selected >= static_cast<int>(rows.size())) {
+            selected = 0;
+          }
+          list_control.EnsureVisible(static_cast<std::size_t>(selected));
           description = BuildMissionInfoDescription(
               state, rows[static_cast<std::size_t>(selected)].slot);
-        } else if (input->key_code == 0xd0 && !rows.empty()) { // DIK_DOWN
-          selected = (selected + 1) % static_cast<int>(rows.size());
-          description = BuildMissionInfoDescription(
-              state, rows[static_cast<std::size_t>(selected)].slot);
+        };
+        if (input->key_code == 0x61) { // Up
+          move(-1);
+        } else if (input->key_code == 0x66) { // Down
+          move(1);
+        } else if (input->key_code == 0x0f) { // Tab: next
+          move(1);
         }
         continue;
       }
       if (input->key == TextKey::primary) {
         const SDL_FPoint point = platform.mouse_position();
         bool handled = false;
-        if (contains(layout->list, point)) {
-          // FUN_004d1db0: the list control maps the click to row
-          // (click_y - list.top) / native row pitch (+ scroll, always 0
-          // here); a click past the last row finds no matching list row and
-          // deselects (DAT_0077430c resets to -1).
-          const auto row = static_cast<std::size_t>((point.y - layout->list.y) /
-                                                    kMissionInfoRowPitch);
-          const int new_selected =
-              !rows.empty() && row < rows.size() ? static_cast<int>(row) : -1;
+        // Scrollbar arm of FUN_004d1db0 (arrows step a row, the trough pages
+        // by the visible row count; thumb dragging is not reproduced).
+        switch (NovaListScrollbarHitTest(list_control, info_scrollbar, point)) {
+        case NovaListScrollbarPart::kUp:
+          list_control.ScrollRows(-1);
+          handled = true;
+          break;
+        case NovaListScrollbarPart::kDown:
+          list_control.ScrollRows(1);
+          handled = true;
+          break;
+        case NovaListScrollbarPart::kPageUp:
+          list_control.ScrollRows(-list_control.visible_rows());
+          handled = true;
+          break;
+        case NovaListScrollbarPart::kPageDown:
+          list_control.ScrollRows(list_control.visible_rows());
+          handled = true;
+          break;
+        case NovaListScrollbarPart::kThumb:
+        case NovaListScrollbarPart::kNone:
+          break;
+        }
+        // FUN_004d1db0: the list control maps the click to row
+        // (click_y - list.top) / native row pitch + scroll; a click past the
+        // last row finds no matching list row and deselects (DAT_0077430c
+        // resets to -1).
+        if (!handled && contains(list_control.content_rect(), point)) {
+          const auto row = list_control.RowAt(point);
+          const int new_selected = row ? static_cast<int>(*row) : -1;
           if (new_selected != selected) {
             selected = new_selected;
             description =
