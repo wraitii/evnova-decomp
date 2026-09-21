@@ -273,6 +273,20 @@ NovaOutfit_GetCloakShieldDrainFlags(const GameState &state, const Ship &ship);
 NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
                                           const Ship &ship);
 
+// True when the ship has the fast-jump capability: class Flags2 0x0020
+// ("can jump without slowing down"), or an outfit whose any of its four
+// ModTypes is 37 (kFastJump). The player scans the owned inventory (positive
+// count, ModVal irrelevant); NPCs scan the class default loadout. See the
+// primary-site citation in outfit.cpp and docs/player_hyperspace.md.
+[[nodiscard]] bool NovaOutfit_HasFastJumpCapability(const GameState &state,
+                                                    const Ship &ship);
+
+// Player-branch inertialess predicate (class Flags2 0x40 or an owned
+// inertial dampener outfit); the original-function citation is at the
+// definition in outfit.cpp. The NPC branch is NovaShip_IsInertialess in
+// spaceflight.hpp.
+[[nodiscard]] bool NovaPlayer_IsInertialess(const GameState &state);
+
 // Ghidra 0x0046e060 Ship_GetShipFuelBurnRate, for the player: the last
 // owned outfit encountered with opcode 15 supplies ModVal / 30 fuel per
 // original simulation tick. The original caches this result until inventory

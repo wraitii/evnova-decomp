@@ -127,6 +127,40 @@ TEST_CASE("inertialess reverse floors at zero and never goes negative") {
   CHECK(ship.vel_y == Catch::Approx(0.0F));
 }
 
+TEST_CASE("inertialess fire-restricted decay is one 0.985 multiply per call") {
+  // Ghidra PlayerTick_InertialessSteering 0x0044cffe -> 0x0044d05b: the scalar
+  // speed clamps to g_player_speed_cap_x, then, while fire-restricted, decays
+  // by the g_inertialess_fire_restricted_speed_damp double 0x005755e0 = 0.985.
+  // The original applies one FMUL per call (0x0044d02b) with no tick scale, so
+  // the port must decay exactly once per call regardless of elapsed_ticks.
+  game::PlayerShip ship;
+  ship.heading = 0.0F;
+  ship.speed = 10.0F;
+  ship.vel_x = 0.0F;
+  ship.vel_y = -10.0F;
+  FlightInput input;
+  game::PlayerMovementOptions opts;
+  opts.inertialess = true;
+  opts.fire_restricted = true;
+  opts.speed_cap_x = 100.0F;
+  opts.speed_cap_y = 100.0F;
+
+  // 500/10000*2 = 0.1 px/tick^2 thrust step for the test class; the steering
+  // step (0.1 * 4.0) is large enough to snap the velocity onto heading*speed.
+  (void)game::NovaPlayer_IntegrateMovement(
+      ship, input, TestShipClass(), 1.0F, opts);
+  CHECK(ship.speed == Catch::Approx(9.85F));
+  CHECK(ship.vel_y == Catch::Approx(-9.85F));
+
+  // A second call with a DIFFERENT elapsed_ticks still decays exactly once by
+  // the same factor: the cadence is per call, not pow(0.985, ticks). The larger
+  // tick count widens the steering step, so the velocity still snaps on.
+  (void)game::NovaPlayer_IntegrateMovement(
+      ship, input, TestShipClass(), 2.0F, opts);
+  CHECK(ship.speed == Catch::Approx(9.85F * 0.985F));
+  CHECK(ship.vel_y == Catch::Approx(-9.85F * 0.985F));
+}
+
 TEST_CASE("flight turns at the original rounded effective turn rate") {
   game::PlayerShip ship;
   game::ShipClass ship_class = TestShipClass();

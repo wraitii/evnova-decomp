@@ -1548,12 +1548,7 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   // player branch: class flags_secondary 0x40 or an owned inertial dampener).
   PlayerMovementOptions movement_opts;
   movement_opts.face_target_armed = face_target_armed;
-  const ShipClass *player_class =
-      state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
-  movement_opts.inertialess =
-      (player_class != nullptr &&
-       (player_class->flags_secondary & 0x40U) != 0U) ||
-      Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener);
+  movement_opts.inertialess = NovaPlayer_IsInertialess(state);
   movement_opts.fire_restricted = fire_restricted;
   movement_opts.speed_cap_x = state.player_speed_cap_x;
   movement_opts.speed_cap_y = state.player_speed_cap_y;

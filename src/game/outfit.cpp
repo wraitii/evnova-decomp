@@ -398,6 +398,71 @@ bool NovaOutfit_HasAreaCloakingDevice(const GameState &state,
   return ShipClassHasCloakingDevice(state, ship, true);
 }
 
+// Ghidra 0x0046d080 Ship_CheckSpecialLoadoutCapability. The class Flags2
+// 0x0020 test comes first for every ship; the loadout scan then branches on
+// ship_instance_id (player owned inventory vs NPC class default loadout). Any
+// of the outfit's four ModTypes may match; the ModVal is irrelevant.
+bool NovaOutfit_HasFastJumpCapability(const GameState &state,
+                                      const Ship &ship) {
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class != nullptr && (ship_class->flags_secondary & 0x0020U) != 0U) {
+    return true;
+  }
+  const auto outfit_grants_fast_jump = [](const Outfit &outfit) {
+    for (const Effect &e : OutfitEffects(outfit)) {
+      if (e.type == static_cast<std::int16_t>(OutfitEffect::kFastJump)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (ship.ship_instance_id == 0) {
+    for (std::size_t index = 0;
+         index < state.inventory.outfit_owned_count.size();
+         ++index) {
+      if (state.inventory.outfit_owned_count[index] <= 0) {
+        continue;
+      }
+      const Outfit *outfit =
+          state.scenario.Outfit(static_cast<std::int16_t>(index + 0x80));
+      if (outfit != nullptr && outfit_grants_fast_jump(*outfit)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (ship_class == nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0; i < ship_class->default_outfit_ids.size(); ++i) {
+    if (ship_class->default_outfit_counts[i] <= 0) {
+      continue;
+    }
+    const Outfit *outfit =
+        state.scenario.Outfit(ship_class->default_outfit_ids[i]);
+    if (outfit != nullptr && outfit_grants_fast_jump(*outfit)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x0046df70 Outfit_ShipIsInertialess (player branch): class Flags2
+// 0x40 or an owned inertial dampener outfit (ModType 38, kInertialDampener).
+// The NPC fragment is NovaShip_IsInertialess (spaceflight.hpp, used by
+// spaceflight_movement.cpp). The owned-outfit probe is Outfit_HasOwnedEffect,
+// the same scan the movement options build in
+// PlayerTick_ManualFlightAndRegeneration.
+bool NovaPlayer_IsInertialess(const GameState &state) {
+  const ShipClass *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  if (ship_class != nullptr && (ship_class->flags_secondary & 0x40U) != 0U) {
+    return true;
+  }
+  return Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener);
+}
+
 // Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags.
 std::int16_t NovaOutfit_GetCloakFuelDrainFlags(const GameState &state,
                                                const Ship &ship) {

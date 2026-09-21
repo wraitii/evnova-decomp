@@ -10,6 +10,7 @@
 #include "mission_trace.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
+#include "spaceflight.hpp"
 #include "targeting.hpp"
 #include "weapon.hpp"
 
@@ -1439,41 +1440,62 @@ void NovaTravel_Tick(GameState &state,
       // Ends at the original's |trunc(vel_x)| < 2 && |trunc(vel_y)| < 2 stop
       // test -- the hold begins and the 'Warp up' cue pre-stages there
       // (0x0044c4e9).
+      // Ship_CheckSpecialLoadoutCapability (0x0044c4db, Ghidra 0x0046d080):
+      // a hull with class Flags2 0x0020 or the ModType-37 fast-jumping outfit
+      // skips the per-axis stop requirement and enters the hold directly.
+      // Ordinary hulls still compare |trunc(vel)| < 2 on both axes.
+      const bool fast_jump = NovaOutfit_HasFastJumpCapability(state, player);
       const bool stopped =
-          std::abs(std::trunc(player.vel_x)) < kStoppedRoundedVel &&
-          std::abs(std::trunc(player.vel_y)) < kStoppedRoundedVel;
+          fast_jump ||
+          (std::abs(std::trunc(player.vel_x)) < kStoppedRoundedVel &&
+           std::abs(std::trunc(player.vel_y)) < kStoppedRoundedVel);
       if (!stopped) {
-        // Still moving: turn around to face the reverse of the velocity.
-        const float vel_heading = std::atan2(player.vel_x, -player.vel_y);
-        float desired =
-            std::fmod(vel_heading + 3.14159265358979323846F, kTwoPi);
-        if (desired < 0.0F) {
-          desired += kTwoPi;
-        }
-        turn_toward(desired, class_turn_deg);
-
-        // Once facing the reverse heading within the facing window, punch back
-        // along it (Ship_ComputeShipEffectiveThrust toward the heading) and
-        // ramp the engine glow; otherwise the glow fades.
-        const float delta_deg =
-            std::abs(std::remainder(desired - player.heading, kTwoPi)) *
-            (180.0F / 3.14159265358979323846F);
-        if (delta_deg < turn_align_window) {
-          const float thrust = PlayerThrust(state) * kBrakeThrustScale;
-          player.vel_x += std::sin(player.heading) * thrust * ticks;
-          player.vel_y += -std::cos(player.heading) * thrust * ticks;
-          ramp_glow(kGlowFastStep);
-        } else {
+        // Inertialess jump brake (Ghidra 0x0044f0e3): decay scalar speed
+        // (+0x48) by Ship_ComputeShipEffectiveThrust * tick scale, floored at
+        // zero, then shared 0x0044cffe/0x0043b020 steering toward
+        // heading*speed.
+        // TODO(decomp): scalar cap, fire-restricted 0.985 decay, glow ramp
+        // unported (fade_glow placeholder).
+        if (NovaPlayer_IsInertialess(state)) {
+          const float thrust = PlayerThrust(state);
+          player.speed = std::max(0.0F, player.speed - thrust * ticks);
+          NovaShip_SteerVelocityTowardShipHeading(player, thrust, ticks);
           fade_glow();
+          player.pos_x += player.vel_x * ticks;
+          player.pos_y += player.vel_y * ticks;
+        } else {
+          // Still moving: turn around to face the reverse of the velocity.
+          const float vel_heading = std::atan2(player.vel_x, -player.vel_y);
+          float desired =
+              std::fmod(vel_heading + 3.14159265358979323846F, kTwoPi);
+          if (desired < 0.0F) {
+            desired += kTwoPi;
+          }
+          turn_toward(desired, class_turn_deg);
+
+          // Once facing the reverse heading within the facing window, punch
+          // back along it (Ship_ComputeShipEffectiveThrust toward the heading)
+          // and ramp the engine glow; otherwise the glow fades.
+          const float delta_deg =
+              std::abs(std::remainder(desired - player.heading, kTwoPi)) *
+              (180.0F / 3.14159265358979323846F);
+          if (delta_deg < turn_align_window) {
+            const float thrust = PlayerThrust(state) * kBrakeThrustScale;
+            player.vel_x += std::sin(player.heading) * thrust * ticks;
+            player.vel_y += -std::cos(player.heading) * thrust * ticks;
+            ramp_glow(kGlowFastStep);
+          } else {
+            fade_glow();
+          }
+          // Brake (g_jump_turnaround_velocity_damp, applied per 30 Hz tick) and
+          // keep the ship coasting through the deceleration.
+          const float damp = std::pow(kTurnDamp, ticks);
+          player.vel_x *= damp;
+          player.vel_y *= damp;
+          player.speed = std::hypot(player.vel_x, player.vel_y);
+          player.pos_x += player.vel_x * ticks;
+          player.pos_y += player.vel_y * ticks;
         }
-        // Brake (g_jump_turnaround_velocity_damp, applied per 30 Hz tick) and
-        // keep the ship coasting through the deceleration.
-        const float damp = std::pow(kTurnDamp, ticks);
-        player.vel_x *= damp;
-        player.vel_y *= damp;
-        player.speed = std::hypot(player.vel_x, player.vel_y);
-        player.pos_x += player.vel_x * ticks;
-        player.pos_y += player.vel_y * ticks;
       } else {
         // Stopped: begin the stationary hold. The original seeds the station-
         // hold timer to 2.0 (0x0044c548), stamps the 60 Hz jump clock
@@ -1539,10 +1561,22 @@ void NovaTravel_Tick(GameState &state,
       // fire lands once the hold passes g_hyperspace_engage_hold_30hz (30
       // ticks) AND the 'Warp up' cue is no longer active
       // (NovaAudio_CountActiveByHandle latch, g_playerHyperspaceAudioLatch).
-      const float damp = std::pow(kSlowPhaseVelDamp, ticks);
-      player.vel_x *= damp;
-      player.vel_y *= damp;
-      player.speed = std::hypot(player.vel_x, player.vel_y);
+      // Ship_CheckSpecialLoadoutCapability (0x0044c72e, Ghidra 0x0046d080):
+      // fast-jump hulls keep their momentum through the hold -- the slow-phase
+      // velocity damp only runs for ordinary hulls.
+      const bool fast_jump = NovaOutfit_HasFastJumpCapability(state, player);
+      const bool inertialess = NovaPlayer_IsInertialess(state);
+      if (!fast_jump) {
+        const float damp = std::pow(kSlowPhaseVelDamp, ticks);
+        player.vel_x *= damp;
+        player.vel_y *= damp;
+        // Ordinary hulls derive the scalar speed from the damped vector;
+        // inertialess hulls keep the maintained +0x48 scalar authoritative
+        // (the original's 0x0044f414 damp writes vel_x/vel_y only).
+        if (!inertialess) {
+          player.speed = std::hypot(player.vel_x, player.vel_y);
+        }
+      }
       fade_glow();
       // Align onto the jump heading at the class turn rate. The original
       // stores the integer map bearing in the player's ai_desired_heading_deg
@@ -1558,6 +1592,19 @@ void NovaTravel_Tick(GameState &state,
       turn_toward(
           t.jump_heading_rad,
           std::max(std::round(state.cached_stats.turn_raw * 0.1F), 1.0F));
+      // Shared manual-flight inertialess tail (Ghidra 0x0044cffe ->
+      // 0x0044d05b, PlayerTick_InertialessSteering): the engaged hold still
+      // reaches it, so an inertialess hull -- including fast-jump+inertialess
+      // -- steers its velocity toward heading*speed while the hold turns onto
+      // the jump bearing. It runs after the slow damp and after the auto-turn,
+      // and before position integration, matching the original frame order.
+      // TODO(decomp): the shared tail's g_player_speed_cap_x scalar clamp,
+      // fire-restricted 0.985 decay and speed-proportional glow ramp remain
+      // unported in this suspended-movement path.
+      if (inertialess) {
+        NovaShip_SteerVelocityTowardShipHeading(
+            player, PlayerThrust(state), ticks);
+      }
       // Keep integrating the residual drift; the fire overwrites it.
       player.pos_x += player.vel_x * ticks;
       player.pos_y += player.vel_y * ticks;
@@ -1676,9 +1723,10 @@ void NovaTravel_Tick(GameState &state,
   // No-jump radius around the SYSTEM CENTER (0x0044c220 loop +
   // Stellar_ComputeTravelRangeSq 0x00465610): while a non-restricted nav
   // stellar exists and the ship sits inside the travel range measured from
-  // the origin, the engage is refused with STR# 0x7d2 0x2a. Ships with the
-  // fast-jump capability (Bible outfit 37) skip the stop requirement
-  // entirely; TODO(decomp) Ship_CheckSpecialLoadoutCapability 0x0046d080.
+  // the origin, the engage is refused with STR# 0x7d2 0x2a. The fast-jump
+  // capability (class Flags2 0x0020 or ModType 37; see
+  // NovaOutfit_HasFastJumpCapability 0x0046d080) does NOT bypass this
+  // range gate -- only the brake phase's per-axis stop gate.
   bool has_usable_nav = false;
   for (const std::int16_t nav : sys->nav_defs) {
     if (nav < 0x80) {
