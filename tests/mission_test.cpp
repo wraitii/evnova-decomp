@@ -2,10 +2,13 @@
 #include "game/game_state.hpp"
 #include "game/mission.hpp"
 #include "game/outfit.hpp"
+#include "game/starmap.hpp"
 #include "game/travel.hpp"
 
 #include <algorithm>
+#include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -106,7 +109,7 @@ TEST_CASE(
   state.player.current_system_id = 9;
   Mission_ResolveMissionStellarLocators(state);
 
-  REQUIRE(Mission_ActivateAtSlot(state, 0, -1));
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
   const auto &active = state.active_missions[0];
   CHECK(active.carrying_resources); // PickupMode 0: cargo aboard at accept
   CHECK(active.mission_template_id == 0);
@@ -142,7 +145,7 @@ TEST_CASE("acceptance dialogs follow script activation order") {
   const MissionAcceptanceSink sink = [&](std::int16_t mission_def) {
     presented.push_back(mission_def);
   };
-  REQUIRE(Mission_ActivateAtSlot(state, 0, -1, sink));
+  REQUIRE(Mission_ActivateAtSlot(state, 0, sink));
 
   // The nested activation's dialogs run inside the outer on-accept payload, so
   // it reports first; the outer mission follows when activation returns.
@@ -177,13 +180,190 @@ TEST_CASE("script S activation preserves trailing commands") {
   const MissionAcceptanceSink sink = [&](std::int16_t mission_def) {
     presented.push_back(mission_def);
   };
-  REQUIRE(Mission_ActivateAtSlot(state, 0, -1, sink));
+  REQUIRE(Mission_ActivateAtSlot(state, 0, sink));
 
   CHECK(state.active_mission_runtime_flags[0].is_active);
   CHECK(state.active_mission_runtime_flags[1].is_active);
   CHECK(state.control.ControlBit(424));
   const std::vector<std::int16_t> expected{1, 0};
   CHECK(presented == expected);
+}
+
+// 0x0043f100 runs the on-accept payload BEFORE the acceptance fee and BEFORE
+// the carrying/briefing latches. A nested S activation therefore observes the
+// outer slot pre-latch, and the outer fee is charged against post-payload
+// credits.
+TEST_CASE("on-accept payload runs before acceptance fee and latches") {
+  GameState state;
+  state.scenario.missions.resize(2);
+  for (auto &definition : state.scenario.missions) {
+    definition.present = true;
+    definition.travel_stellar_locator = -1;
+    definition.return_stellar_locator = -1;
+  }
+  state.player.credits = 100;
+  state.scenario.missions[0].pickup_mode = 0;                 // carrying latch
+  state.scenario.missions[0].resource_delta_or_cost = -50010; // fee 10
+  constexpr std::string_view kStartNested = "S129";
+  for (std::size_t i = 0; i < kStartNested.size(); ++i) {
+    state.scenario.missions[0].raw_payload[0x15b + i] =
+        static_cast<std::byte>(kStartNested[i]);
+  }
+
+  bool saw_nested = false;
+  bool carrying_pre_latch = true;
+  bool briefing_pre_latch = true;
+  bool credits_pre_fee = false;
+  const MissionAcceptanceSink sink = [&](std::int16_t mission_def) {
+    if (mission_def != 1) {
+      return;
+    }
+    saw_nested = true;
+    carrying_pre_latch = state.active_missions[0].carrying_resources;
+    briefing_pre_latch =
+        state.active_mission_runtime_flags[0].travel_stellar_reached;
+    credits_pre_fee = state.player.credits == 100;
+  };
+  REQUIRE(Mission_ActivateAtSlot(state, 0, sink));
+
+  CHECK(saw_nested);
+  CHECK_FALSE(carrying_pre_latch); // outer carrying latch not set yet
+  CHECK_FALSE(briefing_pre_latch); // outer briefing latch not set yet
+  CHECK(credits_pre_fee);          // outer fee not charged yet
+  CHECK(state.active_missions[0].carrying_resources);
+  CHECK(state.player.credits == 90);
+}
+
+// 0x0043f100 permits duplicate active slots (eligibility, not activation,
+// suppresses re-offering) and charges a below--50000 value after clamping the
+// credit balance at zero rather than refusing activation.
+TEST_CASE("activation permits duplicates and clamps the acceptance fee") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  state.scenario.missions[0].present = true;
+  state.scenario.missions[0].travel_stellar_locator = -1;
+  state.scenario.missions[0].return_stellar_locator = -1;
+  state.scenario.missions[0].resource_delta_or_cost = -50010; // fee 10
+  state.player.credits = 5;
+
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK(state.player.credits == 0);
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK(state.active_mission_runtime_flags[0].is_active);
+  CHECK(state.active_mission_runtime_flags[1].is_active);
+}
+
+// 0x0043f100 tail clears the definition's offering roll on every activation.
+TEST_CASE("activation clears the definition offering roll") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  state.scenario.missions[0].present = true;
+  state.scenario.missions[0].travel_stellar_locator = -1;
+  state.scenario.missions[0].return_stellar_locator = -1;
+  state.mission_offering_rolls[0] = 100;
+
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK(state.mission_offering_rolls[0] == 0);
+}
+
+// 0x0043f8c0 normalizes the aux-ship dude to 0x80..0x27f (else -1) and clamps
+// mission_ship_count_max/active below 1 to -1.
+TEST_CASE("aux ship normalization matches Mission_PopulateMissionSlotFromDef") {
+  GameState state;
+  state.scenario.missions.resize(2);
+  for (auto &definition : state.scenario.missions) {
+    definition.present = true;
+    definition.travel_stellar_locator = -1;
+    definition.return_stellar_locator = -1;
+  }
+  // Out-of-range aux dude: -1, budget -1.
+  state.scenario.missions[0].auxiliary_ship_dude = 0x50;
+  state.scenario.missions[0].mission_ship_count_max = 4;
+  // Valid aux dude and budget: rebased, budget preserved.
+  state.scenario.missions[1].auxiliary_ship_dude = 0x82;
+  state.scenario.missions[1].mission_ship_count_max = 4;
+
+  REQUIRE(Mission_PopulateActiveSlot(state, 0, 0));
+  CHECK(state.active_missions[0].aux_ships_dude_def_index == -1);
+  CHECK(state.active_missions[0].mission_ship_count_max == -1);
+  CHECK(state.active_missions[0].mission_ship_count_active == -1);
+
+  REQUIRE(Mission_PopulateActiveSlot(state, 1, 1));
+  CHECK(state.active_missions[1].aux_ships_dude_def_index == 2);
+  CHECK(state.active_missions[1].mission_ship_count_max == 4);
+  CHECK(state.active_missions[1].mission_ship_count_active == 4);
+}
+
+// The resolver 0x0043d240 owns cargo decoding; population copies the resolved
+// target directly. An unresolved target stays 0 for both the acceptance gate
+// and population, so no fallback draw can smuggle cargo past the gate.
+TEST_CASE("population copies resolved cargo without re-resolving") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = -1;
+  definition.return_stellar_locator = -1;
+  definition.cargo_qty_tons = 2;
+  definition.cargo_type_resource = 7;
+
+  REQUIRE(Mission_PopulateActiveSlot(state, 0, 0));
+  CHECK(state.active_missions[0].cargo_qty_tons == 0);
+  CHECK(state.active_missions[0].cargo_type_id == -1);
+}
+
+// The cargo gate reads the resolved target CargoQty, not the raw definition.
+TEST_CASE("acceptance cargo gate uses the resolved target cargo") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  state.scenario.missions[0].present = true;
+  state.scenario.missions[0].travel_stellar_locator = -1;
+  state.scenario.missions[0].return_stellar_locator = -1;
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].cargo_holds = 1;
+  state.player.ship_class_id = 0;
+  state.mission_target_resolutions[0].cargo_qty_tons = 5;
+
+  CHECK_FALSE(Mission_ActivateAtSlot(state, 0));
+}
+
+// 0x0043f8c0 reads DatePostInc/on_resolve_repeat_count from musn +0x65e, not
+// the AuxShipCount at +0x48.
+TEST_CASE("mission DatePostInc decodes from payload offset 0x65e") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const auto be16 = [](const std::array<std::byte, 0x7b2> &payload,
+                       std::size_t offset) {
+    return static_cast<std::int16_t>(
+        (std::to_integer<unsigned>(payload[offset]) << 8) |
+        std::to_integer<unsigned>(payload[offset + 1]));
+  };
+  std::size_t checked = 0;
+  for (const auto &mission : state.scenario.missions) {
+    if (!mission.present) {
+      continue;
+    }
+    CHECK(mission.on_resolve_repeat_count == be16(mission.raw_payload, 0x65e));
+    ++checked;
+  }
+  CHECK(checked > 0);
+}
+
+// 0x0043f100 tail auto-resolves a mid-transition flags-0x0001 mission with no
+// target ships and no return stellar once the briefing latch is set.
+TEST_CASE("transition activation auto-resolves a flags-1 mission") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.flags_primary = 0x0001;
+  definition.target_ship_count = 0;
+  definition.travel_stellar_locator = -1;
+  definition.return_stellar_locator = -1;
+  state.system_transition_active = true;
+
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK_FALSE(state.active_mission_runtime_flags[0].is_active);
 }
 
 TEST_CASE("Tutorial 006a preserves its shipped lore fleet") {
@@ -800,9 +980,8 @@ TEST_CASE("tutorial 001 reveals Sol on accept and completes on landing") {
   REQUIRE(state.scenario.missions[tutorial_002].present);
 
   Mission_ResolveMissionStellarLocators(state);
-  REQUIRE(Mission_ActivateAtSlot(state,
-                                 static_cast<std::int16_t>(tutorial_001),
-                                 /*landed_stellar_id=*/-1));
+  REQUIRE(
+      Mission_ActivateAtSlot(state, static_cast<std::int16_t>(tutorial_001)));
 
   // On-accept payload: bit 8339 set, Sol (system resource 130, def 2)
   // explored.
@@ -1235,4 +1414,309 @@ TEST_CASE("auto-abort applies the competing-government reward under the fix "
     CHECK(state.system_reputation[0] == 0);
     CHECK(state.system_reputation[1] == 0);
   }
+}
+
+// Ghidra 0x004aa980 Mission_RebuildMissionTargetSystemList: the starmap emits
+// the TravelStel system until the TravelStel leg is satisfied, then the
+// ReturnStel system REPLACES it (a single sVar2, not both). An unavailable
+// ReturnStel falls back to keeping the TravelStel system.
+TEST_CASE("travel_stellar_reached gates the starmap T to R arrow") {
+  GameState state;
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[0].system_id = 11;
+  state.scenario.stellars[0].name = "Alpha";
+  state.scenario.stellars[0].is_available = true;
+  state.scenario.stellars[1].system_id = 12;
+  state.scenario.stellars[1].name = "Beta";
+  state.scenario.stellars[1].is_available = true;
+
+  auto &mission = state.active_missions[0];
+  mission.travel_stellar_id = 0;
+  mission.return_stellar_id = 1;
+  mission.flags_primary = 0;
+  auto &runtime = state.active_mission_runtime_flags[0];
+  runtime.is_active = true;
+
+  CHECK(BuildMissionTargetSystems(state) == std::vector<std::int16_t>{11});
+  runtime.travel_stellar_reached = true;
+  CHECK(BuildMissionTargetSystems(state) == std::vector<std::int16_t>{12});
+
+  // ReturnStel unavailable: the original keeps the TravelStel arrow.
+  state.scenario.stellars[1].is_available = false;
+  CHECK(BuildMissionTargetSystems(state) == std::vector<std::int16_t>{11});
+}
+
+// Bible mission Flags 0x0002 ("Don't show the red destination arrows") and
+// 0x0200 ("Show an additional arrow on the map for the ShipSyst").
+TEST_CASE("starmap mission arrows honor Bible Flags 0x0002 and 0x0200") {
+  GameState state;
+  state.scenario.stellars.resize(1);
+  state.scenario.stellars[0].system_id = 11;
+  state.scenario.stellars[0].name = "Alpha";
+  state.scenario.stellars[0].is_available = true;
+  state.scenario.systems.resize(3);
+  state.scenario.systems[2].is_visible = true;
+  state.scenario.systems[2].visibility_root_system_id = -1;
+
+  auto &mission = state.active_missions[0];
+  mission.travel_stellar_id = 0;
+  mission.current_system_id = 2;
+  mission.target_ship_count = 1;
+  auto &runtime = state.active_mission_runtime_flags[0];
+  runtime.is_active = true;
+
+  mission.flags_primary = 0x0002;
+  CHECK(BuildMissionTargetSystems(state).empty());
+
+  mission.flags_primary = 0x0200;
+  CHECK(BuildMissionTargetSystems(state) == (std::vector<std::int16_t>{11, 2}));
+}
+
+// Ghidra 0x0043f100: the TravelStel predicate only fires while the mission
+// interaction window is open (g_mission_interaction_window != 0); a
+// TravelStel-less mission sets the latch unconditionally.
+TEST_CASE("travel_stellar_reached requires an actual landed visit") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = 0x80;
+  definition.return_stellar_locator = -1;
+  state.scenario.stellars.resize(1);
+  state.scenario.stellars[0].name = "Alpha";
+  Mission_ResolveMissionStellarLocators(state);
+
+  // In-flight mode-2 target match: the raw ShipState +0x6C compare would
+  // collide, but the port-only landed gate keeps the latch clear.
+  state.system_transition_active = false;
+  state.player.travel_transfer_mode = 2;
+  state.travel.selected_stellar_id = 0x80;
+  {
+    MissionInteractionWindowScope window_scope(state);
+    REQUIRE(Mission_ActivateAtSlot(state, 0));
+  }
+  CHECK_FALSE(state.active_mission_runtime_flags[0].travel_stellar_reached);
+
+  // Mode-3 adjacency collision against the same 0-based travel_stellar_id.
+  state.player.travel_transfer_mode = 3;
+  state.travel.travel_slot = 0;
+  {
+    MissionInteractionWindowScope window_scope(state);
+    REQUIRE(Mission_ActivateAtSlot(state, 0));
+  }
+  CHECK_FALSE(state.active_mission_runtime_flags[1].travel_stellar_reached);
+
+  // Landed at the TravelStel with the window open: the latch fires.
+  state.system_transition_active = true;
+  state.player.travel_transfer_mode = -1;
+  state.travel.travel_slot = -1;
+  state.player.ai_secondary_target_slot = 0x80;
+  {
+    MissionInteractionWindowScope window_scope(state);
+    REQUIRE(Mission_ActivateAtSlot(state, 0));
+  }
+  CHECK(state.active_mission_runtime_flags[2].travel_stellar_reached);
+
+  // Landed at a different stellar: still clear.
+  state.player.ai_secondary_target_slot = 0x81;
+  {
+    MissionInteractionWindowScope window_scope(state);
+    REQUIRE(Mission_ActivateAtSlot(state, 0));
+  }
+  CHECK_FALSE(state.active_mission_runtime_flags[3].travel_stellar_reached);
+
+  // Landed match but no interaction window (scripted activation): clear.
+  state.player.ai_secondary_target_slot = 0x80;
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK_FALSE(state.active_mission_runtime_flags[4].travel_stellar_reached);
+
+  // No TravelStel: the latch is set regardless of window or landed context.
+  definition.travel_stellar_locator = -1;
+  Mission_ResolveMissionStellarLocators(state);
+  state.system_transition_active = false;
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK(state.active_mission_runtime_flags[5].travel_stellar_reached);
+}
+
+// A nested S in an OnAccept payload must inherit both the open offer window
+// and the landed context, so its own TravelStel match latches.
+TEST_CASE("nested OnAccept S inherits the landed offer window") {
+  GameState state;
+  state.scenario.missions.resize(2);
+  for (auto &definition : state.scenario.missions) {
+    definition.present = true;
+    definition.travel_stellar_locator = 0x80;
+    definition.return_stellar_locator = -1;
+  }
+  state.scenario.stellars.resize(1);
+  state.scenario.stellars[0].name = "Alpha";
+  Mission_ResolveMissionStellarLocators(state);
+
+  // Outer mission 0's on-accept payload activates mission 1 (S129).
+  constexpr std::string_view kStartNested = "S129";
+  for (std::size_t i = 0; i < kStartNested.size(); ++i) {
+    state.scenario.missions[0].raw_payload[0x15b + i] =
+        static_cast<std::byte>(kStartNested[i]);
+  }
+
+  state.system_transition_active = true;
+  state.player.ai_secondary_target_slot = 0x80;
+  {
+    MissionInteractionWindowScope window_scope(state);
+    REQUIRE(Mission_ActivateAtSlot(state, 0));
+  }
+
+  CHECK(state.active_mission_runtime_flags[0].travel_stellar_reached);
+  CHECK(state.active_mission_runtime_flags[1].travel_stellar_reached);
+}
+
+// 0x0043f100 reads ai_secondary_target_slot AFTER the on-accept payload, so an
+// M/N opcode can repoint the live field before the TravelStel latch is judged.
+// A pre-payload snapshot would take the opposite branch in both arms below.
+TEST_CASE("OnAccept M/N repoints the target before the TravelStel latch") {
+  const auto prepare = [](GameState &state) {
+    state.scenario.missions.resize(1);
+    state.scenario.missions[0].present = true;
+    state.scenario.missions[0].travel_stellar_locator = 0x80;
+    state.scenario.missions[0].return_stellar_locator = -1;
+    state.scenario.stellars.resize(1);
+    state.scenario.stellars[0].name = "Alpha";
+    state.scenario.systems.resize(3);
+    state.scenario.systems[2].nav_defs[0] = 0x80;
+    Mission_ResolveMissionStellarLocators(state);
+    state.system_transition_active = true;
+  };
+  const auto write_payload = [](GameState &state, std::string_view script) {
+    for (std::size_t i = 0; i < script.size(); ++i) {
+      state.scenario.missions[0].raw_payload[0x15b + i] =
+          static_cast<std::byte>(script[i]);
+    }
+  };
+
+  // M130 repositions to system 2's first nav (resource 0x80 -> index 0), the
+  // TravelStel. Pre-script the player was elsewhere, so only the late read
+  // latches.
+  {
+    GameState state;
+    prepare(state);
+    write_payload(state, "M130");
+    state.player.ai_secondary_target_slot = 0x85;
+    MissionInteractionWindowScope window_scope(state);
+    REQUIRE(Mission_ActivateAtSlot(state, 0));
+    CHECK(state.active_mission_runtime_flags[0].travel_stellar_reached);
+  }
+
+  // N130 clears the navigation target, so the post-script value no longer
+  // matches the TravelStel even though the pre-script value did.
+  {
+    GameState state;
+    prepare(state);
+    write_payload(state, "N130");
+    state.player.ai_secondary_target_slot = 0x80;
+    MissionInteractionWindowScope window_scope(state);
+    REQUIRE(Mission_ActivateAtSlot(state, 0));
+    CHECK_FALSE(state.active_mission_runtime_flags[0].travel_stellar_reached);
+  }
+}
+
+// Nested offers (e.g. an OnAccept S that starts another mission) must restore
+// the enclosing window state rather than clobber it.
+TEST_CASE("mission interaction window scope restores nested state") {
+  GameState state;
+  CHECK_FALSE(state.mission_offer_window_open);
+  {
+    MissionInteractionWindowScope outer(state);
+    CHECK(state.mission_offer_window_open);
+    {
+      MissionInteractionWindowScope inner(state);
+      CHECK(state.mission_offer_window_open);
+    }
+    CHECK(state.mission_offer_window_open);
+  }
+  CHECK_FALSE(state.mission_offer_window_open);
+}
+
+// Ghidra 0x004438d0: arriving at the TravelStel sets travel_stellar_reached
+// whether or not cargo is picked up; the ReturnStel does not set it for a
+// distinct TravelStel.
+TEST_CASE("TravelStel arrival sets travel_stellar_reached") {
+  GameState state;
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[0].name = "Alpha";
+  state.scenario.stellars[1].name = "Beta";
+
+  auto &mission = state.active_missions[0];
+  mission.travel_stellar_id = 0;
+  mission.return_stellar_id = 1;
+  mission.pickup_mode = -1;
+  auto &runtime = state.active_mission_runtime_flags[0];
+  runtime.is_active = true;
+
+  Mission_ProcessInteractionReactionSlotResources(state, 0, 0);
+  CHECK(runtime.travel_stellar_reached);
+  CHECK_FALSE(runtime.objective_complete);
+
+  runtime.travel_stellar_reached = false;
+  Mission_ProcessInteractionReactionSlotResources(state, 0, 1);
+  CHECK_FALSE(runtime.travel_stellar_reached);
+}
+
+// Ghidra 0x00443780: success at the ReturnStel needs BOTH
+// travel_stellar_reached and the ship-goal latch; the same landing without the
+// TravelStel leg leaves the mission active.
+TEST_CASE("ReturnStel success gate needs travel_stellar_reached") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  state.scenario.missions[0].present = true;
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[0].name = "Alpha";
+  state.scenario.stellars[1].name = "Beta";
+
+  auto &mission = state.active_missions[0];
+  mission.travel_stellar_id = 0;
+  mission.return_stellar_id = 1;
+  mission.ship_goal = -1;
+  auto &runtime = state.active_mission_runtime_flags[0];
+  runtime.is_active = true;
+  runtime.objective_complete = true;
+  runtime.travel_stellar_reached = false;
+
+  int debriefs = 0;
+  Mission_TickReactionSlotsForTravelInteraction(
+      state, /*landed_stellar_id=*/1, 0, [&](const MissionDialogText &) {
+        ++debriefs;
+      });
+  CHECK(runtime.is_active);
+  CHECK(debriefs == 0);
+
+  runtime.travel_stellar_reached = true;
+  Mission_TickReactionSlotsForTravelInteraction(
+      state, /*landed_stellar_id=*/1, 0, [&](const MissionDialogText &) {
+        ++debriefs;
+      });
+  CHECK_FALSE(runtime.is_active);
+}
+
+// Mission_OriginalAiSecondaryTargetSlot units: a stale docked resource id must
+// be rebased even when no in-flight target exists, so it cannot numerically
+// alias a different 0-based travel_stellar_id. The docked M-script re-point and
+// the raw mode-3 adjacency slot keep precedence.
+TEST_CASE("mission offer target helper rebases a stale docked stellar") {
+  GameState state;
+  state.system_transition_active = false;
+  state.player.travel_transfer_mode = -1;
+  state.travel.travel_slot = -1;
+  state.travel.selected_stellar_id = -1;
+  state.player.ai_secondary_target_slot = 0x85; // resource id -> index 5
+  CHECK(Mission_OriginalAiSecondaryTargetSlot(state) == 5);
+
+  state.system_transition_active = true;
+  state.player.ai_secondary_target_slot = 0x83;
+  CHECK(Mission_OriginalAiSecondaryTargetSlot(state) == 3);
+
+  state.system_transition_active = false;
+  state.player.travel_transfer_mode = 3;
+  state.travel.travel_slot = 7;
+  state.player.ai_secondary_target_slot = 0x85;
+  CHECK(Mission_OriginalAiSecondaryTargetSlot(state) == 7);
 }

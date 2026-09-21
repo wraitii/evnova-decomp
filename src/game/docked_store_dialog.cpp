@@ -1479,12 +1479,8 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         *mission_context,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
         [&](std::int16_t mission_def) {
-          return NovaMission_RunOfferWindow(platform,
-                                            audio,
-                                            state,
-                                            mission_def,
-                                            stellar_id,
-                                            render_store_background);
+          return NovaMission_RunOfferWindow(
+              platform, audio, state, mission_def, render_store_background);
         });
   };
   (void)run_mission_offer();

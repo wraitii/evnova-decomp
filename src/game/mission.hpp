@@ -11,6 +11,24 @@ namespace game {
 
 struct GameState;
 
+// Transient scope mirroring Ghidra g_mission_interaction_window (0x00774AE4),
+// set only where the original actually owns the window (Mission BBS, offer
+// window). Mission_ActivateMissionAtSlot (0x0043f100) reads it. Save/restore
+// guards re-entrant windows; a nested S starts no window and inherits the
+// enclosing value.
+class MissionInteractionWindowScope {
+public:
+  explicit MissionInteractionWindowScope(GameState &state) noexcept;
+  ~MissionInteractionWindowScope();
+  MissionInteractionWindowScope(const MissionInteractionWindowScope &) = delete;
+  MissionInteractionWindowScope &
+  operator=(const MissionInteractionWindowScope &) = delete;
+
+private:
+  GameState *state_;
+  bool previous_;
+};
+
 struct MissionListEvaluation {
   std::vector<std::int16_t> page_zero;
   std::vector<std::int16_t> page_one;
@@ -99,13 +117,23 @@ Mission_ExpandMissionWildcards(const GameState &state,
 // missions still show their readers. Unset sinks keep the state-only port.
 using MissionAcceptanceSink = std::function<void(std::int16_t mission_def)>;
 
-// landed_stellar_id is the stellar the player is docked at when accepting
-// (the BBS context) as a 0x80-based resource id; a mission whose resolved
-// TravelStel matches it skips the initial destination briefing.
+// Reconstructs ShipState +0x6C in its original units: a 0-based g_stellar_defs
+// index, or a raw 0..15 adjacency slot in the mode-3 plotted-route context
+// (0x004a8080); -1 when none. Read at the TravelStel latch site after the
+// OnAccept payload, matching 0x0043f100 (an M/N payload can repoint the live
+// field); only the landed arm is reachable because the latch also requires an
+// actual docked visit.
+[[nodiscard]] std::int16_t
+Mission_OriginalAiSecondaryTargetSlot(const GameState &state);
+
+// The TravelStel predicate fires only while MissionInteractionWindowScope is
+// active AND the player is actually docked, and it reads the navigation target
+// at latch time (after the OnAccept payload). That landed requirement is a
+// port-only BUGFIX(original): 0x0043f100 also accepted an in-flight target or
+// plotted-route adjacency slot via the raw field compare.
 [[nodiscard]] bool
 Mission_ActivateAtSlot(GameState &state,
                        std::int16_t mission_id,
-                       std::int16_t landed_stellar_id,
                        const MissionAcceptanceSink &acceptance = {});
 
 // Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel. Follows a system's

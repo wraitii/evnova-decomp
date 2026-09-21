@@ -1439,12 +1439,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
       3,
       static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
       [&](std::int16_t mission_def) {
-        return NovaMission_RunOfferWindow(platform,
-                                          audio,
-                                          state,
-                                          mission_def,
-                                          ctx.stellar_id,
-                                          render_background);
+        return NovaMission_RunOfferWindow(
+            platform, audio, state, mission_def, render_background);
       });
 
   while (!platform.quit_requested()) {

@@ -73,6 +73,14 @@ struct StarmapResult {
 NovaUi_SystemFactionConflictStatusText(const GameState &state,
                                        std::int16_t zero_based_system_id);
 
+// Ghidra 0x004aa980 Mission_RebuildMissionTargetSystemList. Builds the
+// starmap's mission-arrow system list: one TravelStel-or-ReturnStel system per
+// active mission (the ReturnStel system replaces the TravelStel system once
+// travel_stellar_reached is set and the two differ), honoring Bible Flags
+// 0x0002 (suppress) and 0x0200 (extra ShipSyst arrow). Exposed for tests.
+[[nodiscard]] std::vector<std::int16_t>
+BuildMissionTargetSystems(const GameState &state);
+
 // Marker arrow textures shared by the starmap window and the route-map
 // overlay chart (Ghidra CICN 0x3a98 -> DAT_007dc3b0, 0x3a99 -> DAT_007dc3b4).
 struct NovaStarmap_MarkerIcons {

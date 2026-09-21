@@ -457,12 +457,8 @@ LandedExit RunBarDialog(SdlPlatform &platform,
         1,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
         [&](std::int16_t mission_def) {
-          return NovaMission_RunOfferWindow(platform,
-                                            audio,
-                                            state,
-                                            mission_def,
-                                            stellar_id,
-                                            draw_bar_contents);
+          return NovaMission_RunOfferWindow(
+              platform, audio, state, mission_def, draw_bar_contents);
         });
   };
 

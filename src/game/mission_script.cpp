@@ -355,8 +355,7 @@ ExecuteMissionScriptCommand(GameState &state,
       const bool saved_travel_scene = state.in_travel_scene;
       state.in_travel_scene = !state.system_transition_active;
       Mission_ResolveMissionStellarTargets(state, mission_id);
-      (void)Mission_ActivateAtSlot(
-          state, mission_id, state.player.ai_secondary_target_slot, acceptance);
+      (void)Mission_ActivateAtSlot(state, mission_id, acceptance);
       state.in_travel_scene = saved_travel_scene;
     }
     return true;

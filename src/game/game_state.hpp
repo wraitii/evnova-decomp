@@ -54,10 +54,12 @@ struct GameDate {
 
 struct MissionRuntimeFlags {
   bool is_active = false; // +0x00
-  // Cleared-to-proceed latch: set at acceptance when the mission has no
-  // separate fail/visit stellar, and set by the landing/interaction pass when
-  // the destination stellar requires no special handling.
-  bool initial_briefing_done = false; // +0x01
+  // TravelStel-leg latch (MisnRuntimeFlags +0x01; Ghidra
+  // travel_stellar_reached). Set with no TravelStel, on acceptance at the
+  // TravelStel with the mission window open (0x0043f100), or on arrival
+  // (0x004438d0); gates success at the ReturnStel and the starmap T->R arrow
+  // (0x004aa980). Not a briefing flag.
+  bool travel_stellar_reached = false; // +0x01
   // Objective-complete latch, driven by the per-goal evaluation in
   // Mission_HandleMissionOrSurrenderShipReaction (0x00443c60).
   bool objective_complete = false;           // +0x02
@@ -1497,6 +1499,10 @@ struct GameState {
   // -1 none). The <OSN> mission-text wildcard expands to the speaker's
   // personality display name.
   std::int16_t mission_speaker_ship_slot = -1;
+  // Mirrors Ghidra g_mission_interaction_window (0x00774AE4): true while a
+  // Mission BBS / offer window is open; read by Mission_ActivateMissionAtSlot
+  // (0x0043f100). Owned by MissionInteractionWindowScope.
+  bool mission_offer_window_open = false;
   // Ghidra g_travel_scene_ctx (0x007d2b78): the landing DLOG 1000 window
   // handle, nonzero while the travel-destination window owns the world --
   // i.e. during Mission_TickReactionSlotsForTravelInteraction's landing pass

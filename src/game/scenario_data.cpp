@@ -74,7 +74,10 @@ using evnova::util::ReadCString;
   mission.pickup_mode = ReadBeI16(bytes, 0x14);
   mission.drop_off_mode = ReadBeI16(bytes, 0x16);
   mission.scan_mask = ReadBeI16(bytes, 0x18);
-  mission.on_resolve_repeat_count = ReadBeI16(bytes, 0x48);
+  // Bible DatePostInc: the accepted-mission population (0x0043f8c0) reads
+  // this from musn +0x65e, immediately after the 8-byte Require mask. It is
+  // not the AuxShipCount at +0x48.
+  mission.on_resolve_repeat_count = ReadBeI16(bytes, 0x65e);
   // PayVal: populate (0x0043f8c0) reads this 4-byte field from payload +0x1c
   // into MisnActive +0x22. The prior +0x4a read overlapped AuxShipDude/
   // AuxShipSyst and fed garbage into the fee/pay chain.

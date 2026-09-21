@@ -493,7 +493,10 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
                                const std::function<void()> &render_background) {
   SdlPlatform::ScopedPlacement placement_guard(platform,
                                                platform.current_placement());
-  (void)stellar_id;
+  // Ghidra 0x0043c470 creates the shared mission-interaction window handle
+  // (g_mission_interaction_window) for the BBS lifetime; Mission_ActivateAtSlot
+  // reads it for the TravelStel predicate.
+  MissionInteractionWindowScope interaction_window_scope(state);
   const auto contains = [](const SDL_FRect &rect, SDL_FPoint point) {
     return point.x >= rect.x && point.x < rect.x + rect.w &&
            point.y >= rect.y && point.y < rect.y + rect.h;
@@ -626,7 +629,6 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
       if (Mission_ActivateAtSlot(
               state,
               mission_id,
-              stellar_id,
               MakeAcceptanceSink(platform, state, render_background))) {
         return true;
       }
@@ -898,7 +900,6 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                            SdlAudio &audio,
                            GameState &state,
                            std::int16_t mission_def,
-                           std::int16_t landed_stellar_id,
                            const std::function<void()> &render_background) {
   SdlPlatform::ScopedPlacement placement_guard(platform,
                                                platform.current_placement());
@@ -936,7 +937,6 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     if (!Mission_ActivateAtSlot(
             state,
             mission_def,
-            landed_stellar_id,
             MakeAcceptanceSink(platform, state, render_background))) {
       return MissionOfferResult::kActivationFailed;
     }
@@ -964,6 +964,10 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                   mission_def);
     return MissionOfferResult::kDeclined;
   }
+  // Ghidra 0x00442510 creates the shared mission-interaction window handle
+  // (g_mission_interaction_window) here; the can't-refuse direct-activation arm
+  // above runs before window creation and therefore sees the ambient scope.
+  MissionInteractionWindowScope interaction_window_scope(state);
 
   const float win_w = static_cast<float>(dlog->right - dlog->left);
   const float win_h = static_cast<float>(dlog->bottom - dlog->top);
@@ -1094,7 +1098,6 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     if (!Mission_ActivateAtSlot(
             state,
             mission_def,
-            landed_stellar_id,
             MakeAcceptanceSink(platform, state, render_background))) {
       return MissionOfferResult::kActivationFailed;
     }
