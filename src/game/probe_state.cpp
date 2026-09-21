@@ -270,6 +270,13 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("speed", ship.speed);
       row.num("shield", ship.shield_points);
       row.num("armor", ship.armor_points);
+      // Raw tank plus the travel/jump locks, so a probe reader can tell a
+      // fuel-starved ship from one held by its recorded destination or the
+      // velocity-match gate in Stellar_CanShipInitiateJumpSequence.
+      row.num("fuel_points", ship.fuel_points);
+      row.num("jump_destination_stellar_id", ship.jump_destination_stellar_id);
+      row.num("velocity_match_target_ship_slot",
+              ship.velocity_match_target_ship_slot);
       row.num("ai_state_code", ship.ai_state_code);
       row.num("ai_behavior_code", ship.ai_behavior_code);
       row.num("ai_control_mode", ship.ai_control_mode);

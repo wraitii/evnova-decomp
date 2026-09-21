@@ -144,11 +144,16 @@ void NovaStellar_TickStellarDefenseBatteries(GameState &state);
 // Ghidra Shot_QueueBeamHit / Shot_UpdateBeamHitQueue (0x00427a90/0x0042f270)
 // impact leg, exposed for the instantaneous beam queue. Applies one direct
 // weapon impact using the same shield/armor, ionization, impulse, and aggro
-// path as projectiles.
+// path as projectiles. `suppress_retarget_logic` is the original's argument of
+// the same name: true when the beam contact is the owner's locked target (it
+// bypasses the incidental-fire gates), false for a stray beam sweep. The
+// 0x0042f270 incidental arm passes true only when the swept hit equals the
+// beam's recorded target or the owner's current primary target.
 void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                                        std::int16_t owner_ship_slot,
                                        std::int16_t target_ship_slot,
                                        std::int16_t weapon_id,
-                                       std::int8_t impact_variant = 0);
+                                       std::int8_t impact_variant = 0,
+                                       bool suppress_retarget_logic = true);
 
 } // namespace game

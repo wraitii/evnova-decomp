@@ -179,7 +179,9 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
     return false;
   }
 
-  ship.fuel_points = std::max(0.0F, ship.fuel_points - kJumpFuelCost);
+  // A jump burns no NPC fuel: the original only subtracts
+  // FLOAT_kJumpFuelCost (0x005755a4) inside Ship_HandlePlayerShipCore's jump
+  // block, never on the NPC transfer path.
   ship.current_system_id = destination_system;
   ship.primary_target_ship_slot = -1;
   ship.squad_leader_ship_slot = -1;

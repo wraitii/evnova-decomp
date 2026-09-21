@@ -133,12 +133,11 @@ inline constexpr int kHyperspaceWarpUpSoundKey = 128;
 
 // Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence, for an arbitrary
 // (NPC) ship: returns true when `ship` may initiate a hyperspace jump. Gates on
-// the ship's own class fuel capacity (kJumpFuelCost), NOT the player's, and on
-// the ship's CURRENT fuel being at least one jump (Stellar_HandlePlayerShipCore
-// refuses to (re)enter hyperspace while fuel_points < kJumpFuelCost). The
-// original also blocks while velocity-matched to another ship and under
-// certain mission-ship flags; those need the velocity-match / mission systems
-// and are deferred (see the .cpp).
+// the ship's own class fuel capacity (kJumpFuelCost), NOT the player's; on the
+// ship not being velocity-matched to another ship; and, for personality Flags2
+// 0x0001 ("starts with zero fuel"), on the current tank being at least one
+// jump. This shared gate does NOT otherwise inspect current fuel -- that term
+// belongs to the player's Stellar_HandlePlayerShipCore jump block.
 [[nodiscard]] bool
 NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
                                        const Ship &ship);

@@ -853,7 +853,7 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
 // `state 0 -> adjacent stellar -> state 1/2/6` ladder visible in both Ghidra
 // supervisors; mission and special-loadout branches remain deferred.
 void NovaAi_ReacquireTravelOrSettle(GameState &state, Ship &ship) {
-  const System *sys = CurrentSystem(state);
+  const System *sys = CurrentSystem(state, ship);
   const bool still_at_point = sys && ship.jump_destination_stellar_id >= 0 &&
                               NovaTargeting_IsStellarAdjacentToSystem(
                                   *sys, ship.jump_destination_stellar_id);
@@ -948,7 +948,7 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
     // the current system's nav points. If it is, the ship is parked/at a
     // valid stellar and tries to jump away; if not, it picks a fresh random
     // adjacent travel stellar to wander toward.
-    const System *sys = CurrentSystem(state);
+    const System *sys = CurrentSystem(state, ship);
     const bool still_at_point = sys && ship.jump_destination_stellar_id >= 0 &&
                                 NovaTargeting_IsStellarAdjacentToSystem(
                                     *sys, ship.jump_destination_stellar_id);
@@ -1270,11 +1270,13 @@ void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship) {
   }
 }
 
-// Ghidra 0x00402e50 Ship_UpdateShipAiBehavior0x03_Warship. Hostile behavior
-// acquires a nearby contact when idle, preserves an active primary target, and
-// falls back to the normal travel/jump ladder when combat has no target. The
-// government flee, weapon-readiness, mission-fleet, and capture-variant arms
-// depend on data not represented by the current clean-room Ship model.
+// Ghidra 0x00402e50 Ship_UpdateShipAiBehavior0x03_Warship. Hostile warship
+// supervisor: government hold/aggression policy, idle target acquisition,
+// target retention/loss, the state-1/0x14/2 travel re-acquire arm, the state-6
+// attached-fighter wait, and the low-shield / cowardice / ammo-out disengage
+// arms. The capture/plunder government variant (flags_primary 0x1000) is the
+// separate 0x004038b0 port. The random_ai_render_cadence aggression thresholds
+// remain provisional.
 void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     return;
@@ -1284,44 +1286,248 @@ void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
     return;
   }
 
-  if (ship.primary_target_ship_slot != -1) {
-    if (!state.SlotInRange(
-            static_cast<std::size_t>(ship.primary_target_ship_slot)) ||
-        !state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot))
-             .is_active ||
-        NovaAiShip_IsDestroyed(state.ShipAt(
-            static_cast<std::size_t>(ship.primary_target_ship_slot)))) {
-      ship.primary_target_ship_slot = -1;
-      ship.ai_state_code = 0;
+  const auto ship_government = [&state, &ship]() -> const Government * {
+    return ship.faction_or_government_id == -1
+               ? nullptr
+               : state.scenario.GovernmentByIndex(
+                     ship.faction_or_government_id);
+  };
+
+  // Government hold window [-900, 0]: a non-threat-policy government drops a
+  // player-squad threat; a government with Flags 0x0004 instead turns hostile
+  // to an engageable player.
+  if (ship.faction_or_government_id != -1 &&
+      ship.ai_station_hold_timer > -900.0F &&
+      ship.ai_station_hold_timer <= 0.0F) {
+    if (const Government *govt = ship_government(); govt != nullptr) {
+      if ((govt->flags_primary & 0x0004U) == 0U) {
+        if ((govt->flags_primary & 0x0040U) != 0U &&
+            NovaTargeting_IsThreatToPlayerSquad(state, ship)) {
+          ship.primary_target_ship_slot = -1;
+          ship.ai_state_code = 0;
+        }
+      } else if (!NovaTargeting_IsThreatToPlayerSquad(state, ship) &&
+                 NovaAiShip_CanEngageTargetUnderCloakRules(
+                     state, state.player, ship)) {
+        NovaAi_SetShipHostileToPlayer(state, ship);
+        ship.primary_target_ship_slot = 0;
+        ship.ai_hostility_accumulator = 1;
+      }
     }
   }
 
-  if (ship.ai_state_code == 0 && ship.primary_target_ship_slot == -1) {
-    NovaAi_AcquirePrimaryTarget(state, ship);
+  // A control-mode 4 "hold position" command forces the ship back into the
+  // state-2 centre/standoff manoeuvre unless it is already jumping (2) or
+  // retreating (0xb).
+  if (ship.ai_control_mode == 4 && ship.ai_state_code != 2 &&
+      ship.ai_state_code != 0xb) {
+    ship.ai_state_code = 2;
+  }
+
+  // State 0: idle acquisition. A newly acquired contact promotes to attack;
+  // without one, fall through to the travel/jump ladder. The original runs the
+  // ladder twice; the second pass only re-runs when the first left no target
+  // and is retained for fidelity.
+  if (ship.ai_state_code == 0) {
     if (ship.primary_target_ship_slot == -1) {
-      NovaAi_ReacquireTravelOrSettle(state, ship);
+      if (ship.ai_station_hold_timer <= 0.0F) {
+        NovaAi_AcquirePrimaryTarget(state, ship);
+        if (ship.primary_target_ship_slot == -1) {
+          NovaAi_ReacquireTravelOrSettle(state, ship);
+        } else {
+          ship.ai_state_code = 4;
+        }
+        if (ship.primary_target_ship_slot == -1) {
+          NovaAi_ReacquireTravelOrSettle(state, ship);
+        }
+      }
     } else if (ship.ai_station_hold_timer <= 0.0F) {
-      // 0x00402e50 state-0 arm: a freshly acquired target promotes to attack
-      // here, not inside Ship_AcquirePrimaryTargetForShip.
       ship.ai_state_code = 4;
     }
   }
 
+  // Threat escalation: any live hostility with a target attacks unless already
+  // retreating (3/7) or holding station.
   if (ship.ai_hostility_accumulator > 0 &&
-      ship.primary_target_ship_slot != -1 && ship.ai_state_code != 3 &&
-      ship.ai_state_code != 7 && ship.ai_station_hold_timer <= 0.0F) {
+      ship.primary_target_ship_slot != -1 && ship.ai_state_code != 7 &&
+      ship.ai_state_code != 3 && ship.ai_station_hold_timer <= 0.0F) {
     ship.ai_state_code = 4;
   }
 
-  if (ship.ai_state_code == 4 && ship.primary_target_ship_slot != -1) {
+  // Travel states re-scan for a contact each tick: 1/0x14/2 (wandering /
+  // jumping / standoff) promote to attack on acquisition, keeping an already
+  // held target only while not holding station. The original also tests
+  // state != 3 and != 7 here, which are unreachable for these states.
+  const std::int16_t travel_state = ship.ai_state_code;
+  if (travel_state == 1 || travel_state == 0x14 || travel_state == 2) {
+    if (ship.primary_target_ship_slot == -1) {
+      if (ship.ai_station_hold_timer <= 0.0F) {
+        NovaAi_AcquirePrimaryTarget(state, ship);
+        if (ship.primary_target_ship_slot != -1) {
+          ship.ai_state_code = 4;
+        }
+      }
+    } else if (ship.ai_station_hold_timer <= 0.0F) {
+      ship.ai_state_code = 4;
+    }
+  }
+
+  // State 6: no jump route / no fuel. Re-scan once; if still targetless, wait
+  // while behavior-5 fighter attachments with no stellar home remain,
+  // otherwise release to state 0. Without this arm a parked warship never
+  // leaves state 6.
+  if (ship.ai_state_code == 6) {
+    ship.primary_target_ship_slot = -1;
+    NovaAi_AcquirePrimaryTarget(state, ship);
+    if (ship.primary_target_ship_slot == -1) {
+      int attached_fighters = 0;
+      for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+        const Ship &other = state.ShipAt(slot);
+        if (other.squad_leader_ship_slot == ship.ship_instance_id &&
+            other.is_active && other.ai_behavior_code == 5 &&
+            other.defense_fleet_home_stellar_id == -1 &&
+            !NovaAiShip_IsDisabled(state, other)) {
+          ++attached_fighters;
+        }
+      }
+      if (attached_fighters == 0) {
+        ship.ai_state_code = 0;
+      }
+    }
+  }
+
+  // Loss of an attack target: inactive/destroyed, or disabled with no
+  // fireable non-secondary weapon left.
+  if (ship.primary_target_ship_slot != -1 && ship.ai_state_code == 4) {
     const auto target_slot =
         static_cast<std::size_t>(ship.primary_target_ship_slot);
     if (!state.SlotInRange(target_slot) ||
         !state.ShipAt(target_slot).is_active ||
-        NovaAiShip_IsDestroyed(state.ShipAt(target_slot))) {
-      ship.primary_target_ship_slot = -1;
+        NovaAiShip_IsDestroyed(state.ShipAt(target_slot)) ||
+        (NovaAiShip_IsDisabled(state, state.ShipAt(target_slot)) &&
+         !NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship))) {
       ship.ai_state_code = 0;
+      ship.primary_target_ship_slot = -1;
     }
+  }
+
+  // Low-shield government retreat (Govt Flags 0x0010): once engaged and below
+  // half shields, a fleet leader whose odds exceed MaxOdds disengages, with
+  // the threshold doubled while this system's own allied reinforcements are
+  // still on cooldown.
+  if (ship.primary_target_ship_slot != -1 &&
+      ship.faction_or_government_id != -1 && ship.ai_state_code == 4) {
+    if (const Government *govt = ship_government();
+        govt != nullptr && (govt->flags_primary & 0x0010U) != 0U) {
+      const double max_shield = NovaAi_ComputeMaxShieldPoints(state, ship);
+      if (static_cast<double>(ship.shield_points) < max_shield * 0.5 &&
+          ship.ai_odds_score >= 0.0F) {
+        const System *sys = state.scenario.System(
+            static_cast<std::int16_t>(ship.current_system_id + 0x80));
+        if (sys != nullptr && sys->reinf_fleet >= 0) {
+          const FleetDef *fleet = state.scenario.Fleet(
+              static_cast<std::int16_t>(sys->reinf_fleet + 0x80));
+          const bool allied =
+              fleet != nullptr && fleet->government_id >= 0 &&
+              NovaGovernment_AreGovtsAllied(state.scenario,
+                                            ship.faction_or_government_id,
+                                            fleet->government_id);
+          bool retreat = false;
+          if (allied) {
+            const float cooldown =
+                state.reinforcement_countdown[static_cast<std::size_t>(
+                    ship.current_system_id)];
+            retreat = cooldown <= 0.0F
+                          ? govt->max_odds < ship.ai_odds_score
+                          : govt->max_odds * 2.0F < ship.ai_odds_score;
+          } else {
+            retreat = govt->max_odds < ship.ai_odds_score;
+          }
+          if (retreat) {
+            ship.ai_state_code = 3;
+          }
+        } else if (govt->max_odds < ship.ai_odds_score) {
+          ship.ai_state_code = 3;
+        }
+      }
+    }
+  }
+
+  // Cowardice / depletion disengage: outside states 2/3/0xb, an engaged
+  // unled ship whose shields fall below its aggression or personality
+  // cowardice threshold, or whose cost-bearing weapons are all depleted,
+  // retreats. random_ai_render_cadence packs the personality aggression level:
+  // 1 -> 30% shields, 2 -> 15%, 4 -> never retreats.
+  if (ship.primary_target_ship_slot != -1 && ship.ai_state_code != 7 &&
+      ship.ai_state_code != 3) {
+    if (ship.ai_station_hold_timer <= 0.0F) {
+      ship.ai_state_code = 4;
+    }
+
+    const double max_shield = NovaAi_ComputeMaxShieldPoints(state, ship);
+    int shield_retreat_threshold = -0x7fff;
+    if (ship.pers_def_slot == -1) {
+      if (ship.random_ai_render_cadence == 1) {
+        shield_retreat_threshold =
+            static_cast<int>(std::lround(max_shield * 0.3));
+      } else if (ship.random_ai_render_cadence == 2) {
+        shield_retreat_threshold =
+            static_cast<int>(std::lround(max_shield * 0.15));
+      }
+    } else if (static_cast<std::size_t>(ship.pers_def_slot) <
+               state.scenario.pers_defs.size()) {
+      const double cowardice =
+          static_cast<double>(
+              state.scenario
+                  .pers_defs[static_cast<std::size_t>(ship.pers_def_slot)]
+                  .cowardice_pct) *
+          0.01 * max_shield;
+      shield_retreat_threshold = static_cast<int>(std::lround(cowardice));
+    }
+
+    const Government *govt = ship_government();
+    if (ship.shield_points < static_cast<float>(shield_retreat_threshold) &&
+        ship.squad_leader_ship_slot == -1 && govt != nullptr &&
+        (govt->flags_primary & 0x0010U) != 0U && ship.ai_state_code != 2 &&
+        ship.ai_state_code != 3 && ship.ai_state_code != 0xb) {
+      ship.ai_state_code = 3;
+    }
+
+    const ShipClass *ship_class = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (ship_class != nullptr &&
+        (ship_class->flags_secondary & 0x0080U) != 0U &&
+        NovaWeapon_ClassifyAmmoReadiness(state, ship) != 0 &&
+        ship.ai_state_code != 2 && ship.ai_state_code != 3 &&
+        ship.ai_state_code != 0xb) {
+      ship.ai_state_code = 3;
+    }
+  }
+
+  // State 2 without a jump route: re-pick a travel stellar, otherwise fall to
+  // the no-route state 6. (The original re-tests the jump gate in the -1
+  // branch, but the gate is false at entry to this arm, so state 6 is the only
+  // outcome.)
+  if (ship.ai_state_code == 2 &&
+      !NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+    ship.ai_secondary_target_slot = -1;
+    ship.ai_secondary_target_slot = NovaAi_SelectRandomAdjacentTravelStellar(
+        state, ship, /*strict_mode=*/false, /*unrestricted_only=*/false);
+    if (ship.ai_secondary_target_slot == -1) {
+      ship.ai_state_code = 6;
+    } else {
+      ship.travel_transfer_mode = 2;
+      ship.ai_state_code = 1;
+    }
+  }
+
+  // Attack run out of ammo: stand down and clear all targets.
+  if (ship.ai_state_code == 4 &&
+      NovaWeapon_ClassifyAmmoReadiness(state, ship) == 2) {
+    ship.ai_state_code = 0;
+    ship.ai_control_mode = 0;
+    ship.primary_target_ship_slot = -1;
+    ship.ai_secondary_target_slot = -1;
   }
 }
 

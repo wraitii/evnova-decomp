@@ -5,6 +5,7 @@
 #include "game/nova_math.hpp"
 #include "game/scenario_data.hpp"
 #include "game/ship_ai.hpp"
+#include "game/ship_ai_internal.hpp"
 #include "game/ship_spawn.hpp"
 #include "game/spaceflight.hpp"
 #include "game/targeting.hpp"
@@ -1040,7 +1041,9 @@ TEST_CASE("state 0x14 NPC jump transfers to the linked system") {
   ship.current_system_id = source_system;
   ship.ai_state_code = 0x14;
   ship.ai_secondary_target_slot = target_stellar;
-  ship.fuel_points = 100.0F;
+  // A jump neither requires nor consumes NPC fuel: a fleet lead spawned with
+  // an empty tank still transfers, and the tank is unchanged afterward.
+  ship.fuel_points = 0.0F;
 
   REQUIRE(game::NovaAi_CompleteNpcJump(state, ship));
   CHECK(ship.current_system_id == destination_system);
@@ -1051,10 +1054,12 @@ TEST_CASE("state 0x14 NPC jump transfers to the linked system") {
   CHECK(ship.vel_y == Catch::Approx(0.0F));
 }
 
-// The jump gate also requires CURRENT fuel: a jumping-capable class with an
-// empty tank is refused, mirroring Stellar_HandlePlayerShipCore's
-// `fuel_points < _DAT_005755a4 (100)` jump block.
-TEST_CASE("jump gate requires current fuel") {
+// The shared NPC jump gate (0x00415b80) does NOT require current fuel for
+// ordinary ships: a class able to carry a jump may initiate one with an empty
+// tank. Only personalities with Flags2 0x0001 ("starts with zero fuel") are
+// held back until the tank holds a jump's worth. The velocity-match lock also
+// refuses the jump.
+TEST_CASE("jump gate only requires current fuel for zero-fuel personalities") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
@@ -1071,13 +1076,113 @@ TEST_CASE("jump gate requires current fuel") {
       std::distance(first, static_cast<const game::ShipClass *>(with_fuel)));
 
   game::Ship npc;
+  npc.ship_instance_id = 3;
   npc.ship_class_id = cls_zero;
-  npc.fuel_points = 0.0F; // empty tank
+  npc.pers_def_slot = -1;
+  npc.fuel_points = 0.0F; // empty tank, ordinary ship
+  CHECK(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+
+  // Velocity-matched to another ship: refused; matched to itself: allowed.
+  npc.velocity_match_target_ship_slot = 4;
+  CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+  npc.velocity_match_target_ship_slot = npc.ship_instance_id;
+  CHECK(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+  npc.velocity_match_target_ship_slot = -1;
+
+  REQUIRE(!state.scenario.pers_defs.empty());
+  state.scenario.pers_defs.front().flags_secondary = 0x0001;
+  npc.pers_def_slot = 0;
   CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
   npc.fuel_points = game::kJumpFuelCost - 1.0F;
   CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
   npc.fuel_points = game::kJumpFuelCost;
   CHECK(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+}
+
+// Behavior 0x03 (0x00402e50) state-1/0x14/2 arm: a traveling warship must
+// re-scan for a hostile contact each tick instead of ignoring it until the
+// travel ladder settles. A Flags-1 grudge personality makes acquisition
+// deterministic against the player.
+TEST_CASE("warship behavior reacquires a target from travel states") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Free-energy weapon so the supervisor's trailing ammo-out arm does not
+  // immediately clear the freshly acquired attack state.
+  int weapon_bank = -1;
+  for (std::size_t w = 0; w < state.scenario.weapons.size(); ++w) {
+    if (state.scenario.weapons[w].ammo_type >= -1000 &&
+        state.scenario.weapons[w].ammo_type <= -1) {
+      weapon_bank = static_cast<int>(w);
+      break;
+    }
+  }
+  REQUIRE(weapon_bank >= 0);
+
+  state.scenario.pers_defs.resize(1);
+  game::PersDef &pers = state.scenario.pers_defs[0];
+  pers.alive = true;
+  pers.grudge = true;
+  pers.flags_primary = 0x0001;
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = 0;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.current_system_id = 0;
+  ship.pers_def_slot = 0;
+  ship.ai_behavior_code = 3;
+  ship.armor_points = 1000.0F;
+  ship.npc_weapon_count_by_class[static_cast<std::size_t>(weapon_bank)] = 1;
+
+  for (const std::int16_t state_code : {1, 0x14, 2}) {
+    ship.primary_target_ship_slot = -1;
+    ship.ai_state_code = state_code;
+    game::NovaAi_UpdateBehavior0x03(state, ship);
+    CHECK(ship.primary_target_ship_slot == 0);
+    CHECK(ship.ai_state_code == 4);
+  }
+}
+
+// Behavior 0x03 state-6 arm: a parked warship with no target and no attached
+// behavior-5 fighter returns to state 0 so the next supervisor pass can travel;
+// an attached fighter with no stellar home holds it in state 6.
+TEST_CASE("warship behavior leaves state 6 once no fighters remain") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  state.player.is_active = false;
+  const int slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = -1;
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 6;
+  ship.primary_target_ship_slot = -1;
+  ship.armor_points = 1000.0F;
+
+  game::NovaAi_UpdateBehavior0x03(state, ship);
+  CHECK(ship.ai_state_code == 0);
+
+  const int fighter_slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(fighter_slot > 0);
+  game::Ship &fighter = state.ShipAt(static_cast<std::size_t>(fighter_slot));
+  fighter.current_system_id = 0;
+  fighter.faction_or_government_id = -1;
+  fighter.ai_behavior_code = 5;
+  fighter.defense_fleet_home_stellar_id = -1;
+  fighter.squad_leader_ship_slot = ship.ship_instance_id;
+  fighter.armor_points = 1000.0F;
+
+  ship.ai_state_code = 6;
+  game::NovaAi_UpdateBehavior0x03(state, ship);
+  CHECK(ship.ai_state_code == 6);
 }
 
 // ---------------------------------------------------------------------------
