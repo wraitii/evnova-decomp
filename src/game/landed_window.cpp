@@ -358,6 +358,13 @@ void Stellar_Launch(GameState &state) {
   // player.
   NovaAsteroid_InitSystem(state);
 
+  // Stellar_HandleStellarEntryAndExit 0x00458304: the post-launch cleanup
+  // drops the player's primary ship target just before the vacant-ship sweep,
+  // so a recycled NPC slot cannot leave a stale reticle on an unrelated fresh
+  // ship after the population rebuild below.
+  state.player.primary_target_ship_slot = -1;
+  state.ship_reticle_pulse = 0.0F;
+
   // Stellar_HandleStellarEntryAndExit 0x00458a47..0x00458bd2 performs the
   // vacant-ship sweep and System_RebuildInitialNpcAndMissionPopulation only
   // after Stellar_RunDockAndLaunchSequence returns. Missions accepted in the
