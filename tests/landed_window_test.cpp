@@ -812,6 +812,11 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   state.player.armor_points = 2.0F;
   state.travel.selected_stellar_id = 0x80;
   state.travel.engage_timer = 0x2ee; // approach armed
+  // A ship target held across the landing must be dropped by the launch
+  // cleanup before the vacant-ship sweep recycles NPC slots
+  // (Stellar_HandleStellarEntryAndExit 0x00458304).
+  state.player.primary_target_ship_slot = 1;
+  state.ship_reticle_pulse = 128.0F;
 
   // A healthy attached escort must survive the launch rebuild and be adopted
   // into the destination system before mission/ambient population is added.
@@ -877,6 +882,10 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   CHECK(state.player.heading < 6.2831855F);
   // 0x00456158: the travel selection resets on launch.
   CHECK(state.travel.selected_stellar_id == -1);
+  // 0x00458304: the post-launch cleanup also clears the primary ship target
+  // before the NPC rebuild can reuse the slot.
+  CHECK(state.player.primary_target_ship_slot == -1);
+  CHECK(state.ship_reticle_pulse == 0.0F);
   // 0x00456128: the launch tail swallows the held launch/cancel command edge
   // latches so the key that left the dock must be released before it re-fires.
   CHECK(state.command_latches.return_to_menu_was_held);
