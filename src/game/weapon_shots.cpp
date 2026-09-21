@@ -32,11 +32,17 @@ using weapon_detail::WeaponAt;
 namespace {
 // Shot_UpdateShotGuidance constants (typed + pre-commented in the Ghidra DB).
 inline constexpr float kGuidanceAgeGateF64 = 15.0F; // 0x00575400
-inline constexpr float kJamTurnSignF32 = -1.0F;     // 0x00575350
-inline constexpr float kRocketBlendOldF32 = 95.0F;  // 0x0057540c
-inline constexpr float kRocketBlendNewF32 = 5.0F;   // 0x00575408
-inline constexpr float kOnePercentF64 = 0.01F;      // 0x00575368
-inline constexpr float kBombNoseTurnRate = 1.0F;    // 0x00575318
+// Shot_HandleShot's target-chain age threshold (k_guidance_life_gate_f64 at
+// 0x005754c0 = 30.0), distinct from the guidance-controller gate above.
+inline constexpr float kShotExpiryAgeGate = 30.0F; // 0x005754c0
+// k_shot_expiry_min_life_f32 (0x005754b8) = -32000.0; the outer expiry impact
+// requires remaining life strictly above it.
+inline constexpr float kShotExpiryMinLife = -32000.0F; // 0x005754b8
+inline constexpr float kJamTurnSignF32 = -1.0F;        // 0x00575350
+inline constexpr float kRocketBlendOldF32 = 95.0F;     // 0x0057540c
+inline constexpr float kRocketBlendNewF32 = 5.0F;      // 0x00575408
+inline constexpr float kOnePercentF64 = 0.01F;         // 0x00575368
+inline constexpr float kBombNoseTurnRate = 1.0F;       // 0x00575318
 inline constexpr float kOriginalRawCallTicks = 21.0F * 0.03F;
 } // namespace
 
@@ -181,6 +187,9 @@ void NovaWeapon_ClearTransientCombatState(GameState &state) {
     object = FreeflightObjectState{};
   }
   state.sw_particles.clear();
+  for (WeaponSmokePuff &puff : state.weapon_smoke_puffs) {
+    puff = WeaponSmokePuff{};
+  }
   state.sw_particle_tick_accumulator = 0.0F;
   state.shot_trail_tick_accumulator = 0.0F;
   state.pending_fire_sounds.clear();
@@ -1428,6 +1437,9 @@ void NovaWeapon_StepShotAnimation(GameState &state,
     return;
   }
   const std::int16_t frame_delay = w->beam_width_or_animation_frame_delay;
+  // Shot_HandleShot latches the display frame from frame_cycle_index BEFORE
+  // the animation increment (the increment only shows next call).
+  std::int16_t display = shot.frame_cycle_index;
   shot.anim_elapsed += elapsed_ticks;
   if (frame_delay < 1 || shot.anim_elapsed >= static_cast<float>(frame_delay)) {
     shot.frame_cycle_index += 1;
@@ -1437,8 +1449,103 @@ void NovaWeapon_StepShotAnimation(GameState &state,
   // count, mirroring Shot_HandleShot's wrap. The reverse-wrap (flags_secondary
   // bit 1 -> frame_count - 1) needs the frame count, which lives on the SDL
   // side; DrawShots owns that clamp once the set is resolved.
+  //
+  // Ghidra Shot_HandleShot: a reverse-animation weapon (flags_secondary 0x1 and
+  // 0x2) is held on frame 0 while its remaining life is still inside the
+  // ProxSafety window (life > lifetime - proximity_safety_ticks). This runs
+  // after the increment/wrap and overrides both the live cycle and the latched
+  // display frame.
+  if ((w->flags_secondary & 0x0001U) != 0U &&
+      (w->flags_secondary & 0x0002U) != 0U &&
+      shot.life_ticks_remaining >
+          static_cast<float>(w->lifetime_ticks - w->proximity_safety_ticks)) {
+    shot.frame_cycle_index = 0;
+    shot.anim_elapsed = 0.0F;
+    display = 0;
+  }
+  shot.display_frame = static_cast<int>(display);
 }
 
+namespace {
+
+// Ghidra 0x004215d0 Shot_SpawnWeaponSmokePuff. Takes the first dead slot
+// (life < 0) of the 64-entry pool; a full pool drops the puff, as the original
+// returns without spawning. `variant` is the Flags1-selected animation (0/2 =
+// 8-frame, 1/3 = ping-pong); `effect_slot` is Bible SmokeSet. The loader only
+// creates sprite sets for SmokeSet 0 and 1; the original's slot scan also
+// requires the set to be non-null, so a higher SmokeSet spawns nothing at all
+// (it must not consume a pool slot either).
+void SpawnWeaponSmokePuff(GameState &state,
+                          float x,
+                          float y,
+                          std::int16_t variant,
+                          std::int16_t effect_slot) {
+  if (effect_slot < 0 || effect_slot > 1) {
+    return;
+  }
+  for (WeaponSmokePuff &puff : state.weapon_smoke_puffs) {
+    if (puff.life < 0.0F) {
+      puff.pos_x = x;
+      puff.pos_y = y;
+      puff.variant = variant;
+      puff.effect_slot = effect_slot;
+      puff.life = 0.0F;
+      return;
+    }
+  }
+}
+
+// Ghidra 0x0042c660 Shot_UpdateWeaponSmokePuffs. Life advances by
+// g_death_puff_offset_scale_f64 (0.25) * the normalized tick scale; variants
+// 0/2 run an 8-frame animation and 1/3 ping-pong over 3 frames, with variants
+// 2/3 at half speed. A puff that steps past its last frame is deactivated
+// (life = -1).
+void UpdateWeaponSmokePuffs(GameState &state, float elapsed_ticks) {
+  constexpr float kLifeAdvanceScale = 0.25F; // g_death_puff_offset_scale_f64
+  const float step = std::max(0.0F, elapsed_ticks) * kLifeAdvanceScale;
+  for (WeaponSmokePuff &puff : state.weapon_smoke_puffs) {
+    if (puff.life < 0.0F) {
+      continue;
+    }
+    puff.life += step;
+    if (puff.variant == 1 || puff.variant == 3) {
+      const float t = puff.variant == 3 ? puff.life * 0.5F : puff.life;
+      if (static_cast<int>(std::trunc(t)) >= 6) {
+        puff.life = -1.0F;
+      }
+    } else if (static_cast<int>(std::trunc(
+                   puff.variant == 2 ? puff.life * 0.5F : puff.life)) >= 8) {
+      puff.life = -1.0F;
+    }
+  }
+}
+
+} // namespace
+
+// Display frame for a smoke puff, or -1 when it is inactive/finished. Mirrors
+// the variant animation in Shot_UpdateWeaponSmokePuffs so the renderer picks
+// the same frame.
+int NovaWeapon_SmokePuffFrame(const WeaponSmokePuff &puff) {
+  if (puff.life < 0.0F) {
+    return -1;
+  }
+  if (puff.variant == 1 || puff.variant == 3) {
+    const float t = puff.variant == 3 ? puff.life * 0.5F : puff.life;
+    const int frame = static_cast<int>(std::trunc(t));
+    if (frame < 3) {
+      return frame;
+    }
+    if (frame < 6) {
+      return 5 - frame;
+    }
+    return -1;
+  }
+  const float t = puff.variant == 2 ? puff.life * 0.5F : puff.life;
+  const int frame = static_cast<int>(std::trunc(t));
+  return frame < 8 ? frame : -1;
+}
+
+// Ghidra 0x00435830 Shot_HandleShot.
 void NovaWeapon_TickShots(GameState &state,
                           float elapsed_ticks,
                           const NovaPreferences *prefs) {
@@ -1488,6 +1595,32 @@ void NovaWeapon_TickShots(GameState &state,
       shot.consumed = true;
       continue;
     }
+    // Outer expiry test (primary site of the Shot_HandleShot port above). The
+    // impact block runs on the frame AFTER lifetime crossed zero (the previous
+    // frame's tail latched -1) and also when the shot's system no longer
+    // matches the player's; the linked-submunition launch is inside this block,
+    // before the area impact. The original ALSO requires the shot sprite's
+    // +0x14 visible/prepared flag; the port's `consumed` latch substitutes for
+    // it (a retired or transient-cleared shot never re-enters this loop). The
+    // life > k_shot_expiry_min_life_f32 (-32000.0, 0x005754b8) gate excludes
+    // exactly the DAT_00596d29 transient-clear latch value.
+    if (shot.system_id != state.player.current_system_id ||
+        shot.life_ticks_remaining <= 0.0F) {
+      if (shot.system_id == state.player.current_system_id &&
+          shot.life_ticks_remaining > kShotExpiryMinLife) {
+        if (weapon->range_link_gate > 0 &&
+            (weapon->flags_secondary & 0x0020U) == 0U) {
+          const ActiveShot expiring_shot = shots[shot_index];
+          NovaWeapon_SpawnLinkedShotsOnImpact(
+              state, expiring_shot, expiring_shot.target_ship_slot);
+        }
+        NovaWeapon_ResolveShotExpiryImpact(state, shots[shot_index], *weapon);
+      }
+      shots[shot_index].life_ticks_remaining = -2.0F;
+      shots[shot_index].life_frames = 0;
+      shots[shot_index].consumed = true;
+      continue;
+    }
     // Owner sanitation and the target latches. Point-defense shots are always
     // targetless (they were lead-aimed at fire time); a mode-1 shot whose
     // recorded target died latches 998 and flies inert for the rest of its
@@ -1511,62 +1644,155 @@ void NovaWeapon_TickShots(GameState &state,
       }
     }
 
+    // One-time guidance age gate (Shot_HandleShot local bVar7): computed from
+    // the PRE-decrement lifetime, so the target-chain arm below fires on the
+    // single frame whose post-decrement age crosses the threshold.
+    const float guidance_age_before =
+        static_cast<float>(weapon->lifetime_ticks) - shot.life_ticks_remaining;
+    const bool homing_target_locked =
+        weapon->weapon_mode_code == 1 && shot.owner_ship_slot != -1 &&
+        shot.target_ship_slot > 0 && shot.guidance_state == 0 &&
+        tick_scale * kShotExpiryAgeGate < guidance_age_before;
+
     shot.life_ticks_remaining -= tick_scale;
     shot.life_frames =
         static_cast<int>(std::ceil(std::max(0.0F, shot.life_ticks_remaining)));
+    // The original latches -1 on the crossing frame (or -32000 under the
+    // DAT_00596d29 transient-clear latch, which the port applies structurally
+    // in NovaWeapon_ClearTransientCombatState) and still guides/moves/animates
+    // the shot; the impact then runs from the outer test next frame.
     if (shot.life_ticks_remaining <= 0.0F) {
-      // Ghidra Shot_HandleShot (0x00435830) emits the weapon's expiry/fuse
-      // impact for shots in the player's system (gated in the original by
-      // life > k_shot_expiry_min_life -63000, which a -1 expiry satisfies).
-      if (shot.system_id == state.player.current_system_id) {
-        // The expiry path launches linked submunitions unless Flags2 0x20
-        // explicitly suppresses that behavior. Snapshot first because the
-        // spawner appends to active_shots and may invalidate this reference.
-        if (weapon->range_link_gate > 0 &&
-            (weapon->flags_secondary & 0x0020U) == 0U) {
-          const ActiveShot expiring_shot = shots[shot_index];
-          NovaWeapon_SpawnLinkedShotsOnImpact(
-              state, expiring_shot, expiring_shot.target_ship_slot);
-        }
-        NovaEffects_SpawnAreaImpact(state,
-                                    shots[shot_index].pos_x,
-                                    shots[shot_index].pos_y,
-                                    weapon->impact_effect_id,
-                                    weapon->splash_radius,
-                                    true);
-      }
-      shots[shot_index].consumed = true;
-      continue;
+      shot.life_ticks_remaining = -1.0F;
     }
     // Guidance runs before movement: a homing shot turns and rebuilds its
     // velocity, then the (possibly new) vector integrates this frame.
     NovaWeapon_UpdateShotGuidance(state, shot, tick_scale, raw_call_count);
     shot.pos_x += shot.vel_x * tick_scale;
     shot.pos_y += shot.vel_y * tick_scale;
-    if (trail_raw_call_count > 0 && tick_scale > 0.0F &&
-        (prefs == nullptr || !prefs->smoke_trails) &&
-        weapon->trail_particle_count > 0) {
-      // Sprite_GetFrameFullWidth(shot->sprite_ref) / 2, rounded up, is the
-      // rear-edge anchor used by 0x0043609d. A prepared collision mask carries
-      // the exact frame width; otherwise the original's missing/default shot
-      // sprite is represented by its 32px full-width default (half = 16).
-      const float anchor_offset_px =
-          weapon->trail_particle_count > 0 && shot.collision_mask.HasMask()
-              ? static_cast<float>((shot.collision_mask.mask->width + 1) / 2)
-              : 16.0F;
-      for (int raw_call = 0; raw_call < trail_raw_call_count; ++raw_call) {
-        // TODO(decomp(0x00436170)) skipped: ActiveShot does not model the
-        // original sprite's fade intensity, so the blend weight stays 0x20
-        // instead of 0x20 - sprite_intensity.
-        NovaEffects_SpawnWeaponTrailParticles(state,
-                                              shot.pos_x,
-                                              shot.pos_y,
-                                              *weapon,
-                                              shot.heading_deg,
-                                              anchor_offset_px);
+    // Player target-chain arm: on the frame a player-owned mode-1 homing shot
+    // crosses the guidance age gate, if its target is not on the same squad
+    // root as the player the target is struck with the -32000 sentinel damage
+    // (force-armor-only, fire-restriction transition armed). The post-decrement
+    // age is the other half of the one-time crossing test.
+    {
+      const std::int16_t target_slot = shot.target_ship_slot;
+      const float guidance_age_after =
+          static_cast<float>(weapon->lifetime_ticks) -
+          shot.life_ticks_remaining;
+      if (!homing_target_locked && tick_scale > 0.0F &&
+          weapon->weapon_mode_code == 1 && shot.owner_ship_slot == 0 &&
+          target_slot > 0 &&
+          target_slot < static_cast<std::int16_t>(GameState::kMaxShips) &&
+          shot.guidance_state == 0 &&
+          state.ShipAt(static_cast<std::size_t>(target_slot))
+                  .squad_leader_ship_slot != 0 &&
+          tick_scale * kShotExpiryAgeGate < guidance_age_after &&
+          !NovaShip_ShipsShareSquadRoot(state, target_slot, 0)) {
+        Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+        Ship_ApplyDamageToShip(
+            state,
+            target_slot,
+            target,
+            target.pos_x,
+            target.pos_y,
+            /*impact_impulse=*/0,
+            /*armor_damage=*/-32000,
+            /*shield_damage=*/-32000,
+            /*attacker_ship_slot=*/0,
+            /*allow_aggro_updates=*/true,
+            /*suppress_retarget_logic=*/true,
+            /*force_armor_only=*/true,
+            /*bypass_shields=*/false,
+            /*player_aggro_delta=*/
+            static_cast<std::int16_t>(
+                static_cast<std::int32_t>(weapon->reload_ticks)),
+            /*check_fire_restriction_transition=*/true);
       }
     }
     NovaWeapon_StepShotAnimation(state, shot, tick_scale);
+    // Ghidra Shot_HandleShot shot_fade_rate quads (WeaponDef +0xb8). The
+    // sprite words are computed from the CURRENT visibility_or_falloff, then
+    // progress advances (except the additive negative branch, which never
+    // advances -- an original quirk). Ordinary weapons write +0xa2 only
+    // (0 = opaque, 32 = transparent); flags_tertiary 0x2 selects the additive
+    // tint path (the original writes the four corner words; SDL expresses it
+    // with additive blending). Pre-advance alpha is latched for the renderer
+    // and the trail's 32 - a2 weight.
+    shot.fade_additive = (weapon->flags_tertiary & 0x0002U) != 0U;
+    const float progress = shot.visibility_or_falloff;
+    if (weapon->shot_fade_rate < 0.0F && progress < 32.0F) {
+      if (!shot.fade_additive) {
+        shot.visibility_attenuation = 32.0F - progress;
+        shot.fade_alpha = (32.0F - shot.visibility_attenuation) / 32.0F;
+        shot.visibility_or_falloff -=
+            static_cast<float>(weapon->shot_fade_rate) * tick_scale;
+      } else {
+        // Additive negative: a2 = 0x20, corners = progress (0), and visibility
+        // is NOT advanced (the original quirk leaves this state fixed).
+        shot.visibility_attenuation = 32.0F;
+        shot.fade_alpha = progress / 32.0F;
+      }
+    } else if (weapon->shot_fade_rate > 0.0F &&
+               shot.life_ticks_remaining < 32.0F && progress < 32.0F) {
+      if (!shot.fade_additive) {
+        shot.visibility_attenuation = std::min(31.0F, progress);
+        shot.fade_alpha = (32.0F - shot.visibility_attenuation) / 32.0F;
+      } else {
+        // Additive positive: a2 = 0x20 and the RGB corner a4 = max(4,
+        // 32 - progress).
+        shot.visibility_attenuation = 32.0F;
+        shot.fade_alpha = std::max(4.0F, 32.0F - progress) / 32.0F;
+      }
+      shot.visibility_or_falloff +=
+          static_cast<float>(weapon->shot_fade_rate) * tick_scale;
+    } else if (shot.fade_additive && weapon->shot_fade_rate == 0) {
+      // Additive with no fade on a >=16-bit surface: all corner words 0x20.
+      shot.visibility_attenuation = 32.0F;
+      shot.fade_alpha = 1.0F;
+    } else {
+      shot.visibility_attenuation = 0.0F;
+      shot.fade_alpha = 1.0F;
+    }
+    if (trail_raw_call_count > 0 && tick_scale > 0.0F &&
+        (prefs == nullptr || !prefs->smoke_trails)) {
+      // Ghidra Shot_HandleShot smoke-puff arm: Flags1 0x200 selects the
+      // big/normal variant, 0x400 the small variant, and 0x800 adds the
+      // persistent (ping-pong) animation. DAT_00596d3d's enable latch is
+      // treated as always-on; the original's inverted smoke-trails preference
+      // (g_nova_control_bits[9]) is the guard already applied above.
+      if ((weapon->flags & (0x0200U | 0x0400U)) != 0U) {
+        std::int16_t variant = (weapon->flags & 0x0200U) != 0U ? 1 : 0;
+        if ((weapon->flags & 0x0800U) != 0U) {
+          variant = static_cast<std::int16_t>(variant + 2);
+        }
+        for (int raw_call = 0; raw_call < trail_raw_call_count; ++raw_call) {
+          SpawnWeaponSmokePuff(
+              state, shot.pos_x, shot.pos_y, variant, weapon->smoke_set);
+        }
+      }
+      if (weapon->trail_particle_count > 0) {
+        // Sprite_GetFrameFullWidth(shot->sprite_ref) / 2, rounded up, is the
+        // rear-edge anchor used by 0x0043609d. A prepared collision mask
+        // carries the exact frame width; otherwise the original's
+        // missing/default shot sprite is represented by its 32px full-width
+        // default (half = 16).
+        const float anchor_offset_px =
+            shot.collision_mask.HasMask()
+                ? static_cast<float>((shot.collision_mask.mask->width + 1) / 2)
+                : 16.0F;
+        for (int raw_call = 0; raw_call < trail_raw_call_count; ++raw_call) {
+          NovaEffects_SpawnWeaponTrailParticles(
+              state,
+              shot.pos_x,
+              shot.pos_y,
+              *weapon,
+              shot.heading_deg,
+              anchor_offset_px,
+              /*blend_mode=*/
+              static_cast<std::int16_t>(32.0F - shot.visibility_attenuation));
+        }
+      }
+    }
     // Bible Decay is measured in 30ths of a second. The original adds
     // g_avg_frame_tick_scale, advances only when elapsed strictly exceeds the
     // interval, resets to zero, and performs at most one decay step per call.
@@ -1579,11 +1805,28 @@ void NovaWeapon_TickShots(GameState &state,
             static_cast<std::int16_t>(shot.damage_decay_points + 1);
       }
     }
+    // Ghidra Shot_HandleShot 0x00435f8a: flags_tertiary 0x4 weapons reset
+    // their owner's bank cooldown to Reload every frame the shot is alive.
+    if ((weapon->flags_tertiary & 0x0004U) != 0U) {
+      const std::size_t bank = static_cast<std::size_t>(shot.weapon_id);
+      if (shot.owner_ship_slot == 0) {
+        state.weapon_bank_cooldown[bank] = weapon->reload_ticks;
+      } else if (shot.owner_ship_slot > 0 &&
+                 shot.owner_ship_slot <
+                     static_cast<std::int16_t>(GameState::kMaxShips)) {
+        state.ShipAt(static_cast<std::size_t>(shot.owner_ship_slot))
+            .npc_weapon_bank_cooldown[bank] = weapon->reload_ticks;
+      }
+    }
   }
   shots.erase(std::remove_if(shots.begin(),
                              shots.end(),
                              [](const ActiveShot &s) { return s.consumed; }),
               shots.end());
+  // Ghidra Shot_UpdateWeaponSmokePuffs (0x0042c660): advance the pooled smoke
+  // sprites once per flight call. Called here because TickShots is the port's
+  // per-frame weapon-effects tick.
+  UpdateWeaponSmokePuffs(state, tick_scale);
   // Cooldown decay moved to NovaWeapon_TickPlayerWeaponBankCooldowns (the
   // faithful PlayerTick_WeaponCommands tail: ammo>0 gate + ionization pin),
   // called from the spaceflight loop's player tick.

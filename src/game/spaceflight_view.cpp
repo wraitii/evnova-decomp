@@ -17,6 +17,7 @@
 #include "ship_visual.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
+#include "weapon.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -1698,22 +1699,46 @@ void SpaceflightView::DrawShots(SdlPlatform &platform,
       SpriteDrawOptions opts;
       opts.wrap = false;
       ApplyFog(opts);
+      // Ghidra Shot_HandleShot 0x00435f29 pre-subtracts
+      // floor(Sprite_GetFrameFullWidth/2) from BOTH axes: the disassembly
+      // reads the x-extent accessor (0x00462390) once and reuses it for x and
+      // y, then places the frame's zero anchor. Passing that explicit anchor
+      // reproduces the original placement (including its non-square-frame
+      // quirk); DrawSprite's default frame-centre anchor would instead use the
+      // height on y. The original also snaps the world-relative position to a
+      // short; the port keeps sub-pixel float positioning (renderer
+      // divergence).
+      opts.anchor_x = static_cast<float>(set->tile_width / 2);
+      opts.anchor_y = opts.anchor_x;
       int frame;
       if ((w->flags & 0x0001U) == 0) {
-        // Static/heading branch: the frame is the shot's firing bearing.
-        const float bearing = std::atan2(s.vel_x, -s.vel_y);
-        frame = FrameForHeading(bearing, set->frame_count);
+        // Static/heading branch: Shot_HandleShot computes the frame as
+        // trunc(frame_count * heading_deg / 360), using the stored flight
+        // heading (not the velocity direction, which a guided shot may differ
+        // from).
+        const float sector =
+            s.heading_deg * static_cast<float>(set->frame_count) / 360.0F;
+        frame = static_cast<int>(std::trunc(sector)) % set->frame_count;
+        if (frame < 0) {
+          frame += set->frame_count;
+        }
       } else {
-        // Time-animated branch: clamp the stepped frame_cycle_index at the
-        // set's frame count, holding the last frame for a flags_secondary bit 1
-        // reverse-wrap (Shot_HandleShot's frame-count wrap + reverse hold).
-        int cycle = s.frame_cycle_index;
+        // Time-animated branch: the displayed frame is the value latched
+        // BEFORE the animation increment (Shot_HandleShot snapshots
+        // frame_cycle_index first). Clamp it at the set's frame count, holding
+        // the last frame for a flags_secondary bit 1 reverse-wrap.
+        int cycle = s.display_frame;
         if (cycle >= set->frame_count) {
           cycle =
               ((w->flags_secondary & 0x0002U) != 0) ? set->frame_count - 1 : 0;
         }
         frame = std::clamp(cycle, 0, set->frame_count - 1);
       }
+      // Ghidra Shot_HandleShot shot_fade_rate quads: fade_alpha is the latched
+      // pre-advance per-corner intensity. flags_tertiary 0x2 selects the
+      // additive tint path instead of ordinary alpha blending.
+      opts.alpha_mod *= std::clamp(s.fade_alpha, 0.0F, 1.0F);
+      opts.additive = s.fade_additive;
       DrawSprite(renderer,
                  *set,
                  frame,
@@ -1733,6 +1758,54 @@ void SpaceflightView::DrawShots(SdlPlatform &platform,
           sx - radius, sy - radius, radius * 2.0F, radius * 2.0F};
       SDL_RenderFillRect(renderer, &rect);
     }
+  }
+}
+
+void SpaceflightView::DrawSmokePuffs(SdlPlatform &platform,
+                                     const GameState &state) {
+  SDL_Renderer *const renderer = platform.renderer();
+  const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
+  for (const WeaponSmokePuff &puff : state.weapon_smoke_puffs) {
+    const int frame = NovaWeapon_SmokePuffFrame(puff);
+    // The original loader (0x004ae7fe) builds only SmokeSet 0 and 1 (resource
+    // bases 1000/1008); slots 2..7 have a null sprite set, so a puff of any
+    // higher set is invisible even if a plug-in ships cicn 1016+. Match that
+    // exactly instead of loading a set the original never creates.
+    if (frame < 0 || puff.effect_slot < 0 || puff.effect_slot > 1) {
+      continue;
+    }
+    const auto slot = static_cast<std::size_t>(puff.effect_slot);
+    if (!smoke_puff_sets_tried_[slot]) {
+      smoke_puff_sets_tried_[slot] = true;
+      smoke_puff_sets_[slot] = SpriteAsset::LoadCicnSet(
+          renderer, static_cast<std::uint16_t>(1000 + puff.effect_slot * 8), 8);
+    }
+    const SpriteAsset *set = smoke_puff_sets_[slot].get();
+    if (set == nullptr || set->frames.empty()) {
+      continue;
+    }
+    SpriteDrawOptions opts;
+    opts.wrap = false;
+    ApplyFog(opts);
+    // Ghidra Shot_UpdateWeaponSmokePuffs 0x0042c660 positions each puff with
+    // floor(full_width/2) on x and floor(full_height/2) on y. The cicn sets
+    // carry a (0,0) frame anchor (they are shared with the reticle brackets),
+    // so the half-span must be supplied here; the original forces the four
+    // corner words to 0x20 (full) afterwards, which full alpha + ApplyFog
+    // reproduces.
+    opts.anchor_x = static_cast<float>(set->tile_width / 2);
+    opts.anchor_y = static_cast<float>(set->tile_height / 2);
+    DrawSprite(renderer,
+               *set,
+               std::clamp(frame, 0, set->frame_count - 1),
+               puff.pos_x,
+               puff.pos_y,
+               camera_x,
+               camera_y,
+               vp.w,
+               vp.h,
+               opts);
   }
 }
 
@@ -1964,6 +2037,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   // sit below them; both are below shots and ships.
   DrawFreeflightObjects(platform, state); // jettisoned pods / launched drones
   DrawFadingEffects(platform, state);     // directional destruction fragments
+  DrawSmokePuffs(platform, state);        // layer 6: weapon smoke puffs
   // Layers 7-9: the mode9, mode1 and default shot containers, in that order,
   // below the ships.
   DrawShots(platform, state, ShotDrawLayer::Mode9);

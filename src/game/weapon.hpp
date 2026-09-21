@@ -317,7 +317,9 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship);
 void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship);
 
 // Ship_HandleShip (0x00433050): count down NPC-local bank cooldowns.
-void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks);
+void NovaWeapon_TickNpcWeaponBanks(GameState &state,
+                                   Ship &ship,
+                                   float elapsed_ticks);
 
 // Ghidra Shot_QueueBeamHit (0x00427A90): enqueue one immediate beam hit.
 // The queue is gameplay-complete for direct target impacts; turret quadrant
@@ -351,6 +353,11 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
                                    ActiveShot &shot,
                                    float elapsed_ticks,
                                    int raw_call_count = 1);
+
+// Display frame for a pooled smoke puff (Ghidra Shot_UpdateWeaponSmokePuffs
+// animation), or -1 when it is inactive/finished. The sprite set base id is
+// 1000 + effect_slot * 8; this resolves the variant frame only.
+int NovaWeapon_SmokePuffFrame(const WeaponSmokePuff &puff);
 
 // Per-frame shot + cooldown bookkeeping for the firing path. Advances each
 // active shot by its velocity, counts down its remaining life, and steps the

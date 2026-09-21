@@ -1264,6 +1264,253 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   CHECK(queued.target_y == Catch::Approx(410.0F - 100.0F));
 }
 
+// Ghidra Shot_UpdateBeamHitQueue (0x0042f270) negative-impact-impulse arm:
+// a tractor/repulsor beam arms a velocity-match lock. When the target is at
+// most 4/3 the source's mass the TARGET locks onto the source; otherwise the
+// SOURCE self-locks, is stamped and pulled toward the target. A mass < 1 ton or
+// capability Flags 0x400 target suppresses the impulse entirely.
+TEST_CASE("negative beam impulse arms the velocity-match producer",
+          "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 3; // non-zero, so the recorded target is used direct
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.impact_impulse = -20;
+  state.scenario.ships.resize(2);
+  state.scenario.ships[0].mass_tons = 100;
+  state.scenario.ships[0].speed = 300.0F;
+  state.scenario.ships[0].base_shield = 100;
+  state.scenario.ships[0].base_armor = 100;
+  state.scenario.ships[1].mass_tons = 10;
+  state.scenario.ships[1].speed = 300.0F;
+  state.scenario.ships[1].base_shield = 100;
+  state.scenario.ships[1].base_armor = 100;
+  state.player.current_system_id = 0;
+  state.tick_60hz = 1234;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 100.0F;
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 1;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+  target.pos_x = 300.0F;
+  target.pos_y = 100.0F;
+
+  // Target lighter (10 * 0.75 = 7.5 <= 100): the target locks onto the source.
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(target.velocity_match_target_ship_slot == 0);
+  CHECK(target.velocity_match_start_tick_60hz == 1234);
+  CHECK(owner.velocity_match_target_ship_slot == -1);
+
+  // Target heavier (100 * 0.75 = 75 > 10): the source self-locks and is pulled
+  // toward the target.
+  state.scenario.ships[0].mass_tons = 10;
+  state.scenario.ships[1].mass_tons = 100;
+  target.velocity_match_target_ship_slot = -1;
+  target.velocity_match_start_tick_60hz = 0;
+  owner.velocity_match_target_ship_slot = -1;
+  owner.vel_x = 0.0F;
+  owner.vel_y = 0.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(owner.velocity_match_target_ship_slot == 0);
+  CHECK(owner.velocity_match_start_tick_60hz == 1234);
+  CHECK(target.velocity_match_target_ship_slot == -1);
+  CHECK((owner.vel_x != 0.0F || owner.vel_y != 0.0F));
+
+  // Capability Flags 0x400 target: the impulse is suppressed and no lock arms.
+  state.scenario.ships[1].capability_flags = 0x0400U;
+  owner.velocity_match_target_ship_slot = -1;
+  owner.vel_x = 0.0F;
+  owner.vel_y = 0.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(owner.velocity_match_target_ship_slot == -1);
+  CHECK(target.velocity_match_target_ship_slot == -1);
+  CHECK(owner.vel_x == 0.0F);
+  CHECK(owner.vel_y == 0.0F);
+}
+
+// Ghidra Shot_HandleShot shot_fade_rate quads (WeaponDef +0xb8): ordinary vs
+// flags_tertiary 0x2 additive, the additive-negative no-advance quirk, the
+// positive RGB min-4 clamp, the no-fade full-0x20 path, and the pre-advance
+// latched alpha.
+TEST_CASE("shot fade quads preserve additive quirks and pre-advance alpha",
+          "[weapon][shot]") {
+  auto run =
+      [](std::int16_t fade_rate, std::uint16_t flags_tertiary, float elapsed) {
+        GameState state;
+        state.scenario.weapons.resize(1);
+        Weapon &w = state.scenario.weapons[0];
+        w.weapon_mode_code = 4;
+        w.lifetime_ticks = 30;
+        w.projectile_speed = 100;
+        w.shot_fade_rate = fade_rate;
+        w.flags_tertiary = flags_tertiary;
+        ActiveShot s;
+        s.weapon_id = 0;
+        s.owner_ship_slot = -1;
+        s.system_id = 0;
+        s.life_ticks_remaining = 30.0F;
+        state.active_shots.push_back(s);
+        NovaWeapon_TickShots(state, elapsed);
+        return state.active_shots[0];
+      };
+
+  // Ordinary negative: a2 = 32 - 0, alpha 0, progress advances by 4*0.7.
+  const ActiveShot ordinary_neg = run(-4, 0, 0.7F);
+  CHECK(ordinary_neg.visibility_attenuation == Catch::Approx(32.0F));
+  CHECK(ordinary_neg.fade_alpha == Catch::Approx(0.0F));
+  CHECK_FALSE(ordinary_neg.fade_additive);
+  CHECK(ordinary_neg.visibility_or_falloff == Catch::Approx(2.8F));
+
+  // Additive negative: a2 = 0x20, alpha = progress = 0, and the original does
+  // NOT advance visibility in this branch.
+  const ActiveShot additive_neg = run(-4, 0x0002U, 0.7F);
+  CHECK(additive_neg.visibility_attenuation == Catch::Approx(32.0F));
+  CHECK(additive_neg.fade_alpha == Catch::Approx(0.0F));
+  CHECK(additive_neg.visibility_or_falloff == Catch::Approx(0.0F));
+
+  // Ordinary positive: a2 = min(0, 0x1f) = 0, alpha 1, progress advances.
+  const ActiveShot ordinary_pos = run(4, 0, 0.7F);
+  CHECK(ordinary_pos.visibility_attenuation == Catch::Approx(0.0F));
+  CHECK(ordinary_pos.fade_alpha == Catch::Approx(1.0F));
+  CHECK(ordinary_pos.visibility_or_falloff == Catch::Approx(2.8F));
+
+  // Additive positive: a2 = 0x20, alpha = max(4, 32 - 0)/32 = 1.
+  const ActiveShot additive_pos = run(4, 0x0002U, 0.7F);
+  CHECK(additive_pos.visibility_attenuation == Catch::Approx(32.0F));
+  CHECK(additive_pos.fade_alpha == Catch::Approx(1.0F));
+  CHECK(additive_pos.visibility_or_falloff == Catch::Approx(2.8F));
+
+  // Additive with no fade rate on a >=16-bit surface: all corners 0x20.
+  const ActiveShot additive_static = run(0, 0x0002U, 0.7F);
+  CHECK(additive_static.visibility_attenuation == Catch::Approx(32.0F));
+  CHECK(additive_static.fade_alpha == Catch::Approx(1.0F));
+}
+
+// Ghidra Shot_HandleShot animated branch: the displayed frame is latched
+// BEFORE the animation increment, so frame 0 shows on the first advancing
+// call (the increment only shows next call).
+TEST_CASE("animated shot displays the pre-increment frame", "[weapon][shot]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &w = state.scenario.weapons[0];
+  w.weapon_mode_code = 4;
+  w.lifetime_ticks = 30;
+  w.projectile_speed = 100;
+  w.flags = 0x0001U; // animated sprite set
+  w.beam_width_or_animation_frame_delay = 1;
+  state.player.current_system_id = 0;
+  ActiveShot s;
+  s.weapon_id = 0;
+  s.owner_ship_slot = -1;
+  s.system_id = 0;
+  s.life_ticks_remaining = 30.0F;
+  state.active_shots.push_back(s);
+  NovaWeapon_TickShots(state, 1.0F);
+  CHECK(state.active_shots[0].frame_cycle_index == 1);
+  CHECK(state.active_shots[0].display_frame == 0);
+  NovaWeapon_TickShots(state, 1.0F);
+  CHECK(state.active_shots[0].display_frame == 1);
+}
+
+// Ghidra 0x00435830 Shot_HandleShot smoke-puff arm + 0x0042c660
+// Shot_UpdateWeaponSmokePuffs: a Flags1 0x200/0x400 weapon queues a pooled
+// smoke sprite selected from SmokeSet, and the pool advances/deactivates on
+// the 0.25 * tick cadence. Also pins the shot_fade_rate visibility accumulator.
+TEST_CASE("shot smoke puffs spawn and fade on the effect cadence",
+          "[weapon][shot]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &w = state.scenario.weapons[0];
+  w.weapon_mode_code = 4;
+  w.lifetime_ticks = 30;
+  w.projectile_speed = 100;
+  w.flags = 0x0400U; // small smoke variant (0), no 0x800 ping-pong
+  w.smoke_set = 1;   // only SmokeSet 0/1 have a loaded cicn set
+  w.shot_fade_rate = -4;
+  state.player.current_system_id = 0;
+
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.owner_ship_slot = -1;
+  shot.system_id = 0;
+  shot.life_ticks_remaining = 30.0F;
+  shot.pos_x = 10.0F;
+  shot.pos_y = 20.0F;
+  state.active_shots.push_back(shot);
+
+  // 0.7 normalized ticks is one original 21 ms flight call.
+  NovaWeapon_TickShots(state, 0.7F);
+  int active = 0;
+  for (const WeaponSmokePuff &puff : state.weapon_smoke_puffs) {
+    if (puff.life >= 0.0F) {
+      ++active;
+      CHECK(puff.effect_slot == 1);
+      CHECK(puff.variant == 0);
+      CHECK(puff.pos_x == Catch::Approx(10.0F));
+    }
+  }
+  CHECK(active == 1);
+  // Negative shot_fade_rate advances visibility by |rate| * ticks.
+  CHECK(state.active_shots[0].visibility_or_falloff == Catch::Approx(2.8F));
+
+  // Life advances by 0.25 * 0.7 = 0.175 per call; the 8-frame variant dies
+  // once the truncated frame reaches 8 (~46 calls after it spawns). The shot
+  // spawns puffs until it expires at ~43 calls, so tick well past that.
+  for (int call = 0; call < 120; ++call) {
+    NovaWeapon_TickShots(state, 0.7F);
+  }
+  for (const WeaponSmokePuff &puff : state.weapon_smoke_puffs) {
+    CHECK(puff.life < 0.0F);
+  }
+}
+
+// The original loader (0x004ae7fe) builds sprite sets only for SmokeSet 0 and
+// 1, and Shot_SpawnWeaponSmokePuff's slot scan requires a non-null set. A
+// higher SmokeSet therefore spawns nothing at all and must not consume a pool
+// slot (which would starve a later valid puff).
+TEST_CASE("shot smoke puff with a null SmokeSet consumes no pool slot",
+          "[weapon][shot]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &w = state.scenario.weapons[0];
+  w.weapon_mode_code = 4;
+  w.lifetime_ticks = 30;
+  w.projectile_speed = 100;
+  w.flags = 0x0400U;
+  w.smoke_set = 2; // no loaded set
+  state.player.current_system_id = 0;
+
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.owner_ship_slot = -1;
+  shot.system_id = 0;
+  shot.life_ticks_remaining = 30.0F;
+  state.active_shots.push_back(shot);
+
+  NovaWeapon_TickShots(state, 0.7F);
+
+  for (const WeaponSmokePuff &puff : state.weapon_smoke_puffs) {
+    CHECK(puff.life < 0.0F);
+  }
+}
+
 // Regression: 0x0042f270's first contact clause is candidate_slot !=
 // owner_slot, so a fixed beam can never intercept its own firing ship. The
 // port's BeamCandidateEligible omitted that clause. The geometry test above
@@ -1627,6 +1874,53 @@ TEST_CASE("Thunderhead Lance fires from alternating side exits",
   CHECK(centre.turret_quadrant == -1);
   CHECK(centre.source_x == Catch::Approx(1000.0F));
   CHECK(centre.source_y == Catch::Approx(2000.0F));
+}
+
+// Ship_HandleShip 0x00433050 per-bank cooldown tail.
+TEST_CASE("NPC weapon bank cooldowns decay, reload targetless bays, and pin "
+          "ionized disruptors",
+          "[weapon][npc]") {
+  GameState state;
+  state.scenario.weapons.resize(2);
+  Weapon &reload_bay = state.scenario.weapons[0];
+  reload_bay.weapon_mode_code = 99;
+  reload_bay.reload_ticks = 30.0F;
+  Weapon &disruptor = state.scenario.weapons[1];
+  disruptor.flags_quaternary = 0x0020;
+
+  Ship &ship = state.ShipAt(1);
+  ship.ship_class_id = 0;
+  ship.primary_target_ship_slot = -1;
+  ship.npc_weapon_count_by_class[0] = 1;
+  ship.npc_weapon_count_by_class[1] = 1;
+  ship.npc_weapon_bank_cooldown[0] = 0.0F;
+  ship.npc_weapon_bank_cooldown[1] = 5.0F;
+
+  NovaWeapon_TickNpcWeaponBanks(state, ship, 1.0F);
+  // A targetless mode-99 bay reloads to Reload; the disruptor decays by one.
+  CHECK(ship.npc_weapon_bank_cooldown[0] == Catch::Approx(30.0F));
+  CHECK(ship.npc_weapon_bank_cooldown[1] == Catch::Approx(4.0F));
+
+  // With a primary target the mode-99 reload arm is skipped.
+  ship.primary_target_ship_slot = 2;
+  ship.npc_weapon_bank_cooldown[0] = 0.0F;
+  ship.npc_weapon_bank_cooldown[1] = 5.0F;
+  NovaWeapon_TickNpcWeaponBanks(state, ship, 1.0F);
+  CHECK(ship.npc_weapon_bank_cooldown[0] == Catch::Approx(0.0F));
+
+  // Ionized pin: full ionization charge + flags_quaternary 0x20 -> 1.0.
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].ionization_capacity = 100;
+  ship.ionization_points = 100.0F;
+  ship.npc_weapon_bank_cooldown[1] = 7.0F;
+  NovaWeapon_TickNpcWeaponBanks(state, ship, 1.0F);
+  CHECK(ship.npc_weapon_bank_cooldown[1] == Catch::Approx(1.0F));
+
+  // Ammo gate: a bank with no ammo does not decay.
+  ship.npc_weapon_count_by_class[0] = 0;
+  ship.npc_weapon_bank_cooldown[0] = 5.0F;
+  NovaWeapon_TickNpcWeaponBanks(state, ship, 1.0F);
+  CHECK(ship.npc_weapon_bank_cooldown[0] == Catch::Approx(5.0F));
 }
 
 } // namespace game

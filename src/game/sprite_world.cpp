@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -357,7 +358,8 @@ int Sprite_DistanceBrightness(int effective_murk,
   if (effective_murk <= 0) {
     return 0;
   }
-  constexpr double kDistanceIntensityScale = 1.2e-05; // 0x005754d0
+  constexpr float kDistanceIntensityScale = 1.2e-05F; // 0x005754d0 (double,
+                                                      // cast to float)
   // The original receives the sprite's world position as shorts and computes
   // |player - (float)(int)sprite| (sprite position truncated to an integer)
   // before the x87-truncation round.
@@ -365,9 +367,21 @@ int Sprite_DistanceBrightness(int effective_murk,
   const float sy = static_cast<float>(static_cast<int>(sprite_y));
   const int dx = static_cast<int>(std::trunc(std::fabs(camera_x - sx)));
   const int dy = static_cast<int>(std::trunc(std::fabs(camera_y - sy)));
-  const double fog = static_cast<double>(effective_murk) *
-                     static_cast<double>(dx * dx + dy * dy) *
-                     kDistanceIntensityScale;
+  // Frame_UpdateSpriteDistanceIntensity 0x00438db0 forms
+  // `(float)(murk * distSq) * (float)1.2e-05` in 32-bit float before the final
+  // truncation. The original does that multiply in 32-bit x86 integer
+  // registers (IMUL), so it wraps; reproduce the wrapping explicitly rather
+  // than rely on signed-overflow UB. Widening the product to double can also
+  // round across an integer boundary.
+  const auto square = [](std::int32_t value) {
+    return static_cast<std::uint32_t>(value) *
+           static_cast<std::uint32_t>(value);
+  };
+  const std::uint32_t dist_sq = square(dx) + square(dy);
+  const std::uint32_t product =
+      static_cast<std::uint32_t>(effective_murk) * dist_sq;
+  const float fog = static_cast<float>(std::bit_cast<std::int32_t>(product)) *
+                    kDistanceIntensityScale;
   return std::clamp(static_cast<int>(std::trunc(fog)), 0, 0x1f);
 }
 

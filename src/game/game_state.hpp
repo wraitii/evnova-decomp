@@ -512,6 +512,11 @@ struct Ship {
   // cleared by Ship_DeactivateVacantShipsAndTally (0x0041ad50) and seeded by
   // Ship_AllocateShipSlotInSystem, so it lives on the struct.
   std::int16_t velocity_match_target_ship_slot = -1; // +0xC8DC
+  // Ghidra ShipState +0xB4 (unnamed): the 60 Hz tick when the velocity-match
+  // lock was armed. Ship_HandleShip 0x00433050 retires the lock once 30 ticks
+  // (0x1e) have elapsed. Produced by Shot_UpdateBeamHitQueue (0x0042f270)'s
+  // negative-impact-impulse arm (see NovaWeapon_ResolveDirectWeaponHit).
+  std::uint32_t velocity_match_start_tick_60hz = 0; // +0xB4 (Provisional)
   // Ghidra ShipState +0xC92E: the AI's resolved squad leader, cleared by
   // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810).
   std::int16_t resolved_squad_leader_ship_slot = -1; // +0xC92E
@@ -969,6 +974,27 @@ struct ActiveShot {
   // velocity from it each frame; the renderer maps it to the shot sprite frame
   // (frame_count * heading / 360).
   float heading_deg = 0.0F;
+  // Ghidra ShotState.visibility_or_falloff (+0x34): cloak-style fade progress
+  // for a projectile whose WeaponDef.shot_fade_rate is nonzero. The sprite
+  // corner intensity (+0xa2, an ATTENUATION: 0 = opaque, 0x20 = transparent)
+  // is derived from this value BEFORE the progress advance each call, so the
+  // per-call rendered intensity is latched here for the renderer.
+  float visibility_or_falloff = 0.0F;
+  // Shot_HandleShot sprite attenuation word +0xa2 for this call (0 = opaque,
+  // 32 = transparent); the particle trail uses the complementary 32 - a2
+  // weight. Additive (flags_tertiary 0x2) weapons hold a2 at 0x20.
+  float visibility_attenuation = 0.0F;
+  // Final sprite alpha derived from the original's per-corner words for this
+  // call (ordinary: (32-a2)/32; additive: the a4 RGB corner / 32). Latched
+  // pre-advance so the first drawn frame matches the original.
+  float fade_alpha = 1.0F;
+  // flags_tertiary 0x2 selects the additive tint path instead of ordinary
+  // alpha (the original writes the four corner words rather than +0xa2 only).
+  bool fade_additive = false;
+  // Display frame for this call. The original snapshots frame_cycle_index
+  // BEFORE the animation increment (the increment takes effect next call); the
+  // renderer draws this latched value.
+  int display_frame = 0;
   // Ghidra ShotState.guidance_state (+0x30): guidance state latch. 0 =
   // normal homing, 1 = asteroid-decoy tracking (target_ship_slot then indexes
   // the asteroid pool), 998 = inert (target lost), 999 = interference weave.
@@ -1023,6 +1049,20 @@ struct BeamHit {
   std::int16_t firing_bearing_deg = 0;
   std::int8_t impact_variant = 0;
   bool impact_resolved = false;
+};
+
+// Ghidra g_weapon_smoke_puff_instances_ptr (0x005912bc), 64 entries at a
+// 0x18-byte stride. Each entry holds a pooled smoke sprite plus its world
+// position, the Flags1-selected animation variant (0..3), the SmokeSet index
+// (selects sprite resource base 1000 + slot*8) and the float life. `life < 0`
+// is the inactive sentinel; Shot_UpdateWeaponSmokePuffs advances it and steps
+// the variant's 8-frame or ping-pong animation.
+struct WeaponSmokePuff {
+  float pos_x = 0.0F;
+  float pos_y = 0.0F;
+  float life = -1.0F;
+  std::int16_t variant = 0;     // +0xc: 0/2 = 8-frame, 1/3 = ping-pong
+  std::int16_t effect_slot = 0; // SmokeSet index, selects resource 1000+slot*8
 };
 
 // Ghidra ImpactEffectInstance (g_impact_effect_instances_ptr, 0x005912b8),
@@ -1741,6 +1781,7 @@ struct GameState {
   float npc_maintenance_raw_tick_accumulator = 0.0F;
 
   std::array<BeamHit, 0x40> beam_hit_queue{};
+  std::array<WeaponSmokePuff, 0x40> weapon_smoke_puffs{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};
   std::array<FadingEffectInstance, 0x20> fading_effect_instances{};
   std::array<FreeflightObjectState, FreeflightObjectState::kPoolSize>

@@ -125,6 +125,10 @@ public:
   // fragments emitted by Shot_SpawnShipDestructionDebrisPuff (0x00428090).
   void DrawFadingEffects(SdlPlatform &platform, const GameState &state);
 
+  // Ghidra Shot_UpdateWeaponSmokePuffs draw side: the layer-6 pooled smoke
+  // sprites emitted by Shot_HandleShot's Flags1 0x200/0x400/0x800 arm.
+  void DrawSmokePuffs(SdlPlatform &platform, const GameState &state);
+
   // FreeflightObjectState pool (jettisoned cargo/junk pods, launched drones
   // and effect-package sprites). Simulation half is NovaFreeflight_Tick;
   // this draws the live objects' 500+index spin sets.
@@ -279,6 +283,12 @@ private:
   // frame (the reticle drawers fall back to the debug bracket art).
   std::unique_ptr<SpriteAsset> ship_reticle_set_;
   std::unique_ptr<SpriteAsset> travel_reticle_set_;
+  // Layer-6 weapon smoke-puff sets: the original loads only SmokeSet 0 and 1
+  // as 8-frame sequential cicn runs at resource bases 1000 and 1008
+  // (Ghidra 0x004ae7fe loops twice, `ADD ESI,8`). Higher SmokeSet values have
+  // a null set, so a puff of that set is invisible.
+  std::array<std::unique_ptr<SpriteAsset>, 8> smoke_puff_sets_;
+  std::array<bool, 8> smoke_puff_sets_tried_{};
   bool ship_reticle_tried_ = false;
   bool travel_reticle_tried_ = false;
 

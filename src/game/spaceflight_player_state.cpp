@@ -176,35 +176,6 @@ const Outfit *FindOutfitWithModType(const GameState &state,
   return nullptr;
 }
 
-// Ghidra Frame_ShouldTriggerAutoRepairTick (0x0046e540): random gate (1-in-N,
-// N = 500 with the low-tick-scale reroll; 500 / frame tick scale otherwise),
-// a destroyed-ship veto, and the repair outfit's ModType 0x31 presence among
-// owned outfits (player path). The original additionally checks fire-
-// restriction; the player caller already gates on it.
-bool Frame_ShouldTriggerAutoRepairTick(GameState &state) {
-  const int roll_range =
-      state.last_frame_tick_scale <= kFrameScaleAutoRepairRerollGate
-          ? kAutoRepairFrameRerollRange
-          : static_cast<int>(static_cast<float>(kAutoRepairFrameRerollRange) /
-                             state.last_frame_tick_scale);
-  if (RandomBelow(state, roll_range) != 0) {
-    return false;
-  }
-  if (NovaAiShip_IsDestroyed(state.player)) {
-    return false;
-  }
-  for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
-                            idx < state.inventory.outfit_owned_count.size();
-       ++idx) {
-    if (state.inventory.outfit_owned_count[idx] > 0 &&
-        FindOutfitWithModType(state, idx, kAutoRepairOutfitModType) !=
-            nullptr) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Jump-arrival call site note: the in-flight jump-arrival block of
 // Ship_HandlePlayerShipCore (PlayerTick_SystemTransitionAndArrival
 // 0x0044f660) runs Frame_JitterPlayerStatModifiers + Frame_RerollPlayerStat-
@@ -376,6 +347,63 @@ void DetonateCarriedBomb(GameState &state) {
 }
 
 } // namespace
+
+// Ghidra Frame_ShouldTriggerAutoRepairTick (0x0046e540): random gate (1-in-N,
+// N = 500 with the low-tick-scale reroll; 500 / frame tick scale otherwise),
+// a destroyed-ship veto, and the repair outfit's ModType 0x31 presence. The
+// player scans owned outfits, an NPC scans its class default loadout; the
+// original additionally checks fire-restriction, and both callers gate on it.
+bool Frame_ShouldTriggerAutoRepairTick(GameState &state, const Ship &ship) {
+  const int roll_range =
+      state.last_frame_tick_scale <= kFrameScaleAutoRepairRerollGate
+          ? kAutoRepairFrameRerollRange
+          : static_cast<int>(static_cast<float>(kAutoRepairFrameRerollRange) /
+                             state.last_frame_tick_scale);
+  if (RandomBelow(state, roll_range) != 0) {
+    return false;
+  }
+  if (NovaAiShip_IsDestroyed(ship)) {
+    return false;
+  }
+  const auto has_repair_slot = [](const Outfit &outfit) {
+    if (outfit.mod_type == kAutoRepairOutfitModType) {
+      return true;
+    }
+    for (const std::int16_t alt : outfit.alt_mod_types) {
+      if (alt == kAutoRepairOutfitModType) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (ship.ship_instance_id == 0) {
+    for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
+                              idx < state.inventory.outfit_owned_count.size();
+         ++idx) {
+      if (state.inventory.outfit_owned_count[idx] > 0 &&
+          FindOutfitWithModType(state, idx, kAutoRepairOutfitModType) !=
+              nullptr) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return false;
+  }
+  for (std::size_t slot = 0; slot < cls->default_outfit_ids.size(); ++slot) {
+    if (cls->default_outfit_counts[slot] <= 0) {
+      continue;
+    }
+    const Outfit *outfit = state.scenario.Outfit(cls->default_outfit_ids[slot]);
+    if (outfit != nullptr && has_repair_slot(*outfit)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Jump-arrival call-site note for the pair below: the in-flight jump-arrival
 // block of Ship_HandlePlayerShipCore (PlayerTick_SystemTransitionAndArrival
@@ -1035,7 +1063,7 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
 
   // --- Disabled auto-repair (0x0044b2a5) -----------------------------------
   if (fire_restricted && state.recently_hit_timer < kRecentlyHitRegenCutoff &&
-      Frame_ShouldTriggerAutoRepairTick(state)) {
+      Frame_ShouldTriggerAutoRepairTick(state, state.player)) {
     const ShipClass *cls =
         state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
     if (cls != nullptr) {

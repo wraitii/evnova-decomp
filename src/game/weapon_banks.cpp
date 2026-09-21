@@ -12,6 +12,7 @@
 #include "preferences.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight.hpp"
+#include "spaceflight_internal.hpp"
 #include "targeting.hpp"
 
 #include <algorithm>
@@ -834,10 +835,49 @@ void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
   }
 }
 
-void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks) {
+// Ship_HandleShip 0x00433050 per-bank cooldown tail (primary site
+// Stub_HandleShips, src/game/spaceflight.cpp). Mirrors the original loop: only
+// banks with ammo > 0 decay, an ionized ship pins flags_quaternary 0x20 banks
+// at a 1-tick cooldown, and a targetless ship reloads every mode-99 launch bay.
+void NovaWeapon_TickNpcWeaponBanks(GameState &state,
+                                   Ship &ship,
+                                   float elapsed_ticks) {
   const float ticks = std::max(0.0F, elapsed_ticks);
-  for (float &cooldown : ship.npc_weapon_bank_cooldown) {
-    cooldown = std::max(0.0F, cooldown - ticks);
+  // The original gates the pin on trunc(Ship_GetIonizationIntensity) > 0, i.e.
+  // a fully charged ionization pool. NovaShip_IonizationIntensity is the same
+  // helper the ionization block uses.
+  bool ionized = false;
+  if (const ShipClass *cls = ShipClassFor(state, ship); cls != nullptr) {
+    ionized =
+        spaceflight_detail::NovaShip_IonizationIntensity(ship, *cls) >= 1.0F;
+  }
+  for (std::size_t bank = 0; bank < ship.npc_weapon_bank_cooldown.size();
+       ++bank) {
+    if (ship.npc_weapon_count_by_class[bank] <= 0) {
+      continue;
+    }
+    float &cooldown = ship.npc_weapon_bank_cooldown[bank];
+    if (cooldown <= 0.0F) {
+      cooldown = 0.0F;
+    } else {
+      cooldown = std::max(0.0F, cooldown - ticks);
+    }
+    const std::int16_t bank_id = static_cast<std::int16_t>(bank);
+    const Weapon *w = WeaponAt(state, bank_id);
+    if (w != nullptr && (w->flags_quaternary & 0x0020U) != 0U && ionized) {
+      cooldown = 1.0F;
+    }
+  }
+  if (ship.primary_target_ship_slot == -1) {
+    for (std::size_t bank = 0; bank < ship.npc_weapon_bank_cooldown.size();
+         ++bank) {
+      const std::int16_t bank_id = static_cast<std::int16_t>(bank);
+      const Weapon *w = WeaponAt(state, bank_id);
+      if (w != nullptr && w->weapon_mode_code == 99 &&
+          ship.npc_weapon_count_by_class[bank] > 0) {
+        ship.npc_weapon_bank_cooldown[bank] = w->reload_ticks;
+      }
+    }
   }
 }
 

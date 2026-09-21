@@ -25,10 +25,10 @@
 //     and instant-kill non-immune hulls (see
 //     NovaStellar_HandleShipStellarCrash).
 //
-// Deferred scope: the linked-shot expiry callsite in Shot_HandleShot (the
-// impact-linked spawner itself is ported), kill chatter, the player-owned
-// stellar faction-combat events, and the mission disable bookkeeping inside
-// the ship-hit path. Weapon impact SWParticle bursts are emitted by the
+// Deferred scope: kill chatter, the player-owned stellar faction-combat
+// events, and the mission disable bookkeeping inside the ship-hit path. The
+// linked-shot expiry callsite in Shot_HandleShot (0x00435830) is now wired.
+// Weapon impact SWParticle bursts are emitted by the
 // ported NovaEffects_SpawnWeaponImpactBurstForWeapon. Direct shot-vs-ship,
 // shot-vs-asteroid and shot/ship-vs-stellar contacts test the decoded sprite
 // pixel masks (Sprite_TestPixelMaskOverlap 0x00475c80) with the original
@@ -46,6 +46,13 @@ namespace game {
 [[nodiscard]] bool NovaWeapon_CanProjectileHitShip(const GameState &state,
                                                    const ActiveShot &shot,
                                                    std::int16_t target_slot);
+
+// Public entry to the file-local Ship_ShipsShareSquadRoot walk (primary site
+// SharesSquadRoot, // Ghidra 0x0046d190 Ship_ShipsShareSquadRoot.). Used by
+// Shot_HandleShot's player target-chain arm.
+[[nodiscard]] bool NovaShip_ShipsShareSquadRoot(const GameState &state,
+                                                std::int16_t first_slot,
+                                                std::int16_t second_slot);
 
 // Ghidra Ship_ApplyDamageToShip (0x004192d0) core: shield-first/
 // armor damage, disable-transition arms, aggro/hostility response. Exported
@@ -65,6 +72,20 @@ void Ship_ApplyDamageToShip(GameState &state,
                             bool bypass_shields,
                             std::int16_t player_aggro_delta,
                             bool check_fire_restriction_transition = false);
+
+// Shot_HandleShot's expiry block, split so the damage/on-hit helpers stay in
+// this translation unit (primary site NovaWeapon_TickShots,
+// // Ghidra 0x00435830 Shot_HandleShot.). Called by the outer expiry test only
+// while the shot is in the player's current system; the caller suppresses the
+// whole block on a system mismatch. A plain weapon (flags_primary 0x8000
+// clear) spawns the single default impact sprite only when impact_effect_id
+// is nonzero; a flags-0x8000 weapon takes the area helper plus the
+// splash-damage pass over every active ship within splash_radius, suppressed
+// by flags_secondary 0x400. NPC owners are always splash-immune; the player
+// owner is immune only when flags_primary 0x100 is set.
+void NovaWeapon_ResolveShotExpiryImpact(GameState &state,
+                                        const ActiveShot &shot,
+                                        const Weapon &weapon);
 
 // Ghidra Ship_HandleSpritePairCollision (0x004374f0) plus its sprite-layer
 // driver: resolves direct shot-vs-ship contacts with the original's bounding-

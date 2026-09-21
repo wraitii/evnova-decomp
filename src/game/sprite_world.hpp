@@ -307,14 +307,15 @@ struct SpriteAnchorTransform {
 
 // Ghidra 0x00438db0 Frame_UpdateSpriteDistanceIntensity: the per-sprite
 // distance-brightness fog amount. distance_brightness = clamp(trunc(
-// effective_murk * distSq * 1.2e-05), 0, 0x1f), where distSq is the sum of the
-// squared x87-truncated absolute axis deltas between the player (camera) and
-// the sprite's integer world position (the original receives shorts and
-// truncates each sprite coordinate). effective_murk is the effective system
-// murk and the 1.2e-05 constant is g_distance_intensity_scale_const2
-// (0x005754d0). The original also clamps to 0x18 at 8-bit colour depth; every
-// SDL texture is 32-bit here, so the 0x1f ceiling applies. A murk of 0 (a
-// clear-cut system) always yields 0.
+// (float)(effective_murk * distSq) * (float)1.2e-05), 0, 0x1f), where distSq
+// is the sum of the squared x87-truncated absolute axis deltas between the
+// player (camera) and the sprite's integer world position (the original
+// receives shorts and truncates each sprite coordinate), and the final
+// multiply stays in 32-bit float as in the original. effective_murk is the
+// effective system murk and the 1.2e-05 constant is
+// g_distance_intensity_scale_const2 (0x005754d0). The original also clamps to
+// 0x18 at 8-bit colour depth; every SDL texture is 32-bit here, so the 0x1f
+// ceiling applies. A murk of 0 (a clear-cut system) always yields 0.
 [[nodiscard]] int Sprite_DistanceBrightness(int effective_murk,
                                             float camera_x,
                                             float camera_y,

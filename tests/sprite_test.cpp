@@ -157,6 +157,66 @@ TEST_CASE("distance brightness matches the murk fog formula",
   CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 1.9F, 0.0F) == 0);
   // Symmetric in the axis deltas (both axes contribute).
   CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 0.0F, -100.0F) == 12);
+  // The original multiplies the two integer terms in 32-bit registers, so an
+  // out-of-range coordinate wraps rather than trapping; the port must remain
+  // bounded and clamp to 0. (100000^2 overflows int32.)
+  CHECK(Sprite_DistanceBrightness(100, 0.0F, 0.0F, 100000.0F, 0.0F) == 0);
+}
+
+// Ghidra Shot_HandleShot 0x00435f29 pre-subtracts floor(full_width/2) from
+// BOTH axes (the y offset uses the frame WIDTH, an original quirk) rather than
+// the frame-centre DrawSprite defaults to. For an 8x4 frame the shot anchor is
+// (4,4), so its bottom row lands one row lower than a centre-anchored draw.
+TEST_CASE("shot-style floor half-width anchor shifts the y edge",
+          "[sprite][anchor]") {
+  std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface{
+      SDL_CreateSurface(40, 40, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface};
+  REQUIRE(surface);
+  std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer{
+      SDL_CreateSoftwareRenderer(surface.get()), SDL_DestroyRenderer};
+  REQUIRE(renderer);
+
+  std::vector<std::uint8_t> pixels(8 * 4 * 4);
+  for (std::size_t i = 0; i < pixels.size(); i += 4) {
+    pixels[i] = 255;
+    pixels[i + 3] = 0xff;
+  }
+  SpriteAsset asset;
+  asset.tile_width = 8;
+  asset.tile_height = 4;
+  asset.frame_count = 1;
+  asset.frames.resize(1);
+  asset.frames[0].texture = SdlTexture::Create(renderer.get(), 8, 4, pixels);
+  asset.frames[0].anchor_x = 4.0F; // frame centre (DrawSprite default)
+  asset.frames[0].anchor_y = 2.0F;
+  REQUIRE(asset.frames[0].texture);
+
+  const auto sample = [&](const SpriteDrawOptions &opts, int x, int y) {
+    REQUIRE(SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255));
+    REQUIRE(SDL_RenderClear(renderer.get()));
+    DrawSprite(renderer.get(), asset, 0, 0.0F, 0.0F, 0.0F, 0.0F, 40, 40, opts);
+    REQUIRE(SDL_FlushRenderer(renderer.get()));
+    SDL_Color color{};
+    REQUIRE(SDL_ReadSurfacePixel(
+        surface.get(), x, y, &color.r, &color.g, &color.b, &color.a));
+    return color.r;
+  };
+
+  SpriteDrawOptions shot_opts;
+  shot_opts.anchor_x = 4.0F; // floor(8/2)
+  shot_opts.anchor_y = 4.0F; // floor(width/2), not floor(height/2) == 2
+  // top-left = 20 - 4 = 16 on both axes; the bottom row occupies y 16..19.
+  CHECK(sample(shot_opts, 16, 19) == 255);
+  CHECK(sample(shot_opts, 16, 20) == 0);
+  // The frame-centre default starts at y 18, leaving row 16 unpainted.
+  CHECK(sample(SpriteDrawOptions{}, 16, 16) == 0);
+  CHECK(sample(SpriteDrawOptions{}, 16, 18) == 255);
+  // Odd shot tiles (the 35px light-blaster sprite) use floor(35/2) = 17 on
+  // both axes, not the 17.5 frame centre.
+  const auto odd =
+      Sprite_AnchorToScreen(0.0F, 0.0F, 0.0F, 0.0F, 640, 400, 17.0F, 17.0F);
+  CHECK(odd.screen_x == Catch::Approx(320.0F - 17.0F));
+  CHECK(odd.screen_y == Catch::Approx(200.0F - 17.0F));
 }
 
 // The optional SpriteDrawOptions.tint_rgb5 color mod (SDL approximation of the
