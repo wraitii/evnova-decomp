@@ -173,15 +173,16 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
     // dereferences the texture.
     return cached->second->texture ? cached->second.get() : nullptr;
   }
-  // Target-info pict id = 3000 + clone-source class (Bible: "PICT resource ID
-  // 3000 + shipID - 128"). The engine reuses one pict for every class that
-  // shares the source's base sprites (ShipClassDef.clone_source_ship_class,
-  // derived from the sh\x8an BaseImageID at load time), so a Fed Viper
-  // duplicate resolves to the original's 3016 rather than a missing 3096.
+  // Target-info pict id = 3000 + target-pict class (Bible: "PICT resource ID
+  // 3000 + shipID - 128"). ShipClassDef.target_pict_ship_class (+0xa0c) is
+  // the class itself when it owns a PICT 3000+id, otherwise the class that
+  // owns its base sprites (NovaData_LoadAllShipClassVisualAndLaunchData
+  // 0x004aeda0), so a Fed Viper duplicate resolves to the original's 3016
+  // rather than a missing 3096.
   std::int16_t pict_class = ship_class_id;
   if (const ShipClass *cls = scenario.Ship(ship_class_id + 0x80);
-      cls != nullptr && cls->clone_source_ship_class >= 0) {
-    pict_class = cls->clone_source_ship_class;
+      cls != nullptr && cls->target_pict_ship_class >= 0) {
+    pict_class = cls->target_pict_ship_class;
   }
   auto entry = std::make_unique<PortraitEntry>();
   if (const auto pict_data = NovaResource_LoadPictData(
@@ -738,7 +739,7 @@ void HudRenderer::DrawWeaponPanel(SdlPlatform &platform,
 // top+47. With one: centered name at top+16 (mission-ship STR# name, else
 // p}brs display name, else ship-class name), centered subtitle at top+29 in
 // the .ntf secondary font size (mission subtitle pool, p}brs special-ship
-// name, else the class Subtitle), the 128x64 clone-source portrait blitted
+// name, else the class Subtitle), the 128x64 target-pict portrait blitted
 // into a rect centered on the panel, a bottom-left shield/armor status row
 // at baseline bottom-6 starting at left+5, and a bottom-right government (or
 // fighter/escort) footer right-aligned at right-7. The original's AI/debug
@@ -801,10 +802,10 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
   DrawPanelCentered(platform, font, font_size, panel, 16, name, value_color);
 
   // Portrait: 128x64 rect centered on the panel (FUN_008747f3), blitting the
-  // clone-source class's target PICT (DAT_00596d44 table). Drawn after the
-  // name line but BEFORE the subtitle, exactly as the original orders the
-  // three (NovaUi_DrawTargetStatusPanel 0x0045f530): the class-variant
-  // subtitle draws over the portrait.
+  // target-pict class's target PICT (g_ship_class_target_pict_images table).
+  // Drawn after the name line but BEFORE the subtitle, exactly as the original
+  // orders the three (NovaUi_DrawTargetStatusPanel 0x0045f530): the
+  // class-variant subtitle draws over the portrait.
   if (ship_class != nullptr) {
     if (const auto *portrait =
             TargetPortrait(platform, state.scenario, target.ship_class_id)) {

@@ -210,16 +210,16 @@ struct StoreTextureCache {
                : nullptr;
   }
   // Ship thumbnails use the class's resolved portrait PICT
-  // (ShipClassDef +0xa0a pict_fallback_sprite_resource_id, the id
+  // (ShipClassDef +0xa0a portrait_pict_resource_id, the id
   // NovaUi_DrawShipyardShipList 0x004948b0 passes to
   // NovaUi_BlitPictThumbnailCached 0x00497b70): PICT 5000+class when it
-  // exists, else the clone-source class's portrait (0x004aeda0). Computing
+  // exists, else the base-sprite owner's portrait (0x004aeda0). Computing
   // 5000+id here instead showed the wrong ship for clone classes (e.g. the
   // Used Heavy Shuttle).
   const ShipClass *ship_class =
       outfit_store ? nullptr : state.scenario.Ship(id);
   const std::uint16_t portrait_pict =
-      ship_class != nullptr ? ship_class->pict_fallback_sprite_resource_id : 0;
+      ship_class != nullptr ? ship_class->portrait_pict_resource_id : 0;
   const std::int32_t pict_id = outfit_store
                                    ? static_cast<std::int32_t>(id - 0x80) + 6000
                                    : static_cast<std::int32_t>(portrait_pict);

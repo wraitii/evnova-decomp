@@ -15,7 +15,7 @@
 // (labels from the STR# 0x96 "button labels" pool entries 0x14/0x15/0x16/
 // 0x18/0x1f). The window is laid out from DLOG/DITL 0x3ef: the 423x215 PICT
 // 0x213f backdrop is centred on the 640x480 playfield, with the 200x200 ship
-// portrait (ShipClass pict_fallback_sprite_resource_id = PICT 5000+class,
+// portrait (ShipClass portrait_pict_resource_id = PICT 5000+class,
 // overridden by the pers HailPict, from
 // NovaData_LoadAllShipClassVisualAndLaunchData 0x004aeda0) in DITL item 10 on
 // the right, the word-wrapped comm prompt panel in item 9 and the Class:/
@@ -87,7 +87,7 @@ enum class EscortManagementAction : std::uint8_t {
 // live flight view (SpaceflightView::DrawGameFrame; the original composites
 // its DLOG over the unmodified gameplay surface), shows the 200x200 ship
 // portrait (ShipClass
-// pict_fallback_sprite_resource_id) on the right and name/government panel on
+// portrait_pict_resource_id) on the right and name/government panel on
 // the left, and loops the three context buttons (stacked vertically on the
 // lower-left) until the player closes the channel (Esc/Enter/'e'/Close
 // Channel), the platform quits, or the internal escort-transfer latch is

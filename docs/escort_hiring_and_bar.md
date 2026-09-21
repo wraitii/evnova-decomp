@@ -66,9 +66,9 @@ Ghidra. The clean-room counterparts live in
   **not reconstructed yet**), else random STR# 0x1fa5 (Generic News), else
   STR# 0x7d2 0xbf.
 - Thumbnails: the shipyard list passes ShipClassDef +0xa0a
-  `pict_fallback_sprite_resource_id` to `NovaUi_BlitPictThumbnailCached`
-  (0x00497b70): PICT 5000+class when it exists, else the clone-source
-  class's portrait (0x004aeda0) — never 5000+id blindly, or clone classes
+  `portrait_pict_resource_id` to `NovaUi_BlitPictThumbnailCached`
+  (0x00497b70): PICT 5000+class when it exists, else the base-sprite owner's
+  portrait (0x004aeda0) — never 5000+id blindly, or clone classes
   (Used Heavy Shuttle etc.) show the wrong hull; missing PICTs fill the
   atlas cell black.
 - Draw (0x0047d370): PICT over the window rect; headline band
