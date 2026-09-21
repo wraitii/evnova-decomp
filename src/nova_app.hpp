@@ -99,8 +99,8 @@ struct NovaRuntime {
   // Geneva.ttf face cache for the menu status text (the original draws menu
   // text with g_main_menu_font_id 3 / size 9, Ghidra 0x004b32aa).
   game::NovaFontCache font_cache;
-  // 128x64 clone-source portrait PICT (3000 + class) shown in the pilot status
-  // panel; cached per class id, -1 = none loaded yet.
+  // 128x64 target-pict portrait PICT (3000 + target_pict_ship_class) shown in
+  // the pilot status panel; cached per class id, -1 = none loaded yet.
   std::unique_ptr<SdlTexture> menu_status_portrait;
   std::int16_t menu_status_portrait_class = -1;
   StartupPhase startup_phase = StartupPhase::loading_splash;

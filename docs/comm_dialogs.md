@@ -104,7 +104,7 @@ Black-filled rect, three left-aligned Geneva-12 lines:
 
 ## Ship portrait PICT selection (0x0047e470)
 
-`g_ship_class_defs[class].pict_fallback_sprite_resource_id`, overridden by
+`g_ship_class_defs[class].portrait_pict_resource_id`, overridden by
 the pers personality's HailPict (`g_pers_defs[slot] + 0x12`) when it is a
 real PICT id (> 0x7f). Loaded once per window open into
 `g_escort_management_ship_image` and blitted into the item-10 rect.

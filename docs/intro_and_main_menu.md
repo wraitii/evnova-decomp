@@ -123,7 +123,7 @@ depending on the game-active flag:
   0x86, 0x00468d90) / Combat Rating (0x00469030, STR# 0x8a) / Current Date
   right column; "<name> has been killed" when destroyed, with a "Oh my God!
   They killed Kenny!" easter egg for a pilot named Kenny, DAT_0056ce68) and
-  the clone-source ship portrait (DAT_00596d44) centered between the columns.
+  the target-pict ship portrait (g_ship_class_target_pict_images) centered between the columns.
   Text is Geneva size 9 (g_main_menu_font_id 3, 0x004b32aa), labels dark red
   (DAT_00735652 = RGB555 0x84d0,0,0) and values bright red (DAT_0073564c =
   0xffff,0,0).

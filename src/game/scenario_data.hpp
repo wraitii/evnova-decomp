@@ -437,12 +437,17 @@ struct ShipClass {
   // Ship_UpdateVisualState (0x00428340) skips the glow brightness block.
   std::int16_t engine_glow_image_id = 0;
   // Ghidra ShipClassDef +0xa08 (base_sprite_clone_source_ship_class):
-  // zero-based id of the class whose base sprite this class cloned (0x004b4ee0
-  // clone arm: the first EARLIER class in load order whose sh\x8an BaseImageID
-  // matches; -1 when the class builds its own sprite). Read by
-  // Ship_LaunchCarriedShipFromBay 0x00415ea0's bay-weapon fallback, mapping a
-  // fighter variant back to its carrier's bay weapon. Distinct from the Bible
-  // EscortType/EscortCategory field.
+  // zero-based id of the class that owns this class's base sprite. The
+  // 0x004b0c20 startup table seeds every class with its own index and
+  // 0x004b4ee0's clone arm overwrites it with the first EARLIER class in load
+  // order whose sh\x8an BaseImageID matches, so fresh classes point at
+  // themselves and clones at their source -- never -1. Read by
+  // Sprite_GetShipClassEscortFrameWidth 0x004624c0 (escort/formation span) and
+  // by Ship_LaunchCarriedShipFromBay 0x00415ea0's bay-weapon fallback, mapping
+  // a fighter variant back to its carrier's bay weapon. Distinct from the
+  // Bible EscortType/EscortCategory field and from target_pict_ship_class
+  // (+0xa0c). -1 here means "no sprite owner" (e.g. a default-constructed
+  // ShipClass).
   std::int16_t base_sprite_clone_source_ship_class = -1;
   // Ghidra ShipClassDef +0xa06 (sh\x8an +0x34 FramesPer, 36 when 0): the
   // rotation-grid frame count. The turret muzzle bearing is the displayed
@@ -514,26 +519,25 @@ struct ShipClass {
   // Ghidra sh\x8an WeapImageID (+0x26): weapon-effects overlay sheet id.
   std::int16_t weapon_image_id = 0;
 
-  // Ghidra ShipClassDef +0xA0A (pict_fallback_sprite_resource_id): the large
+  // Ghidra ShipClassDef +0xA0A (portrait_pict_resource_id): the large
   // (200x200) portrait PICT drawn in the ship-comm dialog (DLOG 0x3ef item 10)
   // and the shipyard list. Ghidra NovaData_LoadAllShipClassVisualAndLaunchData
   // (0x004aeda0) stores `5000 + (zero-based class id)` when PICT(index+5000)
-  // exists, otherwise `5000 + clone_source_ship_class` (the source's portrait)
-  // -- the portrait lives in the 5000+ PICT range, distinct from the target-
-  // panel 3000+ PICT set. 0 when neither resolution succeeded.
-  std::uint16_t pict_fallback_sprite_resource_id = 0;
+  // exists, otherwise `5000 + base_sprite_clone_source_ship_class` (the base-
+  // sprite owner's portrait) -- the portrait lives in the 5000+ PICT range,
+  // distinct from the target-panel 3000+ PICT set. 0 when neither succeeds.
+  std::uint16_t portrait_pict_resource_id = 0;
 
-  // Ghidra ShipClassDef +0xA0C (clone_source_ship_class). The zero-based ship
-  // class that owns the base sprites this class shares: the first class whose
-  // sh\x8an BaseImageID matches this class's (derived by ShipClass_LoadShip-
-  // ClassVisualAndLaunchData 0x004b4ee0's clone branch, stored at load time by
-  // NovaData_LoadAllShipClassVisualAndLaunchData 0x004aeda0). Classes that
-  // clone an earlier class reuse its target-info PICT (Bible: "give the first
-  // of any series of identical-looking ship types a target pict ... and the
-  // engine will use it for all higher-numbered ship types with the same base
-  // sprites"); the portrait resource is 3000 + this id. -1 when not derived
-  // (the decoder falls back to the class's own id).
-  std::int16_t clone_source_ship_class = -1;
+  // Ghidra ShipClassDef +0xA0C (target_pict_ship_class). The class whose
+  // target-info PICT (3000 + id, the 128x64 class portrait) this class draws:
+  // the class itself when it owns a PICT 3000+id
+  // (g_ship_class_target_pict_images, loaded by FUN_004ad960), otherwise the
+  // class that owns its base sprites (base_sprite_clone_source_ship_class). Set
+  // by NovaData_LoadAllShipClassVisualAndLaunchData 0x004aeda0; the
+  // target-status panel (0x0046020f) and the menu status portrait (0x00487d26)
+  // blit g_ship_class_target_pict_images[target_pict_ship_class]. -1 for a
+  // default-constructed class.
+  std::int16_t target_pict_ship_class = -1;
 
   // DefaultItems (outfit ids, zero-based after 0x80) + counts, up to 8. These
   // seed the player's starting inventory when bought/captured.

@@ -1673,10 +1673,11 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
   std::size_t loaded_asteroid_types = 0;
   std::size_t loaded_impact_effects = 0;
 
-  // BaseImageID -> first zero-based ship class using it, for clone-source
-  // derivation (ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0's clone
-  // branch: a class whose sh\x8an BaseImageID matches an earlier class's
-  // reuses that class's sprites and target portrait).
+  // BaseImageID -> first zero-based ship class using it, for the base-sprite
+  // owner derivation (ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0's
+  // clone branch: a class whose sh\x8an BaseImageID matches an earlier class's
+  // reuses that class's sprites; the target portrait owner is resolved
+  // separately from the 3000+ PICT set below).
   std::map<std::uint16_t, std::int16_t> first_class_by_base_image;
   for (std::int32_t id = 0x80; id <= 0x37f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
@@ -1688,12 +1689,12 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
       // 0x004cd230, bounded to 0x3f chars), not a numeric header field.
       cls.display_name = NovaText_StripSubtitleSuffix(res->name);
       const std::size_t index = static_cast<std::size_t>(id) - 0x80;
-      // Clone-source derivation: the sh\x8an descriptor shares the class id,
-      // and its BaseImageID (+0x00) is the sheet the class's sprites are cut
-      // from. The first class (lowest id) seen with a given BaseImageID is the
-      // clone source; identical-looking classes get its portrait (Bible:
-      // "PICT resource ID 3000 + shipID - 128 ... for all higher-numbered
-      // ship types with the same base sprites").
+      // Base-sprite owner derivation: the sh\x8an descriptor shares the class
+      // id, and its BaseImageID (+0x00) is the sheet the class's sprites are
+      // cut from. The first class (lowest id) seen with a given BaseImageID
+      // becomes the base-sprite owner; identical-looking classes store it at
+      // +0xa08 (Bible: "PICT resource ID 3000 + shipID - 128 ... for all
+      // higher-numbered ship types with the same base sprites").
       const auto shan = NovaResource_Load(kShipVisualResourceType,
                                           static_cast<std::uint16_t>(id));
       if (shan && shan->size() >= 2) {
@@ -1812,32 +1813,48 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
         }
         if (const auto found = first_class_by_base_image.find(base_image);
             found != first_class_by_base_image.end()) {
-          cls.clone_source_ship_class = found->second;
-          // Base sprite clone source (ShipClassDef +0xa08,
-          // base_sprite_clone_source_ship_class); the original leaves it at -1
-          // when the sprite is built fresh.
+          // Base sprite owner (ShipClassDef +0xa08,
+          // base_sprite_clone_source_ship_class). Ship_InitGameplayDataTables
+          // (0x004b0c20) seeds every class with its OWN zero-based index and
+          // 0x004b4ee0's clone arm overwrites it with the earlier class that
+          // shares this BaseImageID, so the field always names the class that
+          // owns the base sprite -- it is never -1.
           cls.base_sprite_clone_source_ship_class = found->second;
         } else {
-          cls.clone_source_ship_class = static_cast<std::int16_t>(index);
+          cls.base_sprite_clone_source_ship_class =
+              static_cast<std::int16_t>(index);
           first_class_by_base_image.emplace(base_image,
                                             static_cast<std::int16_t>(index));
         }
       } else {
-        // No sh\x8an descriptor: the class owns its (missing) sprites.
-        cls.clone_source_ship_class = static_cast<std::int16_t>(index);
+        // No sh\x8an descriptor: the class owns its (missing) sprites, so the
+        // sprite owner is the class itself (matching the 0x004b0c20 seed).
+        cls.base_sprite_clone_source_ship_class =
+            static_cast<std::int16_t>(index);
       }
-      // Large 200x200 portrait PICT for the ship-comm / shipyard panels
-      // (ShipClassDef +0xA0A). Ghidra NovaData_LoadAllShipClassVisualAndLaunch
-      // Data (0x004aeda0): use PICT `index + 5000` when that resource exists
-      // (FUN_004ce640(CICN 'PICT', index + 5000)), else fall back to the
-      // clone-source class's portrait `clone_source_ship_class + 5000` (the
-      // portrait resource lives at 5000 + a zero-based class id).
+      // Target-info portrait class (ShipClassDef +0xA0C,
+      // target_pict_ship_class) and the large 200x200 portrait fallback
+      // (+0xA0A), both resolved by NovaData_LoadAllShipClassVisualAndLaunchData
+      // (0x004aeda0). The target-status panel draws PICT
+      // 3000 + target_pict_ship_class; when a class owns its own 3000+id PICT
+      // (g_ship_class_target_pict_images, loaded per class by FUN_004ad960) the
+      // field is the class itself, otherwise it points at the class that owns
+      // its base sprite. The portrait is PICT 5000+id when present, else the
+      // base-sprite owner's.
+      const bool own_target_pict =
+          NovaResource_Load(kResourceTypePict,
+                            static_cast<std::uint16_t>(index + 3000))
+              .has_value();
+      cls.target_pict_ship_class =
+          own_target_pict ? static_cast<std::int16_t>(index)
+                          : cls.base_sprite_clone_source_ship_class;
       const std::uint16_t own_portrait =
           static_cast<std::uint16_t>(index + 5000);
-      cls.pict_fallback_sprite_resource_id =
+      cls.portrait_pict_resource_id =
           NovaResource_Load(kResourceTypePict, own_portrait)
               ? own_portrait
-              : static_cast<std::uint16_t>(cls.clone_source_ship_class + 5000);
+              : static_cast<std::uint16_t>(
+                    cls.base_sprite_clone_source_ship_class + 5000);
       ships[index] = std::move(cls);
       ++loaded_ships;
     }

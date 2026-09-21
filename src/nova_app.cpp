@@ -764,7 +764,7 @@ void DrawMenuTextCentered(SdlPlatform &platform,
 }
 
 // The pilot status panel (Ghidra 0x004873b0, DAT_00596d28 != 0 branch): two
-// columns of Geneva status text below the buttons plus the clone-source ship
+// columns of Geneva status text below the buttons plus the target-pict ship
 // portrait centered between them. All offsets below are 1024x768 backdrop
 // space relative to the backdrop-frame centre, scaled by 0.625 like the art.
 void DrawMenuStatusPanel(NovaRuntime &runtime) {
@@ -905,15 +905,16 @@ void DrawMenuStatusPanel(NovaRuntime &runtime) {
     }
   }
 
-  // Ship portrait (Ghidra: DAT_00596d44[clone_source] blit, 128x64 class
+  // Ship portrait (Ghidra:
+  // g_ship_class_target_pict_images[target_pict_ship_class] blit, 128x64 class
   // portrait centered on the panel origin, top at origin + 0x118).
   const std::int16_t class_id = game.player.ship_class_id;
   if (runtime.menu_status_portrait_class != class_id) {
     runtime.menu_status_portrait.reset();
     runtime.menu_status_portrait_class = class_id;
     std::int16_t pict_class = class_id;
-    if (ship_class != nullptr && ship_class->clone_source_ship_class >= 0) {
-      pict_class = ship_class->clone_source_ship_class;
+    if (ship_class != nullptr && ship_class->target_pict_ship_class >= 0) {
+      pict_class = ship_class->target_pict_ship_class;
     }
     if (const auto pict_data = NovaResource_LoadPictData(
             static_cast<std::uint16_t>(3000 + pict_class))) {

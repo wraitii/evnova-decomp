@@ -7,13 +7,11 @@
 #include <utility>
 #include <vector>
 
-#include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../util/math.hpp"
 #include "landed_store.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
-#include "ship_visual.hpp"
 #include "spaceflight.hpp"
 #include "weapon.hpp"
 
@@ -52,37 +50,33 @@ int RoundHeadingDeg(const Ship &ship) {
 }
 
 // Sprite_GetShipClassEscortFrameWidth (0x004624c0): the ship-class sprite
-// span used to size wedge spacing. The original resolves
-// ShipClassDef.base_sprite_clone_source_ship_class (+0xa08), which the
-// sh\x8an loader writes to the clone-source class; clone classes share the
-// source sprite, so the port decodes the class's own sh\x8an (identical span
-// for clones). Divergence: non-clone classes read clone source 0 (class 0's
-// sprite) in the original when the field defaults to zero; the port always
-// uses the class's own span. TODO(decomp) if a scenario shows spacing drift.
-// Like Sprite_GetFrameFullWidth, this returns the FULL frame width (see
-// Ghidra 0x004624c0/0x00462390),
-// fallback 0x4b = 75.
-// Cached per class id: the scenario resource set is fixed for the process
-// lifetime, and this runs per follower per frame.
-std::int16_t EscortClassSpriteSpanPx(std::int16_t class_id) {
-  static std::vector<std::int16_t> cache(0x300, -1);
+// span used to size wedge spacing. The original resolves the class's sprite
+// owner (ShipClassDef.base_sprite_clone_source_ship_class, +0xa08 -- the class
+// itself when the sprite is built fresh, the source class when cloned) and
+// returns that owner's full frame width (Sprite_GetFrameFullWidth 0x00462390).
+// It returns the 0x4b = 75 debug fallback only when the owner index is invalid
+// or the owner has no prepared sprite; the port reads the decoded base_x_size
+// of the owner class instead.
+std::int16_t EscortClassSpriteSpanPx(const ScenarioData &scenario,
+                                     std::int16_t class_id) {
   if (class_id < 0 || class_id >= 0x300) {
     return kFollowerSpanFallback;
   }
-  std::int16_t &cached = cache[static_cast<std::size_t>(class_id)];
-  if (cached >= 0) {
-    return cached;
+  const ShipClass *cls =
+      scenario.Ship(static_cast<std::int16_t>(class_id + 0x80));
+  if (cls == nullptr) {
+    return kFollowerSpanFallback;
   }
-  const auto resource_id = static_cast<std::uint16_t>(class_id + 0x80);
-  if (const auto resource =
-          NovaResource_Load(kShipVisualResourceType, resource_id)) {
-    if (const auto visual = DecodeShipVisualDescriptor(*resource)) {
-      cached = static_cast<std::int16_t>(visual->base_x_size);
-      return cached;
-    }
+  const std::int16_t source = cls->base_sprite_clone_source_ship_class;
+  if (source < 0 || source >= 0x300) {
+    return kFollowerSpanFallback;
   }
-  cached = kFollowerSpanFallback;
-  return cached;
+  const ShipClass *source_cls =
+      scenario.Ship(static_cast<std::int16_t>(source + 0x80));
+  if (source_cls == nullptr || source_cls->base_x_size == 0) {
+    return kFollowerSpanFallback;
+  }
+  return static_cast<std::int16_t>(source_cls->base_x_size);
 }
 
 // One wedge slot's (lateral, forward) offset in multiples of the formation
@@ -222,10 +216,15 @@ void Ship_MoveShipTowardFormationOffset(GameState &state,
 // Ghidra 0x00413990 Ship_UpdateEscortFormations.
 void Ship_UpdateEscortFormations(GameState &state, Ship &leader, bool snap) {
   // Spacing radius: max participant sprite span * 0.7, clamped to 24..60 px.
+  // The leader seed at 0x004139b8 only runs when its class's base-sprite
+  // owner field is valid; otherwise the 0x40 default stands.
   std::int16_t span = kLeaderSpanFallback;
-  if (state.scenario.Ship(
-          static_cast<std::int16_t>(leader.ship_class_id + 0x80)) != nullptr) {
-    span = EscortClassSpriteSpanPx(leader.ship_class_id);
+  if (const ShipClass *leader_cls = state.scenario.Ship(
+          static_cast<std::int16_t>(leader.ship_class_id + 0x80));
+      leader_cls != nullptr &&
+      leader_cls->base_sprite_clone_source_ship_class >= 0 &&
+      leader_cls->base_sprite_clone_source_ship_class < 0x300) {
+    span = EscortClassSpriteSpanPx(state.scenario, leader.ship_class_id);
   }
   std::vector<Ship *> followers;
   followers.reserve(8);
@@ -238,7 +237,7 @@ void Ship_UpdateEscortFormations(GameState &state, Ship &leader, bool snap) {
       continue;
     }
     span = static_cast<std::int16_t>(std::max<std::int16_t>(
-        span, EscortClassSpriteSpanPx(other.ship_class_id)));
+        span, EscortClassSpriteSpanPx(state.scenario, other.ship_class_id)));
     followers.push_back(&other);
   }
   if (followers.empty()) {

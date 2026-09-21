@@ -113,7 +113,7 @@ private:
   // Ship-class portraits for the target panel (PICT 3000 + zero-based clone
   // source class id, per the Bible "PICT resource ID 3000 + shipID - 128",
   // reused across classes that share base sprites via
-  // ShipClassDef.clone_source_ship_class). Keyed by the zero-based ship class
+  // ShipClassDef.target_pict_ship_class). Keyed by the zero-based ship class
   // id so each distinct class is decoded/uploaded once. A missing/failed
   // decode maps to null (the target panel draws text-only).
   struct PortraitEntry {
@@ -159,8 +159,8 @@ private:
   bool radar_static_active_ = false;
 
   // Loads (and caches) the target-panel portrait for a zero-based ship class
-  // id, resolving the portrait PICT through the class's clone source, or null
-  // when unavailable (null is also returned for a cached-but-textureless
+  // id, resolving the portrait PICT through the class's target-pict owner, or
+  // null when unavailable (null is also returned for a cached-but-textureless
   // entry, so callers may dereference the returned entry's texture freely).
   [[nodiscard]] const PortraitEntry *
   TargetPortrait(SdlPlatform &platform,

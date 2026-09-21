@@ -902,7 +902,7 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
   const EscortManagementLayout layout = LoadEscortManagementLayout();
   auto backdrop = LoadPictTexture(platform, kEscortManagementFramePict);
   auto ship_picture =
-      LoadPictTexture(platform, ship_class->pict_fallback_sprite_resource_id);
+      LoadPictTexture(platform, ship_class->portrait_pict_resource_id);
   NovaFontCache font_cache;
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
@@ -1167,15 +1167,14 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                   "bordered placeholder");
   }
   // Ship portrait PICT (0x0047e470): the class's 200x200 portrait PICT
-  // (ShipClass.pict_fallback_sprite_resource_id, 5000 + class id, populated
+  // (ShipClass.portrait_pict_resource_id, 5000 + class id, populated
   // by the scenario loader at startup), overridden by the ship's pers
   // personality HailPict (+0x12) when it names a real PICT (> 0x7f).
   std::unique_ptr<SdlTexture> ship_picture;
   {
     std::uint16_t pict_id = 0;
-    if (ship_class != nullptr &&
-        ship_class->pict_fallback_sprite_resource_id != 0) {
-      pict_id = ship_class->pict_fallback_sprite_resource_id;
+    if (ship_class != nullptr && ship_class->portrait_pict_resource_id != 0) {
+      pict_id = ship_class->portrait_pict_resource_id;
     }
     if (target.pers_def_slot >= 0 &&
         target.pers_def_slot <

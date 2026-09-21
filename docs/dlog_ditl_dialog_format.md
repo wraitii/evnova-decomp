@@ -163,7 +163,7 @@ All values are window-local (0,0 = window top-left, matching the backdrop).
 | `0x03e8` spaceport (PICT `0x2134`) | 618×517 | large body `(3,3)-(615,288)`; content panel `(160,327)-(461,512)`; eight 145×25 buttons down both sides + bottom bars |
 
 The 200×200 portrait PICTs (`0x1388..`, i.e. 5000 + zero-based ship-class id,
-`ShipClass.pict_fallback_sprite_resource_id`) slot straight into the ship-comm
+`ShipClass.portrait_pict_resource_id`) slot straight into the ship-comm
 `portrait` rect — a strong sanity check that the coordinate model is right.
 
 ## 6. Items outside the DLOG bounds are legal (and common)

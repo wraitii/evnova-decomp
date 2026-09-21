@@ -77,7 +77,7 @@ the shield sprite RGB intensity, and subtracts `g_avg_frame_tick_scale`.
 
 `ShipClass_FindShipSpriteSetByResourceId` scans the resource-id table; when a
 sprite is already loaded for the same id it is cloned
-(`Sprite_Clone`) rather than re-decoded, and `clone_source_ship_class`
+(`Sprite_Clone`) rather than re-decoded, and `base_sprite_clone_source_ship_class`
 remembers the source class.
 
 ## Typed `Sprite` object (0xd4 bytes)
