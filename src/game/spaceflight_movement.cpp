@@ -271,10 +271,13 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   if (opts.inertialess) {
     // Ghidra 0x0044cffe inertialess steering block
     // (PlayerTick_InertialessSteering). The scalar speed is clamped to the
-    // cap global, decays by 33/34 (DAT_005755e0, a double) while
-    // fire-restricted, and the velocity rotates toward heading * speed at the
-    // thrust-scaled rate. The block's engine-glow ramp toward round(speed * 32
-    // * 0.75 / max) capped 24 is owned by the port's glow drive (TODO(decomp)).
+    // cap global, decays by the g_inertialess_fire_restricted_speed_damp
+    // double while fire-restricted, and the velocity rotates toward
+    // heading * speed at the thrust-scaled rate. The original disasm
+    // (0x0044d02b, FMUL double ptr [0x005755e0]) applies the decay as a single
+    // multiply per call with no tick scale; this port keeps that original
+    // cadence. The block's engine-glow ramp toward round(speed * 32 * 0.75 /
+    // max) capped 24 is owned by the port's glow drive (TODO(decomp)).
     const float scalar_cap = opts.speed_cap_x >= 0.0F
                                  ? opts.speed_cap_x
                                  : stats.max_speed_px_per_tick;
@@ -282,7 +285,7 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
       ship.speed = scalar_cap;
     }
     if (opts.fire_restricted) {
-      constexpr float kInertialessFireRestrictedSpeedDamp = 33.0F / 34.0F;
+      constexpr float kInertialessFireRestrictedSpeedDamp = 0.985F;
       ship.speed *= kInertialessFireRestrictedSpeedDamp;
     }
     NovaShip_SteerVelocityTowardShipHeading(

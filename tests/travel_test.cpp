@@ -768,6 +768,464 @@ TEST_CASE("jump stop gate truncates velocity before starting Warp up") {
   CHECK(state.warp_up_sound_pending);
 }
 
+// Ship_CheckSpecialLoadoutCapability (0x0046d080): a class with Flags2 0x0020
+// skips the per-axis stop gate (0x0044c4db) and keeps its momentum through the
+// hold (0x0044c72e) -- "jump without slowing down".
+TEST_CASE("fast-jump class skips the brake and keeps momentum") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  state.player.heading = 0.0F;
+  state.player.vel_x = 8.0F;
+  state.player.vel_y = 0.0F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  state.scenario.ships[static_cast<std::size_t>(state.player.ship_class_id)]
+      .flags_secondary |= 0x0020U;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  // The stop gate is bypassed: the hold begins with the ship still moving and
+  // the slow-phase damp never runs.
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  const float speed = std::hypot(state.player.vel_x, state.player.vel_y);
+  CHECK(speed == Catch::Approx(8.0F));
+  for (int f = 0; f < 10; ++f) {
+    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+    CHECK(std::hypot(state.player.vel_x, state.player.vel_y) ==
+          Catch::Approx(speed));
+  }
+  // The sequence still completes to the plotted destination.
+  for (int f = 0; f < 400 && !state.travel.just_completed; ++f) {
+    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  }
+  CHECK(state.travel.just_completed);
+  CHECK(state.player.current_system_id == 1);
+}
+
+TEST_CASE("owned fast-jump outfit grants the capability") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  state.player.vel_x = 8.0F;
+  state.player.vel_y = 0.0F;
+  // The scenario loads a full 0x200 outfit table, so reuse the last slot
+  // instead of appending (id must stay inside the 0x200 owned-count array).
+  REQUIRE(!state.scenario.outfits.empty());
+  const std::size_t id = state.scenario.outfits.size() - 1;
+  REQUIRE(id < state.inventory.outfit_owned_count.size());
+  game::Outfit &outfit = state.scenario.outfits[id];
+  outfit.mod_type = static_cast<std::int16_t>(game::OutfitEffect::kFastJump);
+  outfit.mod_val = 0;
+  outfit.alt_mod_types = {};
+  outfit.alt_mod_vals = {};
+  state.inventory.outfit_owned_count[id] = 1;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+}
+
+// A merely-defined fast-jump outfit is not owned (count 0), so the ordinary
+// brake still runs.
+TEST_CASE("defined but unowned fast-jump outfit does not grant") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  state.player.vel_x = 8.0F;
+  state.player.vel_y = 0.0F;
+  REQUIRE(!state.scenario.outfits.empty());
+  const std::size_t id = state.scenario.outfits.size() - 1;
+  REQUIRE(id < state.inventory.outfit_owned_count.size());
+  game::Outfit &outfit = state.scenario.outfits[id];
+  outfit.mod_type = static_cast<std::int16_t>(game::OutfitEffect::kFastJump);
+  state.inventory.outfit_owned_count[id] = 0;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+}
+
+// The fast-jump ModType in an alternate effect slot with ModVal 0 still grants
+// the capability: the four ModTypes are equivalent and no positive value or
+// activation is needed.
+TEST_CASE("fast-jump in an alternate ModType with ModVal 0 grants") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  state.player.vel_x = 8.0F;
+  state.player.vel_y = 0.0F;
+  REQUIRE(!state.scenario.outfits.empty());
+  const std::size_t id = state.scenario.outfits.size() - 1;
+  REQUIRE(id < state.inventory.outfit_owned_count.size());
+  game::Outfit &outfit = state.scenario.outfits[id];
+  outfit.mod_type = 0;
+  outfit.mod_val = 0;
+  outfit.alt_mod_types[1] =
+      static_cast<std::int16_t>(game::OutfitEffect::kFastJump);
+  outfit.alt_mod_vals[1] = 0;
+  state.inventory.outfit_owned_count[id] = 1;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+}
+
+// The fast-jump capability does not bypass the no-jump radius around the
+// system centre (0x0044c220 + Stellar_ComputeTravelRangeSq): the engage is
+// refused with STR# 0x7d2 0x2a before the stop gate is reached.
+TEST_CASE("fast-jump is still denied inside the no-jump range") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  state.scenario.ships[static_cast<std::size_t>(state.player.ship_class_id)]
+      .flags_secondary |= 0x0020U;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  CHECK_FALSE(state.travel.engaging);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kIdle);
+}
+
+// Inertialess hulls use the 0x0044f0e3 speed-decay arm of the jump brake
+// (Outfit_ShipIsInertialess 0x0046df70), not the 0x0044f127 turnaround: the
+// maintained scalar speed decays by the effective thrust step while the
+// heading and velocity direction stay fixed, then the stop gate hands off to
+// the hold.
+TEST_CASE(
+    "inertialess hull decays scalar speed without turning in the jump brake") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  constexpr float kHeading = 0.75F;
+  constexpr float kInitialSpeed = 8.0F;
+  state.player.heading = kHeading;
+  state.player.speed = kInitialSpeed;
+  state.player.vel_x = std::sin(kHeading) * kInitialSpeed;
+  state.player.vel_y = -std::cos(kHeading) * kInitialSpeed;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  state.scenario.ships[static_cast<std::size_t>(state.player.ship_class_id)]
+      .flags_secondary |= 0x0040U;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  const float thrust = state.cached_stats.thrust_raw / 10000.0F * 2.0F;
+  REQUIRE(thrust > 0.0F);
+  const float ticks = 16.67F / (1000.0F / 30.0F);
+  const float expected_speed = std::max(0.0F, kInitialSpeed - thrust * ticks);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  CHECK(state.player.heading == Catch::Approx(kHeading));
+  CHECK(state.player.speed == Catch::Approx(expected_speed));
+  CHECK(std::hypot(state.player.vel_x, state.player.vel_y) ==
+        Catch::Approx(expected_speed).margin(1e-4));
+
+  // Coast straight to the stop gate without the turnaround's reverse heading.
+  int guard = 0;
+  while (state.travel.jump_phase == game::TravelState::JumpPhase::kBrake &&
+         guard++ < 400) {
+    CHECK(state.player.heading == Catch::Approx(kHeading));
+    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  }
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+}
+
+// The owned inertial dampener (ModType 38, kInertialDampener) selects the same
+// arm as the class Flags2 0x40 flag.
+TEST_CASE("owned inertial dampener selects the jump-brake speed-decay arm") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  constexpr float kHeading = 0.75F;
+  state.player.heading = kHeading;
+  state.player.speed = 8.0F;
+  state.player.vel_x = std::sin(kHeading) * 8.0F;
+  state.player.vel_y = -std::cos(kHeading) * 8.0F;
+  REQUIRE(!state.scenario.outfits.empty());
+  const std::size_t id = state.scenario.outfits.size() - 1;
+  REQUIRE(id < state.inventory.outfit_owned_count.size());
+  game::Outfit &outfit = state.scenario.outfits[id];
+  outfit.mod_type =
+      static_cast<std::int16_t>(game::OutfitEffect::kInertialDampener);
+  outfit.mod_val = 0;
+  outfit.alt_mod_types = {};
+  outfit.alt_mod_vals = {};
+  state.inventory.outfit_owned_count[id] = 1;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  const float speed_before = state.player.speed;
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  CHECK(state.player.speed < speed_before);
+  CHECK(state.player.heading == Catch::Approx(kHeading));
+}
+
+// Off-heading velocity with the scalar at the zero floor: the arm must not
+// make the speed negative and must not snap the velocity onto heading*speed in
+// one frame.
+TEST_CASE("inertialess jump brake floors scalar speed and steers off-heading "
+          "velocity") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  constexpr float kHeading = 0.0F;
+  state.player.heading = kHeading; // heading points up
+  state.player.speed = 0.0F;
+  state.player.vel_x = 8.0F; // off-heading: velocity is sideways
+  state.player.vel_y = 0.0F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  state.scenario.ships[static_cast<std::size_t>(state.player.ship_class_id)]
+      .flags_secondary |= 0x0040U;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  const float thrust = state.cached_stats.thrust_raw / 10000.0F * 2.0F;
+  REQUIRE(thrust > 0.0F);
+  const float ticks = 16.67F / (1000.0F / 30.0F);
+  // Ship_SteerVelocityTowardShipHeading step = eff_thrust * 4.0 * ticks
+  // (_DAT_005754ac = 4.0). At speed 0 the commanded velocity is (0,0), so each
+  // axis may move at most one step and vel_y (already 0) stays put.
+  const float step = thrust * 4.0F * ticks;
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  CHECK(state.player.speed == 0.0F); // floored, never negative
+  CHECK(state.player.heading == Catch::Approx(kHeading));
+  CHECK(state.player.vel_x == Catch::Approx(8.0F - step));
+  CHECK(state.player.vel_y == Catch::Approx(0.0F));
+}
+
+// The fast-jump capability is tested first at 0x0044c4db, before the
+// inertialess split, so it wins: the hold begins with the ship still moving.
+TEST_CASE("fast-jump wins over inertialess in the jump brake") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  state.player.heading = 0.0F;
+  state.player.speed = 8.0F;
+  state.player.vel_x = 8.0F;
+  state.player.vel_y = 0.0F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  state.scenario.ships[static_cast<std::size_t>(state.player.ship_class_id)]
+      .flags_secondary |= 0x0040U | 0x0020U;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  CHECK(std::hypot(state.player.vel_x, state.player.vel_y) ==
+        Catch::Approx(8.0F));
+}
+
+// Engaged hold: the shared manual-flight inertialess tail (Ghidra 0x0044cffe ->
+// 0x0044d05b) still runs, so a fast-jump inertialess hull steers velocity
+// toward heading*speed while the hold turns onto the jump bearing. Heading and
+// jump bearing coincide here, isolating the steering from the auto-turn.
+TEST_CASE("fast-jump inertialess hold steers off-heading velocity") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  constexpr float kHeading = 0.0F;
+  constexpr float kSpeed = 8.0F;
+  state.player.heading = kHeading;
+  state.player.speed = kSpeed;
+  state.player.vel_x = kSpeed; // off-heading: velocity is sideways
+  state.player.vel_y = 0.0F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  state.scenario.ships[static_cast<std::size_t>(state.player.ship_class_id)]
+      .flags_secondary |= 0x0040U | 0x0020U;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  // Pin the jump bearing to the current heading: the hold must not turn, so
+  // only the shared steering tail moves the velocity.
+  state.travel.jump_heading_rad = kHeading;
+
+  const float thrust = state.cached_stats.thrust_raw / 10000.0F * 2.0F;
+  REQUIRE(thrust > 0.0F);
+  const float ticks = 16.67F / (1000.0F / 30.0F);
+  // Ship_SteerVelocityTowardShipHeading step = eff_thrust * 4.0 * ticks
+  // (_DAT_005754ac = 4.0). Command = heading*speed = (0, -8).
+  const float step = thrust * 4.0F * ticks;
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kHold body
+  CHECK(state.player.vel_x == Catch::Approx(kSpeed - step));
+  CHECK(state.player.vel_y == Catch::Approx(-step));
+  // Inertialess hulls keep the maintained scalar authoritative; it must not be
+  // overwritten with hypot(velocity).
+  CHECK(state.player.speed == Catch::Approx(kSpeed));
+}
+
+// During the hold the auto-turn runs before the shared inertialess steering
+// (Ghidra 0x0044cffe -> 0x0044d05b), so the velocity chases the freshly turned
+// heading.
+TEST_CASE("fast-jump inertialess hold turns while steering velocity") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  constexpr float kHeading = 0.0F;
+  constexpr float kJumpBearing = 0.5F;
+  constexpr float kSpeed = 8.0F;
+  state.player.heading = kHeading;
+  state.player.speed = kSpeed;
+  state.player.vel_x = 0.0F;
+  state.player.vel_y = -kSpeed; // aligned to the old heading, off the bearing
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  state.scenario.ships[static_cast<std::size_t>(state.player.ship_class_id)]
+      .flags_secondary |= 0x0040U | 0x0020U;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  state.travel.jump_heading_rad = kJumpBearing;
+
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kHold body
+  CHECK(state.player.heading > kHeading);
+  CHECK(state.player.heading <= kJumpBearing);
+  // The auto-turned heading has sin > 0, so the commanded heading*speed pulls
+  // velocity toward positive x; a steering pass that ran before the turn (or
+  // did not run) would leave vel_x at zero and vel_y at -speed.
+  CHECK(state.player.vel_x > 0.0F);
+}
+
+// Ordinary (non-fast, non-inertialess) holds keep the slow-phase damp.
+TEST_CASE("ordinary hold applies the slow-phase velocity damp") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  state.player.heading = 0.0F;
+  state.player.vel_x = 0.5F;
+  state.player.vel_y = -0.5F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  state.travel.jump_heading_rad = 0.0F;
+
+  // g_hyperspace_slow_phase_velocity_damp (0x005755f8, double 0.98006866).
+  const float ticks = 16.67F / (1000.0F / 30.0F);
+  const float damp = std::pow(0.98006866F, ticks);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kHold body
+  CHECK(state.player.vel_x == Catch::Approx(0.5F * damp));
+  CHECK(state.player.vel_y == Catch::Approx(-0.5F * damp));
+}
+
+// A non-fast inertialess hull in the hold runs the slow damp on the velocity
+// but keeps its maintained scalar speed (+0x48): the original's 0x0044f414
+// damp writes vel_x/vel_y only, and the shared tail then steers toward
+// heading*speed. Overwriting the scalar with hypot() would decay it.
+TEST_CASE("inertialess hold keeps its maintained scalar through the damp") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  constexpr float kHeading = 0.0F;
+  constexpr float kSpeed = 1.0F;
+  state.player.heading = kHeading;
+  state.player.speed = kSpeed;
+  state.player.vel_x = 0.0F;
+  state.player.vel_y = -kSpeed;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  state.scenario.ships[static_cast<std::size_t>(state.player.ship_class_id)]
+      .flags_secondary |= 0x0040U;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  state.travel.jump_heading_rad = kHeading;
+
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kHold body
+  CHECK(state.player.speed == Catch::Approx(kSpeed));
+  // The steering tail pulls the damped velocity back toward heading*speed.
+  CHECK(state.player.vel_y == Catch::Approx(-kSpeed).margin(1e-4F));
+}
+
 TEST_CASE("jump payroll uses fleet travel days after escort restoration",
           "[travel][escort]") {
   GameState state;

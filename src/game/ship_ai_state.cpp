@@ -358,13 +358,11 @@ void NovaAi_UpdateShipState(GameState &state,
     // outward thrust arm. The "stopped" test uses the same 0.35 px/tick
     // threshold as the original (_DAT_00575080); special-loadout classes can
     // bypass that brake as described below.
-    const ShipClass *cls = state.scenario.Ship(
-        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
     // Ship_CheckSpecialLoadoutCapability (0x0046d080) bypasses the brake for
-    // classes flagged 0x20 in Flags2. Its outfit-based capability (load id
-    // 0x25) is not represented in the NPC loadout model yet.
+    // classes flagged Flags2 0x0020 or carrying the ModType-37 fast-jumping
+    // outfit (owned inventory for the player; class default loadout for NPCs).
     const bool special_departure =
-        cls != nullptr && (cls->flags_secondary & 0x0020U) != 0U;
+        NovaOutfit_HasFastJumpCapability(state, ship);
     if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <= kCentreRangeSq) {
       ship.ai_control_mode = 3;
     } else if (special_departure || (std::abs(ship.vel_x) < kVerySlowSpeed &&
@@ -702,8 +700,9 @@ void NovaAi_UpdateShipState(GameState &state,
                      kCentreRangeSq ||
                  !NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
         ship.ai_control_mode = 3;
-      } else if (std::abs(ship.vel_x) < kVerySlowSpeed &&
-                 std::abs(ship.vel_y) < kVerySlowSpeed) {
+      } else if (NovaOutfit_HasFastJumpCapability(state, ship) ||
+                 (std::abs(ship.vel_x) < kVerySlowSpeed &&
+                  std::abs(ship.vel_y) < kVerySlowSpeed)) {
         ship.ai_control_mode = 4;
       } else {
         ship.ai_control_mode = 1;

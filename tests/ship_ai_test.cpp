@@ -2084,22 +2084,73 @@ TEST_CASE("mission arrival sentinel keeps behavior NPC in slowdown") {
   CHECK(ship.ai_desired_speed < -40.0F);
 }
 
-TEST_CASE("state 2 special departure classes skip the outward brake") {
+TEST_CASE("state 2 fast-jump class and default outfit skip the outward brake") {
   GameState state;
-  game::ShipClass cls;
-  cls.flags_secondary = 0x0020;
-  state.scenario.ships.push_back(cls);
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].flags_secondary = 0x0020;
+  // A default-loadout outfit whose ModType 37 sits in an alternate slot and
+  // whose count is initially 0 (not owned/equipped).
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].alt_mod_types[0] = 37;
+  state.scenario.ships[0].default_outfit_ids[0] = 0x80;
+  state.scenario.ships[0].default_outfit_counts[0] = 0;
 
   game::Ship &ship = state.ShipAt(1);
+  ship.ship_instance_id = 1;
   ship.ship_class_id = 0;
   ship.ai_state_code = 2;
   ship.ai_control_mode = 1;
   ship.pos_x = 1100.0F;
   ship.vel_x = 10.0F;
 
+  // Class Flags2 0x0020: fast jump, brake bypassed.
   game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
-
   CHECK(ship.ai_control_mode == 4);
+
+  // Flag cleared and default outfit count 0: ordinary outward brake.
+  state.scenario.ships[0].flags_secondary = 0;
+  ship.ai_control_mode = 1;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 1);
+
+  // Default outfit count 1 (alternate ModType 37): fast jump.
+  state.scenario.ships[0].default_outfit_counts[0] = 1;
+  ship.ai_control_mode = 1;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 4);
+}
+
+// State 3's attack jump-departure arm (Ghidra 0x00406720): a moving attacker
+// with a valid target far from the system centre normally holds control mode 1
+// (seek); the fast-jump capability selects mode 4 (outward thrust) instead.
+TEST_CASE("state 3 fast-jump arm selects outward thrust while moving") {
+  GameState state;
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].base_fuel = 100; // one jump
+  state.scenario.ships[0].flags_secondary = 0x0020;
+
+  state.player.is_active = true;
+  state.player.armor_points = 100.0F;
+  state.player.death_timer_active = -1.0F;
+  state.player.pos_x = 5000.0F; // outside the combat station range
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = 0;
+  ship.ai_state_code = 3;
+  ship.ai_control_mode = 1;
+  ship.primary_target_ship_slot = 0;
+  ship.pos_x = 1100.0F; // far from the centre
+  ship.vel_x = 10.0F;   // still moving
+
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 4);
+
+  // Without the capability the moving attacker keeps seeking (mode 1).
+  state.scenario.ships[0].flags_secondary = 0;
+  ship.ai_control_mode = 1;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 1);
 }
 
 namespace {
