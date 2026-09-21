@@ -249,23 +249,23 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     break;
 
   case 0x12: {
-    // Chase the formation leader: head at the point 15x max-speed in front
-    // of the leader's heading (Math_AddPolarVelocity on the leader position)
-    // and thrust within turn+20 deg. With no leader the original falls back
-    // to control mode 0; state-4 guided-weapon selection arms a guided bank.
+    // Chase the swarm mate: head at the point 15x max-speed in front of the
+    // mate's heading (Math_AddPolarVelocity on the mate position) and thrust
+    // within turn+20 deg. With no mate the original falls back to control mode
+    // 0; state-4 guided-weapon selection arms a guided bank.
     if (fire_restricted) {
       break;
     }
-    const std::int16_t leader_slot = ship.formation_leader_ship_slot;
-    if (leader_slot < 1 ||
-        !state.SlotInRange(static_cast<std::size_t>(leader_slot))) {
+    const std::int16_t mate_slot = ship.swarm_mate_ship_slot;
+    if (mate_slot < 1 ||
+        !state.SlotInRange(static_cast<std::size_t>(mate_slot))) {
       ship.ai_control_mode = 0;
       break;
     }
-    const Ship &leader = state.ShipAt(static_cast<std::size_t>(leader_slot));
-    float tx = leader.pos_x;
-    float ty = leader.pos_y;
-    add_polar_step(tx, ty, leader.heading / kDegToRad, max_speed * 15.0F);
+    const Ship &mate = state.ShipAt(static_cast<std::size_t>(mate_slot));
+    float tx = mate.pos_x;
+    float ty = mate.pos_y;
+    add_polar_step(tx, ty, mate.heading / kDegToRad, max_speed * 15.0F);
     ship.ai_desired_heading_deg =
         static_cast<std::int16_t>(BearingDeg(ship.pos_x, ship.pos_y, tx, ty));
     if (std::abs(heading_delta_deg()) < eff_turn_deg + 20.0F) {
@@ -488,9 +488,9 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
       ship.vel_y = leader.vel_y;
       // Ship_MoveShipTowardFormationOffset (0x00408150 mode-0xd block, snap=0)
       // + glow copy: the released hold path positions onto the wedge offset.
-      if (ship.formation_leader_ship_slot > 0 &&
+      if (ship.swarm_mate_ship_slot > 0 &&
           state.SlotInRange(
-              static_cast<std::size_t>(ship.formation_leader_ship_slot))) {
+              static_cast<std::size_t>(ship.swarm_mate_ship_slot))) {
         Ship_MoveShipTowardFormationOffset(
             state, ship, /*snap=*/false, elapsed_ticks);
       }
@@ -512,16 +512,15 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
       break;
     }
-    if (ship.formation_leader_ship_slot > 0 &&
-        static_cast<std::size_t>(ship.formation_leader_ship_slot) <
+    if (ship.swarm_mate_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.swarm_mate_ship_slot) <
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
       Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
-          state
-              .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
+          state.ShipAt(static_cast<std::size_t>(ship.swarm_mate_ship_slot))
               .engine_glow_level;
     }
     const std::int16_t target_slot = ship.primary_target_ship_slot;
@@ -711,16 +710,15 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     ship.ai_desired_speed = max_speed * kBoostCruiseFactor;
     ship.ai_desired_heading_deg = static_cast<std::int16_t>(
         BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
-    if (ship.formation_leader_ship_slot > 0 &&
-        static_cast<std::size_t>(ship.formation_leader_ship_slot) <
+    if (ship.swarm_mate_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.swarm_mate_ship_slot) <
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
       Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
-          state
-              .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
+          state.ShipAt(static_cast<std::size_t>(ship.swarm_mate_ship_slot))
               .engine_glow_level;
     }
     const float dx = std::abs(ship.pos_x - target.pos_x);
@@ -757,16 +755,15 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
       break;
     }
-    if (ship.formation_leader_ship_slot > 0 &&
-        static_cast<std::size_t>(ship.formation_leader_ship_slot) <
+    if (ship.swarm_mate_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.swarm_mate_ship_slot) <
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
       Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
-          state
-              .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
+          state.ShipAt(static_cast<std::size_t>(ship.swarm_mate_ship_slot))
               .engine_glow_level;
     }
     const std::int16_t target_slot = ship.primary_target_ship_slot;
@@ -936,8 +933,9 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     // Formation hold: like mode 9 but the arrival throttle is 0.5x max speed
     // within 100 px/axis (not 0). The original gates the whole arm on a
     // primary/secondary target slot existing (0x0040ab56) and the ship not
-    // being disabled (0x0040abc7) BEFORE the formation work, so a wingman that
-    // has a leader but no combat target does no formation creep here.
+    // being disabled (0x0040abc7) BEFORE the formation work, so a swarm
+    // follower that has a mate but no combat target does no formation creep
+    // here.
     if (fire_restricted) {
       break;
     }
@@ -946,16 +944,15 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
         !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
       break;
     }
-    if (ship.formation_leader_ship_slot > 0 &&
-        static_cast<std::size_t>(ship.formation_leader_ship_slot) <
+    if (ship.swarm_mate_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.swarm_mate_ship_slot) <
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x0040aee8) + glow copy
-      // (leader +0xc8d4): the wedge is held while attacking.
+      // (mate +0xc8d4): the wedge is held while attacking.
       Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
-          state
-              .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
+          state.ShipAt(static_cast<std::size_t>(ship.swarm_mate_ship_slot))
               .engine_glow_level;
     }
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));

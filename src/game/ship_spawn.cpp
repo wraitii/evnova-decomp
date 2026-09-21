@@ -437,7 +437,7 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
           NovaOutfit_HasMiningScoopOutfit(state, escort);
       escort.jump_destination_stellar_id = -2;
       escort.jump_destination_system_id = -2;
-      escort.formation_leader_ship_slot = -1;
+      escort.swarm_mate_ship_slot = -1;
       escort.resolved_squad_leader_ship_slot = static_cast<std::int16_t>(slot);
       escort.ai_selected_as_resolved_target = true;
       escort.vel_x = ship.vel_x;
@@ -1536,7 +1536,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
         ship.ai_behavior_code = 6;
         ship.squad_leader_ship_slot = 0;
         ship.resolved_squad_leader_ship_slot = 0;
-        ship.formation_leader_ship_slot = 0;
+        ship.swarm_mate_ship_slot = 0;
         if (copy_player_heading) {
           ship.heading = state.player.heading;
         }

@@ -388,10 +388,11 @@ bool NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
     return false;
   }
 
-  // Original bank walk (0x004110f0-0x0041117d). Both of its exit paths return
-  // the identical strict base_speed comparison (disasm 0x00411183 vs
-  // 0x004111e0), so the walk is dead with respect to the result; it is
-  // reproduced for fidelity and `has_intercept_bank` is intentionally unused.
+  // Original bank walk (0x004110f0-0x0041117d). The two exit paths differ on
+  // equal base speeds: with a tracking guided bank the original returns the
+  // strict `ship < target` (disasm 0x004111e0, TEST AH,0x5), and with no bank
+  // it returns the non-strict `ship <= target` (0x00411183, TEST AH,0x45).
+  // The walk is live at equality, not dead.
   const float distance_sq =
       SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
   // Ghidra 0x00411122-0x00411137 passes the TARGET ship to
@@ -418,8 +419,8 @@ bool NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
     has_intercept_bank = true;
     break;
   }
-  (void)has_intercept_bank; // result discarded by the original in both paths
-  return ship_class->speed < target_class->speed;
+  return has_intercept_bank ? ship_class->speed < target_class->speed
+                            : ship_class->speed <= target_class->speed;
 }
 
 // Ghidra 0x00412090 Ship_ScoreAssistTargetForShip. `candidate` is the target

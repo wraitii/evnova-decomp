@@ -735,11 +735,10 @@ void NovaAi_UpdateShipState(GameState &state,
             } else {
               ship.ai_control_mode = 0xe;
             }
-          } else if (!NovaAiShip_ShouldSwitchToEscortWingmanTarget(state,
-                                                                   ship) &&
+          } else if (!NovaAiShip_ShouldFollowSwarmMate(state, ship) &&
                      ship.ai_control_mode != 0x11) {
-            // ShouldSwitch commits mode 0x12 itself; only fall back to the
-            // ordinary strafe mode when it declined.
+            // ShouldFollowSwarmMate commits mode 0x12 itself; only fall back
+            // to the ordinary strafe mode when it declined.
             ship.ai_control_mode = 7;
           }
         } else {

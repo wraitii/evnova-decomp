@@ -474,11 +474,13 @@ struct Ship {
   // Ghidra ShipState +0xC90C (provisional): set when an escort-group order
   // changed this ship's command, consumed by the AI/comm-chatter pass.
   std::int16_t escort_command_pending = 0;
-  // Formation lead whose engine-glow/formation-offset this ship mirrors in the
-  // escort control modes (ShipState +0xC906 formation_leader_ship_slot). <1
-  // means "no leader": mode 0x12 (chase leader) falls back to idle control
-  // when it is empty.
-  std::int16_t formation_leader_ship_slot = -1; // +0xC906
+  // Swarming-behavior mate cache (ShipState +0xC906 swarm_mate_ship_slot):
+  // the lower-indexed swarming ship this ship flies with, produced by
+  // Ship_FindSwarmMate (0x00411c20) and validated by Ship_IsSwarmMateStillValid
+  // (0x00411b40). Also feeds the general formation/leader pass and blocks this
+  // ship's afterburner while another ship lists it here. <1 means "no mate":
+  // control mode 0x12 (chase mate) falls back to idle control when it is empty.
+  std::int16_t swarm_mate_ship_slot = -1; // +0xC906
   // Escort wedge formation offset (ShipState field_0x28/0x2c): the world
   // point Ship_SetEscortLaunchOffsetVelocity (0x00413b60) computes for this
   // ship's slot around its leader, which Ship_MoveShipTowardFormationOffset
@@ -489,9 +491,8 @@ struct Ship {
   // Squad/bookkeeping flag bytes (ShipState +0xC0/+0xC1/+0xC2), refreshed
   // every full tick by the Frame_TickSystems (0x004186b0) scope-6 pass:
   // +0xC0 some active ship holds this ship as its squad leader (NOT combat
-  // targeting), +0xC1 some ship's
-  // formation_leader_ship_slot is this slot, and +0xC2 some ship's
-  // resolved_squad_leader_ship_slot is this slot -- the byte
+  // targeting), +0xC1 some ship's swarm_mate_ship_slot is this slot, and
+  // +0xC2 some ship's resolved_squad_leader_ship_slot is this slot -- the byte
   // Ship_UpdateShipAI (0x00401000) and the player core (0x00451003) gate
   // their per-frame Ship_UpdateEscortFormations pass on.
   bool is_any_ships_squad_leader = false;      // +0xC0

@@ -625,6 +625,16 @@ TEST_CASE(
   CHECK(NovaAiShip_CanInterceptCurrentPrimaryTarget(state, attacker));
   state.player.vel_y = 0.0F;
   CHECK_FALSE(NovaAiShip_CanInterceptCurrentPrimaryTarget(state, attacker));
+
+  // Equal base speeds are where the guided-bank walk matters: the original
+  // returns the non-strict `ship <= target` when no bank is found (0x00411183)
+  // and the strict `ship < target` when one is (0x004111e0). Clearing the
+  // attacker's banks forces the no-bank path, which must return true here.
+  state.player.ship_class_id = attacker_class;
+  state.player.vel_y = -10.0F;
+  attacker.npc_weapon_count_by_class.fill(0);
+  attacker.npc_weapon_secondary_count_by_class.fill(0);
+  CHECK(NovaAiShip_CanInterceptCurrentPrimaryTarget(state, attacker));
 }
 
 TEST_CASE("assist helper chooses the lowest positive candidate score") {
@@ -1112,15 +1122,15 @@ void ActivatePlayer(GameState &state, float pos_x, float pos_y) {
 }
 
 // Pins scenario class 0 to ShipClass Flags2 0x0001 (swarming, no standoff) so
-// the wingman-mirror tests do not depend on which shipped classes carry the
-// bit. Each test owns its freshly loaded ScenarioData.
+// the swarm-mate tests do not depend on which shipped classes carry the bit.
+// Each test owns its freshly loaded ScenarioData.
 void MarkClass0Swarming(GameState &state) {
   state.scenario.ships[0].flags_secondary = 0x0001;
 }
 
 // Spawns an active, in-system ship whose target/faction/leader context the
 // caller can then shape.
-game::Ship &SpawnWingmanTestShip(GameState &state, int sys_idx) {
+game::Ship &SpawnSwarmTestShip(GameState &state, int sys_idx) {
   game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
   ship.is_active = true;
   ship.current_system_id = static_cast<std::int16_t>(sys_idx);
@@ -1601,9 +1611,9 @@ TEST_CASE("ApplyControls mode 0xf velocity-match pursuit") {
   CHECK(ship.vel_y == 0.0F);
 }
 
-// Mode 0x12 (chase leader) falls back to control mode 0 without a leader and
-// steers at the point 15x max-speed ahead of the leader's heading otherwise.
-TEST_CASE("ApplyControls mode 0x12 chase leader") {
+// Mode 0x12 (chase swarm mate) falls back to control mode 0 without a mate
+// and steers at the point 15x max-speed ahead of the mate's heading otherwise.
+TEST_CASE("ApplyControls mode 0x12 chase swarm mate") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   const int sys_idx = FindWanderSuitableSystem(state);
@@ -1613,28 +1623,28 @@ TEST_CASE("ApplyControls mode 0x12 chase leader") {
 
   game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
   ship.ai_control_mode = 0x12;
-  ship.formation_leader_ship_slot = -1;
+  ship.swarm_mate_ship_slot = -1;
   NovaAi_ApplyControls(state, ship, 1.0F);
-  REQUIRE(ship.ai_control_mode == 0); // no leader: idle control
+  REQUIRE(ship.ai_control_mode == 0); // no mate: idle control
 
   ship.ai_control_mode = 0x12;
-  // The original treats leader slot < 1 (including the player slot 0) as "no
-  // leader", so the chased leader must occupy a real NPC slot.
-  const int leader_slot = NovaShip_AllocateShipSlot(
+  // The original treats mate slot < 1 (including the player slot 0) as "no
+  // mate", so the chased mate must occupy a real NPC slot.
+  const int mate_slot = NovaShip_AllocateShipSlot(
       state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
-  REQUIRE(leader_slot > 0);
-  game::Ship &leader = state.ShipAt(static_cast<std::size_t>(leader_slot));
-  leader.is_active = true;
-  leader.ship_instance_id = static_cast<std::int16_t>(leader_slot);
-  ship.formation_leader_ship_slot = static_cast<std::int16_t>(leader_slot);
+  REQUIRE(mate_slot > 0);
+  game::Ship &mate = state.ShipAt(static_cast<std::size_t>(mate_slot));
+  mate.is_active = true;
+  mate.ship_instance_id = static_cast<std::int16_t>(mate_slot);
+  ship.swarm_mate_ship_slot = static_cast<std::int16_t>(mate_slot);
   ship.pos_x = 0.0F;
   ship.pos_y = 0.0F;
   ship.heading = 0.0F;
-  leader.pos_x = 100.0F;
-  leader.pos_y = 0.0F;
-  leader.heading = 0.0F; // leader facing up: lead point = north of leader
+  mate.pos_x = 100.0F;
+  mate.pos_y = 0.0F;
+  mate.heading = 0.0F; // mate facing up: lead point = north of the mate
   NovaAi_ApplyControls(state, ship, 1.0F);
-  // Lead point is (100, -15*max) north of the leader; the ship at the origin
+  // Lead point is (100, -15*max) north of the mate; the ship at the origin
   // must steer roughly north-east.
   const game::ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
@@ -1647,7 +1657,7 @@ TEST_CASE("ApplyControls mode 0x12 chase leader") {
   CHECK(std::abs(ship.ai_desired_heading_deg - expected) < 1.0F);
 }
 
-TEST_CASE("wingman mirror finder pairs lower-indexed swarming hulls") {
+TEST_CASE("swarm-mate finder pairs lower-indexed swarming hulls") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   const int sys_idx = FindWanderSuitableSystem(state);
@@ -1656,9 +1666,9 @@ TEST_CASE("wingman mirror finder pairs lower-indexed swarming hulls") {
   ActivatePlayer(state, 0.0F, 0.0F);
   MarkClass0Swarming(state);
 
-  game::Ship &first = SpawnWingmanTestShip(state, sys_idx);
-  game::Ship &second = SpawnWingmanTestShip(state, sys_idx);
-  game::Ship &third = SpawnWingmanTestShip(state, sys_idx);
+  game::Ship &first = SpawnSwarmTestShip(state, sys_idx);
+  game::Ship &second = SpawnSwarmTestShip(state, sys_idx);
+  game::Ship &third = SpawnSwarmTestShip(state, sys_idx);
   REQUIRE(first.ship_instance_id < second.ship_instance_id);
   REQUIRE(second.ship_instance_id < third.ship_instance_id);
 
@@ -1670,19 +1680,18 @@ TEST_CASE("wingman mirror finder pairs lower-indexed swarming hulls") {
 
   // The highest ship scans strictly downward and caches the first (lowest)
   // lower-indexed match; the starting value is cleared first.
-  third.formation_leader_ship_slot = 99;
-  CHECK(game::NovaAi_FindLowerIndexedWingmanSharingTarget(state, third) ==
-        first.ship_instance_id);
-  CHECK(third.formation_leader_ship_slot == first.ship_instance_id);
+  third.swarm_mate_ship_slot = 99;
+  CHECK(game::NovaAi_FindSwarmMate(state, third) == first.ship_instance_id);
+  CHECK(third.swarm_mate_ship_slot == first.ship_instance_id);
 
   // No strictly lower match means the cache is reset to -1.
-  first.formation_leader_ship_slot = 42;
-  CHECK(game::NovaAi_FindLowerIndexedWingmanSharingTarget(state, first) == -1);
-  CHECK(first.formation_leader_ship_slot == -1);
+  first.swarm_mate_ship_slot = 42;
+  CHECK(game::NovaAi_FindSwarmMate(state, first) == -1);
+  CHECK(first.swarm_mate_ship_slot == -1);
 
   // A different primary target breaks the pairing.
   second.primary_target_ship_slot = -1;
-  CHECK(game::NovaAi_FindLowerIndexedWingmanSharingTarget(state, second) == -1);
+  CHECK(game::NovaAi_FindSwarmMate(state, second) == -1);
 
   // A shared squad leader also qualifies when no faction is set.
   second.primary_target_ship_slot = shared_target;
@@ -1690,11 +1699,10 @@ TEST_CASE("wingman mirror finder pairs lower-indexed swarming hulls") {
   first.faction_or_government_id = -1;
   second.squad_leader_ship_slot = 7;
   first.squad_leader_ship_slot = 7;
-  CHECK(game::NovaAi_FindLowerIndexedWingmanSharingTarget(state, second) ==
-        first.ship_instance_id);
+  CHECK(game::NovaAi_FindSwarmMate(state, second) == first.ship_instance_id);
 }
 
-TEST_CASE("wingman mirror validator rejects a drifted cache") {
+TEST_CASE("swarm-mate validator rejects a drifted cache") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   const int sys_idx = FindWanderSuitableSystem(state);
@@ -1703,70 +1711,67 @@ TEST_CASE("wingman mirror validator rejects a drifted cache") {
   ActivatePlayer(state, 0.0F, 0.0F);
   MarkClass0Swarming(state);
 
-  game::Ship &leader = SpawnWingmanTestShip(state, sys_idx);
-  game::Ship &follower = SpawnWingmanTestShip(state, sys_idx);
-  leader.primary_target_ship_slot = 0;
-  leader.faction_or_government_id = 5;
+  game::Ship &mate = SpawnSwarmTestShip(state, sys_idx);
+  game::Ship &follower = SpawnSwarmTestShip(state, sys_idx);
+  mate.primary_target_ship_slot = 0;
+  mate.faction_or_government_id = 5;
   follower.primary_target_ship_slot = 0;
   follower.faction_or_government_id = 5;
-  follower.formation_leader_ship_slot = leader.ship_instance_id;
-  CHECK(game::NovaAiShip_IsWingmanMirrorTargetStillValid(state, follower));
+  follower.swarm_mate_ship_slot = mate.ship_instance_id;
+  CHECK(game::NovaAiShip_IsSwarmMateStillValid(state, follower));
 
-  // The cached wingman must stay on the same target.
-  leader.primary_target_ship_slot = -1;
-  CHECK_FALSE(
-      game::NovaAiShip_IsWingmanMirrorTargetStillValid(state, follower));
-  leader.primary_target_ship_slot = 0;
+  // The cached swarm mate must stay on the same target.
+  mate.primary_target_ship_slot = -1;
+  CHECK_FALSE(game::NovaAiShip_IsSwarmMateStillValid(state, follower));
+  mate.primary_target_ship_slot = 0;
 
   // A cache that is not a strictly lower slot is invalid.
-  follower.formation_leader_ship_slot = follower.ship_instance_id;
-  CHECK_FALSE(
-      game::NovaAiShip_IsWingmanMirrorTargetStillValid(state, follower));
-  follower.formation_leader_ship_slot = -1;
-  CHECK_FALSE(
-      game::NovaAiShip_IsWingmanMirrorTargetStillValid(state, follower));
+  follower.swarm_mate_ship_slot = follower.ship_instance_id;
+  CHECK_FALSE(game::NovaAiShip_IsSwarmMateStillValid(state, follower));
+  follower.swarm_mate_ship_slot = -1;
+  CHECK_FALSE(game::NovaAiShip_IsSwarmMateStillValid(state, follower));
 
   // A non-swarming hull always reports the cache valid (nothing to maintain).
   state.scenario.ships[0].flags_secondary = 0;
-  follower.formation_leader_ship_slot = -1;
-  CHECK(game::NovaAiShip_IsWingmanMirrorTargetStillValid(state, follower));
+  follower.swarm_mate_ship_slot = -1;
+  CHECK(game::NovaAiShip_IsSwarmMateStillValid(state, follower));
 }
 
-TEST_CASE("ShouldSwitch forces mode 0x12 only for a distinct wingman") {
+TEST_CASE("ShouldFollowSwarmMate forces mode 0x12 only for a distinct mate") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   const int sys_idx = FindWanderSuitableSystem(state);
   REQUIRE(sys_idx >= 0);
   MarkClass0Swarming(state);
-  game::Ship &ship = SpawnWingmanTestShip(state, sys_idx);
+  game::Ship &ship = SpawnSwarmTestShip(state, sys_idx);
 
-  ship.formation_leader_ship_slot = 1;
+  ship.swarm_mate_ship_slot = 1;
   ship.squad_leader_ship_slot = -1;
   ship.defense_fleet_home_stellar_id = -1;
   ship.ai_control_mode = 0;
-  CHECK(game::NovaAiShip_ShouldSwitchToEscortWingmanTarget(state, ship));
+  CHECK(game::NovaAiShip_ShouldFollowSwarmMate(state, ship));
   CHECK(ship.ai_control_mode == 0x12);
 
-  // A cached wingman equal to the squad leader is left to the squad modes.
+  // A cached swarm mate equal to the squad leader is left to the squad modes.
   ship.ai_control_mode = 0;
   ship.squad_leader_ship_slot = 1;
-  CHECK_FALSE(game::NovaAiShip_ShouldSwitchToEscortWingmanTarget(state, ship));
+  CHECK_FALSE(game::NovaAiShip_ShouldFollowSwarmMate(state, ship));
   CHECK(ship.ai_control_mode == 0);
 
-  // Defense-fleet ships are excluded even with a distinct wingman.
+  // Defense-fleet ships are excluded even with a distinct swarm mate.
   ship.squad_leader_ship_slot = -1;
   ship.defense_fleet_home_stellar_id = 9;
-  CHECK_FALSE(game::NovaAiShip_ShouldSwitchToEscortWingmanTarget(state, ship));
+  CHECK_FALSE(game::NovaAiShip_ShouldFollowSwarmMate(state, ship));
   CHECK(ship.ai_control_mode == 0);
 
-  // Non-swarming hulls never enter the wingman mode.
+  // Non-swarming hulls never enter the swarm mode.
   ship.defense_fleet_home_stellar_id = -1;
   state.scenario.ships[0].flags_secondary = 0;
-  CHECK_FALSE(game::NovaAiShip_ShouldSwitchToEscortWingmanTarget(state, ship));
+  CHECK_FALSE(game::NovaAiShip_ShouldFollowSwarmMate(state, ship));
   CHECK(ship.ai_control_mode == 0);
 }
 
-TEST_CASE("state 0x15 emergence skips the wingman-mirror refresh") {
+TEST_CASE("state 0x15 emergence skips the swarm-mate refresh") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   const int sys_idx = FindWanderSuitableSystem(state);
@@ -1775,31 +1780,31 @@ TEST_CASE("state 0x15 emergence skips the wingman-mirror refresh") {
   ActivatePlayer(state, 0.0F, 0.0F);
   MarkClass0Swarming(state);
 
-  game::Ship &wingman = SpawnWingmanTestShip(state, sys_idx);
-  game::Ship &ship = SpawnWingmanTestShip(state, sys_idx);
+  game::Ship &swarm_mate = SpawnSwarmTestShip(state, sys_idx);
+  game::Ship &ship = SpawnSwarmTestShip(state, sys_idx);
   CHECK(game::NovaAiShip_IsShipInAiState0x15(ship) == false);
-  wingman.primary_target_ship_slot = 0;
-  wingman.faction_or_government_id = 5;
+  swarm_mate.primary_target_ship_slot = 0;
+  swarm_mate.faction_or_government_id = 5;
   ship.primary_target_ship_slot = 0;
   ship.faction_or_government_id = 5;
-  ship.formation_leader_ship_slot = -1;
+  ship.swarm_mate_ship_slot = -1;
   ship.ai_maneuver_timer_ms = 0.0F;
   ship.ai_state_code = 0;
 
-  // Ordinary idle state: the mirror refresh finds the lower-indexed wingman.
+  // Ordinary idle state: the refresh finds the lower-indexed swarm mate.
   game::NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
-  CHECK(ship.formation_leader_ship_slot == wingman.ship_instance_id);
+  CHECK(ship.swarm_mate_ship_slot == swarm_mate.ship_instance_id);
 
   // State 0x15 skips the whole ordinary behavior branch, so even a cache that
   // would be refreshed is left untouched (here deliberately cleared).
-  ship.formation_leader_ship_slot = -1;
+  ship.swarm_mate_ship_slot = -1;
   ship.ai_state_code = 0x15;
   CHECK(game::NovaAiShip_IsShipInAiState0x15(ship));
   game::NovaAi_UpdateShipAI(state, ship, /*now_ms=*/0);
-  CHECK(ship.formation_leader_ship_slot == -1);
+  CHECK(ship.swarm_mate_ship_slot == -1);
 }
 
-TEST_CASE("state 4 wingman switch outranks the strafe fallback") {
+TEST_CASE("state 4 swarm-mate switch outranks the strafe fallback") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   const int sys_idx = FindWanderSuitableSystem(state);
@@ -1808,13 +1813,13 @@ TEST_CASE("state 4 wingman switch outranks the strafe fallback") {
   ActivatePlayer(state, 0.0F, 0.0F);
   MarkClass0Swarming(state);
 
-  // Keep the wingman slot distinct from both the ship and the target so the
-  // primary-target slot and squad-leader slot can never collide.
-  game::Ship &wingman = SpawnWingmanTestShip(state, sys_idx);
-  game::Ship &target = SpawnWingmanTestShip(state, sys_idx);
+  // Keep the swarm-mate slot distinct from both the ship and the target so
+  // the primary-target slot and squad-leader slot can never collide.
+  game::Ship &swarm_mate = SpawnSwarmTestShip(state, sys_idx);
+  game::Ship &target = SpawnSwarmTestShip(state, sys_idx);
   // A non-player target that is not in state 3 makes the intercept test fail.
   target.ai_state_code = 0;
-  game::Ship &ship = SpawnWingmanTestShip(state, sys_idx);
+  game::Ship &ship = SpawnSwarmTestShip(state, sys_idx);
   ship.ai_state_code = 4;
   ship.ai_behavior_code = 3;
   ship.primary_target_ship_slot = target.ship_instance_id;
@@ -1822,7 +1827,7 @@ TEST_CASE("state 4 wingman switch outranks the strafe fallback") {
   ship.pos_y = 0.0F;
   target.pos_x = 1000.0F;
   target.pos_y = 0.0F;
-  ship.formation_leader_ship_slot = wingman.ship_instance_id;
+  ship.swarm_mate_ship_slot = swarm_mate.ship_instance_id;
   ship.squad_leader_ship_slot = -1;
   ship.defense_fleet_home_stellar_id = -1;
   ship.ai_control_mode = 0;
@@ -1830,12 +1835,12 @@ TEST_CASE("state 4 wingman switch outranks the strafe fallback") {
   game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
   CHECK(ship.ai_control_mode == 0x12);
 
-  // Once the wingman is the ship's own squad leader, the ordinary strafe
+  // Once the swarm mate is the ship's own squad leader, the ordinary strafe
   // fallback applies instead.
   ship.ai_control_mode = 0;
   ship.ai_state_code = 4;
   ship.primary_target_ship_slot = target.ship_instance_id;
-  ship.squad_leader_ship_slot = wingman.ship_instance_id;
+  ship.squad_leader_ship_slot = swarm_mate.ship_instance_id;
   game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
   CHECK(ship.ai_control_mode == 7);
 }
