@@ -747,6 +747,18 @@ struct Weapon {
   std::array<float, 8> trail_particle_speed_variants{};
   std::array<std::uint32_t, 8> trail_particle_color_variants{};
 
+  // Bible SmokeSet (payload +0x20 -> WeaponDef.smoke_set +0x28): the cicn
+  // sprite set used by a weapon's sprite smoke trail. The loader zeroes any
+  // value above 7 (only eight smoke sets are loaded, resource bases 1000 +
+  // slot*8). Shot_HandleShot selects the puff variant from Flags1 0x200/0x400/
+  // 0x800 and passes this set index to Shot_SpawnWeaponSmokePuff (0x004215d0).
+  std::int16_t smoke_set = 0;
+  // WeaponDef.shot_fade_rate (+0xb8). The loader reuses the Bible Falloff
+  // field (+0x34, `beam_falloff`) for non-beam modes (0/3/10 get 0): a
+  // projectile's cloak-style fade-in/out rate consumed by Shot_HandleShot's
+  // visibility_or_falloff quads. Negative fades in, positive fades out.
+  std::int16_t shot_fade_rate = 0;
+
   // Bible Decay (resource +0x22): normalized 30 Hz ticks between removing one
   // point from both mass and energy damage. Values <= 0 disable decay.
   std::int16_t damage_decay_interval_ticks = 0;

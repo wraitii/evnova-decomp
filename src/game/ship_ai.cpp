@@ -343,6 +343,146 @@ double NovaAi_ComputeShipFuelCapacity(const GameState &state,
 
 namespace {
 
+// Sum a modifier over the class default-outfit loadout, mirroring the
+// original's four ModType/ModVal slots per outfit (OutfitDef name-0x26 stride).
+// `scale_per_unit` converts one ModVal unit into the per-frame rate.
+float SumClassDefaultOutfitMod(const GameState &state,
+                               const ShipClass &cls,
+                               std::int16_t mod_type,
+                               float scale_per_unit) {
+  float total = 0.0F;
+  for (std::size_t i = 0; i < cls.default_outfit_ids.size(); ++i) {
+    const std::int16_t count = cls.default_outfit_counts[i];
+    if (count <= 0) {
+      continue;
+    }
+    const Outfit *outfit = state.scenario.Outfit(cls.default_outfit_ids[i]);
+    if (outfit == nullptr) {
+      continue;
+    }
+    if (outfit->mod_type == mod_type) {
+      total += static_cast<float>(count) *
+               (static_cast<float>(outfit->mod_val) * scale_per_unit);
+    }
+    for (std::size_t slot = 0; slot < outfit->alt_mod_types.size(); ++slot) {
+      if (outfit->alt_mod_types[slot] == mod_type) {
+        total +=
+            static_cast<float>(count) *
+            (static_cast<float>(outfit->alt_mod_vals[slot]) * scale_per_unit);
+      }
+    }
+  }
+  return total;
+}
+
+// k_behavior5_difficulty_mult_f64 (0x00575760) = 1.333.
+constexpr float kBehavior5DifficultyMult = 1.333F;
+
+} // namespace
+
+// Ghidra 0x00463680 Ship_ComputeShipShieldRegenRate.
+// NPC branch (the player's runs inside Outfit_ComputePlayerEffectiveStats).
+float NovaAi_ComputeShipShieldRegenRate(const GameState &state,
+                                        const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return Outfit_ComputePlayerEffectiveStats(state).shield_recharge;
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return 0.0F;
+  }
+  // k_outfit_recharge_scale_f64 = 0.001: ModVal 1000 = +1 point/frame.
+  float rate =
+      cls->shield_recharge + SumClassDefaultOutfitMod(state, *cls, 5, 0.001F);
+  rate = std::max(0.0F, rate);
+  if (ship.ai_behavior_code == 5) {
+    rate *= kBehavior5DifficultyMult;
+  }
+  return rate;
+}
+
+// Ghidra 0x004638e0 Ship_ComputeShipArmorRegenRate.
+// NPC branch (the player's runs inside Outfit_ComputePlayerEffectiveStats).
+float NovaAi_ComputeShipArmorRegenRate(const GameState &state,
+                                       const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return Outfit_ComputePlayerEffectiveStats(state).armor_recharge;
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return 0.0F;
+  }
+  float rate =
+      cls->armor_recharge + SumClassDefaultOutfitMod(state, *cls, 0x1d, 0.001F);
+  rate = std::max(0.0F, rate);
+  if (ship.ai_behavior_code == 5) {
+    rate *= kBehavior5DifficultyMult;
+  }
+  return rate;
+}
+
+// Ghidra 0x00463b30 Ship_ComputeShipFuelRechargeRate.
+// NPC branch (the player's runs inside Outfit_ComputePlayerEffectiveStats).
+bool NovaAi_ComputeShipFuelRechargeRate(const GameState &state,
+                                        const Ship &ship,
+                                        float &out_rate) {
+  if (ship.ship_instance_id == 0) {
+    const PlayerEffectiveStats eff = Outfit_ComputePlayerEffectiveStats(state);
+    if (eff.fuel_regen_rate == 0.0F) {
+      return false;
+    }
+    out_rate = eff.fuel_regen_rate;
+    return true;
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return false;
+  }
+  bool active = false;
+  float rate = 0.0F;
+  // The NPC branch of the class base arm is unconditional on capability 0x8
+  // (ship_instance_id != 0 satisfies the OR).
+  if (cls->fuel_regen > 0) {
+    active = true;
+    rate += 1.0F / static_cast<float>(cls->fuel_regen);
+  }
+  for (std::size_t i = 0; i < cls->default_outfit_ids.size(); ++i) {
+    const std::int16_t count = cls->default_outfit_counts[i];
+    if (count <= 0) {
+      continue;
+    }
+    const Outfit *outfit = state.scenario.Outfit(cls->default_outfit_ids[i]);
+    if (outfit == nullptr) {
+      continue;
+    }
+    const auto add_scoop = [&](std::int16_t val) {
+      if (val == 0) {
+        return;
+      }
+      active = true;
+      rate += static_cast<float>(count) * (1.0F / static_cast<float>(val));
+    };
+    if (outfit->mod_type == 0x12) {
+      add_scoop(outfit->mod_val);
+    }
+    for (std::size_t slot = 0; slot < outfit->alt_mod_types.size(); ++slot) {
+      if (outfit->alt_mod_types[slot] == 0x12) {
+        add_scoop(outfit->alt_mod_vals[slot]);
+      }
+    }
+  }
+  if (!active) {
+    return false;
+  }
+  out_rate = rate;
+  return true;
+}
+
+namespace {
+
 void BeginCloakTransition(GameState &state, Ship &ship) {
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
     return;

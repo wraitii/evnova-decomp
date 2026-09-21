@@ -14,10 +14,12 @@
 #include "flight_automation.hpp"
 #include "frame_timing.hpp"
 #include "game_state.hpp"
+#include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "impact_effects.hpp"
 #include "intro_cinematic.hpp"
+#include "landed_store.hpp"
 #include "landed_window.hpp"
 #include "mission.hpp"
 #include "mission_script.hpp"
@@ -364,11 +366,17 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       // in the containing scope. Keep the wreck's current-frame coast before
       // any finale deactivates it.
       NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
+      // The original weapon-bank cooldown tail runs for destroyed hulls too.
+      NovaWeapon_TickNpcWeaponBanks(state, ship, elapsed_ticks);
       ship.destruction_raw_tick_accumulator +=
           std::max(0.0F, RawSpaceflightCallTicks(elapsed_ticks));
       // Clean-room scheduler: the accumulator does not model an original
       // ShipState field. It decouples the original discrete per-call body from
-      // SDL presentation frequency.
+      // SDL presentation frequency. Every per-raw-call mutation below (death
+      // timer, cargo transfer, debris, the 1-in-3 launch roll) therefore runs
+      // at the original 21 ms cadence, not once per display frame.
+      const float half_death_delay =
+          static_cast<float>(cls->death_delay_frames) * 0.5F;
       std::uint16_t raw_counter_bits =
           std::bit_cast<std::uint16_t>(state.shot_guidance_frame_counter);
       while (ship.is_active &&
@@ -376,10 +384,55 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
         ship.destruction_raw_tick_accumulator -= 1.0F;
         ship.destruction_raw_tick_accumulator =
             std::max(0.0F, ship.destruction_raw_tick_accumulator);
-        if (ship.death_timer_active > 0.0F) {
+        // Original gate: the death block runs whenever the PRE-decrement
+        // timer is positive; the decrement itself is separate so the cargo
+        // transfer still runs on the call that reaches zero.
+        const bool death_active = ship.death_timer_active > 0.0F;
+        if (death_active) {
           ship.death_timer_active -= 1.0F;
+          // Ghidra 0x00434a9d: a player-led dying escort
+          // (squad_leader_ship_slot 0) dumps its cargo share and reverts to its
+          // default behavior. The original also marks the inventory dirty and
+          // redraws the cargo panel; the port recomputes derived state live.
+          if (ship.squad_leader_ship_slot == 0) {
+            if (ship.ai_behavior_code == 6 && cls->default_ai_behavior < 3) {
+              Player_TransferCargoAndJunkToEscortByRatio(state,
+                                                         ship.ship_instance_id);
+            }
+            ship.squad_leader_ship_slot = -1;
+            ship.ai_behavior_code = cls->default_ai_behavior;
+          }
           TickShipHandleDestructionDebrisPuffs(
               state, ship, std::bit_cast<std::int16_t>(raw_counter_bits));
+        }
+        // Ghidra 0x00433050 destroyed launch-bay arm (bottom of the original):
+        // in the second half of the death timer a carrier may eject one carried
+        // fighter (1-in-3 roll per call), randomize its shields and halve its
+        // velocity, then zero every weapon bank counter. The zeroing runs
+        // regardless of the roll.
+        if (NovaWeapon_HasLaunchBayWeapon(state, ship) &&
+            ship.death_timer_active <= half_death_delay) {
+          if (RandomBelow(state, 3) == 0) {
+            const std::int16_t bay =
+                NovaWeapon_FindLaunchBayWeaponBank(state, ship);
+            const int child_slot =
+                NovaWeapon_SpawnShipFromCarrierBayWeapon(state, ship, bay);
+            if (child_slot >= 0 &&
+                state.SlotInRange(static_cast<std::size_t>(child_slot))) {
+              Ship &child = state.ShipAt(static_cast<std::size_t>(child_slot));
+              if (child.shield_points > 1.0F) {
+                const int bound = static_cast<int>(child.shield_points);
+                if (bound > 0) {
+                  child.shield_points =
+                      static_cast<float>(RandomBelow(state, bound));
+                }
+              }
+              child.vel_x *= 0.5F;
+              child.vel_y *= 0.5F;
+            }
+          }
+          ship.npc_weapon_count_by_class.fill(0);
+          ship.npc_weapon_secondary_count_by_class.fill(0);
         }
         NovaShip_TickDestroyedShipVisualStateRawCall(state, ship);
         raw_counter_bits = static_cast<std::uint16_t>(raw_counter_bits + 1U);
@@ -387,9 +440,24 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       continue;
     }
 
+    // Ship_HandleShip 0x00433050: a negative personality shield_armor_scale
+    // pins shields and armor at their effective maxima before integration.
+    if (ship.pers_def_slot != -1 &&
+        ship.pers_def_slot <
+            static_cast<std::int16_t>(state.scenario.pers_defs.size())) {
+      const PersDef &pers =
+          state.scenario
+              .pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
+      if (pers.shield_armor_scale < 0.0F) {
+        ship.shield_points =
+            static_cast<float>(NovaAi_ComputeMaxShieldPoints(state, ship));
+        ship.armor_points = NovaAi_ComputeMaxArmorPoints(state, ship);
+      }
+    }
+
     NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
 
-    NovaWeapon_TickNpcWeaponBanks(ship, elapsed_ticks);
+    NovaWeapon_TickNpcWeaponBanks(state, ship, elapsed_ticks);
     // Ship_HandleShip hands a latched active bank to Weapon_FireShipWeapons.
     NovaWeapon_FireNpcWeaponBank(state, ship);
 
@@ -400,16 +468,10 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
         ship,
         static_cast<std::uint32_t>(state.gameplay_now_ms * 60 / 1000));
 
-    // Ionization decay tail (0x0043373f/0x00434394) plus the ionized-velocity
-    // ramp. Ship_ComputeShipEffectiveMaxSpeed (0x004642e0) is
-    // ionization-independent (it never calls Ship_GetIonizationIntensity), so
-    // computing it here before the decay is equivalent to the original's
-    // post-decay call at 0x004343d5.
-    spaceflight_detail::NovaShip_UpdateIonizationCharge(
-        state,
-        ship,
-        NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, ship, *cls),
-        elapsed_ticks);
+    // Ionization decay/ramp now runs inside NovaShip_IntegrateNpcMovement at
+    // the original's position (after velocity integration, before the
+    // turn/regen and thrust blocks), where it can feed the freshly decayed
+    // intensity into Ship_ComputeShipMaxTurnRateDeg.
   }
 
   // Ship_UpdateVisualState (0x00428340) destruction pass: runs after every

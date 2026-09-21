@@ -764,6 +764,12 @@ TEST_CASE("fractional projectile lifetime advances without rounding",
   CHECK(state.active_shots[0].pos_x == Catch::Approx(2.5F));
   CHECK(state.active_shots[0].life_ticks_remaining == Catch::Approx(0.25F));
 
+  // Crossing frame: Shot_HandleShot latches life to -1 and the shot is still
+  // integrated this frame; the outer expiry test retires it the frame after.
+  NovaWeapon_TickShots(state, 0.25F);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].life_ticks_remaining == Catch::Approx(-1.0F));
+
   NovaWeapon_TickShots(state, 0.25F);
   CHECK(state.active_shots.empty());
 }
@@ -1524,6 +1530,9 @@ TEST_CASE("expiry launches linked shots unless Flags2 0x20 suppresses it",
   state.active_shots[0].target_ship_slot = 1;
   state.active_shots[0].life_ticks_remaining = 1.0F;
 
+  // Shot_HandleShot latches the crossing frame to -1 and launches linked
+  // submunitions from the outer expiry test on the following frame.
+  NovaWeapon_TickShots(state, 1.0F);
   NovaWeapon_TickShots(state, 1.0F);
 
   REQUIRE(state.active_shots.size() == 2);
@@ -1540,6 +1549,7 @@ TEST_CASE("expiry launches linked shots unless Flags2 0x20 suppresses it",
   SpawnTestShot(suppressed_state);
   suppressed_state.active_shots[0].life_ticks_remaining = 1.0F;
 
+  NovaWeapon_TickShots(suppressed_state, 1.0F);
   NovaWeapon_TickShots(suppressed_state, 1.0F);
 
   CHECK(suppressed_state.active_shots.empty());
@@ -1560,6 +1570,98 @@ TEST_CASE("Flags2 0x0010 linked shots acquire the nearest hittable target",
   for (const ActiveShot &child : state.active_shots) {
     CHECK(child.target_ship_slot == 2);
   }
+}
+
+// Shot_HandleShot (0x00435830) expiry impact: a flags_primary 0x8000 weapon
+// splashes every active ship within splash_radius on both axes, and the owner
+// immunity rule matches the original (the player is caught by their own blast
+// unless flags_primary 0x100 is set; NPC owners never are).
+TEST_CASE("shot expiry splash damages ships in radius only",
+          "[collision][shot-expiry]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.flags = 0x8000;
+  weapon.splash_radius = 20;
+  weapon.mass_damage = 30;
+  weapon.energy_damage = 0;
+  weapon.impact_effect_id = 0;
+  state.player.shield_points = 0.0F;
+
+  Ship &in_radius = state.ShipAt(1);
+  in_radius.shield_points = 0.0F;
+  in_radius.armor_points = 100.0F;
+  Ship &out_of_radius = state.ShipAt(2);
+  ActivateHostileShip(state, 2, 100.0F, 0.0F);
+  out_of_radius.shield_points = 0.0F;
+  out_of_radius.armor_points = 100.0F;
+
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.owner_ship_slot = 0;
+  shot.pos_x = 10.0F;
+  shot.pos_y = 0.0F;
+
+  NovaWeapon_ResolveShotExpiryImpact(state, shot, weapon);
+
+  CHECK(in_radius.armor_points == Catch::Approx(70.0F));
+  CHECK(out_of_radius.armor_points == Catch::Approx(100.0F));
+  // Player owner at the origin (10px from the blast) is caught.
+  CHECK(state.player.armor_points == Catch::Approx(70.0F));
+}
+
+TEST_CASE("shot expiry owner immunity via flags_primary 0x0100",
+          "[collision][shot-expiry]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.flags = 0x8000 | 0x0100;
+  weapon.splash_radius = 20;
+  weapon.mass_damage = 30;
+  weapon.energy_damage = 0;
+  weapon.impact_effect_id = 0;
+  state.ShipAt(1).shield_points = 0.0F;
+  state.player.shield_points = 0.0F;
+
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.owner_ship_slot = 0;
+  shot.pos_x = 10.0F;
+  shot.pos_y = 0.0F;
+
+  NovaWeapon_ResolveShotExpiryImpact(state, shot, weapon);
+
+  CHECK(state.ShipAt(1).armor_points == Catch::Approx(70.0F));
+  CHECK(state.player.armor_points == Catch::Approx(100.0F));
+}
+
+TEST_CASE("expiry impact runs one tick after lifetime crosses zero",
+          "[collision][shot-expiry]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.flags = 0x8000;
+  weapon.splash_radius = 20;
+  weapon.mass_damage = 30;
+  weapon.energy_damage = 0;
+  weapon.impact_effect_id = 0;
+  weapon.lifetime_ticks = 1;
+  state.ShipAt(1).shield_points = 0.0F;
+  state.ShipAt(1).armor_points = 100.0F;
+
+  REQUIRE(SpawnTestShot(state) == 0);
+  state.active_shots[0].pos_x = 10.0F;
+  state.active_shots[0].pos_y = 0.0F;
+
+  // Crossing frame: the shot is still guided/animated, no impact yet.
+  NovaWeapon_TickShots(state, /*elapsed_ticks=*/1.0F, nullptr);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.ShipAt(1).armor_points == Catch::Approx(100.0F));
+
+  // Following frame: the outer test fires the expiry impact and retires it.
+  NovaWeapon_TickShots(state, /*elapsed_ticks=*/1.0F, nullptr);
+  CHECK(state.active_shots.empty());
+  CHECK(state.ShipAt(1).armor_points == Catch::Approx(70.0F));
 }
 
 } // namespace game

@@ -193,10 +193,10 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
   return false;
 }
 
-// Ghidra Ship_ShipsShareSquadRoot (0x0046d190) walks each ship's
-// squad_leader_ship_slot to a root and excludes shots within one squad-root
-// chain. The walk is bounded to tolerate malformed cycles (the original is
-// not; see the function's plate comment).
+// Ghidra 0x0046d190 Ship_ShipsShareSquadRoot. Walks each ship's
+// squad_leader_ship_slot to a root and returns true when the roots match. The
+// walk is bounded to tolerate malformed cycles (the original is not; see the
+// function's plate comment). NovaShip_ShipsShareSquadRoot exposes it.
 [[nodiscard]] bool SharesSquadRoot(const GameState &state,
                                    std::int16_t first_slot,
                                    std::int16_t second_slot) {
@@ -636,6 +636,87 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
 }
 
 } // namespace
+
+// Public checkpoint to the file-local SquadRoot walk above (see its canonical
+// citation) so Shot_HandleShot's player target-chain arm reuses the exact same
+// chain semantics as Weapon_CanWeaponHitTarget.
+bool NovaShip_ShipsShareSquadRoot(const GameState &state,
+                                  std::int16_t first_slot,
+                                  std::int16_t second_slot) {
+  return SharesSquadRoot(state, first_slot, second_slot);
+}
+
+// Split expiry-impact helper for Shot_HandleShot (canonical citation at the
+// primary site NovaWeapon_TickShots, src/game/weapon_shots.cpp).
+void NovaWeapon_ResolveShotExpiryImpact(GameState &state,
+                                        const ActiveShot &shot,
+                                        const Weapon &weapon) {
+  if ((weapon.flags & 0x8000U) == 0U) {
+    // Quirk preserved: the original tests impact_effect_id > 0 but always
+    // passes effect id 0 to Shot_SpawnImpactEffectSprite(x, y, 0, 0, 0).
+    if (weapon.impact_effect_id > 0) {
+      NovaEffects_SpawnImpactEffect(state, shot.pos_x, shot.pos_y, 0, 0);
+    }
+    return;
+  }
+
+  NovaEffects_SpawnAreaImpact(state,
+                              shot.pos_x,
+                              shot.pos_y,
+                              weapon.impact_effect_id,
+                              weapon.splash_radius,
+                              /*play_sound=*/true);
+  if (weapon.splash_radius <= 0 || (weapon.flags_secondary & 0x0400U) != 0U) {
+    return;
+  }
+
+  // x87 FIST + residual/sign truncation of Reload toward zero, matching the
+  // other damage callsites.
+  const auto player_aggro_delta =
+      static_cast<std::int16_t>(static_cast<std::int32_t>(weapon.reload_ticks));
+  for (std::int16_t slot = 0;
+       slot < static_cast<std::int16_t>(GameState::kMaxShips);
+       ++slot) {
+    // NPC owners never splash themselves; the player owner is skipped (immune)
+    // only when flags_primary 0x100 is set.
+    if (slot == shot.owner_ship_slot &&
+        ((weapon.flags & 0x0100U) != 0U || shot.owner_ship_slot != 0)) {
+      continue;
+    }
+    Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
+    if (!target.is_active || target.ship_class_id < 0 ||
+        target.ship_class_id == kShipClassInvalidSentinel) {
+      continue;
+    }
+    const ShipClass *cls = ShipClassFor(state, target);
+    if (cls != nullptr && (cls->capability_flags & 0x0400U) != 0U) {
+      continue;
+    }
+    if (std::abs(target.pos_x - shot.pos_x) >
+            static_cast<float>(weapon.splash_radius) ||
+        std::abs(target.pos_y - shot.pos_y) >
+            static_cast<float>(weapon.splash_radius)) {
+      continue;
+    }
+    Ship_ApplyDamageToShip(state,
+                           slot,
+                           target,
+                           shot.pos_x,
+                           shot.pos_y,
+                           weapon.impact_impulse,
+                           weapon.mass_damage,
+                           weapon.energy_damage,
+                           shot.owner_ship_slot,
+                           /*allow_aggro_updates=*/false,
+                           /*suppress_retarget_logic=*/false,
+                           /*force_armor_only=*/shot.impact_variant != 0,
+                           /*bypass_shields=*/(weapon.flags & 0x0020U) != 0U,
+                           player_aggro_delta,
+                           /*check_fire_restriction_transition=*/false);
+    ApplyWeaponOnHitEffects(
+        target, weapon, std::make_pair(shot.pos_x, shot.pos_y));
+  }
+}
 
 // Ghidra 0x0046f1e0 Frame_AddCombatRatingPoints.
 void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
@@ -2505,12 +2586,66 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
     // This clean-room path resolves only the beam queue's recorded ship
     // target. The original 0x0042f270 passes true for that intended contact;
     // its still-deferred incidental beam-contact sweep passes false.
+    // Ghidra Shot_UpdateBeamHitQueue (0x0042f270) negative-impact-impulse arm:
+    // a tractor/repulsor beam (impact_impulse < 0) from a ship arms a
+    // velocity-match lock on the target or the source. The target must be a
+    // real ship (pers_def_slot != 0x3ff), mass >= 1 ton and capability Flags
+    // 0x400 clear; otherwise the impulse is suppressed. When the target is at
+    // most 4/3 the source's mass (target.mass * 0.75 <= source.mass) the
+    // TARGET locks onto the source and the negative impulse still reaches
+    // Ship_ApplyDamageToShip. Otherwise the SOURCE self-locks and is stamped,
+    // and -- when the two are at least 50 px apart on either axis -- is pulled
+    // toward the target, after which the impulse is suppressed so the target
+    // takes no push. DAT_005753e8 = 0.75, DAT_005753f0 = 50.0.
+    std::int16_t effective_impulse = weapon->impact_impulse;
+    if (effective_impulse < 0 && target.pers_def_slot != 0x3ff) {
+      const ShipClass *target_class = ShipClassFor(state, target);
+      const ShipClass *owner_class = ShipClassFor(state, owner);
+      if (target_class == nullptr || owner_class == nullptr ||
+          target_class->mass_tons < 1 ||
+          (target_class->capability_flags & 0x0400U) != 0U) {
+        effective_impulse = 0;
+      } else if (static_cast<float>(target_class->mass_tons) * 0.75F <=
+                 static_cast<float>(owner_class->mass_tons)) {
+        target.velocity_match_target_ship_slot = owner_ship_slot;
+        target.velocity_match_start_tick_60hz = state.tick_60hz;
+      } else {
+        if (owner.velocity_match_target_ship_slot == -1) {
+          owner.velocity_match_target_ship_slot = owner_ship_slot;
+        }
+        owner.velocity_match_start_tick_60hz = state.tick_60hz;
+        if ((std::abs(target.pos_x - owner.pos_x) >= kImpulseCloseRangePx ||
+             std::abs(target.pos_y - owner.pos_y) >= kImpulseCloseRangePx) &&
+            owner_class->mass_tons > 0 &&
+            (owner_class->capability_flags & 0x0400U) == 0U) {
+          // Bearing target->source with the (negative) impulse / source mass,
+          // per-axis clamped to the class base speed then to the effective max
+          // speed. Unlike Ship_ApplyDamageToShip's impulse block this self-lock
+          // tug has no station-hold gate and no player-afterburner 1.8x widen.
+          const int bearing_deg = static_cast<int>(
+              BearingDeg(target.pos_x, target.pos_y, owner.pos_x, owner.pos_y));
+          constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+          Math_AddPolarVelocityWithClamp(
+              static_cast<float>(bearing_deg) * kDegToRad,
+              static_cast<float>(effective_impulse) /
+                  static_cast<float>(owner_class->mass_tons),
+              owner_class->speed / 100.0F,
+              owner.vel_x,
+              owner.vel_y);
+          const float max_speed = NovaShip_ComputeEffectiveMaxSpeedPxPerTick(
+              state, owner, *owner_class);
+          owner.vel_x = std::clamp(owner.vel_x, -max_speed, max_speed);
+          owner.vel_y = std::clamp(owner.vel_y, -max_speed, max_speed);
+        }
+        effective_impulse = 0;
+      }
+    }
     Ship_ApplyDamageToShip(state,
                            target_ship_slot,
                            target,
                            shot.pos_x,
                            shot.pos_y,
-                           weapon->impact_impulse,
+                           effective_impulse,
                            weapon->mass_damage,
                            weapon->energy_damage,
                            owner_ship_slot,

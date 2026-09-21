@@ -331,6 +331,10 @@ using evnova::util::ReadCString;
   w.ionization_points = ReadBeI16(bytes, 0x4a);
   w.ionization_color = ReadBe32(bytes, 0x72) & 0x00ffffffU;
   w.flags = ReadBe16(bytes, 0x1c); // flags_primary
+  w.smoke_set = ReadBeI16(bytes, 0x20);
+  if (w.smoke_set > 7) {
+    w.smoke_set = 0;
+  }
   w.flags_quaternary = ReadBe16(bytes, 0x1e);
   w.flags_secondary = ReadBe16(bytes, 0x48);
   w.flags_tertiary = ReadBe16(bytes, 0x66);
@@ -363,6 +367,12 @@ using evnova::util::ReadCString;
       w.beam_lightning_amplitude = 1;
     }
   }
+  // Loader 0x004bd3c0 repurposes the beam Falloff field as Shot_Fade_Rate
+  // (WeaponDef +0xb8) for non-beam weapons; modes 0/3/10 get 0. The Bible
+  // Falloff field is the shot's cloak-style fade rate for projectiles.
+  const bool is_beam_mode = w.weapon_mode_code == 0 ||
+                            w.weapon_mode_code == 3 || w.weapon_mode_code == 10;
+  w.shot_fade_rate = is_beam_mode ? 0 : w.beam_falloff;
   // GuidedTurn (payload +0x6a): loader scales by 0.1 into the float
   // WeaponDef.guided_turn_rate (degrees/tick used by shot guidance).
   w.guided_turn_rate = static_cast<float>(ReadBeI16(bytes, 0x6a)) * 0.1F;

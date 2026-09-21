@@ -197,6 +197,29 @@ bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship);
 [[nodiscard]] double NovaAi_ComputeShipFuelCapacity(const GameState &state,
                                                     const Ship &ship);
 
+// Ghidra 0x00463680 Ship_ComputeShipShieldRegenRate. NPC branch: class
+// ShieldRech (points/frame) plus ModType-5 outfit bonuses from the class
+// default loadout, clamped >= 0, then multiplied by 1.333 for behavior 5.
+// The player branch is Outfit_ComputePlayerEffectiveStats().shield_recharge.
+[[nodiscard]] float NovaAi_ComputeShipShieldRegenRate(const GameState &state,
+                                                      const Ship &ship);
+
+// Ghidra 0x004638e0 Ship_ComputeShipArmorRegenRate. NPC branch: class
+// ArmorRech plus ModType-29 outfit bonuses from the class default loadout,
+// clamped >= 0, then multiplied by 1.333 for behavior 5. Returns 0 while the
+// ship is disabled; the Ship_HandleShip caller is already gated on that.
+[[nodiscard]] float NovaAi_ComputeShipArmorRegenRate(const GameState &state,
+                                                     const Ship &ship);
+
+// Ghidra 0x00463b30 Ship_ComputeShipFuelRechargeRate. NPC branch: fuel
+// scoop rate (fuel points/frame) from the class FuelRegen (1/FuelRegen) plus
+// ModType-18 class default outfits (count * 1/ModVal). Returns true and sets
+// `out_rate` when any recharge source is active; false (out_rate untouched)
+// otherwise.
+[[nodiscard]] bool NovaAi_ComputeShipFuelRechargeRate(const GameState &state,
+                                                      const Ship &ship,
+                                                      float &out_rate);
+
 // Ghidra 0x004680d0 Ship_OnShipCloakStateEntered. Starts the signed cloak
 // transition and drops shields when ModType 17 requests it.
 void NovaAi_OnShipCloakStateEntered(GameState &state, Ship &ship);

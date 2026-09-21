@@ -2,10 +2,16 @@
 
 #include "../log.hpp"
 #include "frame_timing.hpp"
+#include "government.hpp"
+#include "hud_overlay.hpp"
+#include "landed_store.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight_internal.hpp"
+#include "targeting.hpp"
 #include "travel.hpp"
+#include "weapon.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -513,7 +519,11 @@ float NovaShip_ComputeEffectiveMaxSpeedPxPerTick(const GameState &state,
 // Inertialess ships (ShipClassDef.flags_secondary bit 0x40) keep a scalar
 // `speed` (integrated in the thrust block below) and steer their velocity
 // through NovaShip_SteerVelocityTowardShipHeading (0x0043b020) in the position
-// block, matching the original's two-regime movement model.
+// block, matching the original's two-regime movement model. The
+// velocity-match tug/cloak/fuel/aggro/derelict tail blocks are split into the
+// helper functions above (NovaAi_Compute*RegenRate, NovaAi_ComputeShipFuel-
+// RechargeRate) and the shared cloak helpers in ship_ai.cpp.
+// Ghidra 0x00433050 Ship_HandleShip.
 void NovaShip_IntegrateNpcMovement(GameState &state,
                                    Ship &ship,
                                    const ShipClass &ship_class,
@@ -533,12 +543,12 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // below its base (TODO(decomp)). Kept to match the original's NPC branch.
   const NpcEffectiveStats stats =
       NovaShip_ComputeEffectiveStats(state, ship, ship_class);
-  const float base_turn_deg = stats.turn_rate_deg_per_tick;
-  float eff_turn_deg = base_turn_deg;
-  if (base_turn_deg >= 1.0F) {
-    eff_turn_deg = std::max(eff_turn_deg, 1.0F);
-  }
-  const float eff_max_speed = stats.max_speed_px_per_tick;
+  // The movement clamp/threshold use Ship_ComputeShipEffectiveMaxSpeed
+  // (0x004642e0), which includes the player-led-squad +1.5x tail
+  // (DAT_005757b8) that the raw NovaShip_ComputeEffectiveStats aggregate does
+  // not; the helper also applies the final negative clamp.
+  const float eff_max_speed =
+      NovaShip_ComputeEffectiveMaxSpeedPxPerTick(state, ship, ship_class);
   const float eff_thrust = stats.thrust_px_per_tick2;
   // Inertialess ships (ShipClassDef.flags_secondary bit 0x40, and not in
   // ai_control_mode 0x0c) keep a scalar Ship.speed and steer their velocity
@@ -553,7 +563,10 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // a yielding (0x16) ship keeps steering even with an active timer.
   const bool coasting = ship.ai_maneuver_timer_ms > 0.0F;
   // Ghidra 0x00416070 Ship_IsShipInAiState0x16 runs inline here.
-  const bool holds_course = coasting && ship.ai_state_code != 0x16;
+  // The same gate also opens for the class-0x2ff sentinel (the escape pod),
+  // which Ship_HandleShip admits even with an active maneuver timer.
+  const bool holds_course = coasting && ship.ai_state_code != 0x16 &&
+                            ship.ship_class_id != kEscapePodShipClassIndex;
   const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
 
   if (ship.arrival_monitor_active) {
@@ -604,6 +617,158 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     ship.vel_x *= damp;
     ship.vel_y *= damp;
     ship.speed *= damp;
+
+    // Ghidra 0x00433050 disabled arm: a disabled direct escort of the player
+    // (squad_leader_ship_slot 0, not a mission/defense-fleet ship) converts to
+    // its default behavior and dumps its cargo share; every other disabled hull
+    // rolls the probabilistic auto-repair. The original writes
+    // g_playerInventoryAndLoadoutDirty; the port recomputes inventory-derived
+    // state live, and the cargo-status panel redraws each frame.
+    if (ship.mission_fleet_slot == -1 &&
+        ship.defense_fleet_home_stellar_id == -1 &&
+        ship.squad_leader_ship_slot == 0) {
+      if (ship_class.default_ai_behavior < 3) {
+        Player_TransferCargoAndJunkToEscortByRatio(state,
+                                                   ship.ship_instance_id);
+      }
+      ship.squad_leader_ship_slot = -1;
+      ship.escort_origin_mark = 0;
+      ship.boarded_target_latch = 1;
+      ship.ai_behavior_code = ship_class.default_ai_behavior;
+      NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+    } else if (Frame_ShouldTriggerAutoRepairTick(state, ship)) {
+      // Armor is restored to a fraction of the effective maximum: 1/3 for a
+      // normal hull, 1/10 when capability Flags 0x10, plus one point
+      // (DOUBLE_00575440 = 1.0).
+      const float max_armor = NovaAi_ComputeMaxArmorPoints(state, ship);
+      const float armor_fraction =
+          (ship_class.capability_flags & 0x10U) != 0U ? 0.1F : (1.0F / 3.0F);
+      ship.armor_points = max_armor * armor_fraction + 1.0F;
+      // The original raises g_playerShipPresentationDirty when the player's
+      // HUD target is this ship; the port's HUD is immediate-mode.
+      if (ship.post_hit_mode_hint >= 0) {
+        // Surrender conversion: the ship joins the player's squad (slot 0),
+        // loses shields/targets, and either becomes a behavior-5 fighter or a
+        // behavior-6 escort depending on how it was disabled. The hint selects
+        // the STR# 0x7d2 overlay (0x80/0x7f) and the escort-origin mark.
+        ship.squad_leader_ship_slot = 0;
+        ship.shield_points = 0.0F;
+        ship.ai_secondary_target_slot = -1;
+        ship.primary_target_ship_slot = -1;
+        if (ship.post_hit_mode_hint == 0) {
+          ship.ai_behavior_code = 5;
+          if (auto text = NovaHud_LoadStringEntry(0x7D2, 0x80)) {
+            NovaHud_ShowOverlayMessage(state, *text, std::uint64_t{0xfa});
+          }
+        } else {
+          ship.escort_origin_mark =
+              static_cast<std::int8_t>(ship.post_hit_mode_hint == 1 ? 1 : 0);
+          ship.ai_behavior_code = 6;
+          if (auto text = NovaHud_LoadStringEntry(0x7D2, 0x7f)) {
+            NovaHud_ShowOverlayMessage(state, *text, std::uint64_t{0xfa});
+          }
+        }
+        state.pending_ui_sounds.push_back(GameState::PendingUiSound{8, 1});
+      }
+    }
+  } else {
+    // Ghidra 0x00433050: a live hull clears any stale post-hit hint every
+    // frame, so a later disable starts from the neutral state.
+    ship.post_hit_mode_hint = -1;
+  }
+
+  // Producer: Shot_UpdateBeamHitQueue (0x0042f270)'s negative-impact-impulse
+  // arm, ported in NovaWeapon_ResolveDirectWeaponHit, arms the +0xC8DC lock and
+  // +0xB4 stamp from a tractor/repulsor beam hit.
+  //
+  // Ghidra 0x00433050 velocity-match physical tug. The step size is the
+  // PLAYER's effective thrust times g_death_puff_offset_scale_f64 (0.25) -- a
+  // deliberate original quirk: the tug reads g_ship_states[0] regardless of
+  // which ship carries the velocity-match lock. Each axis is stepped toward the
+  // target's velocity and snaps when within one step. The original applies the
+  // fixed step once per Ship_HandleShip call; the port replays that discrete
+  // per-call step via RawSpaceflightCallTicks so the pull stays frame-rate
+  // independent.
+  if (ship.velocity_match_target_ship_slot != -1) {
+    constexpr float kVelocityMatchTugScale =
+        0.25F; // g_death_puff_offset_scale_f64
+    const PlayerEffectiveStats player_eff =
+        Outfit_ComputePlayerEffectiveStats(state);
+    // Player branch of Ship_ComputeShipEffectiveThrust (0x004640a0): the
+    // opcode-7 aggregate x2.0 (DAT_005757a8), the mission-ship x2.0 for pers
+    // slot 0x3ff, ionization damping (min(intensity,0.7)) while charged, and a
+    // final negative clamp. The step is a fixed per-raw-call value in the
+    // original (no g_avg_frame_tick_scale), so replay it per 21 ms raw call.
+    float player_thrust = player_eff.thrust_raw / 10000.0F * 2.0F;
+    if (state.player.pers_def_slot == 0x3ff) {
+      player_thrust *= 2.0F;
+    }
+    if (state.player.ionization_points > 0.0F) {
+      const float intensity = std::min(
+          0.7F, NovaOutfit_GetIonizationIntensity(state, state.player));
+      player_thrust *= (1.0F - intensity);
+    }
+    player_thrust = std::max(0.0F, player_thrust);
+    const float step = player_thrust * kVelocityMatchTugScale *
+                       RawSpaceflightCallTicks(elapsed_ticks);
+    float target_vel_x = 0.0F;
+    float target_vel_y = 0.0F;
+    const std::int16_t target_slot = ship.velocity_match_target_ship_slot;
+    if (target_slot != ship.ship_instance_id &&
+        state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+      const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+      target_vel_x = target.vel_x;
+      target_vel_y = target.vel_y;
+    }
+    if (target_vel_x + step < ship.vel_x) {
+      ship.vel_x -= step;
+    }
+    if (ship.vel_x < target_vel_x - step) {
+      ship.vel_x += step;
+    }
+    if (target_vel_y + step < ship.vel_y) {
+      ship.vel_y -= step;
+    }
+    if (ship.vel_y < target_vel_y - step) {
+      ship.vel_y += step;
+    }
+    if (std::abs(ship.vel_x - target_vel_x) < step) {
+      ship.vel_x = target_vel_x;
+    }
+    if (std::abs(ship.vel_y - target_vel_y) < step) {
+      ship.vel_y = target_vel_y;
+    }
+  }
+
+  // Ghidra 0x00433050 NPC cloak upkeep (the player equivalent lives in
+  // PlayerTick_InteractionCloakAndStatus). While the hull is at the cloak
+  // visibility threshold, an unmaintainable cloak is cleared and the ModType-17
+  // fuel (bits 0x10..0x80) and shield (bits 0x100..0x800) drains are applied.
+  // DAT_00575470 = 2.9045e-5 per drain unit and tick.
+  if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
+    if (!NovaAiShip_CanMaintainCloakState(state, ship)) {
+      NovaAi_OnShipCloakStateCleared(ship);
+    }
+    constexpr float kCloakDrainPerTick = 2.9045e-5F; // DAT_00575470
+    const std::int16_t fuel_drain =
+        NovaOutfit_GetCloakFuelDrainFlags(state, ship);
+    if (fuel_drain > 0) {
+      ship.fuel_points -=
+          static_cast<float>(fuel_drain) * kCloakDrainPerTick * elapsed_ticks;
+      if (ship.fuel_points <= 0.0F) {
+        ship.fuel_points = 0.0F;
+      }
+    }
+    const std::int16_t shield_drain =
+        NovaOutfit_GetCloakShieldDrainFlags(state, ship);
+    if (shield_drain > 0 &&
+        static_cast<float>(shield_drain) <= ship.shield_points) {
+      ship.shield_points -=
+          static_cast<float>(shield_drain) * kCloakDrainPerTick * elapsed_ticks;
+      if (ship.shield_points <= 0.0F) {
+        ship.shield_points = 0.0F;
+      }
+    }
   }
 
   // --- Position integration + inertia-less special case. ---
@@ -626,6 +791,22 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     }
   }
 
+  // Ghidra 0x00433050: the ionization decay/ramp runs AFTER position
+  // integration and BEFORE the turn/regen and thrust blocks, so those read the
+  // freshly decayed intensity. (The inertialess steer above intentionally uses
+  // the pre-decay effective thrust: the original calls
+  // Ship_ComputeShipEffectiveThrust before its ionization block, then again
+  // inside the thrust block.)
+  spaceflight_detail::NovaShip_UpdateIonizationCharge(
+      state, ship, eff_max_speed, elapsed_ticks);
+  const NpcEffectiveStats stats_post_ionization =
+      NovaShip_ComputeEffectiveStats(state, ship, ship_class);
+  float eff_turn_deg_post = stats_post_ionization.turn_rate_deg_per_tick;
+  if (eff_turn_deg_post >= 1.0F) {
+    eff_turn_deg_post = std::max(eff_turn_deg_post, 1.0F);
+  }
+  const float eff_thrust_post = stats_post_ionization.thrust_px_per_tick2;
+
   // --- Turn toward the desired heading (continuous AI turn rate). ---
   // The original computes the shortest signed angular delta in degrees from
   // the current heading to = ai_desired_heading_deg, stepping it (in either
@@ -637,7 +818,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // turn_bank_animation_phase field at +0xc8e4
   // tilt anim: +1 while banking one way, -1 the other, 0 otherwise), which the
   // engine-glow block below consumes for its turn-bias +2 bump.
-  ship.ai_turn_bias_dir = 0;
+  int turn_dir = 0;
   // Ghidra gates the whole turn/regen block on `!Ship_IsShipDisabled(ship) &&
   // !g_gameplay_time_frozen` (uVar10, 0x00433050): a disabled NPC holds its
   // current heading (no rotation) and does not regenerate. The inner arm then
@@ -648,37 +829,35 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     const float delta_deg = std::remainder(
         static_cast<float>(ship.ai_desired_heading_deg) - cur_deg,
         kFullCircleDeg);
-    const float max_turn_deg = eff_turn_deg * elapsed_ticks;
+    const float max_turn_deg = eff_turn_deg_post * elapsed_ticks;
     if (std::abs(delta_deg) <= max_turn_deg) {
       ship.heading =
           static_cast<float>(ship.ai_desired_heading_deg) * kDegToRad;
     } else {
       ship.heading =
           (cur_deg + std::copysign(max_turn_deg, delta_deg)) * kDegToRad;
-      ship.ai_turn_bias_dir = delta_deg > 0.0F ? 1 : -1;
+      turn_dir = delta_deg > 0.0F ? 1 : -1;
     }
     ship.heading = std::fmod(ship.heading, kFullCircleDeg / kDegToRad);
     if (ship.heading < 0.0F) {
       ship.heading += kTwoPi;
     }
 
-    // Regeneration shares the block's disabled gate; lethal hits must not
-    // resurrect a ship whose armor has reached zero.
-    if (!NovaAiShip_IsDestroyed(ship)) {
-      const float max_shield = static_cast<float>(ship_class.base_shield);
-      if (ship.shield_points < max_shield) {
-        ship.shield_points = std::min(
-            max_shield,
-            ship.shield_points +
-                static_cast<float>(ship_class.shield_recharge) * elapsed_ticks);
-      }
-      const float max_armor = static_cast<float>(ship_class.base_armor);
-      if (ship.armor_points < max_armor) {
-        ship.armor_points = std::min(
-            max_armor,
-            ship.armor_points +
-                static_cast<float>(ship_class.armor_recharge) * elapsed_ticks);
-      }
+    // Regeneration shares the block's disabled gate. The capacities use the
+    // personality-scaled effective maxima (Ship_ComputeShipMaxShieldPoints/
+    // MaxArmor) and the regen rates the class + class-default-outfit ModType
+    // 5/0x1d bonuses with the behavior-5 x1.333 scale; the original does not
+    // clamp the summed value back to the maximum.
+    const float max_shield =
+        static_cast<float>(NovaAi_ComputeMaxShieldPoints(state, ship));
+    if (ship.shield_points < max_shield) {
+      ship.shield_points +=
+          NovaAi_ComputeShipShieldRegenRate(state, ship) * elapsed_ticks;
+    }
+    const float max_armor = NovaAi_ComputeMaxArmorPoints(state, ship);
+    if (ship.armor_points < max_armor) {
+      ship.armor_points +=
+          NovaAi_ComputeShipArmorRegenRate(state, ship) * elapsed_ticks;
     }
   }
 
@@ -826,8 +1005,8 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     const float heading_delta_deg = std::remainder(
         static_cast<float>(ship.ai_desired_heading_deg) - current_heading_deg,
         360.0F);
-    const bool aligned = std::abs(heading_delta_deg) <=
-                         stats.turn_rate_deg_per_tick * elapsed_ticks;
+    const bool aligned =
+        std::abs(heading_delta_deg) <= eff_turn_deg_post * elapsed_ticks;
     if (!aligned) {
       // Ghidra resets the mode-start timestamp while the ship is still
       // turning, so the jump-speed ramp begins only after alignment.
@@ -879,9 +1058,43 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // Despite its legacy field name, the original stores normalized simulation
   // ticks here: Frame_MeasureFrameTiming scales elapsed milliseconds by 0.03
   // before publishing g_avg_frame_time_ms.
-  if (ship.ai_maneuver_timer_ms > 0.0F) {
+  // Ghidra 0x00433050 maneuver-timer countdown is skipped for the class-0x2ff
+  // escape pod, which never carries a coast timer (same sentinel as the thrust
+  // gate above).
+  if (ship.ai_maneuver_timer_ms > 0.0F &&
+      ship.ship_class_id != kEscapePodShipClassIndex) {
     ship.ai_maneuver_timer_ms =
         std::max(0.0F, ship.ai_maneuver_timer_ms - elapsed_ticks);
+  }
+
+  // Ghidra 0x00433050 turn-bank animation ramp (ShipState +0xc8e4). Only
+  // classes with sprite_behavior_flags bit 0 bank: the phase ramps toward +-8
+  // while turning (DAT_005754b4 = 8.0, DAT_005754a8 = -8.0) and decays toward
+  // 0 otherwise; ai_turn_bias_dir becomes +1 above FLOAT_005754ac = 4.0, -1
+  // below DAT_005754b0 = -4.0, else 0. The ramp shares the thrust/coast gate.
+  ship.ai_turn_bias_dir = 0;
+  if (!holds_course && (ship_class.sprite_behavior_flags & 1U) != 0U) {
+    float &phase = ship.turn_bank_animation_phase;
+    if (turn_dir == 1) {
+      if (phase < 8.0F) {
+        phase += elapsed_ticks;
+      }
+    } else if (turn_dir == -1) {
+      if (-8.0F < phase) {
+        phase -= elapsed_ticks;
+      }
+    } else if (elapsed_ticks <= phase) {
+      phase -= elapsed_ticks;
+    } else if (-elapsed_ticks < phase) {
+      phase = 0.0F;
+    } else {
+      phase += elapsed_ticks;
+    }
+    if (phase > 4.0F) {
+      ship.ai_turn_bias_dir = 1;
+    } else if (phase < -4.0F) {
+      ship.ai_turn_bias_dir = -1;
+    }
   }
 
   // --- Engine glow level (Ghidra ShipState field_0xc8d4). ---
@@ -939,7 +1152,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       // jumps to LAB_00435197, the same single decrement the closed main gate
       // would otherwise take through the tail block.
       fade_to_zero();
-    } else if (ship.ai_forward_thrust_cmd < eff_thrust * 2.0F) {
+    } else if (ship.ai_forward_thrust_cmd < eff_thrust_post * 2.0F) {
       // Low throttle: settle the glow at the 0x18 cruise level.
       if (glow < 0x18) {
         glow = static_cast<std::int16_t>(glow + 1);
@@ -964,6 +1177,51 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   if (ship.player_aggro_accumulator > 0.0F) {
     ship.player_aggro_accumulator =
         std::max(0.0F, ship.player_aggro_accumulator - 0.5F * elapsed_ticks);
+  }
+
+  // Ghidra 0x00433050 fuel tail: add the class/outfit scoop rate, clamp to the
+  // effective capacity (the original truncates the double capacity through a
+  // 16-bit cast) and then floor at zero. The player's equivalent runs in
+  // PlayerTick_IonizationAndFuelRegeneration.
+  float fuel_recharge_rate = 0.0F;
+  if (NovaAi_ComputeShipFuelRechargeRate(state, ship, fuel_recharge_rate)) {
+    ship.fuel_points += fuel_recharge_rate * elapsed_ticks;
+  }
+  const float fuel_capacity = static_cast<float>(
+      static_cast<std::int16_t>(NovaAi_ComputeShipFuelCapacity(state, ship)));
+  if (fuel_capacity < ship.fuel_points) {
+    ship.fuel_points = fuel_capacity;
+  }
+  if (ship.fuel_points < 0.0F) {
+    ship.fuel_points = 0.0F;
+  }
+
+  // Ghidra 0x00433050 velocity-match expiry: clear the lock when the target is
+  // gone/disabled/destroyed, and unconditionally retire it 30 ticks (0x1e)
+  // after it was armed.
+  const std::int16_t match_slot = ship.velocity_match_target_ship_slot;
+  if (match_slot != -1) {
+    if (match_slot != ship.ship_instance_id &&
+        state.SlotInRange(static_cast<std::size_t>(match_slot))) {
+      const Ship &match_target =
+          state.ShipAt(static_cast<std::size_t>(match_slot));
+      if (!match_target.is_active ||
+          NovaAiShip_IsDisabled(state, match_target) ||
+          NovaAiShip_IsDestroyed(match_target)) {
+        ship.velocity_match_target_ship_slot = -1;
+        ship.velocity_match_start_tick_60hz = 0;
+      }
+    }
+    if (ship.velocity_match_start_tick_60hz + 0x1eU <= state.tick_60hz) {
+      ship.velocity_match_target_ship_slot = -1;
+    }
+  }
+
+  // Ghidra 0x00433050: a derelict-government hull never shows engine glow.
+  // Applies to destroyed wrecks too (the original has no early return).
+  if (NovaGovernment_IsGovernmentDerelict(state.scenario,
+                                          ship.faction_or_government_id)) {
+    ship.engine_glow_level = 0;
   }
 }
 

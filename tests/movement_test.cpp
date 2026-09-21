@@ -247,6 +247,28 @@ TEST_CASE("npc player-aggro accumulator does not decay below zero") {
   CHECK(ship.player_aggro_accumulator == Catch::Approx(-1.0F));
 }
 
+TEST_CASE("npc ionization decays inside the movement integration call") {
+  // Ghidra 0x00433050 orders the ionization decay AFTER position integration
+  // and BEFORE the turn/regen and thrust blocks; the turn then reads the
+  // freshly decayed intensity. The decay must therefore run inside
+  // NovaShip_IntegrateNpcMovement, not in a later per-frame pass.
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  cls.ionization_decay_rate = 0.5F;
+  cls.ionization_capacity = 10;
+  // NovaShip_UpdateIonizationCharge resolves the class through the scenario
+  // (ship_class_id is zero-based; Ship() indexes by id - 0x80).
+  ship.ship_class_id = 3;
+  state.scenario.ships.resize(4);
+  state.scenario.ships[3] = cls;
+  ship.ionization_points = 3.0F;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 2.0F);
+
+  CHECK(ship.ionization_points == Catch::Approx(2.0F)); // 3 - 0.5 * 2
+}
+
 TEST_CASE("npc snaps exactly onto the desired heading within one turn step") {
   game::GameState state;
   game::Ship ship;
@@ -708,14 +730,131 @@ TEST_CASE("npc bank glow boost adds two with no 0x18 clamp") {
   ship.engine_glow_level = 23;
   ship.ai_desired_heading_deg = 90;
   ship.ai_forward_thrust_cmd = 0.5F; // full burn (>= 2x eff_thrust 0.2)
+  // The bank signal is now derived from the +0xc8e4 phase ramp; seed the phase
+  // just below the +4.0 bias threshold so this tick crosses it.
+  ship.turn_bank_animation_phase = 3.5F;
 
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
 
-  // The turn sets ai_turn_bias_dir; the bank boost adds 2 (23 -> 25, past the
-  // 0x18 cruise level) and the full-burn arm then adds 1 -> 26. The original
-  // 0x004350ee has no upper clamp.
-  CHECK(ship.ai_turn_bias_dir != 0);
+  // The ramp crosses +4.0, setting ai_turn_bias_dir; the bank boost adds 2
+  // (23 -> 25, past the 0x18 cruise level) and the full-burn arm then adds
+  // 1 -> 26. The original 0x004350ee has no upper clamp.
+  CHECK(ship.ai_turn_bias_dir == 1);
+  CHECK(ship.turn_bank_animation_phase == Catch::Approx(4.5F));
   CHECK(ship.engine_glow_level == 26);
+}
+
+TEST_CASE("npc turn-bank phase ramps toward 8 and decays to a zero bias") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass();
+  cls.sprite_behavior_flags = 0x3;
+  cls.turn_rate = 10.0F; // 1 deg/tick
+
+  game::Ship ship;
+  ship.ai_desired_heading_deg = 90;
+  // Turn underway: the phase rises by elapsed_ticks toward +8.0, then the
+  // +4.0 threshold raises the bias.
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.turn_bank_animation_phase == Catch::Approx(1.0F));
+  CHECK(ship.ai_turn_bias_dir == 0);
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.turn_bank_animation_phase == Catch::Approx(2.0F));
+  ship.turn_bank_animation_phase = 8.0F; // saturated while turning hard
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.turn_bank_animation_phase == Catch::Approx(8.0F));
+
+  // Aligned: the ramp decays toward 0 and the bias drops out below +4.0.
+  ship.ai_desired_heading_deg = 0;
+  ship.heading = 0.0F;
+  ship.turn_bank_animation_phase = 5.0F;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.turn_bank_animation_phase == Catch::Approx(4.0F));
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.turn_bank_animation_phase == Catch::Approx(3.0F));
+  CHECK(ship.ai_turn_bias_dir == 0);
+}
+
+TEST_CASE("npc velocity-match tug replays at the raw-call cadence") {
+  game::GameState state;
+  state.scenario.ships.emplace_back(); // resource 0x80 -> the player class
+  state.scenario.ships[0].accel = 500.0F;
+  state.player.ship_class_id = 0;
+  state.tick_60hz = 0;
+  game::ShipClass cls = TestShipClass();
+
+  game::Ship ship;
+  ship.ship_instance_id = 2;
+  ship.velocity_match_start_tick_60hz = 0;
+  ship.armor_points = 10.0F; // alive so no destroyed/disabled interference
+  ship.velocity_match_target_ship_slot = 1;
+  game::Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.armor_points = 10.0F;
+  target.vel_x = 1.0F;
+
+  // Player thrust = 500/10000*2.0 = 0.1; the tug step is 0.1 * 0.25 = 0.025
+  // per 21 ms raw call. One full 0.63-tick frame applies exactly one call.
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.63F);
+  CHECK(ship.vel_x == Catch::Approx(0.025F));
+
+  // Half a raw call (0.315 normalized ticks) applies half the step, proving
+  // the fixed per-call value is replayed rather than scaled as a float rate.
+  ship.vel_x = 0.0F;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.315F);
+  CHECK(ship.vel_x == Catch::Approx(0.0125F));
+}
+
+TEST_CASE("npc player-led max speed applies the non-strict-play 1.5x tail") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass();
+  cls.speed = 400.0F;
+  cls.flags_secondary = 0x40; // inertialess: scalar speed clamp
+
+  game::Ship ship;
+  ship.ship_instance_id = 1;
+  ship.armor_points = 10.0F;
+  ship.ai_control_mode = 0;
+  ship.squad_leader_ship_slot = 0; // player-led escort
+  ship.ai_desired_speed = 0.0F;
+  ship.ai_forward_thrust_cmd = 1.0F;
+  ship.speed = 100.0F;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+
+  // Base class max 4.0 px/tick * 1.5 = 6.0 (DAT_005757b8).
+  CHECK(ship.speed == Catch::Approx(6.0F));
+}
+
+TEST_CASE("npc fuel scoop recharges and clamps to the class capacity") {
+  game::GameState state;
+  state.scenario.ships.emplace_back();
+  state.scenario.ships[0].fuel_regen = 2; // 1/2 fuel per tick
+  state.scenario.ships[0].base_fuel = 10.0F;
+  game::ShipClass cls = TestShipClass();
+  cls.accel = 0.0F;
+  cls.speed = 0.0F; // park the hull so only the fuel tail mutates
+
+  game::Ship ship;
+  ship.ship_instance_id = 1;
+  ship.armor_points = 10.0F;
+  ship.fuel_points = 1.0F;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.fuel_points == Catch::Approx(1.5F));
+
+  ship.fuel_points = 25.0F;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.fuel_points == Catch::Approx(10.0F)); // capacity clamp
+}
+
+TEST_CASE("live npc clears a stale post-hit mode hint") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass();
+  game::Ship ship;
+  ship.ship_instance_id = 1;
+  ship.armor_points = 10.0F;
+  ship.post_hit_mode_hint = 1;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.post_hit_mode_hint == -1);
 }
 
 TEST_CASE("state 2 mode 4 ramps engine glow with its departure step") {

@@ -153,6 +153,13 @@ extern bool PlayerTick_StatusAndOutfitEvents(GameState &state,
 extern void PlayerTick_FlightTutorialHints(GameState &state,
                                            const NovaPreferences &prefs);
 
+// Ghidra 0x0046e540 Frame_ShouldTriggerAutoRepairTick: the 1-in-500
+// (time-scaled) reroll, destroyed veto, and ModType-0x31 repair-outfit gate.
+// The player scans owned outfits; an NPC scans its class default loadout.
+// Callers gate on fire-restriction.
+[[nodiscard]] bool Frame_ShouldTriggerAutoRepairTick(GameState &state,
+                                                     const Ship &ship);
+
 // Ghidra 0x00431480 Frame_JitterPlayerStatModifiers: random-walks the first
 // two persisted player stat modifiers (state.player_stat_modifier_pct[0]/[1],
 // the DAT_007353f6/f8 pair) by +-1 with 2-in-3 probability, clamped to
