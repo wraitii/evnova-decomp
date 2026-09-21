@@ -422,6 +422,86 @@ TEST_CASE("nova control bit expression evaluator", "[scenario][control]") {
       "!(b511 | b515) & !((b50 | 467) | b6666)", s3));
 }
 
+TEST_CASE("NCB evaluator operator chains match the original accumulator",
+          "[scenario][control]") {
+  using game::ControlExpressionState;
+  using game::NovaControlExpression_Evaluate;
+
+  // `bits` bit n set means control bit bn is true.
+  const auto evaluate = [](std::string_view expression, std::uint32_t bits) {
+    ControlExpressionState state;
+    state.get_control_bit = [bits](std::uint32_t bit) {
+      return bit < 32 && (bits & (1U << bit)) != 0U;
+    };
+    return NovaControlExpression_Evaluate(expression, state);
+  };
+
+  // Exhaustive 3-bit truth tables (b1 = bit 1, b2 = bit 2, b3 = bit 3).
+  // expected[i] is the result when bit k of i is b(k+1). Values are derived
+  // from the 0x00449020 disassembly, not from precedence.
+  const auto check_table = [&](std::string_view expression,
+                               const char *expected) {
+    for (int input = 0; input < 8; ++input) {
+      std::uint32_t bits = 0;
+      for (int k = 0; k < 3; ++k) {
+        if (((input >> k) & 1) != 0) {
+          bits |= 1U << (k + 1);
+        }
+      }
+      INFO(expression << " input=" << input);
+      if (expected[input] == '1') {
+        CHECK(evaluate(expression, bits));
+      } else {
+        CHECK_FALSE(evaluate(expression, bits));
+      }
+    }
+  };
+
+  // Flat chains: every '&' / '|' reloads EBP from ESI, so only the last
+  // operator's two adjacent operands survive.
+  check_table("b1 | b2 | b3", "00111111");
+  check_table("b1 & b2 & b3", "00000011");
+  // Mixed chains: the final operator wins.
+  check_table("b1 & b2 | b3", "00111111");
+  check_table("b1 | b2 & b3", "00000011");
+
+  // Bible Test-expressions workaround: parentheses start a fresh accumulator.
+  check_table("(b1 | b2) | b3", "01111111");
+  check_table("(b1 & b2) & b3", "00000001");
+  check_table("(b1 | b2) & b3", "00000111");
+  check_table("(b1 & b2) | b3", "00011111");
+  check_table("b1 & (b2 | b3)", "00010101");
+  check_table("b1 | (b2 | b3)", "01111111");
+  check_table("b1 & (b2 & b3)", "00000001");
+  // A single enclosing group stays flat inside: `(b1 & b2 & b3)` is still
+  // b2&b3, unlike the nested `(b1 & b2) & b3` (see below).
+  check_table("(b1 & b2 & b3)", "00000011");
+
+  // Group operands update ESI differently from bare tokens: a short-circuited
+  // group reloads EBP=ESI (0x00449219 / 0x0044922b) instead of zeroing ESI.
+  // `b1 | (b2 | b3) | b4` stays true when only b1 is set, because the false
+  // group leaves the previous operand (1) in ESI.
+  CHECK(evaluate("b1 | (b2 | b3) | b4", 0b0010)); // b1 only
+  // `b1 & (b2 & b3) | b4` is false when b2 and b3 are set but b1 and b4 are
+  // not, because the true group leaves ESI at b1's 0.
+  CHECK_FALSE(evaluate("b1 & (b2 & b3) | b4", 0b1100)); // b2,b3 only
+  // Wrapping a bare token in parentheses changes the chain result even though
+  // the value is identical.
+  CHECK(evaluate("b1 & b2 | b3", 0b0100));         // b2 only: last op | -> 1
+  CHECK_FALSE(evaluate("b1 & (b2) | b3", 0b0100)); // group: -> 0
+
+  // Nested groups recurse; the inner flat chain's result is what the outer
+  // chain sees.
+  CHECK_FALSE(evaluate("(b1 | b2 | b3) | b4", 0b0010)); // inner flat 0
+  CHECK(evaluate("((b1 | b2) | b3) | b4", 0b0010));     // nested reset -> 1
+
+  // The all-`&` workaround must nest groups: a single enclosing group leaves
+  // the inner chain flat, so `(b1 & b2 & b3)` still reduces to b2&b3, while
+  // `(b1 & b2) & b3` is a true three-way AND.
+  CHECK(evaluate("(b1 & b2 & b3)", 0b1100));       // inner: b2&b3 = 1
+  CHECK_FALSE(evaluate("(b1 & b2) & b3", 0b1100)); // nested: b1&b2&b3 = 0
+}
+
 TEST_CASE("government table loads and decodes the Federation class",
           "[scenario][data]") {
   ScenarioData data;

@@ -2398,12 +2398,18 @@ std::int32_t Outfit::PurchaseMass(std::int16_t ship_hull_mass) const {
 // ---------------------------------------------------------------------------
 namespace {
 
-// Recursive-descent evaluator over the Bible's NCB test-expression grammar:
-//   expr   := or
-//   or     := and ( '|' and )*
-//   and    := unary ( '&' unary )*
-//   unary  := '!' unary | primary
-//   primary:= '(' expr ')' | '[' set ']' [cmp number] | token
+// Evaluator over the Bible's NCB test-expression grammar. Its operator-chain
+// behavior is a faithful port of Ghidra 0x00449020 (NovaExpression_
+// EvaluateBoolean): not a precedence parser. The '&'/'|' handlers at
+// 0x004492c0/0x004492d0 reload EBP from ESI (MOV EBP,ESI at 0x004492c4/
+// 0x004492d4), so for a flat chain of bare terms only the final operator and
+// its two adjacent operands survive. Parentheses recurse into a fresh frame
+// (Bible `b1&(b2|b3)` workaround); group and bare tokens update ESI
+// differently (see ParseChain). Remaining divergences are tracked on
+// 0x00449020. See docs/known_original_bugs.md (Test expressions).
+//   expr   := chain
+//   chain  := operand ( ('&'|'|') operand )*
+//   operand:= '!' operand | '(' chain ')' | '[' set ']' [cmp number] | token
 //   set    := token*            (counts the number of 1-valued tokens)
 //   token  := 'B'number | 'P'number | 'G' | 'O'number | 'E'number | '0' | '1'
 class ExprParser {
@@ -2411,11 +2417,7 @@ public:
   ExprParser(std::string_view text, const ControlExpressionState &state)
       : text_(text), state_(state) {}
 
-  [[nodiscard]] bool Eval() {
-    const bool value = ParseOr();
-    SkipWhitespace();
-    return value;
-  }
+  [[nodiscard]] bool Eval() { return ParseChain(); }
 
 private:
   void SkipWhitespace() {
@@ -2441,57 +2443,91 @@ private:
     return any ? value : -1;
   }
 
-  [[nodiscard]] bool ParseOr() {
-    bool left = ParseAnd();
+  struct Operand {
+    bool value = false;
+    // True for a parenthesised group or counted set. Bare tokens update the
+    // last-operand register to their own value; groups reload it from the
+    // result when the operator is short-circuited (see ParseChain).
+    bool from_group = false;
+  };
+
+  // The original's EvaluateBoolean body (0x00449020). Returns one flat chain's
+  // value, stopping at end-of-text or after consuming the matching ')'.
+  // Transitions per operand, with `prev` = ESI entering the operand:
+  //   op '&', token v: ESI=v,  EBP = v ? EBP : 0
+  //   op '&', group v: ESI=v ? prev : 0, EBP = ESI  (0x00449224-0x0044922b)
+  //   op '|', token v: ESI=v,  EBP = v ? 1 : EBP
+  //   op '|', group v: ESI=v ? 1 : prev, EBP = ESI  (0x0044920e-0x00449219)
+  //   op '?', any   : ESI=v,  EBP unchanged
+  [[nodiscard]] bool ParseChain() {
+    bool result = true;   // EBP, initialised to 1 by the original (0x004490f2)
+    bool operand = false; // ESI, the most recent operand value
+    char op = '?';        // local_1c
     for (;;) {
       SkipWhitespace();
-      if (Peek() != '|') {
-        return left;
+      const char c = Peek();
+      if (c == '\0') {
+        break;
       }
-      Consume();
-      const bool right = ParseAnd();
-      left = left || right;
+      if (c == ')') {
+        Consume();
+        break;
+      }
+      if (c == '&' || c == '|') {
+        Consume();
+        op = c;
+        result = operand; // 0x004492c4 / 0x004492d4: MOV EBP,ESI
+        continue;
+      }
+      const Operand value = ParseOperand();
+      if (op == '&') {
+        if (!value.value) {
+          result = false;
+          operand = false;
+        } else if (value.from_group) {
+          result = operand; // 0x0044922b: MOV EBP,ESI
+        } else {
+          operand = true; // bare true token: ESI = 1
+        }
+      } else if (op == '|') {
+        if (value.value) {
+          result = true;
+          operand = true;
+        } else if (value.from_group) {
+          result = operand; // 0x00449219: MOV EBP,ESI
+        } else {
+          operand = false; // bare false token: ESI = 0
+        }
+      } else {
+        operand = value.value;
+      }
+      // op deliberately persists across operands, matching local_1c.
     }
+    if (op == '?') {
+      result = operand; // 0x00449357-0x00449361
+    }
+    return result;
   }
 
-  [[nodiscard]] bool ParseAnd() {
-    bool left = ParseUnary();
-    for (;;) {
-      SkipWhitespace();
-      if (Peek() != '&') {
-        return left;
-      }
-      Consume();
-      const bool right = ParseUnary();
-      left = left && right;
-    }
-  }
-
-  [[nodiscard]] bool ParseUnary() {
+  [[nodiscard]] Operand ParseOperand() {
     SkipWhitespace();
     if (Peek() == '!') {
       Consume();
-      return !ParseUnary();
+      // TODO(decomp(0x004491ac)) skipped: the original latches one pending
+      // negation (MOV BL,1), so `!!x` inverts once; this recursive form is a
+      // true toggle. Tracked on 0x00449020.
+      Operand inner = ParseOperand();
+      inner.value = !inner.value;
+      return inner;
     }
-    return ParsePrimary();
-  }
-
-  [[nodiscard]] bool ParsePrimary() {
-    SkipWhitespace();
-    const char c = Peek();
-    if (c == '(') {
+    if (Peek() == '(') {
       Consume();
-      const bool value = ParseOr();
-      SkipWhitespace();
-      if (Peek() == ')') {
-        Consume();
-      }
-      return value;
+      return {ParseChain(), true};
     }
-    if (c == '[') {
-      return ParseCountedSet();
+    if (Peek() == '[') {
+      return {ParseCountedSet(), true};
     }
-    return ParseTokenTerm() != 0;
+    return {ParseTokenTerm() != 0, false};
   }
 
   // Counted set: count the 1-valued tokens inside [ ], optionally compared to
@@ -2507,7 +2543,8 @@ private:
         break;
       }
       if (c == '(') {
-        ones += ParsePrimary() ? 1 : 0;
+        Consume();
+        ones += ParseChain() ? 1 : 0;
         continue;
       }
       if (ParseTokenTerm() != 0) {
