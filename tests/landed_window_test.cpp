@@ -963,7 +963,6 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
   game::GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   constexpr std::int16_t kRautherionSystem = 166 - 0x80;
-  constexpr std::int16_t kRautherStellar = 191;
   constexpr std::int16_t kTutorial006Index = 754 - 0x80;
   constexpr std::int16_t kTutorialDerelictPers = 642 - 0x80;
   constexpr std::int16_t kPirateViperShipClass = 166 - 0x80;
@@ -971,8 +970,7 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
   state.player.current_system_id = kRautherionSystem;
   state.player.ship_class_id = 0;
 
-  REQUIRE(
-      game::Mission_ActivateAtSlot(state, kTutorial006Index, kRautherStellar));
+  REQUIRE(game::Mission_ActivateAtSlot(state, kTutorial006Index));
   REQUIRE(state.active_mission_runtime_flags[0].is_active);
   REQUIRE(state.active_mission_runtime_flags[1].is_active);
   REQUIRE(state.control.bits.test(9208));
@@ -1004,7 +1002,6 @@ TEST_CASE("derelict spawns at launch after a pre-accept arrival population") {
   game::GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   constexpr std::int16_t kRautherionSystem = 166 - 0x80;
-  constexpr std::int16_t kRautherStellar = 191;
   constexpr std::int16_t kTutorial006Index = 754 - 0x80;
   constexpr std::int16_t kTutorialDerelictPers = 642 - 0x80;
   state.player.current_system_id = kRautherionSystem;
@@ -1019,8 +1016,7 @@ TEST_CASE("derelict spawns at launch after a pre-accept arrival population") {
 
   // Accept Tutorial 006 while docked; the payload sets b9208 and activates
   // the silent companion mission.
-  REQUIRE(
-      game::Mission_ActivateAtSlot(state, kTutorial006Index, kRautherStellar));
+  REQUIRE(game::Mission_ActivateAtSlot(state, kTutorial006Index));
   REQUIRE(state.control.bits.test(9208));
 
   game::Stellar_Launch(state);

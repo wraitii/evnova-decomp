@@ -1160,38 +1160,6 @@ void DrawButtons(SdlPlatform &platform,
   }
 }
 
-// Ghidra 0x004aa980 Mission_RebuildMissionTargetSystemList.
-// Builds the map's mission-target system list, filling
-// g_starmap_mission_target_system_ids): the travel and return systems of
-// every active mission, deduplicated.
-std::vector<std::int16_t> BuildMissionTargetSystems(const GameState &state) {
-  std::vector<std::int16_t> out;
-  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
-    if (!state.active_mission_runtime_flags[slot].is_active) {
-      continue;
-    }
-    const ActiveMission &mission = state.active_missions[slot];
-    for (const std::int16_t stellar_id :
-         {mission.travel_stellar_id, mission.return_stellar_id}) {
-      // MisnActive +0x00/+0x04 hold 0-based stellar indices (the original's
-      // g_stellar_defs convention); ScenarioData::Stellar takes the 0x80-
-      // based resource id.
-      if (stellar_id < 0) {
-        continue;
-      }
-      const Stellar *st =
-          state.scenario.Stellar(static_cast<std::int16_t>(stellar_id + 0x80));
-      if (st == nullptr || st->system_id < 0) {
-        continue;
-      }
-      if (std::find(out.begin(), out.end(), st->system_id) == out.end()) {
-        out.push_back(st->system_id);
-      }
-    }
-  }
-  return out;
-}
-
 // Ghidra 0x004aab30 NovaUi_RunStarmapSearchDialog: the modal Find box (DLOG
 // 0xbbd, row 5 = edit text, activation 1 = Find, 3 = Cancel).
 // `render_background` is redrawn behind the box each frame. Returns the chosen
@@ -1235,6 +1203,60 @@ RunStarmapSearchDialog(SdlPlatform &platform,
 }
 
 } // namespace
+
+// Ghidra 0x004aa980 Mission_RebuildMissionTargetSystemList. Per active mission
+// emits ONE arrow system: the TravelStel system, replaced by the ReturnStel
+// system once travel_stellar_reached is set and the two differ (an unavailable
+// ReturnStel leaves TravelStel in place). Bible Flags 0x0002 suppresses the
+// arrow; 0x0200 adds the resolved ShipSyst (current_system_id +0x10).
+std::vector<std::int16_t> BuildMissionTargetSystems(const GameState &state) {
+  std::vector<std::int16_t> out;
+  const auto append_unique = [&out](std::int16_t system_id) {
+    if (system_id >= 0 &&
+        std::find(out.begin(), out.end(), system_id) == out.end()) {
+      out.push_back(system_id);
+    }
+  };
+  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
+    }
+    const ActiveMission &mission = state.active_missions[slot];
+    // MisnActive +0x00/+0x04 hold 0-based stellar indices (the original's
+    // g_stellar_defs convention); ScenarioData::Stellar takes the 0x80-based
+    // resource id.
+    std::int16_t target_system = -1;
+    if (mission.travel_stellar_id >= 0) {
+      const Stellar *travel = state.scenario.Stellar(
+          static_cast<std::int16_t>(mission.travel_stellar_id + 0x80));
+      if (travel != nullptr && travel->is_available && travel->system_id >= 0) {
+        target_system = travel->system_id;
+      }
+    }
+    if (mission.return_stellar_id >= 0 &&
+        mission.return_stellar_id != mission.travel_stellar_id &&
+        state.active_mission_runtime_flags[slot].travel_stellar_reached) {
+      const Stellar *ret = state.scenario.Stellar(
+          static_cast<std::int16_t>(mission.return_stellar_id + 0x80));
+      if (ret != nullptr && ret->is_available && ret->system_id >= 0) {
+        target_system = ret->system_id;
+      }
+    }
+    // Bible Flags 0x0002: "Don't show the red destination arrows on the map".
+    if (target_system >= 0 && (mission.flags_primary & 0x0002U) == 0U) {
+      append_unique(target_system);
+    }
+    // Bible Flags 0x0200: "Show an additional arrow on the map for the
+    // ShipSyst". MisnActive +0x10 holds the resolved mission-ship system.
+    if ((mission.flags_primary & 0x0200U) != 0U &&
+        (mission.flags_primary & 0x0002U) == 0U &&
+        mission.target_ship_count > 0 && mission.current_system_id >= 0) {
+      append_unique(
+          Misn_ResolveVisibleSystemForTravel(state, mission.current_system_id));
+    }
+  }
+  return out;
+}
 
 std::string
 NovaUi_SystemFactionConflictStatusText(const GameState &state,

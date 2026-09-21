@@ -2549,7 +2549,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                     audio,
                     state,
                     pers->link_mission_id,
-                    /*landed_stellar_id=*/-1,
                     [&platform, &state, &view, &hud]() {
                       view.DrawGameFrame(platform, state, hud);
                     });

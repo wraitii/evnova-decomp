@@ -185,8 +185,8 @@ struct MissionDef {
   std::int16_t drop_off_mode = -1;          // +0x16 (active +0x18)
   std::int16_t scan_mask = 0;               // +0x18 (active +0x1a)
   std::int16_t time_limit_days = 0;         // payload +0x40 (active +0x45)
-  std::int16_t on_resolve_repeat_count = 0; // +0x48
-  std::int32_t resource_delta_or_cost = 0;  // +0x4a
+  std::int16_t on_resolve_repeat_count = 0; // +0x65e (Bible DatePostInc)
+  std::int32_t resource_delta_or_cost = 0;  // +0x1c
   std::int16_t aux_ships_left = 0;          // +0x50
   std::int16_t initial_ship_count = 0;      // +0x52
   std::uint16_t flags_primary = 0;          // resource +0x50; active +0x55
@@ -204,8 +204,8 @@ struct MissionDef {
   std::int16_t special_ship_name_string_id = -1; // +0x2a
   std::int16_t random_text_string_id = -1;       // +0x32
   std::int16_t mission_ship_count_max = 0;       // +0x48
-  std::int16_t auxiliary_ship_dude = -1;         // +0x4c
-  std::int16_t mission_fleet_metric = 0;         // +0x4a
+  std::int16_t auxiliary_ship_dude = -1;         // +0x4a
+  std::int16_t mission_fleet_metric = 0;         // +0x4c
   std::int16_t start_system_locator = -1;        // +0x22, resolved at accept
   // Bible CanAbort (0 = player cannot abort, 1 = can); Ghidra MisnActive
   // +0x32 can_abort.

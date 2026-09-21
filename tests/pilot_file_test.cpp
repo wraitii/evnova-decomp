@@ -98,7 +98,7 @@ struct TemporaryDirectory {
   p.cron_holdoff_counters[5] = -1;
   p.rank_active_flags[6] = 1;
   p.active_mission_runtime_flags[2].is_active = true;
-  p.active_mission_runtime_flags[2].initial_briefing_done = true;
+  p.active_mission_runtime_flags[2].travel_stellar_reached = true;
   p.active_mission_runtime_flags[2].deadline_day = 17;
   p.active_mission_runtime_flags[2].deadline_time_components = {
       0x3456, 0x1234, 0x5678, 0x9abc};
@@ -224,7 +224,7 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.cron_holdoff_counters[5] == -1);
   CHECK(out.rank_active_flags[6] == 1);
   CHECK(out.active_mission_runtime_flags[2].is_active);
-  CHECK(out.active_mission_runtime_flags[2].initial_briefing_done);
+  CHECK(out.active_mission_runtime_flags[2].travel_stellar_reached);
   CHECK(out.active_mission_runtime_flags[2].deadline_day == 17);
   CHECK(out.active_mission_runtime_flags[2].deadline_time_components ==
         p.active_mission_runtime_flags[2].deadline_time_components);

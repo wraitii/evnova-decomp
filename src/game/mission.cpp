@@ -94,29 +94,23 @@ MissionControlExpressionState(const GameState &state) {
 
 [[nodiscard]] bool
 Mission_PassesAcceptanceResourceGates(const GameState &state,
-                                      const MissionDef &definition) {
-  if (definition.cargo_qty_tons > 0 && state.player.ship_class_id >= 0) {
+                                      std::int16_t resolved_cargo_qty) {
+  if (resolved_cargo_qty > 0 && state.player.ship_class_id >= 0) {
     const auto *ship_class = state.scenario.Ship(static_cast<std::int16_t>(
         state.player.ship_class_id + kResourceIdBase));
     if (ship_class != nullptr) {
-      // Mission_ActivateMissionAtSlot checks both the ship's total cargo
-      // capacity and its remaining free cargo space before opening its
-      // original error dialog.
+      // Mission_ActivateMissionAtSlot (0x0043f100) checks both the ship's
+      // total cargo capacity and its remaining free cargo space against the
+      // resolved target-table CargoQty before opening its error dialog. There
+      // is no credits gate here: a value below -50000 is charged later and
+      // clamped at zero.
       const std::int32_t total_capacity =
           Ship_ComputeShipTotalCargoCapacity(state);
-      if (total_capacity < definition.cargo_qty_tons ||
-          Player_ComputeRemainingCargoSpace(state) <
-              definition.cargo_qty_tons) {
+      if (total_capacity < resolved_cargo_qty ||
+          Player_ComputeRemainingCargoSpace(state) < resolved_cargo_qty) {
         return false;
       }
     }
-  }
-  // Mission_ActivateMissionAtSlot charges the amount below -50000 as an
-  // acceptance cost. The remaining positive/neutral values are rewards or
-  // deferred accounting and do not block the BBS entry.
-  if (definition.resource_delta_or_cost < -50000 &&
-      state.player.credits < -50000 - definition.resource_delta_or_cost) {
-    return false;
   }
   return true;
 }
@@ -743,10 +737,16 @@ CollectStellarLocatorCandidates(const GameState &state,
   }
 
   // ---- Same-system denial arm --------------------------------------------
-  // When AvailStel is not a direct stellar, a TravelStel/ReturnStel inside the
-  // player's current system (same visibility root) is never offered. The
-  // binary resolves both systems through System_ResolveSystemDiscoverySlot
-  // (0x0046b9b0), which maps hidden systems to their visibility root.
+  // Only when AvailStel (link_system_filter) is not a direct stellar: a direct
+  // (0x80..0x87f) TravelStel or ReturnStel locator whose resolved system shares
+  // the player's current visibility root is never offered. The binary resolves
+  // both through System_ResolveSystemDiscoverySlot (0x0046b9b0), which maps
+  // hidden systems to their visibility root. This is the known original bug at
+  // docs/known_original_bugs.md:75. It is an independent eligibility gate: it
+  // can mask the 0x0043f100 in-flight matching-target travel_stellar_reached
+  // latch for a p\xebrs offer whose AvailStel is not a direct stellar (a
+  // mode-2 target is always in the current system). A direct-AvailStel offer,
+  // a mode-3 adjacency collision, or a script activation is unaffected.
   const auto discovery_root = [&](std::int16_t system_id) -> std::int16_t {
     if (system_id < 0 ||
         system_id >= static_cast<std::int16_t>(state.scenario.systems.size())) {
@@ -1259,16 +1259,11 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.current_system_id =
       ResolveMissionCurrentSystem(state, *definition, target);
   // Resolved Bible CargoType/CargoQty (m\xefsn +0x10/+0x12 via the target
-  // table +0x04/+0x06); the prior names special_ship_system_id/count were
-  // misnomers.
-  active.cargo_type_id =
-      target.cargo_type_id >= 0
-          ? target.cargo_type_id
-          : ResolveSpecialShipSystem(state, definition->cargo_type_resource);
-  active.cargo_qty_tons =
-      target.cargo_qty_tons > 0
-          ? target.cargo_qty_tons
-          : ResolveSpecialShipCount(state, definition->cargo_qty_tons);
+  // table +0x04/+0x06); copied directly like 0x0043f8c0. The resolver
+  // 0x0043d240 owns the special-value decoding, so the acceptance gate and
+  // this population always observe the same value.
+  active.cargo_type_id = target.cargo_type_id;
+  active.cargo_qty_tons = target.cargo_qty_tons;
   // Bible PickupMode/DropOffMode/ScanMask (payload +0x14/+0x16/+0x18);
   // the previous port wrongly filled these with resolved system ids.
   active.pickup_mode = definition->pickup_mode;
@@ -1299,16 +1294,48 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.carrying_resources = false;
   active.mission_template_id = mission_id;
   active.mission_ship_count_max = definition->mission_ship_count_max;
+  // Aux-dude normalization (0x0043f8c0): values outside 0x80..0x27f mean no
+  // aux fleet; max is zeroed, then the <1 clamp below makes both the stored
+  // max and the live budget -1.
   active.aux_ships_dude_def_index = definition->auxiliary_ship_dude;
-  if (active.aux_ships_dude_def_index >= kResourceIdBase) {
+  if (active.aux_ships_dude_def_index < kResourceIdBase ||
+      active.aux_ships_dude_def_index > 0x27f) {
+    active.aux_ships_dude_def_index = -1;
+    active.mission_ship_count_max = 0;
+  } else {
     active.aux_ships_dude_def_index = static_cast<std::int16_t>(
         active.aux_ships_dude_def_index - kResourceIdBase);
   }
-  active.mission_ship_count_active = active.mission_ship_count_max;
+  if (active.mission_ship_count_max < 1) {
+    active.mission_ship_count_max = -1;
+    active.mission_ship_count_active = -1;
+  } else {
+    active.mission_ship_count_active = active.mission_ship_count_max;
+  }
   active.mission_fleet_metric_b = definition->mission_fleet_metric;
   active.mission_fleet_metric_c = 0;
+  // Partial original RNG order (0x0043f8c0): among these fields the
+  // special-ship type selection, the 70..139 aux rearm clock (0x46), the
+  // spawn/rearm timer and the two STR# name-pool draws now run in the original
+  // sequence, and Dude_SelectShipTypeIndexFromDudeDef runs before comp_govt.
+  // Remaining divergence: ResolveMissionCurrentSystem (which can consume RNG
+  // for a random system locator) still runs earlier here than in the original,
+  // where it sits between the spawn timer and the name draws.
+  // TODO(decomp(0x0043f8c0)) reorder current-system resolution after the
+  // spawn timer to restore the full draw sequence.
   active.special_ship_type_index =
       SelectMissionShipType(state, active.dude_def_index, active.flags_primary);
+  std::uniform_int_distribution<int> rearm_roll(0, 69);
+  active.rearm_roll_clock =
+      static_cast<std::int16_t>(70 + rearm_roll(state.rng));
+  if (definition->ship_start < 1) {
+    active.spawn_rearm_timer = -1;
+  } else if (definition->ship_behavior == 1 && definition->ship_goal == 3) {
+    active.spawn_rearm_timer = 30;
+  } else {
+    std::uniform_int_distribution<int> roll(0, 99);
+    active.spawn_rearm_timer = static_cast<std::int16_t>(100 + roll(state.rng));
+  }
   active.special_ship_name_string_id = definition->special_ship_name_string_id;
   active.random_text_string_id = definition->random_text_string_id;
   // Fleet-name rolls (0x0043f8c0): both name buffers start empty; when the
@@ -1340,17 +1367,6 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.time_limit_days_remaining = definition->time_limit_days < 1
                                          ? static_cast<std::int16_t>(-32000)
                                          : definition->time_limit_days;
-  if (definition->ship_start < 1) {
-    active.spawn_rearm_timer = -1;
-  } else if (definition->ship_behavior == 1 && definition->ship_goal == 3) {
-    active.spawn_rearm_timer = 30;
-  } else {
-    std::uniform_int_distribution<int> roll(0, 99);
-    active.spawn_rearm_timer = static_cast<std::int16_t>(100 + roll(state.rng));
-  }
-  std::uniform_int_distribution<int> rearm_roll(0, 69);
-  active.rearm_roll_clock =
-      static_cast<std::int16_t>(70 + rearm_roll(state.rng));
   const auto copy_text_buffer = [&](auto &destination,
                                     std::size_t source_offset) {
     if (source_offset < definition->raw_payload.size()) {
@@ -1373,9 +1389,51 @@ bool Mission_PopulateActiveSlot(GameState &state,
   return true;
 }
 
+MissionInteractionWindowScope::MissionInteractionWindowScope(
+    GameState &state) noexcept
+    : state_(&state), previous_(state.mission_offer_window_open) {
+  state.mission_offer_window_open = true;
+}
+
+MissionInteractionWindowScope::~MissionInteractionWindowScope() {
+  if (state_ != nullptr) {
+    state_->mission_offer_window_open = previous_;
+  }
+}
+
+std::int16_t Mission_OriginalAiSecondaryTargetSlot(const GameState &state) {
+  // Docked visit (g_is_system_transition_active): ShipState +0x6C is the
+  // docked stellar (or an M-script nav re-point), mirrored by the port as a
+  // 0x80-based resource id.
+  if (state.system_transition_active) {
+    return state.player.ai_secondary_target_slot >= kResourceIdBase
+               ? static_cast<std::int16_t>(
+                     state.player.ai_secondary_target_slot - kResourceIdBase)
+               : state.player.ai_secondary_target_slot;
+  }
+  // In-flight plotted route: raw 0..15 adjacency slot (0x004a8080).
+  if (state.player.travel_transfer_mode == 3 && state.travel.travel_slot >= 0) {
+    return state.travel.travel_slot;
+  }
+  // In-flight stellar target: TravelState mirrors mode-2
+  // ai_secondary_target_slot as a 0x80-based resource id.
+  if (state.travel.selected_stellar_id >= kResourceIdBase) {
+    return static_cast<std::int16_t>(state.travel.selected_stellar_id -
+                                     kResourceIdBase);
+  }
+  // Fallback: no active in-flight travel target, so ShipState +0x6C may hold a
+  // stale docked/nav resource id (or -1). Convert it to the original 0-based
+  // index so a stale id cannot numerically alias a different
+  // travel_stellar_id.
+  if (state.player.ai_secondary_target_slot >= kResourceIdBase) {
+    return static_cast<std::int16_t>(state.player.ai_secondary_target_slot -
+                                     kResourceIdBase);
+  }
+  return state.player.ai_secondary_target_slot;
+}
+
 bool Mission_ActivateAtSlot(GameState &state,
                             std::int16_t mission_id,
-                            std::int16_t landed_stellar_id,
                             const MissionAcceptanceSink &acceptance) {
   if (mission_id < 0 ||
       mission_id >= static_cast<std::int16_t>(state.scenario.missions.size())) {
@@ -1383,8 +1441,15 @@ bool Mission_ActivateAtSlot(GameState &state,
   }
   const auto &definition =
       state.scenario.missions[static_cast<std::size_t>(mission_id)];
-  if (!definition.present || IsActiveMission(state, mission_id) ||
-      !Mission_PassesAcceptanceResourceGates(state, definition)) {
+  // Ghidra 0x0043f100: only the resolved target-table CargoQty is gated here
+  // (against ship total + free cargo space); credits below -50000 are charged
+  // later and clamped, and duplicate active slots are permitted (eligibility
+  // is what suppresses re-offering).
+  if (!definition.present ||
+      !Mission_PassesAcceptanceResourceGates(
+          state,
+          state.mission_target_resolutions[static_cast<std::size_t>(mission_id)]
+              .cargo_qty_tons)) {
     return false;
   }
   std::size_t free_slot = GameState::kMaxActiveMissions;
@@ -1402,18 +1467,35 @@ bool Mission_ActivateAtSlot(GameState &state,
   auto &runtime = state.active_mission_runtime_flags[free_slot];
   runtime = {};
   runtime.is_active = true;
-  runtime.flags_primary_at_accept =
-      state.active_missions[free_slot].flags_primary;
-  // Ghidra 0x0043f100: with a TimeLimit, the absolute deadline date
-  // (today + TimeLimit days) is computed at acceptance into the runtime
-  // flags (+0x06/+0x08/+0x0a) for the <DL> token.
   auto &active = state.active_missions[free_slot];
+  // Deadline before flags_primary_at_accept, matching 0x0043f100 (both are
+  // set before the on-accept payload runs).
   if (active.time_limit_days_remaining > 0) {
     const GameDate deadline =
         Mission_ComputeDateAfterSteps(state, active.time_limit_days_remaining);
     runtime.deadline_year = deadline.year;
     runtime.deadline_month = deadline.month;
     runtime.deadline_day = deadline.day;
+  }
+  runtime.flags_primary_at_accept = active.flags_primary;
+  // Ghidra 0x0043f100: the on-accept payload (MisnActive +0x1ec, mïsn
+  // payload +0x15b) runs BEFORE the acceptance fee and BEFORE the
+  // carrying/briefing latches, so an OnAccept script observes the outer slot
+  // pre-latch and can change credits before the fee is charged. A nested S
+  // activation recurses through here with the same sink, so its dialogs
+  // precede this mission's exactly as in the original.
+  Mission_RunMisnScriptPayload(state,
+                               TextOf(active.on_accept_text),
+                               static_cast<std::int16_t>(free_slot),
+                               MissionScriptContext{"OnAccept"},
+                               acceptance);
+  // Acceptance fee: values below -50000 charge the excess and clamp at zero.
+  // Read after the payload, matching the original (a script may change it).
+  const auto acceptance_value = active.resource_delta_or_cost;
+  if (acceptance_value < -50000) {
+    const auto charge = -50000 - acceptance_value;
+    state.player.credits =
+        std::max<std::int32_t>(0, state.player.credits - charge);
   }
   // Bible PickupMode 0: the mission cargo is aboard from mission start. The
   // LoadCargText desc dialog (payload +0x38) is UI-owned and runs in
@@ -1422,41 +1504,38 @@ bool Mission_ActivateAtSlot(GameState &state,
   if (active.pickup_mode == 0) {
     active.carrying_resources = true;
   }
-  // The initial destination briefing is skipped when the mission has no
-  // TravelStel, or when the player accepts it while docked there. Callers
-  // pass `landed_stellar_id` as a 0x80-based resource id; resolved targets
-  // are 0-based stellar indices (see Mission_TickReactionSlotsForTravel-
-  // Interaction for the convention note).
-  const std::int16_t landed_index =
-      landed_stellar_id >= kResourceIdBase
-          ? static_cast<std::int16_t>(landed_stellar_id - kResourceIdBase)
-          : landed_stellar_id;
-  runtime.initial_briefing_done = active.travel_stellar_id == -1 ||
-                                  active.travel_stellar_id == landed_index;
-  // The original treats values below -50000 as an immediate acceptance fee;
-  // the encoded value includes the -50000 sentinel, so preserve its unusual
-  // arithmetic and clamp the resulting credit balance at zero.
-  const auto acceptance_value =
-      state.active_missions[free_slot].resource_delta_or_cost;
-  if (acceptance_value < -50000) {
-    const auto charge = -50000 - acceptance_value;
-    state.player.credits =
-        std::max<std::int32_t>(0, state.player.credits - charge);
-  }
-  // Ghidra 0x0043f100: the on-accept payload (MisnActive +0x1ec, mïsn
-  // payload +0x15b) runs at the end of the original activate function, and
-  // then the same function shows the acceptance dialogs. Tutorial missions use
-  // the payload to set chain bits and reveal the destination system (X
-  // opcode); a nested S activation recurses through here with the same sink,
-  // so its dialogs precede this mission's exactly as in the original.
-  Mission_RunMisnScriptPayload(
-      state,
-      TextOf(state.active_missions[free_slot].on_accept_text),
-      static_cast<std::int16_t>(free_slot),
-      MissionScriptContext{"OnAccept"},
-      acceptance);
+  // Ghidra 0x0043f100: travel_stellar_reached is set when the mission has no
+  // TravelStel, or when the live ai_secondary_target_slot (ShipState +0x6C)
+  // equals the TravelStel while g_mission_interaction_window != 0. The read
+  // happens here, after the on-accept payload, so an M/N opcode in that
+  // payload is observed (the original reads the global at this point). The
+  // original compares the field raw, so an in-flight mode-2 target or a mode-3
+  // adjacency slot could satisfy it before the player lands. BUGFIX(original),
+  // ungated: require an actual docked visit and compare the current landed
+  // stellar; a scripted no-window activation is unchanged. This is the
+  // TravelStel-leg latch, not a briefing flag.
+  runtime.travel_stellar_reached =
+      active.travel_stellar_id == -1 ||
+      (state.system_transition_active && state.mission_offer_window_open &&
+       active.travel_stellar_id ==
+           Mission_OriginalAiSecondaryTargetSlot(state));
   if (acceptance) {
     acceptance(mission_id);
+  }
+  // 0x0043f100 tail: a mid-transition activation of a flags-0x0001
+  // (auto-resolve) mission whose destination briefing is already done and
+  // which has no target ships / no return stellar resolves immediately. The
+  // offering roll is cleared AFTER this resolve, so a script it starts sees
+  // the pre-clear availability state (order preserved from the original).
+  if (state.system_transition_active && !state.in_travel_scene &&
+      (active.flags_primary & 0x0001U) != 0U &&
+      runtime.travel_stellar_reached && active.target_ship_count == 0 &&
+      active.return_stellar_id == -1) {
+    Mission_ResolveMisnSlot(state, static_cast<std::int16_t>(free_slot), 0);
+  }
+  if (mission_id >= 0 && static_cast<std::size_t>(mission_id) <
+                             state.mission_offering_rolls.size()) {
+    state.mission_offering_rolls[static_cast<std::size_t>(mission_id)] = 0;
   }
   return true;
 }
@@ -1622,8 +1701,8 @@ void Mission_RefreshActiveMissionSpawnState(GameState &state) {
             : Misn_ResolveVisibleSystemForTravel(state, raw_system);
     // A mission with live target ships whose destination is the player's
     // current system (or the "here" sentinel -6) rearms its spawn clock:
-    // behavior-3 fleets on goal 1 use the fixed 30-tick clock, everything else
-    // rolls 100..199. The goal-countdown latch clears with it.
+    // behavior-3 fleets on goal 1 use the fixed 30-tick clock, everything
+    // else rolls 100..199. The goal-countdown latch clears with it.
     if (mission.target_ship_count > 0 &&
         ((resolved == state.player.current_system_id || raw_system == -6) &&
          mission.ship_start == 1)) {
@@ -2010,8 +2089,8 @@ void Mission_ResolveMisnSlot(GameState &state,
   // Refuel Trader missions (+2 Civvies) and Eamon (-200 Wild Geese), plus the
   // 16 Avoid missions, whose 0x0040 reversal (-5x, exact-government systems
   // only, mirroring NovaUi_RunMissionComputerWindow 0x00446150) the original
-  // could only reach through a manual abort the family blocks with CanAbort 0.
-  // With the policy off, reproduce the original omission. See
+  // could only reach through a manual abort the family blocks with CanAbort
+  // 0. With the policy off, reproduce the original omission. See
   // docs/known_original_bugs.md.
   const bool reversal = (mission.flags_primary & 0x0040U) != 0U;
   const bool pay_on_auto_abort = (mission.flags_secondary & 0x0002U) != 0U;
@@ -2046,21 +2125,23 @@ void Mission_RerollOfferingRolls(GameState &state) {
 // mirrors the same 1000-entry, id-0x80-strided decode); this reproduces the
 // cross-cutting state the original clears around it.
 //
-// TODO(decomp(0x0043bbb0)) skipped: the original gates / seeds this reset from
-// FUN_004cd0b0, which reads a 32-word debug-option block (resource type
-// 0x91627567 id 0x80, decoded FourCC "ebug", all-zero in the shipped Nova.rez;
-// likely a leftover Mac developer debug/QA directive of unknown origin). Word 1
-// skips the whole load, word 9 skips this reset (the Ghidra "restoring from
-// save" arm), and word 0xf becomes g_offer_random_bypass_flag. None are ever
-// set by the shipped binary, so the port always takes the load+reset path.
+// TODO(decomp(0x0043bbb0)) skipped: the original gates / seeds this reset
+// from FUN_004cd0b0, which reads a 32-word debug-option block (resource type
+// 0x91627567 id 0x80, decoded FourCC "ebug", all-zero in the shipped
+// Nova.rez; likely a leftover Mac developer debug/QA directive of unknown
+// origin). Word 1 skips the whole load, word 9 skips this reset (the Ghidra
+// "restoring from save" arm), and word 0xf becomes
+// g_offer_random_bypass_flag. None are ever set by the shipped binary, so the
+// port always takes the load+reset path.
 void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
   // g_last_system_for_ambient_rolls = -1: the clean-room ambient-roll cache
   // latch is not modelled (see Mission_ClearMisnSlotAssignments).
   state.in_travel_scene = false;
   state.mission_speaker_ship_slot = -1;
-  // g_travel_destination_window = 0 and g_starmap_selected_system_id = -1 have
-  // no clean-room counterpart: the travel window is an SDL modal and the
-  // starmap keeps its selection local to NovaStarmap_* rather than in a global.
+  // g_travel_destination_window = 0 and g_starmap_selected_system_id = -1
+  // have no clean-room counterpart: the travel window is an SDL modal and the
+  // starmap keeps its selection local to NovaStarmap_* rather than in a
+  // global.
   state.script_mission_context_slot = -1;
   // Original guard: skip the active-slot/control-bit clear only when the
   // all-zero debug word 9 is set; the port therefore always clears.
@@ -2076,13 +2157,13 @@ void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
 }
 
 // Ghidra 0x00448670 Mission_RunAvailLocOffers. See the header
-// comment. The original walks the persistent lane-1 list (g_return_mission_list
-// = g_mission_slot_list[1], rebuilt by Mission_EvaluateMissionLists on every
-// arrival); the port rebuilds the lane fresh here with the same page-group
-// gate, which also re-applies the eligibility chain the original re-checks at
-// walk time. The original's walk call passes the interaction flag, but the
-// Spaceport loop clears the interaction context before entering, so the list-
-// context gate set applies.
+// comment. The original walks the persistent lane-1 list
+// (g_return_mission_list = g_mission_slot_list[1], rebuilt by
+// Mission_EvaluateMissionLists on every arrival); the port rebuilds the lane
+// fresh here with the same page-group gate, which also re-applies the
+// eligibility chain the original re-checks at walk time. The original's walk
+// call passes the interaction flag, but the Spaceport loop clears the
+// interaction context before entering, so the list- context gate set applies.
 bool Mission_RunAvailLocOffers(
     GameState &state,
     std::int16_t context,
@@ -2338,7 +2419,7 @@ void Mission_ProcessInteractionReactionSlotResources(
       if (Mission_TryConsumeMissionInteractionResources(
               state, mission.cargo_qty_tons)) {
         mission.carrying_resources = true;
-        runtime.initial_briefing_done = true;
+        runtime.travel_stellar_reached = true;
         if (mission.brief_description_ids[2] != -1) {
           NovaLog::Todo("mission cargo-loaded desc (misn {} id {}) not "
                         "reconstructed yet",
@@ -2347,7 +2428,7 @@ void Mission_ProcessInteractionReactionSlotResources(
         }
       }
     } else {
-      runtime.initial_briefing_done = true;
+      runtime.travel_stellar_reached = true;
     }
     if (mission.drop_off_mode == 0 && mission.carrying_resources) {
       mission.carrying_resources = false;
@@ -2419,7 +2500,7 @@ void Mission_TickReactionSlotsForTravelInteraction(
             state, mission.return_stellar_id, landed_index)) {
       if (mission.return_stellar_id == mission.travel_stellar_id ||
           mission.travel_stellar_id == -1) {
-        runtime.initial_briefing_done = true;
+        runtime.travel_stellar_reached = true;
       }
       if (!runtime.is_failed) {
         // Escort missions with no destroyed escorts complete on arrival;
@@ -2427,7 +2508,7 @@ void Mission_TickReactionSlotsForTravelInteraction(
         if (mission.ship_goal == 3 && mission.goal_counter_a < 1) {
           runtime.objective_complete = true;
         }
-        if (runtime.initial_briefing_done && runtime.objective_complete) {
+        if (runtime.travel_stellar_reached && runtime.objective_complete) {
           Mission_ResolveMissionSuccess(state, mission_slot, debrief);
           resolved_a_success = true;
         }
@@ -2438,7 +2519,8 @@ void Mission_TickReactionSlotsForTravelInteraction(
     Mission_HandleMissionOrSurrenderShipReaction(state, mission_slot, now_ms);
   }
   if (resolved_a_success) {
-    // Side-effect call: refreshes availability and the resolved-locator cache.
+    // Side-effect call: refreshes availability and the resolved-locator
+    // cache.
     (void)Mission_EvaluateMissionLists(state);
   }
   state.in_travel_scene = false;

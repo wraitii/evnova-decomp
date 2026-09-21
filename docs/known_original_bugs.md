@@ -49,6 +49,7 @@ Per the discord.
 * **A brief tractor-beam hit can permanently paralyse an AI ship** until it is hit by the tractor again. 
 * **Map outfits can fail to reveal systems that are actually within range** because Nova does not always calculate the shortest hyperlink path. 
 * **Travel-stellar objectives can complete before required special-ship cargo is collected.** 
+* (fixed, ungated; unverified in original) Accepting a mission in flight can count its destination as visited just because it matches the selected planet or jump-slot number. The port now requires the player to be landed. Nested `OnAccept` mission starts still inherit the open offer window.
 * **Ship trade-in value can disagree between the Extras pane and shipyard.** 
 * **Point-defense beams can reacquire targets outside their normal range.** 
 * (perhaps wanted?) **`Gxxx` in an outfit's `OnBuy` prevents the purchased outfit itself from being granted**; `Dxxx` in `OnSell` has the symmetric problem. 

@@ -677,7 +677,7 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     const auto offset = kRuntimeFlagsOffset + slot * kRuntimeFlagsStride;
     block1[offset + 0x00] = flags.is_active ? std::byte{1} : std::byte{0};
     block1[offset + 0x01] =
-        flags.initial_briefing_done ? std::byte{1} : std::byte{0};
+        flags.travel_stellar_reached ? std::byte{1} : std::byte{0};
     block1[offset + 0x02] =
         flags.objective_complete ? std::byte{1} : std::byte{0};
     block1[offset + 0x03] = flags.is_failed ? std::byte{1} : std::byte{0};
@@ -1010,7 +1010,7 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       const auto offset = kRuntimeFlagsOffset + slot * kRuntimeFlagsStride;
       flags.is_active =
           std::to_integer<unsigned char>(block1[offset + 0x00]) != 0;
-      flags.initial_briefing_done =
+      flags.travel_stellar_reached =
           std::to_integer<unsigned char>(block1[offset + 0x01]) != 0;
       flags.objective_complete =
           std::to_integer<unsigned char>(block1[offset + 0x02]) != 0;

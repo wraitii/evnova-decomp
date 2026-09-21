@@ -145,7 +145,6 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                            SdlAudio &audio,
                            GameState &state,
                            std::int16_t mission_def,
-                           std::int16_t landed_stellar_id,
                            const std::function<void()> &render_background = {});
 
 // Ghidra 0x00446150 NovaUi_RunMissionComputerWindow: the in-flight "mission
