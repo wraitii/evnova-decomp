@@ -34,9 +34,9 @@ inline float SquaredDistance(float x1, float y1, float x2, float y2) {
   return dx * dx + dy * dy;
 }
 
-inline const System *CurrentSystem(const GameState &state) {
+inline const System *CurrentSystem(const GameState &state, const Ship &ship) {
   return state.scenario.System(
-      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+      static_cast<std::int16_t>(ship.current_system_id + 0x80));
 }
 
 inline const Stellar *StellarByResourceId(const GameState &state,

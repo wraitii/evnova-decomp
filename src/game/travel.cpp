@@ -819,26 +819,38 @@ bool NovaTravel_CanStartJump(const GameState &state) {
 
 // Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence, for an arbitrary
 // (NPC) ship. Gates on the ship's OWN class fuel capacity being at least one
-// jump (kJumpFuelCost) -- NOT the player's, which is what the old NPC AI call
-// sites wrongly used. The original further blocks while the ship is locked to
-// another ship's velocity match (ShipState.velocity_match_target_ship_slot !=
-// -1 and != own id) and while a mission ship lacks fuel; those need the
-// velocity-match / mission systems and are deferred (TODO(decomp)).
-//
-// It additionally gates on the CURRENT fuel amount: Stellar_HandlePlayerShip-
-// Core' jump block refuses to (re)enter the hyperspace sequence while
-// `ship->fuel_points < FLOAT_kJumpFuelCost` (0x005755a4 == kJumpFuelCost ==
-// 100), showing the "not enough fuel to take off" denial overlay. A ship with
-// no fuel in the tank cannot engage a jump even though its class can hold a
-// jump's worth of fuel.
+// jump (kJumpFuelCost), NOT the player's. Blocks while the ship is locked to
+// another ship's velocity match (velocity_match_target_ship_slot != -1 and !=
+// own instance id), and, for a personality whose Flags2 0x0001 means
+// "starts with zero fuel", while the current tank is below one jump.
+// Ordinary ships are NOT gated on current fuel; the current-fuel term that
+// shows the player's "not enough fuel to take off" denial lives only in
+// Stellar_HandlePlayerShipCore's jump block, not in this shared gate. The NPC
+// transfer path (NovaAi_CompleteNpcJump) charges no fuel, so a freshly spawned
+// fleet lead with fuel_points 0 can still jump.
 bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
                                             const Ship &ship) {
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   const float class_fuel_capacity =
       cls ? static_cast<float>(cls->base_fuel) : 0.0F;
-  return class_fuel_capacity >= kJumpFuelCost &&
-         ship.fuel_points >= kJumpFuelCost;
+  if (class_fuel_capacity < kJumpFuelCost) {
+    return false;
+  }
+  if (ship.velocity_match_target_ship_slot != -1 &&
+      ship.velocity_match_target_ship_slot != ship.ship_instance_id) {
+    return false;
+  }
+  if (ship.pers_def_slot != -1 && static_cast<std::size_t>(ship.pers_def_slot) <
+                                      state.scenario.pers_defs.size()) {
+    const PersDef &pers =
+        state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
+    if ((pers.flags_secondary & 0x0001) != 0 &&
+        ship.fuel_points < kJumpFuelCost) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Ghidra 0x00447f00 System_IsSystemVisible.

@@ -275,7 +275,7 @@ void NovaAi_UpdateShipState(GameState &state,
     ship.ai_station_hold_timer = 0.0F;
     const float dx = static_cast<float>(target->pos_x) - ship.pos_x;
     const float dy = static_cast<float>(target->pos_y) - ship.pos_y;
-    const System *sys = CurrentSystem(state);
+    const System *sys = CurrentSystem(state, ship);
     const std::int16_t half_span =
         sys ? static_cast<std::int16_t>(sys->pos_x > 0 ? 0x96 : 0x96)
             : 0x96; // System_GetCurrentSystemLinkSpriteWidth fallback

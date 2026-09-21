@@ -2543,7 +2543,8 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                                        std::int16_t owner_ship_slot,
                                        std::int16_t target_ship_slot,
                                        std::int16_t weapon_id,
-                                       std::int8_t impact_variant) {
+                                       std::int8_t impact_variant,
+                                       bool suppress_retarget_logic) {
   if (!ValidShipSlot(owner_ship_slot) || !ValidShipSlot(target_ship_slot) ||
       owner_ship_slot == target_ship_slot || weapon_id < 0 ||
       weapon_id >= 0x100) {
@@ -2650,7 +2651,7 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                            weapon->energy_damage,
                            owner_ship_slot,
                            /*allow_aggro_updates=*/true,
-                           /*suppress_retarget_logic=*/true,
+                           suppress_retarget_logic,
                            /*force_armor_only=*/impact_variant != 0,
                            /*bypass_shields=*/
                            (weapon->flags & 0x0020U) != 0U,

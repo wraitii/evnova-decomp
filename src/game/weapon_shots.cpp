@@ -1361,11 +1361,30 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
       beam.target_x = beam.source_x + std::sin(rad) * visible_length;
       beam.target_y = beam.source_y - std::cos(rad) * visible_length;
       if (!beam.impact_resolved && hit_slot >= 0) {
+        // Ghidra 0x0042f270 chooses the aggro-suppression flag at the impact
+        // call: a swept contact is treated as targeted only when it matches
+        // the beam's recorded target slot, or -- for a targetless
+        // (beam.target_ship_slot == -1) beam -- the owner's *current* primary
+        // target. A stray player beam contact must not bypass the 50-point
+        // player-aggro accumulator in Ship_ApplyDamageToShip, or the first
+        // untargeted beam that clips an NPC turns it hostile instantly.
+        bool suppress_retarget_logic = false;
+        if (owner_valid) {
+          const Ship &owner =
+              state.ShipAt(static_cast<std::size_t>(beam.owner_ship_slot));
+          if (beam.target_ship_slot == -1) {
+            suppress_retarget_logic =
+                hit_slot == owner.primary_target_ship_slot;
+          } else if (hit_slot == beam.target_ship_slot) {
+            suppress_retarget_logic = true;
+          }
+        }
         NovaWeapon_ResolveDirectWeaponHit(state,
                                           beam.owner_ship_slot,
                                           hit_slot,
                                           beam.weapon_id,
-                                          beam.impact_variant);
+                                          beam.impact_variant,
+                                          suppress_retarget_logic);
         beam.impact_resolved = true;
       }
     } else if (beam.target_ship_slot >= 0 &&

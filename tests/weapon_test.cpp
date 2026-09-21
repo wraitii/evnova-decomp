@@ -1264,6 +1264,79 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   CHECK(queued.target_y == Catch::Approx(410.0F - 100.0F));
 }
 
+// Ghidra Shot_UpdateBeamHitQueue (0x0042f270): the incidental mode-0 sweep
+// picks the aggro-suppression flag from the impact site. A stray player beam
+// that clips an NPC without the player locking it (no primary target and no
+// recorded beam target) must pass suppress=false, so Ship_ApplyDamageToShip's
+// 50-point player-aggro accumulator gates the response instead of the first
+// contact immediately turning the NPC hostile. When the swept hit is the
+// owner's live primary target, or the beam's recorded target, suppress=true and
+// the lock-on path bypasses the accumulator.
+TEST_CASE("stray mode-zero beam contact is gated by the player-aggro threshold",
+          "[weapon][beam][ai]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 0;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.mass_damage = 10;
+  beam.reload_ticks = 20.0F;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F; // heading 0 points toward -y
+  owner.primary_target_ship_slot = -1;
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 1000.0F;
+  target.ai_behavior_code = 1;
+  target.pos_x = 100.0F;
+  target.pos_y = 140.0F; // 60 px directly ahead, inside the cone
+
+  // First untargeted contact: accumulator is 0, so the NPC takes damage but
+  // does not switch to the player.
+  REQUIRE(target.player_aggro_accumulator == 0.0F);
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(state.beam_hit_queue[0].impact_resolved);
+  CHECK(target.primary_target_ship_slot == -1);
+  CHECK(target.ai_state_code != 4);
+  // The hit still banks aggro pressure for the next contact.
+  CHECK(target.player_aggro_accumulator > 0.0F);
+
+  // Once the pressure crosses 50 the next untargeted contact retaliates.
+  target.player_aggro_accumulator = 50.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(target.primary_target_ship_slot == 0);
+  CHECK(target.ai_state_code == 4);
+
+  // Locking the NPC as the player's primary target marks the sweep as
+  // targeted even though the beam record itself has target -1.
+  target.primary_target_ship_slot = -1;
+  target.ai_state_code = 0;
+  target.player_aggro_accumulator = 0.0F;
+  owner.primary_target_ship_slot = 1;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(target.primary_target_ship_slot == 0);
+  CHECK(target.ai_state_code == 4);
+}
+
 // Ghidra Shot_UpdateBeamHitQueue (0x0042f270) negative-impact-impulse arm:
 // a tractor/repulsor beam arms a velocity-match lock. When the target is at
 // most 4/3 the source's mass the TARGET locks onto the source; otherwise the
