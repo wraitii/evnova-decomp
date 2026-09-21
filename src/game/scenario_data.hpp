@@ -115,8 +115,13 @@ constexpr std::uint32_t kRankResourceType = 0x728a6e6b; // r\x8ank
 // (gender: male=1), Oxxx (owns outfit), Exxx (explored system), the `& | ! ( )`
 // boolean operators, and counted sets
 // `[ ... ]` compared with `= < >`. Blank expressions evaluate to true (the
-// original's default). The evaluator is pure: game-state lookups are injected
-// through the state callback so scenario parsing stays independent of the game.
+// original's default). Faithful to 0x00449020, a flat chain of bare terms is
+// last-operator-wins (each `&`/`|` reloads the result from the previous
+// operand), not conventional precedence; parenthesised groups get a fresh
+// accumulator and group vs bare-token operands update state differently. See
+// docs/known_original_bugs.md (Test expressions). The
+// evaluator is pure: game-state lookups are injected through the state
+// callback so scenario parsing stays independent of the game.
 struct ControlExpressionState {
   // Bxxx: value of Nova control bit (mission bit) `bit`.
   std::function<bool(std::uint32_t bit)> get_control_bit;
