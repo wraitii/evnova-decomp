@@ -249,7 +249,7 @@ related side effects owned by another subsystem.
 | `0x0f` | Assist approach / boarding hold | Brakes on relative velocity, then copies target velocity/position creep below 0.525 px/tick. Within 3 px: latches the victim (`boarded_target_latch`) and arms the 100..179-tick boarding pause consumed by the capture supervisor's `Boarding_BoardShipAndTransferCargo` handoff; in assist AI state `0x0f` (comm-window Request Assistance on a disabled player) it instead clears the latch and repairs the victim +1.0 armor/tick back above the disable threshold. |
 | `0x10` | Evasive break | Heading is current ±135° (ship-instance parity), 1.5x thrust; returns to pursuit on alignment. |
 | `0x11` | Boost to target | 2.75x thrust and 1.8x max desired speed; returns to pursuit close in or on a random roll. |
-| `0x12` | Chase leader | Heads at leader plus a `15 * max-speed` polar offset; no leader means idle. |
+| `0x12` | Chase swarm mate | Heads at the swarm mate plus a `15 * max-speed` polar offset; no mate means idle. |
 | `0x13` | Scripted manoeuvre | Heads at asteroid-pool slot-0 target; thrust gate `turn_rate + 15°`. |
 | `0x14` | Scripted velocity match | Ramps toward scripted velocity and creeps toward scripted position; weapon merge behaviour is partial. |
 | `0x15` | Freeflight anchor | Heads to nearest freeflight anchor; no anchor means idle. Anchor model is not implemented. |
@@ -295,7 +295,21 @@ field definitions and uncertainties.
 | `+0xc8d8` | `cloak_transition_latch` | Signed cloak enter/exit request. |
 | `+0xc8dc` | `velocity_match_target_ship_slot` | Velocity-match target; also changes effective-stat handling. |
 | `+0xc8f8` | `ai_turn_bias_dir` | `-1/0/+1` visual banking direction produced by turning. |
-| `+0xc906` | `formation_leader_ship_slot` | Formation leader; mode `0x12` idles when empty. |
+| `+0xc906` | `swarm_mate_ship_slot` | Swarming-behavior mate; control mode `0x12` idles when empty. |
+
+## Swarming
+
+A hull with `ShipClass` Flags2 `0x0001` ("swarming behavior") outside a
+stellar defense fleet maintains a `swarm_mate_ship_slot`: `Ship_FindSwarmMate`
+(0x00411c20) scans strictly lower ship slots for the first active swarming hull
+sharing its primary target plus either a non-`-1` faction or a non-`-1` squad
+leader, and `Ship_IsSwarmMateStillValid` (0x00411b40) re-checks that cache each
+frame. In combat state 4, when the target is far (>165 px on an axis) and the
+intercept test declines, `Ship_ShouldFollowSwarmMate` (0x00411ae0) switches the
+ship to control mode `0x12`, which flies it toward a point 15x max speed ahead
+of the mate instead of strafing. This is separate from the escort/squad system,
+which keys off `squad_leader_ship_slot` / `resolved_squad_leader_ship_slot`;
+only the formation/leader pass and the afterburner gate consume the field.
 
 ## Escort formations and system adoption
 

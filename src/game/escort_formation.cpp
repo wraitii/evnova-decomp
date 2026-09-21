@@ -387,23 +387,23 @@ void Ship_TickLeaderFlags(GameState &state) {
             .is_any_ships_squad_leader = true;
       }
     }
-    // Provisional: the original additionally requires the leader slot to be
-    // greater than the follower's own slot (slot counter < leader < 0x40),
-    // which excludes player-led and earlier-slot leads from +0xC1. Nothing
-    // consumes +0xC1 yet; the condition is preserved as decompiled.
-    const std::int16_t formation_lead = ship.formation_leader_ship_slot;
-    if (static_cast<std::int16_t>(slot) < formation_lead &&
-        formation_lead < static_cast<std::int16_t>(GameState::kMaxShips)) {
-      state.ShipAt(static_cast<std::size_t>(formation_lead))
-          .ai_followed_as_leader = true;
+    // Provisional: the original additionally requires the swarm mate's slot to
+    // be greater than this ship's own slot (slot counter < mate < 0x40), which
+    // excludes player-led and earlier-slot mates from +0xC1. Nothing consumes
+    // +0xC1 yet; the condition is preserved as decompiled.
+    const std::int16_t swarm_mate = ship.swarm_mate_ship_slot;
+    if (static_cast<std::int16_t>(slot) < swarm_mate &&
+        swarm_mate < static_cast<std::int16_t>(GameState::kMaxShips)) {
+      state.ShipAt(static_cast<std::size_t>(swarm_mate)).ai_followed_as_leader =
+          true;
     }
     std::int16_t resolved;
     if (ship.ai_behavior_code < 5) {
-      resolved = ship.formation_leader_ship_slot;
+      resolved = ship.swarm_mate_ship_slot;
     } else {
       resolved = -1;
       if (ship.primary_target_ship_slot != -1 && ship.ai_state_code == 4) {
-        resolved = ship.formation_leader_ship_slot;
+        resolved = ship.swarm_mate_ship_slot;
       }
       if (resolved == -1) {
         resolved = ship.squad_leader_ship_slot;
@@ -457,7 +457,7 @@ void NovaShip_ResetToDefaultCombatState(GameState &state,
   }
   ship.current_system_id = state.player.current_system_id;
   ship.heading = state.player.heading;
-  ship.formation_leader_ship_slot = -1;
+  ship.swarm_mate_ship_slot = -1;
   ship.resolved_squad_leader_ship_slot = 0;
   ship.formation_offset_x = 0.0F;
   ship.formation_offset_y = 0.0F;

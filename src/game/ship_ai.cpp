@@ -895,12 +895,12 @@ void NovaAi_UpdateShipAI(GameState &state,
   // skips the whole ordinary behavior branch for a state-0x15 emergence hold
   // (Ship_IsShipInAiState0x15 0x004159c0, disasm 0x00401530).
   if (!restricted && ordinary_arm && !NovaAiShip_IsShipInAiState0x15(ship)) {
-    // Wingman-mirror cache maintenance (0x00401000, disasm 0x00401540/...e1):
-    // a swarming hull whose cached lower-indexed wingman no longer shares its
-    // target/faction/leader context re-scans for a replacement. Non-swarming
-    // hulls report the cache valid and are left untouched.
-    if (!NovaAiShip_IsWingmanMirrorTargetStillValid(state, ship)) {
-      (void)NovaAi_FindLowerIndexedWingmanSharingTarget(state, ship);
+    // Swarm-mate cache maintenance (0x00401000, disasm 0x00401540/...e1):
+    // a swarming hull whose cached lower-indexed swarm mate no longer shares
+    // its target/faction/leader context re-scans for a replacement.
+    // Non-swarming hulls report the cache valid and are left untouched.
+    if (!NovaAiShip_IsSwarmMateStillValid(state, ship)) {
+      (void)NovaAi_FindSwarmMate(state, ship);
     }
     // Dispatch precedence (Ship_UpdateShipAI 0x00401000): a ship holding a
     // stellar assignment runs Ship_DefenseFleetPrioritizePlayerThreat and
@@ -1660,13 +1660,12 @@ bool NovaAiShip_IsShipInAiState0x15(const Ship &ship) {
   return ship.ai_state_code == 0x15;
 }
 
-// Ghidra 0x00411c20 Ship_FindLowerIndexedWingmanSharingTarget. The original
+// Ghidra 0x00411c20 Ship_FindSwarmMate. The original
 // indexes g_ship_states by slot and relies on instance id == slot; the low
 // bound (strictly lower slots) and the -1-faction/-1-leader guards are exact.
 // A ship class that cannot be resolved is treated as non-swarming.
-std::int16_t NovaAi_FindLowerIndexedWingmanSharingTarget(const GameState &state,
-                                                         Ship &ship) {
-  ship.formation_leader_ship_slot = -1;
+std::int16_t NovaAi_FindSwarmMate(const GameState &state, Ship &ship) {
+  ship.swarm_mate_ship_slot = -1;
   if (ship.ship_instance_id <= 1) {
     return -1;
   }
@@ -1683,23 +1682,23 @@ std::int16_t NovaAi_FindLowerIndexedWingmanSharingTarget(const GameState &state,
     }
     if ((faction == other.faction_or_government_id && faction != -1) ||
         (squad_leader == other.squad_leader_ship_slot && squad_leader != -1)) {
-      ship.formation_leader_ship_slot = slot;
+      ship.swarm_mate_ship_slot = slot;
       return slot;
     }
   }
   return -1;
 }
 
-// Ghidra 0x00411b40 Ship_IsWingmanMirrorTargetStillValid. A non-swarming hull
+// Ghidra 0x00411b40 Ship_IsSwarmMateStillValid. A non-swarming hull
 // (or an unresolvable class) reports "valid" so the caller keeps the stale
 // cache untouched, exactly as the original's flags test short-circuits.
-bool NovaAiShip_IsWingmanMirrorTargetStillValid(const GameState &state,
-                                                const Ship &ship) {
+bool NovaAiShip_IsSwarmMateStillValid(const GameState &state,
+                                      const Ship &ship) {
   const ShipClass *cls = ShipClassFor(state, ship);
   if (cls == nullptr || (cls->flags_secondary & 0x0001U) == 0U) {
     return true;
   }
-  const std::int16_t cached = ship.formation_leader_ship_slot;
+  const std::int16_t cached = ship.swarm_mate_ship_slot;
   if (cached <= 0 || cached >= ship.ship_instance_id ||
       !state.SlotInRange(static_cast<std::size_t>(cached))) {
     return false;
@@ -1715,19 +1714,18 @@ bool NovaAiShip_IsWingmanMirrorTargetStillValid(const GameState &state,
            ship.squad_leader_ship_slot != -1));
 }
 
-// Ghidra 0x00411ae0 Ship_ShouldSwitchToEscortWingmanTarget. Defense-fleet
+// Ghidra 0x00411ae0 Ship_ShouldFollowSwarmMate. Defense-fleet
 // ships are excluded (they coordinate through their stellar instead), and a
-// cached wingman equal to the ship's own squad leader is left to the ordinary
-// squad-formation modes.
-bool NovaAiShip_ShouldSwitchToEscortWingmanTarget(const GameState &state,
-                                                  Ship &ship) {
+// cached swarm mate equal to the ship's own squad leader is left to the
+// ordinary squad-formation modes.
+bool NovaAiShip_ShouldFollowSwarmMate(const GameState &state, Ship &ship) {
   const ShipClass *cls = ShipClassFor(state, ship);
   if (cls == nullptr || (cls->flags_secondary & 0x0001U) == 0U ||
       ship.defense_fleet_home_stellar_id != -1) {
     return false;
   }
-  if (ship.formation_leader_ship_slot > 0 &&
-      ship.formation_leader_ship_slot != ship.squad_leader_ship_slot) {
+  if (ship.swarm_mate_ship_slot > 0 &&
+      ship.swarm_mate_ship_slot != ship.squad_leader_ship_slot) {
     ship.ai_control_mode = 0x12;
     return true;
   }
@@ -2128,7 +2126,7 @@ bool NovaShip_CanShipUseAfterburner(GameState &state, const Ship &ship) {
       const Ship &other = state.ShipAt(slot);
       if (static_cast<std::int16_t>(slot) != ship.ship_instance_id &&
           other.is_active &&
-          other.formation_leader_ship_slot == ship.ship_instance_id) {
+          other.swarm_mate_ship_slot == ship.ship_instance_id) {
         return false;
       }
     }
@@ -2183,7 +2181,7 @@ void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
   ship.jump_destination_stellar_id = -2;
   ship.travel_target_cache = -1;
   ship.escort_command_code = -1;
-  ship.formation_leader_ship_slot = -1;
+  ship.swarm_mate_ship_slot = -1;
   ship.resolved_squad_leader_ship_slot = -1;
 }
 

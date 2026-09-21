@@ -233,30 +233,28 @@ NovaAi_ScoreAssistTargetForShip(const GameState &state,
 [[nodiscard]] std::int16_t NovaAi_FindBestAssistTargetForShip(
     const GameState &state, const Ship &ship, std::int16_t score_flags);
 
-// Ghidra 0x00411c20 Ship_FindLowerIndexedWingmanSharingTarget. Resets the
-// cached wingman slot to -1, then scans strictly lower ship slots for an
+// Ghidra 0x00411c20 Ship_FindSwarmMate. Resets the
+// cached swarm-mate slot to -1, then scans strictly lower ship slots for an
 // active swarming-behavior hull (ShipClass Flags2 0x0001) that shares this
 // ship's primary target and either its faction (when not -1) or its squad
 // leader (when not -1). Caches and returns the first match, else -1. This is
-// the only producer of a positive formation_leader_ship_slot.
-[[nodiscard]] std::int16_t
-NovaAi_FindLowerIndexedWingmanSharingTarget(const GameState &state, Ship &ship);
+// the only producer of a positive swarm_mate_ship_slot.
+[[nodiscard]] std::int16_t NovaAi_FindSwarmMate(const GameState &state,
+                                                Ship &ship);
 
-// Ghidra 0x00411b40 Ship_IsWingmanMirrorTargetStillValid. True for a
+// Ghidra 0x00411b40 Ship_IsSwarmMateStillValid. True for a
 // non-swarming hull (nothing to maintain), or when the cached lower-indexed
-// wingman is still active, swarming, and sharing the same primary target plus
-// faction / squad-leader context. False means the cache must be re-found.
-[[nodiscard]] bool
-NovaAiShip_IsWingmanMirrorTargetStillValid(const GameState &state,
-                                           const Ship &ship);
+// swarm mate is still active, swarming, and sharing the same primary target
+// plus faction / squad-leader context. False means the cache must be re-found.
+[[nodiscard]] bool NovaAiShip_IsSwarmMateStillValid(const GameState &state,
+                                                    const Ship &ship);
 
-// Ghidra 0x00411ae0 Ship_ShouldSwitchToEscortWingmanTarget. For a swarming
-// hull outside a defense fleet, when the cached wingman slot is valid and is
-// not this ship's own squad leader, forces ai_control_mode 0x12 (chase the
-// wingman) and returns true. The side effect is committed before returning.
-[[nodiscard]] bool
-NovaAiShip_ShouldSwitchToEscortWingmanTarget(const GameState &state,
-                                             Ship &ship);
+// Ghidra 0x00411ae0 Ship_ShouldFollowSwarmMate. For a swarming
+// hull outside a defense fleet, when the cached swarm-mate slot is valid and
+// is not this ship's own squad leader, forces ai_control_mode 0x12 (chase the
+// swarm mate) and returns true. The side effect is committed before returning.
+[[nodiscard]] bool NovaAiShip_ShouldFollowSwarmMate(const GameState &state,
+                                                    Ship &ship);
 
 // Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget. Refreshes the
 // active NPC weapon bank for behavior >4 ships; ships with a lower behavior
@@ -630,8 +628,8 @@ void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship);
 // Ghidra 0x0046b260 Ship_CanShipUseAfterburner (DB name
 // Ship_IsShipEligibleForEscortOrLaunchBehavior): computes the ShipState +0xBD
 // afterburner latch seeded at spawn time. Zero when another active ship lists
-// this ship's instance id as its formation leader (escorts stay with the
-// leader) or when the class capability flags say never (0x0400 planet-type).
+// this ship's instance id as its swarm mate (followers stay with the mate)
+// or when the class capability flags say never (0x0400 planet-type).
 // Capability 0x0040 is always-afterburner; capability 0x0020 rolls against
 // the player's combat rating (roll + 0x100 <= rating / class Strength). The
 // rating producer is not yet reconstructed, so the roll currently fails
@@ -646,7 +644,7 @@ void NovaShip_ApplyInherentGovernmentVoice(GameState &state, Ship &ship);
 
 // Ghidra 0x00402810 Ship_ResetShipAiBehaviorRuntimeFields: resets the core
 // per-behavior runtime slots (ai_state_code/ai_control_mode, travel target
-// cache, escort mirror cache, resolved-target slot).
+// cache, swarm-mate cache, resolved-target slot).
 void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship);
 
 // Ghidra 0x00468920 Ship_CanPlayerHaveMoreEscorts is declared in
