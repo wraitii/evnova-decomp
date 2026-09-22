@@ -214,6 +214,13 @@ void NovaHud_ShowLandingDenial(GameState &state,
                                 is_station ? static_cast<std::uint16_t>(0x52)
                                            : static_cast<std::uint16_t>(0x53));
     break;
+  case LandedDenial::kCloaked:
+    // Stellar_HandleStellarEntryAndExit 0x004587xx: a ship at/inside the cloak
+    // visibility threshold cannot land; entry 0x49 is "Disengage cloaking
+    // device first."
+    text = NovaHud_LoadStringEntry(kStrId, 0x49)
+               .value_or("Disengage cloaking device first.");
+    break;
   case LandedDenial::kTooFar:
     text = NovaHud_LoadStringEntry(kStrId,
                                    is_station ? kTooFarStation : kTooFarPlanet);

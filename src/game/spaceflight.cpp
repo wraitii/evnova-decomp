@@ -1097,6 +1097,19 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
   }
   const Stellar *target =
       state.scenario.Stellar(state.travel.selected_stellar_id);
+  // Stellar_HandleStellarEntryAndExit (0x004587xx): once the selected body is a
+  // valid, available target, a ship at/inside the cloak visibility threshold
+  // cannot land or use restricted travel. The original shows STR# 0x7d2 0x49
+  // ("Disengage cloaking device first.") and returns without disarming the
+  // approach or clearing the selection.
+  if (target != nullptr && target->is_available &&
+      target->system_id == state.player.current_system_id &&
+      NovaTargeting_StellarTargetsSpriteSetActive(*target) &&
+      NovaTargeting_ShipAtCloakVisibilityThreshold(state.player)) {
+    const bool is_station = (target->flags & 0x10U) != 0U;
+    NovaHud_ShowLandingDenial(state, LandedDenial::kCloaked, is_station);
+    return LandCommandResult::kContinue;
+  }
   if (target != nullptr && (target->availability_flags & 0x3000U) != 0U) {
     if (!NovaTravel_PlayerMeetsStellarAccess(
             state, state.travel.selected_stellar_id)) {
