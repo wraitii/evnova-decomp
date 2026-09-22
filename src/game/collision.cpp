@@ -1437,7 +1437,7 @@ void Ship_ApplyDamageToShip(GameState &state,
   if (allow_aggro_updates && target.cloak_damage_deactivate_latch == 1 &&
       (target.cloak_fade_progress == kCloakFadeFull ||
        target.cloak_transition_latch > 0)) {
-    NovaAi_OnShipCloakStateCleared(target);
+    NovaAi_OnShipCloakStateCleared(state, target);
   }
 }
 

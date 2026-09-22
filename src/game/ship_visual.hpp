@@ -243,11 +243,23 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
 // latch * fade-rate * frame-tick-scale and clamps at the 32.0
 // ceiling or the 0.0 floor (clearing the latch). The fade rate is 0.75
 // ticks/frame, or 1.5 when the ship class carries Flags2 0x1
-// (g_cloak_fade_rate_flags2_swarming 0x0057530c vs g_cloak_fade_rate_default
-// 0x00575308). A still-visible wreck (progress > 0) latches -2 so the fade
-// continues to clear through the lower 8.0 visibility threshold.
+// (g_cloak_fade_rate_slow 0x0057530c vs g_cloak_fade_rate_fast 0x00575308).
+// The original reads the ship-class swarming bit rather than the cloaking
+// outfit's ModVal 0x0001; under kApplyOriginalBugFixes the fade gates on the
+// device bit instead. A still-visible wreck (progress > 0) latches -2 so the
+// fade continues to clear through the lower 8.0 visibility threshold.
 void NovaShip_TickCloakFadeState(GameState &state,
                                  Ship &ship,
                                  float elapsed_ticks);
+
+// Ghidra 0x00428340 Ship_UpdateVisualState tail: maintain the per-ship cloak
+// ability caches (+0xC91C screen reveal, +0xC91E radar reveal, +0xC920
+// damage-deactivate). Inactive or out-of-system hulls are reset to the -1
+// not-yet-computed sentinel; active hulls lazily populate each cache from
+// Outfit_HasCloakScannerRevealForSurface (0x004652a0) and
+// Outfit_HasCloakDamageDeactivateFlag (0x00464f60). Runs for every active hull
+// in the per-ship visual pass and for the player in
+// PlayerTick_InteractionCloakAndStatus.
+void NovaShip_RefreshCloakAbilityCaches(GameState &state, Ship &ship);
 
 } // namespace game

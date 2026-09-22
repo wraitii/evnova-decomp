@@ -839,6 +839,42 @@ TEST_CASE("cloak traits enter and clear the NPC cloak transition") {
   CHECK(ship.cloak_transition_latch == -1);
 }
 
+TEST_CASE("cloak maintain gate honors the device ModVal drain bits") {
+  // BUGFIX(original): the original reads the fuel/shield gate nibbles from the
+  // matched ModType word (always 0x11), so every cloak demands fuel and none is
+  // gated on shields. Under kApplyOriginalBugFixes the real ModVal nibbles are
+  // used; see docs/known_original_bugs.md.
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(!state.scenario.ships.empty());
+
+  auto &ship_class = state.scenario.ships[0];
+  ship_class.default_outfit_ids[0] = 0x80;
+  ship_class.default_outfit_counts[0] = 1;
+  auto &cloaking_device = state.scenario.outfits[0];
+  cloaking_device.mod_type = 0x11;
+
+  game::Ship ship;
+  ship.ship_instance_id = 1; // NPC: ship class default loadout
+  ship.ship_class_id = 0;
+  ship.armor_points = 100.0F;
+  ship.fuel_points = 0.0F;
+  ship.shield_points = 0.0F;
+
+  // Neither drain nibble set: both gates are off, so empty resources pass.
+  cloaking_device.mod_val = 0x0000;
+  CHECK(game::NovaAiShip_CanMaintainCloakState(state, ship));
+
+  // Fuel-drain bit set with no fuel: cannot maintain.
+  cloaking_device.mod_val = 0x0010;
+  CHECK_FALSE(game::NovaAiShip_CanMaintainCloakState(state, ship));
+
+  // Shield-drain bit set with no shields: cannot maintain, even with fuel.
+  cloaking_device.mod_val = 0x0100;
+  ship.fuel_points = 100.0F;
+  CHECK_FALSE(game::NovaAiShip_CanMaintainCloakState(state, ship));
+}
+
 // A fire-restricted (derelict-government) ship must NOT engage the heavy AI:
 // it holds state 0 / control 0 instead of picking a travel target.
 TEST_CASE("fire-restricted ship does not initiate travel") {

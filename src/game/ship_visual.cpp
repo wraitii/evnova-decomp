@@ -10,6 +10,7 @@
 #include "landed_store.hpp"
 #include "mission.hpp"
 #include "nova_random.hpp"
+#include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
 #include "sprite_world.hpp"
@@ -720,17 +721,16 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
 }
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, cloak-fade slice. See the header
-// for scope notes. Constants decoded from data: g_cloak_fade_rate_default
-// (0x00575308) = 1.5, g_cloak_fade_rate_flags2_swarming (0x0057530c) = 0.75,
+// for scope notes. Constants decoded from data: g_cloak_fade_rate_fast
+// (0x00575308) = 1.5, g_cloak_fade_rate_slow (0x0057530c) = 0.75,
 // g_cloak_fade_progress_max (0x00575314) = 32.0, k_unit_f32
 // (0x00575318) = 1.0. The original indexes g_ship_class_defs directly; the
 // port's defensive class lookup only changes behavior for hulls the
-// Ship_HandleShip prologue would already have deactivated.
+// Ship_HandleShip prologue would already have deactivated. The rate selector
+// is a gated BUGFIX(original); see the block below.
 void NovaShip_TickCloakFadeState(GameState &state,
                                  Ship &ship,
                                  float elapsed_ticks) {
-  const ShipClass *cls =
-      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   if (ship.cloak_transition_latch == 0) {
     // Passive decay: an interrupted fade bleeds back toward fully visible at
     // one unit per raw call (no g_avg_frame_tick_scale multiplication in the
@@ -739,8 +739,23 @@ void NovaShip_TickCloakFadeState(GameState &state,
       ship.cloak_fade_progress -= RawSpaceflightCallTicks(elapsed_ticks);
     }
   } else {
-    const float fade_rate =
-        (cls != nullptr && (cls->flags_secondary & 0x1U) != 0U) ? 1.5F : 0.75F;
+    // The original selects 1.5 iff ShipClass.flags_secondary bit 0x0001 is set
+    // (disasm 0x004289a3-0x004289d0), i.e. Bible shïp Flags2 0x0001 "Ship
+    // exhibits swarming behavior" -- not the cloaking outfit's ModType 17
+    // ModVal 0x0001 "Faster fading". The shipped data inverts the intent (the
+    // fast-fading Polaris organ ships are non-swarming; swarming Wraiths carry
+    // a non-fast-fade device). BUGFIX(original): under the compatibility
+    // policy, gate the fade on the actual device bit instead.
+    float fade_rate;
+    if constexpr (kApplyOriginalBugFixes) {
+      fade_rate = NovaOutfit_HasCloakFastFade(state, ship) ? 1.5F : 0.75F;
+    } else {
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      fade_rate = (cls != nullptr && (cls->flags_secondary & 0x1U) != 0U)
+                      ? 1.5F
+                      : 0.75F;
+    }
     ship.cloak_fade_progress +=
         static_cast<float>(ship.cloak_transition_latch) * fade_rate *
         elapsed_ticks;
@@ -757,6 +772,39 @@ void NovaShip_TickCloakFadeState(GameState &state,
   // negative so the remaining fade returns to zero.
   if (ship.cloak_fade_progress > 0.0F && NovaAiShip_IsDestroyed(ship)) {
     ship.cloak_transition_latch = -2;
+  }
+}
+
+// Ghidra 0x00428340 Ship_UpdateVisualState, cloak-ability cache tail. The
+// original resets the three caches to -1 for any hull that is inactive or in a
+// different system than the player, and otherwise lazily populates each one on
+// its first active frame. Index 0 of the cache pair (screen) is tested first
+// by Outfit_HasCloakScannerRevealForSurface; radar follows. The
+// damage-deactivate latch is independent of the two scanner surfaces.
+void NovaShip_RefreshCloakAbilityCaches(GameState &state, Ship &ship) {
+  if (!ship.is_active ||
+      ship.current_system_id != state.player.current_system_id) {
+    ship.cloak_scanner_reveal_screen = -1;
+    ship.cloak_scanner_reveal_radar = -1;
+    ship.cloak_damage_deactivate_latch = -1;
+    return;
+  }
+  for (int surface = 0; surface < 2; ++surface) {
+    std::int16_t &cache = surface == 0 ? ship.cloak_scanner_reveal_screen
+                                       : ship.cloak_scanner_reveal_radar;
+    if (cache < 0) {
+      cache = NovaOutfit_HasCloakScannerRevealForSurface(
+                  state,
+                  ship,
+                  surface == 0 ? CloakScannerSurface::kScreen
+                               : CloakScannerSurface::kRadar)
+                  ? 1
+                  : 0;
+    }
+  }
+  if (ship.cloak_damage_deactivate_latch < 0) {
+    ship.cloak_damage_deactivate_latch =
+        NovaOutfit_HasCloakDamageDeactivateFlag(state, ship) ? 1 : 0;
   }
 }
 

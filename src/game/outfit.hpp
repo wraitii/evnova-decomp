@@ -273,6 +273,45 @@ NovaOutfit_GetCloakShieldDrainFlags(const GameState &state, const Ship &ship);
 NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
                                           const Ship &ship);
 
+// Ghidra 0x00464f60 Outfit_HasCloakDamageDeactivateFlag. ModType 17 ModVal
+// bit 0x0008: a hit deactivates the cloak.
+[[nodiscard]] bool
+NovaOutfit_HasCloakDamageDeactivateFlag(const GameState &state,
+                                        const Ship &ship);
+
+// Whether the active ModType 17 cloaking device carries ModVal bit 0x0001, the
+// Bible's "Faster fading" flag. The original's fade-rate selection never reads
+// this bit: it mistakenly tests ShipClass Flags2 bit 0x0001 (swarming) instead.
+// This predicate supplies the intended behavior for the gated fix; see
+// NovaShip_TickCloakFadeState and docs/known_original_bugs.md.
+[[nodiscard]] bool NovaOutfit_HasCloakFastFade(const GameState &state,
+                                               const Ship &ship);
+
+// Per drain-unit cloak upkeep rate. The original multiplies the ModType-17
+// fuel/shield drain nibble by the 8-byte x87 double at
+// g_cloak_drain_per_unit_player (0x00575690) / _npc (0x00575470) = 1/30, then
+// by g_avg_frame_tick_scale, once per raw frame. Drain nibble value 1
+// (bit 0x10) therefore drains exactly 1 unit/sec at the 30 Hz tick (Bible
+// ModType 17: "Use 1 unit of fuel per second"). Shared by the player
+// (PlayerTick_InteractionCloakAndStatus) and NPC
+// (NovaShip_IntegrateNpcMovement) upkeep paths.
+inline constexpr float kCloakDrainPerUnit = 1.0F / 30.0F;
+
+// Which cloak-scanner surface a ModType 30 reveal bit controls (Ghidra
+// Outfit_HasCloakScannerRevealForSurface 0x004652a0 param 0/1).
+enum class CloakScannerSurface : std::uint8_t {
+  kScreen, // ModVal bit 0x0002
+  kRadar,  // ModVal bit 0x0001
+};
+
+// Ghidra 0x004652a0 Outfit_HasCloakScannerRevealForSurface. True when the
+// ship can reveal cloaked ships on the requested surface via a ModType 30
+// cloak scanner. A pers_def_slot of 0x3ff (special sentinel hulls) always
+// reveals. The player scans the owned inventory, NPCs their class default
+// loadout; each outfit's four mod slots are checked in order.
+[[nodiscard]] bool NovaOutfit_HasCloakScannerRevealForSurface(
+    const GameState &state, const Ship &ship, CloakScannerSurface surface);
+
 // True when the ship has the fast-jump capability: class Flags2 0x0020
 // ("can jump without slowing down"), or an outfit whose any of its four
 // ModTypes is 37 (kFastJump). The player scans the owned inventory (positive

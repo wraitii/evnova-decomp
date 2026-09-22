@@ -59,7 +59,10 @@ Per the discord.
 * **Always-dominated spobs show a disabled-looking “Leave” button that remains clickable.** 
 * **Beam decay can stack successive beam instances into an “auto-machine-gun” effect**, greatly multiplying damage. 
 * **Weapon timing mixes frame-based and fixed 1/30-second timing**, making beam continuity and damage-per-second depend on machine framerate. 
-* **AI cloaking has several broken transitions** (hyperspace cloak state, departure/docking cloak handling). 
+* **AI cloaking has several broken transitions** (hyperspace cloak state: no cloak on jump-in or system departure; approach-uncloak only works for carried fighters; docking does nothing). 
+* (discovery, fixed) **Fast-cloaking is gated on the swarm behaviour flag instead of the device's fast-fade bit**. Fixed under `kApplyOriginalBugFixes` in `NovaShip_TickCloakFadeState`. 
+* (discovery, fixed) **Cloaks that drain shields can't drain to 0 and can be activated at 0 shields**. 
+* (discovery, fixed) **Cloaks that don't drain fuel still require fuel to operate.** 
 * **Pirate AI can make very-low-armour ships effectively invulnerable** because it refuses to destroy targets but cannot disable ships with ≤3 armour. 
 * **Windows hyperspace flash does not build up like the Mac implementation, and its tunnel scalar uses the wrong formula.** The Mac hold computes `FLOAT_007354a0 = (progress - 55) * 5`, clamps it to [0,100], and requests one asynchronous 1.5 s `_FadeWhiteIn` (`0x546f`); at hold end it sets the scalar to -1 and requests `_FadeWhiteOut` (`0x54d1`). The Windows release computes `FLOAT_007354a0 = progress * 0.3 - 15` (`0x00450601`) and calls the stubbed `NoSys_NoOp_00467e60` (`0x00467e60`, a bare `RET`), so the hold shows no build-up and only a one-frame white flash lands at arrival. The hypergate transfer likewise paints white then runs a gated `_FadeWhiteOut` (`0x63c40`); the wormhole paints white but resets the starfield with no fade. The port follows the Mac behaviour unconditionally (not gated by `kApplyOriginalBugFixes`), and `hyperspace_effects` selects white vs black as in the CE colour setter (`0x00872384`) rather than disabling the effect.
 * **`DispWeight` does not control mission ordering**; Mac 1.1 presents missions by increasing resource ID instead. 
@@ -109,6 +112,7 @@ Per the discord.
 * **“Protect player” special ships follow the player through a hypergate rather than waiting on the far side.** 
 * **Mission special ships cannot use the government-based `ShipSyst` selectors that AuxShips can use.** 
 * **“Appear randomly cloaked” behaves differently on first entry versus later entries**: initially the ships hyper in; later they appear at a random cloaked location. 
+* (discovery, unchanged) **AI ships will cloak when hyperspacing allows the player to jump-while-cloaked**. 
 * **Aborting a mission in `OnShipDone` prevents an `OnShipDone` description from appearing.** 
 * **A never-collected cargo requirement can be abused as a free-cargo-space test** for later missions. 
 * **Fleet-created ships ignore generic government hail quotes** and fall back to “Greetings.” 
