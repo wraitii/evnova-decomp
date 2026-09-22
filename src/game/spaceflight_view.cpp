@@ -2007,9 +2007,10 @@ void SpaceflightView::ApplyFog(SpriteDrawOptions &opts) const {
 // Ships hop between the disabled/escort/normal layers exactly as
 // Ship_UpdateVisualState 0x00428340 does, and shots keep their original
 // per-mode containers (mode9/mode1/default on layers 7-9, mode4_alt on layer
-// 12). Remaining divergence: the original's layer-6 weapon smoke puffs are not
-// ported (no stock weapon enables them), and the layer-14 beam pass still
-// lacks the twin-surface branches.
+// 12). The layer-6 weapon smoke-puff pool is ported and drawn (DrawSmokePuffs,
+// Shot_UpdateWeaponSmokePuffs 0x0042c660) but no stock weapon enables it.
+// Remaining divergence: the layer-14 beam pass still lacks the twin-surface
+// branches.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   // Effective system murk (raw system murk + owned MurkMod outfits), rebuilt
   // for this frame's distance fog. Ghidra caches it in

@@ -491,9 +491,9 @@ void InitializeMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
   for (std::size_t row = 0; row < runtime.menu_row_reveal_counters.size();
        ++row) {
     runtime.menu_row_reveal_counters[row] = counter;
-    // Ghidra NovaHud_UpdateLayoutState: each subsequent strip starts half the
-    // preceding strip's frame count behind the prior counter (0.5 multiplier
-    // at DAT_00575938).
+    // Ghidra 0x0048bc90 NovaHud_UpdateLayoutState: each subsequent strip starts
+    // half the preceding strip's frame count behind the prior counter (0.5
+    // multiplier at DAT_00575938).
     if (row + 1 < runtime.menu_row_reveal_counters.size()) {
       const auto frame_count =
           runtime.main_menu_row_reveal_textures[row].size();
@@ -1456,6 +1456,10 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   // +0xe0. Frame_TickTimerDecayAndEffects selects a different random frame on
   // its short animation timer; UpdateMenuEntrance maintains the equivalent
   // no-repeat progression.
+  // Ghidra 0x0048c3c0 NovaHud_RenderOverlays: the main-menu overlay compositor
+  // (top logo strip + three button-slide reveal channels) folded into this
+  // frame renderer; the original's offscreen DrawContext push/blit becomes
+  // direct SDL draws at the computed origins.
   if (!runtime.main_menu_logo_textures.empty() && runtime.main_menu_style) {
     const auto frame = std::min(runtime.menu_top_animation_frame,
                                 runtime.main_menu_logo_textures.size() - 1);

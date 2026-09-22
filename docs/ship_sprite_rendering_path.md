@@ -229,9 +229,10 @@ the layer precedence as a fixed draw sequence (see the ordering comment in
 and `squad_leader_ship_slot == 0`) and all four shot containers in their
 original layer order (`DrawShots(ShotDrawLayer)`: mode9 -> mode1 -> default on
 layers 7-9, then mode4_alt on layer 12, the latter fixed at spawn from weapon
-mode 4 + owner Flags3 0x0040). Remaining divergence:
-the layer-6 weapon smoke-puff pool is not ported (no stock weapon enables it),
-and the layer-14 beam pass still lacks the twin-surface branches.
+mode 4 + owner Flags3 0x0040). The layer-6 weapon smoke-puff pool
+is ported and drawn (`DrawSmokePuffs`, `Shot_UpdateWeaponSmokePuffs` 0x0042c660)
+but no stock weapon enables it. Remaining divergence: the layer-14 beam pass
+still lacks the twin-surface branches.
 
 ## Ship sprite row flags, alt and shield (ported 2026)
 
