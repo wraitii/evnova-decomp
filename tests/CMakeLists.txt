@@ -12,6 +12,7 @@ add_executable(evnova_tests
     flight_automation_test.cpp
     format_util_test.cpp
     gameplay_interface_test.cpp
+    geometry_util_test.cpp
     government_test.cpp
     hud_overlay_test.cpp
     intro_cinematic_test.cpp
