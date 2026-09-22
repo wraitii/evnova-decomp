@@ -31,6 +31,7 @@
 #include "ship_ai.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
+#include "trade_center.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -684,19 +685,272 @@ RunBribePayment(GameState &state, std::int32_t &bribe_cost, bool free_help) {
   return LoadCommPrompt(random_index, kMsgTerribleMood);
 }
 
+// The six standard commodity names DAT_0069d2cc (0x100-stride table): the
+// original loader fills entry n from STR# 0xfa1 entry n+1 with the sparse
+// `STR ` 0x238c+n override, so this mirrors
+// NovaResources_LoadPatchedStringEntry.
+[[nodiscard]] std::string HailCommodityName(std::int16_t commodity) {
+  if (commodity < 0 || commodity > 5) {
+    return "?";
+  }
+  return NovaResources_LoadPatchedStringEntry(
+             0xfa1, static_cast<std::uint16_t>(commodity + 1), 0x238c)
+      .value_or("?");
+}
+
 // The hail-info text (DAT_007d190c) the Greetings button shows for
-// Ghidra 0x004819d0 NovaUi_BuildShipCommHailInfoText (partial port).
-// Used for government-aid-eligible ships. The full assembly (branch 0:
-// stellar scan + commodity names) is deferred;
-// this mirrors the default STR# 0x7d2 0xaf fragment the original shows when
-// the hail target carries no dude hail info (the common case).
-[[nodiscard]] std::string BuildHailInfoText(const GameState &state,
-                                            const Ship &target) {
-  // TODO(decomp): dude-def hail_info_types / stellar-scan assembly of
-  // NovaUi_BuildShipCommHailInfoText branch 0 is not reconstructed; the
-  // original's default fragment is shown instead.
-  // 1-based STR# 0x7d2 entry 0xb0 = "is a good place to".
-  std::string text = NovaHud_LoadStringEntry(kMiscStr, 0xb0).value_or("");
+// Ghidra 0x004819d0 NovaUi_BuildShipCommHailInfoText. The four branches are
+// selected by the target's dude-def `hail_info_types` high nibble (with a
+// retry loop in the original) unless a personality Flags-0x8000/no-CommQuote
+// override forces the disaster branch:
+//   0 (0x1000) stellar trade scan: "<stellar> is a good place to buy|sell
+//              <commodity>." from a random available trading stellar;
+//   1 (0x2000) active-disaster text (STR# 0x7d2 0xb3..0xba fragments);
+//   2 (0x4000) dude hail string pool (hail_info_types & 0xfff) + 0x1d4c,
+//              expanded through the shared ^-placeholder pass;
+//   3 (0x8000) government hail strings (sparse STR faction*10 + 0x271a/0x271f
+//              + random_index, falling back to STR# faction+7000).
+// The selected text is replaced by STR# 0xbb8 prompt 0x2e+random_index when it
+// is short or carries the '*' quantityless marker, then a positive-CommQuote
+// personality overrides everything with `STR ` 15000+CommQuote or STR# 0x1bbc.
+// The dude pool uses the original signed action-index remainder to constrain
+// the selection range. NovaRandom_Range(0) reseeds the original global LCG;
+// RandomBelow(0) returns zero without a matching reseed, but yields the same
+// first pool entry for the destination-window -1 sentinel.
+[[nodiscard]] std::string BuildHailInfoText(GameState &state,
+                                            const Ship &target,
+                                            std::int16_t random_index) {
+  // 1-based STR# 0x7d2 entries (pool index + 1): 0xaf = "Greetings.".
+  const std::string greeting =
+      NovaHud_LoadStringEntry(kMiscStr, 0xaf).value_or("");
+  std::string text = greeting;
+
+  const DudeDef *dude = target.dude_class_id >= 0
+                            ? state.scenario.Dude(static_cast<std::int16_t>(
+                                  target.dude_class_id + 0x80))
+                            : nullptr;
+
+  // Pick one of the enabled hail-info types uniformly (the original rejection
+  // samples NovaRandom_Range(4) until the rolled nibble bit is set).
+  std::int16_t hail_type = -1;
+  if (dude != nullptr && (dude->hail_info_types & 0xf000U) != 0U) {
+    constexpr std::uint16_t kHailBits[4] = {0x1000, 0x2000, 0x4000, 0x8000};
+    for (;;) {
+      const auto roll = static_cast<std::int16_t>(RandomBelow(state.rng, 4));
+      if ((dude->hail_info_types & kHailBits[roll]) != 0U) {
+        hail_type = roll;
+        break;
+      }
+    }
+  }
+
+  // Flags 0x8000 with no CommQuote (the -1 sentinel) forces disaster text.
+  if (target.pers_def_slot >= 0 &&
+      target.pers_def_slot <
+          static_cast<std::int16_t>(state.scenario.pers_defs.size())) {
+    const PersDef &pers =
+        state.scenario
+            .pers_defs[static_cast<std::size_t>(target.pers_def_slot)];
+    if ((pers.flags_primary & 0x8000) != 0 && pers.comm_quote_id == -1) {
+      hail_type = 1;
+    }
+  }
+
+  if (hail_type == 0) {
+    // Stellar trade scan. Count eligible bodies first (available, has a trade
+    // lane, not travel-restricted 0x20, and a 0x55555500 buy/sell lane).
+    const auto &stellars = state.scenario.stellars;
+    int eligible = 0;
+    for (const Stellar &st : stellars) {
+      if (st.is_available && (st.flags & 0x3U) != 0U &&
+          (st.flags & 0x20U) == 0U && (st.flags & 0x55555500U) != 0U) {
+        ++eligible;
+      }
+    }
+    if (eligible > 0 && !stellars.empty()) {
+      // Rejection-sample a stellar and commodity whose connective lane is 1
+      // (buy) or 4 (sell). The loop is bounded; a deterministic fallback scan
+      // guarantees termination for pathological data.
+      std::int16_t stellar_index = -1;
+      std::int16_t commodity = 0;
+      std::int16_t connective = 0;
+      for (int attempt = 0; attempt < 100000 && stellar_index < 0; ++attempt) {
+        const std::size_t idx = static_cast<std::size_t>(
+            RandomBelow(state.rng, static_cast<std::int32_t>(stellars.size())));
+        const Stellar &st = stellars[idx];
+        if (!st.is_available || (st.flags & 0x3U) == 0U ||
+            (st.flags & 0x20U) != 0U || (st.flags & 0x55555500U) == 0U) {
+          continue;
+        }
+        commodity = static_cast<std::int16_t>(RandomBelow(state.rng, 6));
+        const std::int16_t cv =
+            Stellar_TradeConnective(st, static_cast<std::size_t>(commodity));
+        if (cv != 1 && cv != 4) {
+          continue;
+        }
+        stellar_index = static_cast<std::int16_t>(idx);
+        connective = cv;
+      }
+      if (stellar_index < 0) {
+        for (std::size_t i = 0; i < stellars.size() && stellar_index < 0; ++i) {
+          const Stellar &st = stellars[i];
+          if (!st.is_available || (st.flags & 0x3U) == 0U ||
+              (st.flags & 0x20U) != 0U || (st.flags & 0x55555500U) == 0U) {
+            continue;
+          }
+          for (std::int16_t c = 0; c < 6; ++c) {
+            const std::int16_t cv =
+                Stellar_TradeConnective(st, static_cast<std::size_t>(c));
+            if (cv == 1 || cv == 4) {
+              stellar_index = static_cast<std::int16_t>(i);
+              commodity = c;
+              connective = cv;
+              break;
+            }
+          }
+        }
+      }
+      if (stellar_index >= 0) {
+        std::string built =
+            stellars[static_cast<std::size_t>(stellar_index)].name;
+        built += ' ';
+        built += NovaHud_LoadStringEntry(kMiscStr, 0xb0).value_or("");
+        built += ' ';
+        built += NovaHud_LoadStringEntry(
+                     kMiscStr,
+                     static_cast<std::uint16_t>(connective == 1 ? 0xb1 : 0xb2))
+                     .value_or("");
+        built += ' ';
+        built += HailCommodityName(commodity);
+        built += '.';
+        text = std::move(built);
+      }
+    }
+  }
+
+  if (hail_type == 1) {
+    // Active disasters (days_remaining > 1).
+    const auto &disasters = state.scenario.disaster_defs;
+    std::vector<std::size_t> active;
+    for (std::size_t i = 0; i < disasters.size(); ++i) {
+      if (disasters[i].days_remaining > 1) {
+        active.push_back(i);
+      }
+    }
+    std::int16_t index = -1;
+    if (active.size() == 1) {
+      index = static_cast<std::int16_t>(active[0]);
+    } else if (active.size() > 1) {
+      index = static_cast<std::int16_t>(active[static_cast<std::size_t>(
+          RandomBelow(state.rng, static_cast<std::int32_t>(active.size())))]);
+    }
+    if (index != -1) {
+      const DisasterDef &disaster = disasters[static_cast<std::size_t>(index)];
+      if (disaster.active_stellar >= 0 && disaster.active_stellar <= 0x7ff) {
+        const Stellar *st = state.scenario.Stellar(
+            static_cast<std::int16_t>(disaster.active_stellar + 0x80));
+        if (st != nullptr) {
+          std::string built;
+          built += NovaHud_LoadStringEntry(kMiscStr, 0xb3).value_or("");
+          built += ' ';
+          // 0x10 selects the dock-at/land-on phrasing; the short arm uses the
+          // shared 0x3c "on" fragment, the long arm 0xb4 "at".
+          built += NovaHud_LoadStringEntry(
+                       kMiscStr,
+                       static_cast<std::uint16_t>(
+                           (st->flags & 0x10U) == 0U ? 0x3c : 0xb4))
+                       .value_or("");
+          built += ' ';
+          built += st->name;
+          built += ", ";
+          built += NovaHud_LoadStringEntry(kMiscStr, 0xb5).value_or("");
+          built += ' ';
+          built += HailCommodityName(disaster.commodity);
+          built += ' ';
+          built +=
+              NovaHud_LoadStringEntry(
+                  kMiscStr,
+                  static_cast<std::uint16_t>(0xb6 + RandomBelow(state.rng, 3)))
+                  .value_or("");
+          built += ' ';
+          built += NovaHud_LoadStringEntry(
+                       kMiscStr,
+                       static_cast<std::uint16_t>(
+                           disaster.price_delta < 0 ? 0xb9 : 0xba))
+                       .value_or("");
+          built += '.';
+          text = std::move(built);
+        }
+      }
+    }
+  }
+
+  if (hail_type == 2 && dude != nullptr) {
+    // Dude hail string pool: STR# (hail_info_types & 0xfff) + 0x1d4c.
+    const std::uint16_t pool =
+        static_cast<std::uint16_t>((dude->hail_info_types & 0xfffU) + 0x1d4cU);
+    const std::uint16_t count = NovaHud_StringPoolEntryCount(pool);
+    if (count > 0) {
+      const std::int32_t range =
+          static_cast<std::int32_t>(state.travel.interaction_action_index_b) %
+              static_cast<std::int32_t>(count) +
+          1;
+      const std::uint16_t entry =
+          static_cast<std::uint16_t>(RandomBelow(state.rng, range) + 1);
+      if (auto entry_text = NovaHud_LoadStringEntry(pool, entry);
+          entry_text.has_value()) {
+        if (!entry_text->empty()) {
+          std::string expanded = *entry_text;
+          Mission_ExpandStringPlaceholders(state, expanded);
+          text = std::move(expanded);
+        } else {
+          // The original reloads STR# 0x7d2 entry 0xaf when the selected dude
+          // pool string is empty, restoring the default "Greetings." text.
+          text = greeting;
+        }
+      }
+    }
+  }
+
+  if (hail_type == 3) {
+    // Government hail strings. Sparse `STR ` faction*10 + 0x271a/0x271f +
+    // random_index; fallback STR# faction+7000 at random_index+1 (peaceful)
+    // or random_index+6 (aggressive).
+    const std::int16_t faction = target.faction_or_government_id;
+    if (faction >= 0) {
+      const bool peaceful = target.ai_behavior_code < 3;
+      const std::int32_t primary_id =
+          faction * 10 + (peaceful ? 0x271a : 0x271f) + random_index;
+      const std::uint16_t fallback_entry =
+          static_cast<std::uint16_t>(random_index + (peaceful ? 1 : 6));
+      bool resolved = false;
+      if (primary_id >= 0 && primary_id <= 0xffff) {
+        if (auto s = NovaResources_LoadStringResource(
+                static_cast<std::uint16_t>(primary_id));
+            s.has_value()) {
+          text = *s;
+          resolved = true;
+        }
+      }
+      if (!resolved) {
+        if (auto s = NovaHud_LoadStringEntry(
+                static_cast<std::uint16_t>(faction + 7000), fallback_entry);
+            s.has_value()) {
+          text = *s;
+        }
+      }
+    }
+  }
+
+  // Short or '*' quantityless-marker text falls back to the ship prompt pool.
+  if (text.size() < 3 || text[0] == '*' ||
+      (text.size() > 1 && text[1] == '*')) {
+    if (auto prompt = NovaHud_LoadStringEntry(
+            3000, static_cast<std::uint16_t>(random_index + 0x2e));
+        prompt.has_value()) {
+      text = *prompt;
+    }
+  }
 
   // The original applies a personality CommQuote last, replacing whichever
   // generic/dude hail-info branch was selected above. A sparse `STR ` at
@@ -1445,7 +1699,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     if (!fire_restricted && !special_mask) {
       if (!NovaAiShip_ShouldKeepPressingTarget(state, target) &&
           NovaShip_DoesShipLikePlayer(state, target)) {
-        const std::string info = BuildHailInfoText(state, target);
+        const std::string info = BuildHailInfoText(state, target, random_index);
         if (!info.empty()) {
           status = info;
         }

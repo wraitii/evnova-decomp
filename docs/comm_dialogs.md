@@ -109,6 +109,22 @@ the pers personality's HailPict (`g_pers_defs[slot] + 0x12`) when it is a
 real PICT id (> 0x7f). Loaded once per window open into
 `g_escort_management_ship_image` and blitted into the item-10 rect.
 
+## Dude hail string-pool selection (0x004819d0)
+
+For hail-info branch 2, the pool is `STR# (hail_info_types & 0xfff) + 0x1d4c`.
+Ghidra reads its entry count, computes the signed remainder
+`g_travel_interaction_action_index_b % count`, adds one to form the random
+range, then chooses `NovaRandom_Range(range) + 1`. The action index is seeded
+with `NovaRandom_Range(0x800)` on player reset and system arrival. Opening the
+stellar destination interaction copies action-index A's `-1` sentinel into
+action-index B, so signed remainder yields `-1`, the random range becomes
+zero, and the original range helper reseeds its LCG before returning entry 1.
+The port preserves the selector and first-entry result; its clean-room PRNG
+does not reproduce the original zero-bound reseed side effect.
+
+An empty selected pool entry reloads STR# 0x7d2 entry 0xaf ("Greetings.")
+before the common short-text prompt fallback runs.
+
 ## Related resource ids
 
 - Backdrop PICTs: ship 0x213f (Communications frame), stellar 0x2140,

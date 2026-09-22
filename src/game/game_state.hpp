@@ -759,6 +759,11 @@ struct EscortCommandState {
 // cross-system hyperspace jump as an explicit state machine (travel.cpp) so it
 // is reconstructable without the NPC-fleet, landing or dialog systems.
 struct TravelState {
+  // Ghidra g_travel_interaction_action_index_b: initialized with
+  // NovaRandom_Range(0x800) on player reset and system arrival, then copied
+  // from action_index_a (-1) when the destination interaction opens. The hail
+  // string-pool selector uses this signed value modulo the pool count.
+  std::int16_t interaction_action_index_b = 0;
   // The travel-slot index (0..15) of the travel point the player is engaging,
   // or -1 when no travel is active. Mirrors Ghidra ai_secondary_target_slot
   // used as the adjacency-slot selector. The paired destination system is

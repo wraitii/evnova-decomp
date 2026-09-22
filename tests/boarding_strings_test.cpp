@@ -72,6 +72,38 @@ TEST_CASE("STR# 0x7d2 boarding strings (1-based entries)") {
                          "transferred from this ship.");
 }
 
+// The hail-info fragments NovaUi_BuildShipCommHailInfoText (0x004819d0)
+// composes. Resource_LoadStringEntry is 1-based, but the fragment ids the
+// original passes are pool index + 1, so entry 0xaf is pool 0xae
+// ("Greetings."), NOT "is a good place to" (0xb0). This pins that mapping.
+TEST_CASE("STR# 0x7d2 hail-info fragments (1-based entries)") {
+  using game::NovaHud_LoadStringEntry;
+  auto entry = [](std::uint16_t entry_number) {
+    return NovaHud_LoadStringEntry(0x7d2, entry_number);
+  };
+  REQUIRE(entry(0xaf) == "Greetings.");     // default
+  REQUIRE(entry(0xb0) == "is a good place to");
+  REQUIRE(entry(0xb1) == "buy");
+  REQUIRE(entry(0xb2) == "sell");
+  REQUIRE(entry(0xb3) == "The last time I was");
+  REQUIRE(entry(0x3c) == "on"); // planet phrasing
+  REQUIRE(entry(0xb4) == "at"); // station phrasing
+  REQUIRE(entry(0xb5) == "the price of");
+  REQUIRE(entry(0xb6) == "was very");
+  REQUIRE(entry(0xb7) == "was really");
+  REQUIRE(entry(0xb8) == "was pretty");
+  REQUIRE(entry(0xb9) == "low");
+  REQUIRE(entry(0xba) == "high");
+
+  // Ship-comm prompt pool fallback for '*'/short hail text: the five greeting
+  // variants at 0x2e..0x32 (random_index + 0x2e).
+  REQUIRE(NovaHud_LoadStringEntry(0xbb8, 0x2e) == "Nice to meet you.");
+  REQUIRE(NovaHud_LoadStringEntry(0xbb8, 0x2f) == "Hello there.");
+  REQUIRE(NovaHud_LoadStringEntry(0xbb8, 0x30) == "Greetings.");
+  REQUIRE(NovaHud_LoadStringEntry(0xbb8, 0x31) == "Hi there.");
+  REQUIRE(NovaHud_LoadStringEntry(0xbb8, 0x32) == "Howdy.");
+}
+
 // The six standard boarding commodities (STR# 0xfa1): the original loader
 // reads commodity type n through 1-based entry n+1 (FUN_004c7040 ->
 // DAT_0069d2cc), and the port's CargoName does the same.

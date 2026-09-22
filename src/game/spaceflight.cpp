@@ -955,6 +955,9 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   // Offering rolls redraw on every system arrival (Stellar_ProcessTravel
   // AndLanding 0x00458802: roll 1..100 per definition, then re-evaluate
   // the mission lists).
+  // Ghidra 0x0044f815..0x0044f829 seeds the hail selector after the arrival
+  // presentation reset and immediately before the arrival random roll tables.
+  state.travel.interaction_action_index_b = RandomBelow(state, 0x800);
   Mission_RerollOfferingRolls(state);
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
   // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of
