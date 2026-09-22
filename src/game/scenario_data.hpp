@@ -1059,6 +1059,13 @@ struct Stellar {
   // payload +0x246). Run when a planet-type weapon destroys the body; the
   // original also re-arms it through Mission_ExecuteReactionScript.
   std::string on_destroy_script;
+  // OnDominate / OnRelease control-bit expressions (Bible Stellar fields;
+  // Ghidra StellarDef +0x68 / +0x167, payload +0x36 / +0x135). Run by
+  // Mission_ExecuteReactionScript when the destination-interaction window's
+  // Demand Tribute action dominates the body (0x00480ec0) or its Release
+  // action frees it (0x004810a0).
+  std::string on_dominate_script; // StellarDef +0x68
+  std::string on_release_script;  // StellarDef +0x167
   // Current-frame opaque-pixel mask bound by
   // NovaCollision_RefreshCollisionMasks (collision.cpp). Non-owning: points
   // into GameState's SpriteMaskStore.

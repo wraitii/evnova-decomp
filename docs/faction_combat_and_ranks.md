@@ -134,7 +134,19 @@ mission text breaks. The port uses the Bible semantics (ConvName for
 Per pulse it fires event 3, spawns defense-fleet ships up to the stellar
 max/present bookkeeping, latches domination (`dominated` 1, tribute STR#
 0xbba 25/26; release mirrors it with 35/36 and clears `dominated`), and
-runs the stellar reaction scripts. TODO(decomp): the branch is not ported.
+runs the stellar OnDominate/OnRelease reaction scripts (loaded from sp\x9ab
+payload +0x36 / +0x135). Ported in `NovaNegotiation_RunDestinationDialog`
+(`run_tribute_action`): the demand first drops the current system's
+reputation to `min_status - 1`, fires one event-3 pulse, and either dismisses
+the demand when `player_combat_rating_points < 0x3200` and cheats are off
+(status msg 1) or, when no garrison is present and it is the first demand
+this window, dominates (five event-3 pulses, status 0x1a planet / 0x1b
+station, clears the selected stellar, sets `g_pers_defs[0x3fe].alive`,
+`dominated = 1`, `domination_days = 0`, runs OnDominate). A refused demand
+draws status 2, rescales `present_ship_count` and mounts the first wave via
+`NovaStellar_SpawnDefenseFleetShip`. Release draws status 0x24/0x25, clears
+`dominated`, reseeds the garrison from `max_ship_count`, drops the
+reputation, and runs OnRelease.
 
 Pilot save/load persists the `g_rank_defs` active flags (FleetState +0x5dde,
 one word per slot); see `docs/pilot_save_file_format.md`.
