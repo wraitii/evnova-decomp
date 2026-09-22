@@ -635,7 +635,7 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
 // 0x0d. Candidate gates, in original order: not self, not one of this ship's
 // own carried fighters (squad leader == this ship's instance), active,
 // boarded-target latch clear, disabled, not a mission-fleet ship, and one of
-// -- is the player, has a non-negative post-hit mode hint, has low AI
+// -- is the player, has a non-negative fleet_recovery_hint, has low AI
 // behavior (< 3), its class has low default AI (< 3), or this ship still has
 // a fireable non-secondary weapon (Weapon_HasAnyFireableNonSecondaryWeapon
 // 0x00415c10, sampled once at entry). Then the candidate class must have
@@ -663,7 +663,7 @@ void NovaAi_SelectNearestDisabledShipForBoarding(GameState &state, Ship &ship) {
     const bool low_ai =
         candidate.ai_behavior_code < 3 ||
         (candidate_cls != nullptr && candidate_cls->default_ai_behavior < 3);
-    if (!(slot == 0 || candidate.post_hit_mode_hint >= 0 || low_ai ||
+    if (!(slot == 0 || candidate.fleet_recovery_hint >= 0 || low_ai ||
           has_fireable_weapon)) {
       continue;
     }

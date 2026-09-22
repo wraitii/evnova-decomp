@@ -880,15 +880,15 @@ TEST_CASE("npc fuel scoop recharges and clamps to the class capacity") {
   CHECK(ship.fuel_points == Catch::Approx(10.0F)); // capacity clamp
 }
 
-TEST_CASE("live npc clears a stale post-hit mode hint") {
+TEST_CASE("live npc clears a stale fleet recovery hint") {
   game::GameState state;
   game::ShipClass cls = TestShipClass();
   game::Ship ship;
   ship.ship_instance_id = 1;
   ship.armor_points = 10.0F;
-  ship.post_hit_mode_hint = 1;
+  ship.fleet_recovery_hint = 1;
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
-  CHECK(ship.post_hit_mode_hint == -1);
+  CHECK(ship.fleet_recovery_hint == -1);
 }
 
 TEST_CASE("state 2 mode 4 ramps engine glow with its departure step") {

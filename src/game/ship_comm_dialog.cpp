@@ -983,7 +983,7 @@ bool NovaEscortManagement_ApplyAction(GameState &state,
         static_cast<std::int16_t>(escort.ship_class_id + 0x80));
     Player_TransferCargoAndJunkToEscortByRatio(state, escort.ship_instance_id);
     escort.squad_leader_ship_slot = -1;
-    escort.post_hit_mode_hint = -1;
+    escort.fleet_recovery_hint = -1;
     escort.boarded_target_latch = 1;
     escort.ai_behavior_code =
         ship_class != nullptr ? ship_class->default_ai_behavior : 1;
@@ -1555,7 +1555,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     target.ai_behavior_code =
         ship_class != nullptr ? ship_class->default_ai_behavior : 1;
     target.boarded_target_latch = 1;
-    target.post_hit_mode_hint = -1;
+    target.fleet_recovery_hint = -1;
     // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810) subset:
     target.ai_state_code = 0;
     target.ai_control_mode = 0;

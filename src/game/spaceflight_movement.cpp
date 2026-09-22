@@ -675,7 +675,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       ship.armor_points = max_armor * armor_fraction + 1.0F;
       // The original raises g_playerShipPresentationDirty when the player's
       // HUD target is this ship; the port's HUD is immediate-mode.
-      if (ship.post_hit_mode_hint >= 0) {
+      if (ship.fleet_recovery_hint >= 0) {
         // Surrender conversion: the ship joins the player's squad (slot 0),
         // loses shields/targets, and either becomes a behavior-5 fighter or a
         // behavior-6 escort depending on how it was disabled. The hint selects
@@ -684,14 +684,14 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         ship.shield_points = 0.0F;
         ship.ai_secondary_target_slot = -1;
         ship.primary_target_ship_slot = -1;
-        if (ship.post_hit_mode_hint == 0) {
+        if (ship.fleet_recovery_hint == 0) {
           ship.ai_behavior_code = 5;
           if (auto text = NovaHud_LoadStringEntry(0x7D2, 0x80)) {
             NovaHud_ShowOverlayMessage(state, *text, std::uint64_t{0xfa});
           }
         } else {
           ship.escort_origin_mark =
-              static_cast<std::int8_t>(ship.post_hit_mode_hint == 1 ? 1 : 0);
+              static_cast<std::int8_t>(ship.fleet_recovery_hint == 1 ? 1 : 0);
           ship.ai_behavior_code = 6;
           if (auto text = NovaHud_LoadStringEntry(0x7D2, 0x7f)) {
             NovaHud_ShowOverlayMessage(state, *text, std::uint64_t{0xfa});
@@ -701,9 +701,10 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       }
     }
   } else {
-    // Ghidra 0x00433050: a live hull clears any stale post-hit hint every
+    // Ghidra 0x00433050: a live hull clears any stale fleet_recovery_hint
+    // every
     // frame, so a later disable starts from the neutral state.
-    ship.post_hit_mode_hint = -1;
+    ship.fleet_recovery_hint = -1;
   }
 
   // Producer: Shot_UpdateBeamHitQueue (0x0042f270)'s negative-impact-impulse

@@ -461,7 +461,7 @@ struct ShipClass {
   // order whose sh\x8an BaseImageID matches, so fresh classes point at
   // themselves and clones at their source -- never -1. Read by
   // Sprite_GetShipClassEscortFrameWidth 0x004624c0 (escort/formation span) and
-  // by Ship_LaunchCarriedShipFromBay 0x00415ea0's bay-weapon fallback, mapping
+  // by Ship_RecoverCarriedShipToBay 0x00415ea0's bay-weapon fallback, mapping
   // a fighter variant back to its carrier's bay weapon. Distinct from the
   // Bible EscortType/EscortCategory field and from target_pict_ship_class
   // (+0xa0c). -1 here means "no sprite owner" (e.g. a default-constructed
@@ -1019,19 +1019,19 @@ struct Stellar {
   std::int16_t destroyed_days_remaining = 0;
 
   // ---- Hostile-ship deposit bookkeeping (Ghidra StellarDef +0x4e/+0x50 and
-  // the field_0x47 latch). The original keeps a pool of defense-fleet ships
-  // staged at a stellar (spöb DefenseDude/DefCount; max_ship_count = the
-  // mounted garrison size, present_ship_count = how many are currently
-  // spawned). NovaStellar_SpawnDefenseFleetShip (0x00421fd0) sets field_0x47
-  // when the first defender is mounted; NovaSystem_TickNpcSpawnMaintenance
-  // (0x0041d6e0) then trickles replacements while present_ship_count > 0. The
-  // destination-interaction dialog's attack branch
-  // (NovaUi_RunTravelDestinationInteractionWindow 0x00480030) is the trigger
-  // that mounts the first wave and rescales present_ship_count after a
-  // confrontation. field_0x47 is also read by
+  // the defense_fleet_mounted latch). The original keeps a pool of
+  // defense-fleet ships staged at a stellar (spöb DefenseDude/DefCount;
+  // max_ship_count = the mounted garrison size, present_ship_count = how many
+  // are currently spawned). NovaStellar_SpawnDefenseFleetShip (0x00421fd0)
+  // sets defense_fleet_mounted when it mounts the first defender;
+  // NovaSystem_TickNpcSpawnMaintenance (0x0041d6e0) then trickles replacements
+  // while present_ship_count > 0. The destination-interaction dialog's attack
+  // branch (NovaUi_RunTravelDestinationInteractionWindow 0x00480030) mounts the
+  // first wave and rescales present_ship_count after a confrontation; the port
+  // implements it as run_tribute_action in negotiation_dialog.cpp.
+  // defense_fleet_mounted is also read by
   // NovaGovernment_IsCandidateHostileToTargeter (0x004629e0) as the
-  // availability-0x200 stellar's hostility sentinel. TODO(decomp): the attack
-  // branch is deferred (see negotiation_dialog.cpp).
+  // availability-0x200 stellar's hostility sentinel.
   int present_ship_count = 0; // StellarDef +0x50
   int max_ship_count = 0;     // StellarDef +0x4e (garrison size; >0x3e9/0x2711
                               //  rescale branches)
@@ -1048,7 +1048,7 @@ struct Stellar {
   // income pass (0x00423540) while the stellar pays out. The pilot format's
   // stelAnnoyance persists this same word; no reset or other writer is known.
   std::int16_t domination_days = 0;
-  std::uint8_t field_0x47 = 0;
+  std::uint8_t defense_fleet_mounted = 0;
 
   // Current ambient-sprite animation frame (Ghidra StellarDef +0x476,
   // sprite_current_frame). The renderer's AdvanceStellarAnimation

@@ -284,7 +284,7 @@ TEST_CASE("stellar defense fleet spawns and trickles replacements") {
       state.scenario.stellars[static_cast<std::size_t>(stellar_id - 0x80)];
   stellar.system_id = system_id;
   state.player.current_system_id = system_id;
-  stellar.field_0x47 = 0;
+  stellar.defense_fleet_mounted = 0;
   stellar.present_ship_count = 5;
   stellar.max_ship_count = 2; // one wave = 2 defenders
 
@@ -301,7 +301,7 @@ TEST_CASE("stellar defense fleet spawns and trickles replacements") {
   CHECK(ship.pos_y == Catch::Approx(static_cast<float>(stellar.pos_y)));
   CHECK(ship.heading >= 0.0F);
   CHECK(ship.heading < 6.2831855F);
-  CHECK(stellar.field_0x47 == 1);
+  CHECK(stellar.defense_fleet_mounted == 1);
 
   // One live defender < wave size 2, so the tick mounts a second and spends a
   // unit of the present-ship budget.

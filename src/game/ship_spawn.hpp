@@ -193,7 +193,7 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
 //     (NovaEncounter_SpawnFleetLeadShip), otherwise spawn a random
 //     system-bound dude ship (NovaDude_SpawnRandomDudeShipInSystem).
 //  3. Stellar defense-fleet trickle: scan the 16 nav stellars for the first
-//     with field_0x47 set and a positive present_ship_count whose live
+//     with defense_fleet_mounted set and a positive present_ship_count whose live
 //     defenders number below max_ship_count % 10; spawn one
 //     (NovaStellar_SpawnDefenseFleetShip) and decrement the budget. At most
 //     one defense spawn per tick.
@@ -240,7 +240,7 @@ NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
 // stellar's defender (Ship.defense_fleet_home_stellar_id), forces behavior-3
 // warship, seeds it at the stellar's map position with a random heading and an
 // initial velocity at the effective max speed, makes it hostile to the player,
-// and latches the stellar's field_0x47 so the per-tick defense trickle in
+// and latches the stellar's defense_fleet_mounted so the per-tick defense trickle in
 // NovaSystem_TickNpcSpawnMaintenance can replace losses. `stellar_id` is the
 // stellar resource id; returns the slot or -1.
 [[nodiscard]] int NovaStellar_SpawnDefenseFleetShip(GameState &state,
@@ -337,7 +337,7 @@ void NovaGame_ReseedRandom(GameState &state);
 // a fighter launched.
 bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher);
 
-// Ghidra 0x00415ea0 Ship_LaunchCarriedShipFromBay (bay-RECOVERY arm; called
+// Ghidra 0x00415ea0 Ship_RecoverCarriedShipToBay (bay-RECOVERY arm; called
 // when a carried fighter reaches its carrier in AI control mode 8): finds the
 // carrier's mode-99 bay weapon matching the fighter's class id (fallback:
 // the class's base-sprite clone-source id), tops the bay back up (+1 loaded

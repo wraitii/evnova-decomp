@@ -951,11 +951,11 @@ void Ship_ApplyDamageToShip(GameState &state,
             static_cast<std::int16_t>(mission.goal_counter_c + 1);
       }
     }
-    // Post-hit behavior hint for surrendered escorts (squad_leader_ship_slot 0,
+    // Fleet-recovery hint for surrendered escorts (squad_leader_ship_slot 0,
     // not a mission ship): stores how the boarding/escort-conversion flow
     // treats this hull (the behavior-6 escort arms a cargo transfer below).
     if (target.squad_leader_ship_slot == 0 && fleet_slot == -1) {
-      target.post_hit_mode_hint =
+      target.fleet_recovery_hint =
           target.ai_behavior_code == 5
               ? 0
               : (target.escort_origin_mark == 0 ? 2 : 1);
