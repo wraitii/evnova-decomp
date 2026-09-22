@@ -11,6 +11,7 @@
 #include "mission_script.hpp"
 #include "nova_font.hpp"
 #include "nova_name_text.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
 #include "ship_spawn.hpp"
@@ -740,6 +741,8 @@ void NovaShip_ResetPlayerShipState(GameState &state) {
   state.player_stat_modifier_pct.fill(100);
   state.target_category_command.fill(-1);
   state.travel = {};
+  // Ghidra 0x004b39f2..0x004b3a05 seeds the travel-dialog hail selector.
+  state.travel.interaction_action_index_b = RandomBelow(state, 0x800);
   state.travel.travel_hint_state = 0x7fff;
   state.game_over_pending = false;
   state.return_to_menu_pending = false;

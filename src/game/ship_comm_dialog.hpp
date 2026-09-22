@@ -53,10 +53,13 @@
 // (single-pass DLOG 0x3f0-style confirm, 35% acceptance, 0.75x discount,
 // +1000 haggle) and the escort release side-effects on close are
 // reconstructed. The dedicated DLOG 0x3fe escort-management window supports
-// release plus mutually exclusive upgrade/sale scheduling. Deferred with loud
-// Todo(decomp) logs: the mission-fleet escort-def branches (fleet defs not
-// modelled), the full hail-info text assembly beyond the default fragment
-// (NovaUi_BuildShipCommHailInfoText 0x004819d0 branch 0).
+// release plus mutually exclusive upgrade/sale scheduling. The hail-info text
+// builder (NovaUi_BuildShipCommHailInfoText 0x004819d0) is reconstructed in
+// full: the four dude `hail_info_types` branches (stellar trade scan,
+// active-disaster report, dude string pool, government strings), the '*'/short
+// prompt fallback, and the personality CommQuote override. RNG selection is
+// distribution-equivalent rather than bit-identical. The local_1c mission-
+// fleet escort-def branches remain deferred (fleet defs not modelled).
 
 #include <cstdint>
 
