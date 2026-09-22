@@ -76,10 +76,20 @@ the candidate to be a nav default (`SystemDef.nav_stellar_ids`) in **every**
 system of the chain, so a stellar missing from any duplicate system is never
 chosen (`StellarDef.is_defined` also gates out stellars no system hosts). The
 twin chain uses `NovaSystem_ResolveDiscoverySlot` (0x0046b9b0). The selection
-cadence differs from the original: the original proves one of its fixed 0x800
-stellar slots is eligible, then draws uniform random slot numbers until one
-passes; the port builds the eligible vector and draws once. Both are uniform
-over eligible candidates but consume the RNG stream differently.
+cadence now matches the original: each random family proves one of its fixed
+0x800 stellar slots is eligible (RNG-free), then rejection-samples
+`NovaRandom_Range(0x800)` until one passes. The stellar selector's
+15000..19999 allied family carries a binary quirk verified at
+0x0043da4c/0x0043db4d/0x0043db53: it indexes `g_system_defs` with the
+**stellar** slot (not the candidate's own system) and excludes the exact
+stellar government before `Government_AreGovtsAllied`; the 30000/31000
+class families also exclude the exact government. The port reproduces both.
+The port's deliberate divergences are the no-candidate fallback (-1 /
+TravelStel instead of the original anchor); the -2 arm's validity check,
+which the original evaluates against the pre-scan hit (always true); and the
+shared pre-scan/sampling predicate, which applies the sampling loop's
+visibility test to the pre-scan so a pre-scan-only candidate cannot spin the
+loop.
 
 Related: Ghidra `0x00447f00 System_GetSystemDefFlagByte` is exactly the
 `SystemDef.is_visible` (+0x1eb) predicate, renamed `System_IsSystemVisible`.

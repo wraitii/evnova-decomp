@@ -326,150 +326,171 @@ namespace {
   return -1;
 }
 
-[[nodiscard]] std::vector<std::int16_t>
-CollectStellarLocatorCandidates(const GameState &state,
-                                std::int16_t locator,
-                                std::int16_t excluded,
-                                std::int16_t reference) {
-  const auto same_government_class = [&state](std::int16_t lhs,
-                                              std::int16_t rhs,
-                                              bool require_match) {
-    if (lhs < 0 || rhs < 0 ||
-        lhs >= static_cast<std::int16_t>(state.scenario.governments.size()) ||
-        rhs >= static_cast<std::int16_t>(state.scenario.governments.size())) {
-      return false;
-    }
-    const auto &left =
-        state.scenario.governments[static_cast<std::size_t>(lhs)];
-    const auto &right =
-        state.scenario.governments[static_cast<std::size_t>(rhs)];
-    for (const auto left_class : left.classes) {
-      if (left_class < 0) {
-        continue;
-      }
-      for (const auto right_class : right.classes) {
-        if (left_class == right_class) {
-          return require_match;
-        }
-      }
-    }
-    return !require_match;
-  };
-  const auto matches = [&](const Stellar &stellar) {
-    if (!stellar.is_available || stellar.system_id < 0 ||
-        stellar.system_id >=
-            static_cast<std::int16_t>(state.scenario.systems.size()) ||
-        !NovaTargeting_IsStellarUsableForTravel(stellar)) {
-      return false;
-    }
-    const auto stellar_id =
-        static_cast<std::int16_t>(&stellar - state.scenario.stellars.data());
-    if (stellar_id == excluded) {
-      return false;
-    }
-    if (!NovaSystem_IsSystemVisible(state, stellar.system_id)) {
-      return false;
-    }
-    if (!Mission_IsStellarValidRandomDestination(
-            state, stellar_id, reference)) {
-      return false;
-    }
-    const auto govt = stellar.government_id;
-    if (locator == -2) {
-      // Ghidra 0x0043d510: ordinary travel stellar, neither the 0x20
-      // restricted/hypergate lane nor the 0x10 land-only lane.
-      return (stellar.flags & (0x10U | 0x20U)) == 0U;
-    }
-    if (locator == -3) {
-      // Ghidra 0x0043d510: the 0x20 lane, but still not 0x10.
-      return (stellar.flags & 0x20U) != 0U && (stellar.flags & 0x10U) == 0U;
-    }
-    // All remaining random families use the ordinary (non-0x20) travel lane.
-    // The exact-government 9999..14999 arm permits 0x20 only when the target
-    // government carries Flags1c 0x800; retain that narrow original quirk.
-    if ((stellar.flags & 0x20U) != 0U) {
-      const auto target_govt = locator >= 10000 && locator < 15000
-                                   ? static_cast<std::int16_t>(locator - 10000)
-                                   : static_cast<std::int16_t>(-1);
-      if (target_govt < 0 ||
-          target_govt >=
-              static_cast<std::int16_t>(state.scenario.governments.size()) ||
-          (state.scenario.governments[static_cast<std::size_t>(target_govt)]
-               .flags_primary &
-           0x0800U) == 0U) {
-        return false;
-      }
-    }
-    if (locator >= 10000 && locator < 15000) {
-      return govt == static_cast<std::int16_t>(locator - 10000);
-    }
-    if (locator >= 15000 && locator < 20000) {
-      // TODO(decomp(0x0043d510)) skipped: the decompile's allied-family
-      // existence/pick loops contain inconsistent system-table indexing.
-      // Keep the supported government-alliance predicate until disassembly
-      // establishes whether that expression is a real binary quirk.
-      return NovaGovernment_AreGovtsAllied(
-          state.scenario, govt, static_cast<std::int16_t>(locator - 15000));
-    }
-    if (locator >= 20000 && locator < 25000) {
-      return govt != static_cast<std::int16_t>(locator - 20000);
-    }
-    if (locator >= 25000 && locator < 30000) {
-      return NovaGovernment_AreGovtsHostileOrXenophobic(
-          state.scenario, govt, static_cast<std::int16_t>(locator - 25000));
-    }
-    if (locator >= 30000 && locator < 31000) {
-      const auto wanted = static_cast<std::int16_t>(locator - 30000);
-      return same_government_class(govt, wanted, true);
-    }
-    if (locator >= 31000 && locator < 32000) {
-      const auto wanted = static_cast<std::int16_t>(locator - 31000);
-      return same_government_class(govt, wanted, false);
-    }
-    return false;
-  };
-
-  std::vector<std::int16_t> candidates;
-  for (std::size_t i = 0; i < state.scenario.stellars.size(); ++i) {
-    if (matches(state.scenario.stellars[i])) {
-      candidates.push_back(static_cast<std::int16_t>(i));
-    }
-  }
-  return candidates;
+// 0x0043d510 evaluates every family against the fixed 0x800 stellar table
+// (not the shorter clean-room vector), so a slot past the loaded records is
+// simply ineligible.
+[[nodiscard]] bool StellarSlotInTable(const GameState &state, int slot) {
+  return slot >= 0 && slot < 0x800 &&
+         static_cast<std::size_t>(slot) < state.scenario.stellars.size();
 }
 
-[[nodiscard]] std::int16_t ResolveMissionStellar(GameState &state,
-                                                 std::int16_t locator,
-                                                 std::int16_t excluded,
-                                                 std::int16_t fallback,
-                                                 std::int16_t reference) {
+// The candidate predicate shared by the 0x0043d510 existence pre-scan and its
+// rejection-sampling loop. `reference` is the original param_2 (the selected
+// travel stellar, also the no-candidate fallback); `excluded` is param_3 (the
+// TravelStel already chosen for the ReturnStel pass). The original's -2 arm
+// validates Mission_IsStellarValidRandomDestination against the pre-scan's
+// first hit rather than the sampled slot (0x0043d5dc..0x0043d645), which makes
+// that gate always pass; the port tests each sampled candidate instead. Its
+// existence pre-scan is also weaker than the sampling loop (the -2 arm omits
+// System_IsSystemVisible), so sharing one predicate avoids the original
+// spinning when only a pre-scan-only candidate exists.
+[[nodiscard]] bool StellarLocatorEligible(const GameState &state,
+                                          std::int16_t locator,
+                                          int candidate,
+                                          std::int16_t reference,
+                                          std::int16_t excluded) {
+  if (!StellarSlotInTable(state, candidate)) {
+    return false;
+  }
+  const auto candidate_id = static_cast<std::int16_t>(candidate);
+  if (candidate_id == reference || candidate_id == excluded) {
+    return false;
+  }
+  const Stellar &stellar =
+      state.scenario.stellars[static_cast<std::size_t>(candidate)];
+  if (!stellar.is_available ||
+      !NovaSystem_IsSystemVisible(state, stellar.system_id) ||
+      !NovaTargeting_IsStellarUsableForTravel(stellar)) {
+    return false;
+  }
+  if (!Mission_IsStellarValidRandomDestination(
+          state, candidate_id, reference)) {
+    return false;
+  }
+  const std::uint32_t travel_flags = stellar.flags;
+  // -2/-3 are the only families that gate the 0x10 land-only bit; every other
+  // family rejects the 0x20 restricted lane outright (9999..14999 excepted).
+  if (locator == -2) {
+    return (travel_flags & (0x10U | 0x20U)) == 0U;
+  }
+  if (locator == -3) {
+    return (travel_flags & 0x20U) != 0U && (travel_flags & 0x10U) == 0U;
+  }
+  const auto govt = stellar.government_id;
+  if (locator >= 10000 && locator < 15000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 10000);
+    if (govt != wanted) {
+      return false;
+    }
+    if ((travel_flags & 0x20U) == 0U) {
+      return true;
+    }
+    // 0x0043d510 permits the 0x20 lane only when the target government
+    // carries Flags1c 0x800 (derelict).
+    return wanted >= 0 &&
+           wanted <
+               static_cast<std::int16_t>(state.scenario.governments.size()) &&
+           (state.scenario.governments[static_cast<std::size_t>(wanted)]
+                .flags_primary &
+            0x0800U) != 0U;
+  }
+  if (locator >= 15000 && locator < 20000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 15000);
+    if (govt < 0 || govt == wanted || (travel_flags & 0x20U) != 0U) {
+      return false;
+    }
+    // Binary quirk (verified in disassembly 0x0043da4c/0x0043db4d): the
+    // existence and pick loops index g_system_defs with the STELLAR slot, not
+    // the candidate's own system, so this arm also accepts a stellar whose
+    // government is not allied when the unrelated system at the same index is
+    // governed by `wanted`. The exact-match government is excluded outright.
+    const bool system_slot_matches =
+        static_cast<std::size_t>(candidate) < state.scenario.systems.size() &&
+        state.scenario.systems[static_cast<std::size_t>(candidate)]
+                .government_id == wanted;
+    return system_slot_matches ||
+           NovaGovernment_AreGovtsAllied(state.scenario, govt, wanted);
+  }
+  if (locator >= 20000 && locator < 25000) {
+    return (travel_flags & 0x20U) == 0U &&
+           govt != static_cast<std::int16_t>(locator - 20000);
+  }
+  if (locator >= 25000 && locator < 30000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 25000);
+    return (travel_flags & 0x20U) == 0U && govt != -1 &&
+           NovaGovernment_AreGovtsHostileOrXenophobic(
+               state.scenario, govt, wanted);
+  }
+  if (locator >= 30000 && locator < 31000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 30000);
+    // The original excludes the exact government before the share-class test
+    // (0x0043e0xx), so a stellar of the target government is not selected by
+    // this family.
+    return (travel_flags & 0x20U) == 0U && govt != -1 && govt != wanted &&
+           NovaGovernment_DoGovtsShareClass(state.scenario, govt, wanted);
+  }
+  if (locator >= 31000 && locator < 32000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 31000);
+    return (travel_flags & 0x20U) == 0U && govt != -1 && govt != wanted &&
+           !NovaGovernment_DoGovtsShareClass(state.scenario, govt, wanted);
+  }
+  return false;
+}
+
+// Ghidra 0x00441b40's TravelStel/ReturnStel sanity gate calls the selector
+// with param_2 = param_3 = -1 and only checks for a -1 result, so the
+// clean-room check mirrors that without consuming the selection RNG.
+[[nodiscard]] bool HasMissionStellarLocatorCandidate(const GameState &state,
+                                                     std::int16_t locator) {
+  for (int candidate = 0; candidate < 0x800; ++candidate) {
+    if (StellarLocatorEligible(state, locator, candidate, -1, -1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x0043d510 Mission_SelectMissionStellarByLocator. The original first
+// proves at least one of the fixed 0x800 slots is eligible (RNG-free), then
+// rejection-samples NovaRandom_Range(0x800) until one passes. Deliberate
+// divergence: when no slot is eligible the original returns param_2 (the
+// anchor/reference) and can hand the offering stellar back as its own
+// destination; the port returns `fallback` (-1 for TravelStel, the TravelStel
+// for ReturnStel) so a mission never targets its own anchor by default.
+[[nodiscard]] std::int16_t
+SelectMissionStellarByLocator(GameState &state,
+                              std::int16_t locator,
+                              std::int16_t reference,
+                              std::int16_t excluded,
+                              std::int16_t fallback) {
   if (locator == -1 || locator == -4) {
     return fallback;
   }
-
+  if (locator > 0 && locator < kResourceIdBase) {
+    // Out-of-family small positive locators are debug-logged and fall back.
+    return fallback;
+  }
   if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
     const auto stellar_id =
         static_cast<std::int16_t>(locator - kResourceIdBase);
-    if (stellar_id != excluded && stellar_id >= 0 &&
-        stellar_id <
-            static_cast<std::int16_t>(state.scenario.stellars.size())) {
-      return stellar_id;
+    return stellar_id != excluded && StellarSlotInTable(state, stellar_id)
+               ? stellar_id
+               : fallback;
+  }
+  bool exists = false;
+  for (int candidate = 0; candidate < 0x800 && !exists; ++candidate) {
+    exists =
+        StellarLocatorEligible(state, locator, candidate, reference, excluded);
+  }
+  if (!exists) {
+    return fallback;
+  }
+  for (;;) {
+    const std::int16_t sampled = RandomBelow(state, 0x800);
+    if (StellarLocatorEligible(state, locator, sampled, reference, excluded)) {
+      return sampled;
     }
-    return fallback;
   }
-
-  const std::vector<std::int16_t> candidates =
-      CollectStellarLocatorCandidates(state, locator, excluded, reference);
-  if (candidates.empty()) {
-    return fallback;
-  }
-  // TODO(decomp(0x0043d510)) skipped: the original proves that at least one
-  // of the fixed 0x800 stellar slots is eligible, then repeatedly draws a
-  // slot in [0, 0x800) until it passes. Choosing once from the eligible vector
-  // is distribution-equivalent but deliberately consumes a different number
-  // of RNG values, so later random events can diverge for the same seed.
-  std::uniform_int_distribution<std::size_t> roll(0, candidates.size() - 1);
-  return candidates[roll(state.rng)];
 }
 
 // Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility, offering
@@ -764,9 +785,7 @@ CollectStellarLocatorCandidates(const GameState &state,
                  static_cast<std::int16_t>(state.scenario.stellars.size());
     }
     if (locator == -2 || locator == -3 || locator > 0) {
-      return !CollectStellarLocatorCandidates(
-                  state, locator, -1, MissionReferenceStellar(state))
-                  .empty();
+      return HasMissionStellarLocatorCandidate(state, locator);
     }
     return true;
   };
@@ -887,9 +906,12 @@ EvaluateMissionPage(GameState &state, std::int16_t page_group) {
 }
 
 [[nodiscard]] std::int16_t ResolveMissionSystemByLocator(GameState &state,
-                                                         std::int16_t locator,
-                                                         std::int16_t fallback);
+                                                         std::int16_t locator);
 
+// Ghidra 0x0043f8c0's ShipSyst (payload +0x22) decode. -3/-4 read the raw
+// g_stellar_defs[...].system_id of the resolved Travel/ReturnStel (no visible
+// remap); -3 falls back to the ReturnStel when the TravelStel slot is out of
+// range. -6 is the "follow the player" sentinel.
 [[nodiscard]] std::int16_t
 ResolveMissionCurrentSystem(GameState &state,
                             const MissionDef &definition,
@@ -898,20 +920,38 @@ ResolveMissionCurrentSystem(GameState &state,
   if (locator == -1) {
     return state.player.current_system_id;
   }
+  if (locator == -2) {
+    return ResolveMissionSystemByLocator(state, locator);
+  }
   if (locator == -3) {
-    return target.travel_system_id;
+    if (StellarSlotInTable(state, target.travel_stellar_id)) {
+      return ResolveContainingSystem(state, target.travel_stellar_id);
+    }
+    if (StellarSlotInTable(state, target.return_stellar_id)) {
+      return ResolveContainingSystem(state, target.return_stellar_id);
+    }
+    NovaLog::Todo("Mission_PopulateMissionSlotFromDef ShipSyst -3 has no "
+                  "travel/return stellar");
+    return -1;
   }
   if (locator == -4) {
-    return target.return_system_id;
+    if (StellarSlotInTable(state, target.return_stellar_id)) {
+      return ResolveContainingSystem(state, target.return_stellar_id);
+    }
+    NovaLog::Todo("Mission_PopulateMissionSlotFromDef ShipSyst -4 has no "
+                  "return stellar");
+    return -1;
   }
-  if (locator == -2) {
-    return ResolveMissionSystemByLocator(
-        state, locator, state.player.current_system_id);
+  if (locator == -6) {
+    return -6;
   }
-  if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
-    return static_cast<std::int16_t>(locator - kResourceIdBase);
+  if (locator == -5 || locator > 9998) {
+    return ResolveMissionSystemByLocator(state, locator);
   }
-  return ResolveMissionSystemByLocator(state, locator, -1);
+  if (locator < kResourceIdBase) {
+    return -1;
+  }
+  return static_cast<std::int16_t>(locator - kResourceIdBase);
 }
 
 [[nodiscard]] std::int16_t SelectMissionShipType(GameState &state,
@@ -934,120 +974,151 @@ ResolveMissionCurrentSystem(GameState &state,
                              *dude, state.scenario, true, state.rng));
 }
 
-// Ghidra 0x0043e6f0 Mission_SelectMissionSystemByLocator.
-[[nodiscard]] std::int16_t ResolveMissionSystemByLocator(
-    GameState &state, std::int16_t locator, std::int16_t fallback) {
+// 0x0043e6f0 scans the fixed 0x800 system table; a slot past the loaded
+// records is ineligible.
+[[nodiscard]] bool SystemSlotInTable(const GameState &state, int slot) {
+  return slot >= 0 && slot < 0x800 &&
+         static_cast<std::size_t>(slot) < state.scenario.systems.size();
+}
+
+// Candidate predicate shared by 0x0043e6f0's existence scan and its
+// rejection-sampling loop. Every family requires the system visible and on a
+// different System_ResolveSystemDiscoverySlot than `base_system` (the player's
+// current system). The allied family excludes an exact government match in the
+// sampling loop (0x0043ebxx); the port keeps that exclusion so the sampled
+// distribution matches the original. The original's existence scan omits the
+// exact-government exclusion (and the allied govt >= 0 guard), so the port's
+// shared predicate again avoids spinning on a pre-scan-only candidate.
+[[nodiscard]] bool SystemLocatorEligible(const GameState &state,
+                                         std::int16_t locator,
+                                         int candidate,
+                                         std::int16_t base_system) {
+  if (!SystemSlotInTable(state, candidate)) {
+    return false;
+  }
+  const auto candidate_id = static_cast<std::int16_t>(candidate);
+  if (!NovaSystem_IsSystemVisible(state, candidate_id) ||
+      NovaSystem_ResolveDiscoverySlot(state, candidate_id) ==
+          NovaSystem_ResolveDiscoverySlot(state, base_system)) {
+    return false;
+  }
+  const auto govt =
+      state.scenario.systems[static_cast<std::size_t>(candidate)].government_id;
+  if (locator == -2) {
+    return true;
+  }
+  if (locator >= 9999 && locator < 15000) {
+    return govt == static_cast<std::int16_t>(locator - 10000);
+  }
+  if (locator >= 15000 && locator < 20000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 15000);
+    return govt != -1 && govt != wanted &&
+           NovaGovernment_AreGovtsAllied(state.scenario, govt, wanted);
+  }
+  if (locator >= 20000 && locator < 25000) {
+    return govt != static_cast<std::int16_t>(locator - 20000);
+  }
+  if (locator >= 25000 && locator < 30000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 25000);
+    return govt != -1 && NovaGovernment_AreGovtsHostileOrXenophobic(
+                             state.scenario, govt, wanted);
+  }
+  if (locator >= 30000 && locator < 31000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 30000);
+    return govt != -1 && govt != wanted &&
+           NovaGovernment_DoGovtsShareClass(state.scenario, govt, wanted);
+  }
+  if (locator >= 31000 && locator < 32000) {
+    const auto wanted = static_cast<std::int16_t>(locator - 31000);
+    return govt != -1 && govt != wanted &&
+           !NovaGovernment_DoGovtsShareClass(state.scenario, govt, wanted);
+  }
+  return false;
+}
+
+// 0x0043e6f0's pre-scan + NovaRandom_Range(0x800) rejection sampling. The
+// original returns -1 when no slot is eligible.
+[[nodiscard]] std::int16_t SampleMissionSystem(GameState &state,
+                                               std::int16_t locator,
+                                               std::int16_t base_system) {
+  bool exists = false;
+  for (int candidate = 0; candidate < 0x800 && !exists; ++candidate) {
+    exists = SystemLocatorEligible(state, locator, candidate, base_system);
+  }
+  if (!exists) {
+    return -1;
+  }
+  for (;;) {
+    const std::int16_t sampled = RandomBelow(state, 0x800);
+    if (SystemLocatorEligible(state, locator, sampled, base_system)) {
+      return sampled;
+    }
+  }
+}
+
+// 0x0043e6f0's -5 arm draws a random one of the 16 adjacency slots and resolves
+// it through System_ResolveVisibleSystemForTravel, re-drawing empty slots and
+// invisible results. The port's System.links are already visibility-root
+// remapped and deduplicated by the loader, so the port samples over those 16
+// slots (the original samples the raw adjacency list). The original has no
+// existence pre-scan and would spin on a linkless system; the port returns
+// `base_system` instead.
+[[nodiscard]] std::int16_t
+SampleAdjacentMissionSystem(GameState &state, std::int16_t base_system) {
+  if (!SystemSlotInTable(state, base_system)) {
+    return base_system;
+  }
+  const auto &links =
+      state.scenario.systems[static_cast<std::size_t>(base_system)].links;
+  const auto resolve = [&state](std::int16_t link) {
+    if (link < kResourceIdBase) {
+      return static_cast<std::int16_t>(-1);
+    }
+    const auto resolved = Misn_ResolveVisibleSystemForTravel(
+        state, static_cast<std::int16_t>(link - kResourceIdBase));
+    return resolved >= 0 && NovaSystem_IsSystemVisible(state, resolved)
+               ? resolved
+               : static_cast<std::int16_t>(-1);
+  };
+  bool exists = false;
+  for (const std::int16_t link : links) {
+    if (resolve(link) >= 0) {
+      exists = true;
+      break;
+    }
+  }
+  if (!exists) {
+    return base_system;
+  }
+  for (;;) {
+    const auto candidate = resolve(links[RandomBelow(state, 0x10)]);
+    if (candidate >= 0) {
+      return candidate;
+    }
+  }
+}
+
+// Ghidra 0x0043e6f0 Mission_SelectMissionSystemByLocator with param_2 fixed to
+// the player's current system (the only caller, Mission_PopulateMissionSlot-
+// FromDef).
+[[nodiscard]] std::int16_t ResolveMissionSystemByLocator(GameState &state,
+                                                         std::int16_t locator) {
+  const std::int16_t current = state.player.current_system_id;
   if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
     const auto system_id = static_cast<std::int16_t>(locator - kResourceIdBase);
-    return system_id >= 0 && system_id < static_cast<std::int16_t>(
-                                             state.scenario.systems.size())
-               ? system_id
-               : fallback;
+    return SystemSlotInTable(state, system_id) ? system_id
+                                               : static_cast<std::int16_t>(-1);
   }
-  const auto current = state.player.current_system_id;
-  const std::int16_t player_root =
-      NovaSystem_ResolveDiscoverySlot(state, current);
-  const auto choose_random = [&state](
-                                 const std::vector<std::int16_t> &candidates,
-                                 std::int16_t no_match) {
-    if (candidates.empty()) {
-      return no_match;
-    }
-    std::uniform_int_distribution<std::size_t> roll(0, candidates.size() - 1);
-    return candidates[roll(state.rng)];
-  };
   if (locator == -2) {
-    std::vector<std::int16_t> candidates;
-    for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
-      const auto &system = state.scenario.systems[i];
-      if (static_cast<std::int16_t>(i) != current &&
-          NovaSystem_IsSystemVisible(state, static_cast<std::int16_t>(i)) &&
-          system.has_explored_flag &&
-          NovaSystem_ResolveDiscoverySlot(
-              state, static_cast<std::int16_t>(i)) != player_root) {
-        candidates.push_back(static_cast<std::int16_t>(i));
-      }
-    }
-    return choose_random(candidates, fallback);
+    return SampleMissionSystem(state, locator, current);
   }
   if (locator == -5) {
-    if (current < 0 ||
-        current >= static_cast<std::int16_t>(state.scenario.systems.size())) {
-      return fallback;
-    }
-    std::vector<std::int16_t> candidates;
-    for (const auto linked_resource_id :
-         state.scenario.systems[static_cast<std::size_t>(current)].links) {
-      if (linked_resource_id < kResourceIdBase) {
-        continue;
-      }
-      const auto linked =
-          static_cast<std::int16_t>(linked_resource_id - kResourceIdBase);
-      if (linked >= 0 &&
-          linked < static_cast<std::int16_t>(state.scenario.systems.size()) &&
-          NovaSystem_IsSystemVisible(state, linked)) {
-        candidates.push_back(linked);
-      }
-    }
-    return choose_random(candidates, fallback);
+    return SampleAdjacentMissionSystem(state, current);
   }
-  const auto same_class = [&state](std::int16_t lhs,
-                                   std::int16_t rhs,
-                                   bool require_same) {
-    if (lhs < 0 || rhs < 0 ||
-        lhs >= static_cast<std::int16_t>(state.scenario.governments.size()) ||
-        rhs >= static_cast<std::int16_t>(state.scenario.governments.size())) {
-      return false;
-    }
-    for (const auto left_class :
-         state.scenario.governments[static_cast<std::size_t>(lhs)].classes) {
-      for (const auto right_class :
-           state.scenario.governments[static_cast<std::size_t>(rhs)].classes) {
-        if (left_class >= 0 && left_class == right_class) {
-          return require_same;
-        }
-      }
-    }
-    return !require_same;
-  };
-  const auto matches = [&](std::int16_t index) {
-    const auto &system =
-        state.scenario.systems[static_cast<std::size_t>(index)];
-    if (!NovaSystem_IsSystemVisible(state, index) || system.government_id < 0 ||
-        NovaSystem_ResolveDiscoverySlot(state, index) == player_root) {
-      return false;
-    }
-    const auto govt = system.government_id;
-    if (locator >= 10000 && locator < 15000) {
-      return govt == locator - 10000;
-    }
-    if (locator >= 15000 && locator < 20000) {
-      return NovaGovernment_AreGovtsAllied(
-          state.scenario, govt, locator - 15000);
-    }
-    if (locator >= 20000 && locator < 25000) {
-      return govt != locator - 20000;
-    }
-    if (locator >= 25000 && locator < 30000) {
-      return NovaGovernment_AreGovtsHostileOrXenophobic(
-          state.scenario, govt, locator - 25000);
-    }
-    if (locator >= 30000 && locator < 31000) {
-      return same_class(govt, locator - 30000, true);
-    }
-    if (locator >= 31000 && locator < 32000) {
-      return same_class(govt, locator - 31000, false);
-    }
-    return false;
-  };
-  std::vector<std::int16_t> candidates;
-  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
-    if (static_cast<std::int16_t>(i) != current &&
-        matches(static_cast<std::int16_t>(i))) {
-      candidates.push_back(static_cast<std::int16_t>(i));
-    }
+  if (locator >= 9999 && locator < 32000) {
+    return SampleMissionSystem(state, locator, current);
   }
-  return choose_random(candidates, fallback);
+  return current;
 }
 
 } // namespace
@@ -1177,8 +1248,11 @@ void Mission_ResolveMissionStellarTargets(GameState &state,
   // payload +0x0c/+0x0e); the "on_fail/on_success condition" naming was a
   // misnomer.
   const std::int16_t reference = MissionReferenceStellar(state);
-  target.travel_stellar_id = ResolveMissionStellar(
-      state, definition.travel_stellar_locator, -1, -1, reference);
+  target.travel_stellar_id =
+      definition.travel_stellar_locator == -1
+          ? static_cast<std::int16_t>(-1)
+          : SelectMissionStellarByLocator(
+                state, definition.travel_stellar_locator, reference, -1, -1);
   target.travel_system_id =
       ResolveContainingSystem(state, target.travel_stellar_id);
   if (target.travel_system_id != -1) {
@@ -1192,11 +1266,11 @@ void Mission_ResolveMissionStellarTargets(GameState &state,
   target.return_stellar_id =
       definition.return_stellar_locator == -1
           ? target.travel_stellar_id
-          : ResolveMissionStellar(state,
-                                  definition.return_stellar_locator,
-                                  target.travel_stellar_id,
-                                  target.travel_stellar_id,
-                                  reference);
+          : SelectMissionStellarByLocator(state,
+                                          definition.return_stellar_locator,
+                                          reference,
+                                          target.travel_stellar_id,
+                                          target.travel_stellar_id);
   target.return_system_id =
       ResolveContainingSystem(state, target.return_stellar_id);
   if (target.return_system_id == -1) {
@@ -1293,8 +1367,6 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.ship_goal = definition->ship_goal;
   active.ship_behavior = definition->ship_behavior;
   active.ship_start = definition->ship_start;
-  active.current_system_id =
-      ResolveMissionCurrentSystem(state, *definition, target);
   // Resolved Bible CargoType/CargoQty (m\xefsn +0x10/+0x12 via the target
   // table +0x04/+0x06); copied directly like 0x0043f8c0. The resolver
   // 0x0043d240 owns the special-value decoding, so the acceptance gate and
@@ -1351,15 +1423,13 @@ bool Mission_PopulateActiveSlot(GameState &state,
   }
   active.mission_fleet_metric_b = definition->mission_fleet_metric;
   active.mission_fleet_metric_c = 0;
-  // Partial original RNG order (0x0043f8c0): among these fields the
-  // special-ship type selection, the 70..139 aux rearm clock (0x46), the
-  // spawn/rearm timer and the two STR# name-pool draws now run in the original
-  // sequence, and Dude_SelectShipTypeIndexFromDudeDef runs before comp_govt.
-  // Remaining divergence: ResolveMissionCurrentSystem (which can consume RNG
-  // for a random system locator) still runs earlier here than in the original,
-  // where it sits between the spawn timer and the name draws.
-  // TODO(decomp(0x0043f8c0)) reorder current-system resolution after the
-  // spawn timer to restore the full draw sequence.
+  // Full original RNG order (0x0043f8c0): Dude_SelectShipTypeIndexFromDudeDef
+  // (special-ship type) runs before comp_govt, then the 70..139 aux rearm clock
+  // (0x46), the spawn/rearm timer, the ShipSyst current-system resolution
+  // (which may draw for a random system locator), and finally the two STR#
+  // name-pool draws. The resolution sits here, between the spawn timer and the
+  // names, so a random current-system locator consumes the same RNG position as
+  // the original.
   active.special_ship_type_index =
       SelectMissionShipType(state, active.dude_def_index, active.flags_primary);
   std::uniform_int_distribution<int> rearm_roll(0, 69);
@@ -1373,6 +1443,8 @@ bool Mission_PopulateActiveSlot(GameState &state,
     std::uniform_int_distribution<int> roll(0, 99);
     active.spawn_rearm_timer = static_cast<std::int16_t>(100 + roll(state.rng));
   }
+  active.current_system_id =
+      ResolveMissionCurrentSystem(state, *definition, target);
   active.special_ship_name_string_id = definition->special_ship_name_string_id;
   active.random_text_string_id = definition->random_text_string_id;
   // Fleet-name rolls (0x0043f8c0): both name buffers start empty; when the
