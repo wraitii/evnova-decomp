@@ -609,9 +609,16 @@ struct Ship {
   // slot allocation / capture.
   std::int8_t escort_pending_sale_mark = 0; // +0xBE
   std::int8_t escort_upgrade_mark = 0;      // +0xBF
-  // ShipState +0xC8DE post_hit_mode_hint: the AI's post-hit behavior hint
-  // (written by the ship-comm escort release and post-hit state handling).
-  std::int16_t post_hit_mode_hint = -1; // +0xC8DE
+  // ShipState +0xC8DE fleet_recovery_hint: on disable/surrender (collision
+  // handling and the ship-comm escort release), records this hull's fleet
+  // origin so the player board/capture path can route recovery. Values:
+  //   -1 = no fleet origin (cleared every live frame; a generic disabled
+  //        personality-less hull when the player boards it)
+  //    0 = player bay fighter (recover to a bay as a behavior-5 fighter)
+  //    1 = player escort, escort_origin_mark != 0
+  //    2 = player escort, escort_origin_mark == 0
+  // Both escort values rejoin as a behavior-6 flying escort.
+  std::int16_t fleet_recovery_hint = -1; // +0xC8DE
 
   // --- Misc ---
   std::int16_t timed_action_counter = -1; // +0xC908

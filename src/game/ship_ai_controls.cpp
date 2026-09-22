@@ -864,7 +864,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
       ship.ai_desired_speed -= step;
     } else {
       // Inside the escort half-span: dock arrival. The original docks the
-      // fighter into the carrier's bay (Ship_LaunchCarriedShipFromBay
+      // fighter into the carrier's bay (Ship_RecoverCarriedShipToBay
       // 0x00415ea0) when the player can capture/retain that class
       // (ShipClass_HasPlayerBayCapacityFor 0x004694a0); otherwise it
       // clears the escort handoff.

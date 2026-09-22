@@ -253,7 +253,7 @@ bool NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
   }
   // Special (availability 0x200) stellar: only a derelict/abandoned sentinel
   // admits the player/leader as a hostile target.
-  return stellar.field_0x47 != 0 &&
+  return stellar.defense_fleet_mounted != 0 &&
          (ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0);
 }
 

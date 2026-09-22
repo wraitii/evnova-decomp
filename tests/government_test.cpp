@@ -131,7 +131,7 @@ TEST_CASE("candidate-hostility applies the stellar targeter gates",
     stellar.availability_flags = 0x200;
     CHECK(!NovaGovernment_IsCandidateHostileToTargeter(
         state, ship, stellar, 0x80));
-    stellar.field_0x47 = 1;
+    stellar.defense_fleet_mounted = 1;
     CHECK(NovaGovernment_IsCandidateHostileToTargeter(
         state, ship, stellar, 0x80));
   }

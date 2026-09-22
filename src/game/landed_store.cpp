@@ -1224,7 +1224,7 @@ bool Player_ReplaceShipWithCapturedHull(GameState &state,
     replacement.shield_points = 0.0F;
     replacement.armor_points = 1.0F;
     replacement.boarded_target_latch = 1;
-    replacement.post_hit_mode_hint = -1;
+    replacement.fleet_recovery_hint = -1;
     replacement.squad_leader_ship_slot = 0;
     replacement.ai_behavior_code = 6;
     Player_TransferCargoAndJunkToEscortByRatio(state, replacement_slot);

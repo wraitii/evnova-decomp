@@ -104,7 +104,7 @@ TEST_CASE("escort management release transfers cargo before detaching",
   CHECK(released.ai_behavior_code == 2);
   CHECK(released.ai_state_code == 2);
   CHECK(released.boarded_target_latch == 1);
-  CHECK(released.post_hit_mode_hint == -1);
+  CHECK(released.fleet_recovery_hint == -1);
   CHECK_FALSE(state.stat_cache_valid);
 }
 

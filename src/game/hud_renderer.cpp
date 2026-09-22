@@ -983,13 +983,14 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                   status_y,
                   text);
   } else if (target.squad_leader_ship_slot == 0 ||
-             target.post_hit_mode_hint >= 0) {
-    // Outer gate is a lone squadron-leader / post-hit test. The inner gate
+             target.fleet_recovery_hint >= 0) {
+    // Outer gate is a lone squadron-leader / fleet-recovery test. The inner
+    // gate
     // selects Fighter vs Escort by hull mass when ai_behavior is 5 or the
-    // post-hit hint is zero, and otherwise falls back to "Escort" (the
+    // fleet_recovery_hint is zero, and otherwise falls back to "Escort" (the
     // original's inner else) rather than drawing nothing.
     bool light_ship = false;
-    if (target.ai_behavior_code == 5 || target.post_hit_mode_hint == 0) {
+    if (target.ai_behavior_code == 5 || target.fleet_recovery_hint == 0) {
       light_ship = ship_class != nullptr && ship_class->mass_tons < 100;
     }
     const std::string text =

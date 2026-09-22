@@ -257,7 +257,7 @@ std::string ProbeState_Snapshot(const GameState &state,
       // player's fleet from system traffic.
       row.num("squad_leader_ship_slot", ship.squad_leader_ship_slot);
       row.num("boarded_target_latch", ship.boarded_target_latch);
-      row.num("post_hit_mode_hint", ship.post_hit_mode_hint);
+      row.num("fleet_recovery_hint", ship.fleet_recovery_hint);
       // The values the capture-variant arbitration actually reads.
       row.num("class_default_ai_behavior",
               cls != nullptr ? cls->default_ai_behavior : -1);

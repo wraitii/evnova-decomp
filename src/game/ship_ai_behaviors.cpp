@@ -1608,14 +1608,14 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
       }
     } else {
       // A victim/hostile was acquired: capture-approach (0xd) only for the
-      // player, a surrendering post-hit contact, or a low-AI class with
+      // player, a surrendering disabled contact, or a low-AI class with
       // capture capability; otherwise it is just an attack (4).
       const Ship &target =
           state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
       const ShipClass *target_class = state.scenario.Ship(
           static_cast<std::int16_t>(target.ship_class_id + 0x80));
       const bool capturable_kind =
-          target.ship_instance_id == 0 || target.post_hit_mode_hint >= 0 ||
+          target.ship_instance_id == 0 || target.fleet_recovery_hint >= 0 ||
           (target_class != nullptr && target_class->default_ai_behavior < 3);
       if (capturable_kind && target_class != nullptr &&
           target_class->crew != 0) {
@@ -1635,7 +1635,7 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
     const ShipClass *target_class = state.scenario.Ship(
         static_cast<std::int16_t>(target.ship_class_id + 0x80));
     const bool capturable_kind =
-        ship.primary_target_ship_slot == 0 || target.post_hit_mode_hint >= 0 ||
+        ship.primary_target_ship_slot == 0 || target.fleet_recovery_hint >= 0 ||
         (target_class != nullptr && target_class->default_ai_behavior < 3);
     if (capturable_kind && target_class != nullptr && target_class->crew > 0) {
       if (target.boarded_target_latch == 0) {
@@ -1703,7 +1703,7 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
         static_cast<std::int16_t>(target.ship_class_id + 0x80));
     if (NovaAiShip_IsDisabled(state, target) &&
         (target_class != nullptr && target_class->default_ai_behavior > 2) &&
-        ship.primary_target_ship_slot != 0 && target.post_hit_mode_hint < 0 &&
+        ship.primary_target_ship_slot != 0 && target.fleet_recovery_hint < 0 &&
         (!NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship) ||
          NovaWeapon_ClassifyAmmoReadiness(state, ship) == 2)) {
       ship.ai_state_code = 0;

@@ -544,7 +544,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
   // ---- Target eligibility (denial = STR# 0x7d2 pool 0x81) -----------------
   const bool rehired_or_surrendering =
       target.boarded_target_latch == 0 ||
-      (target.mission_fleet_slot == -1 && target.post_hit_mode_hint >= 0);
+      (target.mission_fleet_slot == -1 && target.fleet_recovery_hint >= 0);
   const bool fire_restricted = NovaAiShip_IsDisabled(state, target);
   const bool eligible =
       rehired_or_surrendering && fire_restricted && target.is_active &&
@@ -725,16 +725,16 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
     }
   }
 
-  // Post-hit arms (post_hit_mode_hint 0/-1 => "Fighter captured." carrier-bay
+  // Post-hit arms (fleet_recovery_hint 0/-1 => "Fighter captured." carrier-bay
   // conversion; hint >= 1 with escort capacity => direct escort conversion)
   // depend on ShipClass_HasPlayerBayCapacityFor (0x004694a0, the fighter-bay
   // outfit scan), which the port does not model yet. They are reachable only
   // for carriers that surrendered after combat; the plain plunder window
   // handles the common path. TODO(decomp).
-  if (target.post_hit_mode_hint >= 1 &&
+  if (target.fleet_recovery_hint >= 1 &&
       NovaShip_CanPlayerHaveMoreEscorts(state)) {
     NovaLog::Todo("board: post-hit escort conversion arm skipped "
-                  "(post_hit_mode_hint >= 1)");
+                  "(fleet_recovery_hint >= 1)");
   }
 
   QueueUiSound(state, 4, 8); // the "boarded" cue repeats 8x in the original
@@ -2270,7 +2270,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
   const bool show_loot_message =
       boarded.ship_instance_id == 0 ||
       (boarded.squad_leader_ship_slot == -1 &&
-       boarded.mission_fleet_slot == -1 && boarded.post_hit_mode_hint > 0);
+       boarded.mission_fleet_slot == -1 && boarded.fleet_recovery_hint > 0);
   if (show_loot_message) {
     // g_playerInventoryAndLoadoutDirty.
     state.InvalidateDerivedStatCaches();
@@ -2350,10 +2350,10 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
   }
 
   // "Fighter/Escort stolen!" + victim's targeters drop it. STR# 0x7d2 0xa9
-  // ("Fighter") for post-hit hint 0, 0xa8 ("Escort") otherwise.
-  if (boarded.squad_leader_ship_slot == 0 || boarded.post_hit_mode_hint >= 0) {
+  // ("Fighter") for fleet_recovery_hint 0, 0xa8 ("Escort") otherwise.
+  if (boarded.squad_leader_ship_slot == 0 || boarded.fleet_recovery_hint >= 0) {
     const std::uint16_t kind_entry =
-        boarded.post_hit_mode_hint == 0 ? 0xa9 : 0xa8;
+        boarded.fleet_recovery_hint == 0 ? 0xa9 : 0xa8;
     std::string text = LoadBoardMiscString(kind_entry, "Escort");
     for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
       Ship &attacker = state.ShipAt(slot);
@@ -2379,7 +2379,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
   boarded.faction_or_government_id = boarder.faction_or_government_id;
   boarded.pers_def_slot = -1;
   boarded.ai_behavior_code = 6;
-  boarded.post_hit_mode_hint = -1;
+  boarded.fleet_recovery_hint = -1;
   boarded.ai_state_code = 0;
   boarded.ai_control_mode = 0;
   boarded.boarded_target_latch = 0;

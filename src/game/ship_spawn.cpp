@@ -1260,7 +1260,7 @@ int NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
 // (defense_fleet_home_stellar_id), force behavior-3 warship, seed it at the
 // stellar's map position with a random heading and an initial velocity at the
 // effective max speed along that heading, and finally make it hostile to the
-// player. Sets the stellar's field_0x47 latch so the per-tick
+// player. Sets the stellar's defense_fleet_mounted latch so the per-tick
 // trickle (NovaSystem_TickNpcSpawnMaintenance) may replace losses. `stellar_id`
 // is the stellar resource id; returns the ship slot or -1.
 int NovaStellar_SpawnDefenseFleetShip(GameState &state,
@@ -1323,7 +1323,7 @@ int NovaStellar_SpawnDefenseFleetShip(GameState &state,
     ship.vel_y -= std::cos(ship.heading) * stats.max_speed_px_per_tick;
   }
   NovaAi_SetShipHostileToPlayer(state, ship);
-  stellar.field_0x47 = 1;
+  stellar.defense_fleet_mounted = 1;
   return slot;
 }
 
@@ -1401,7 +1401,7 @@ int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
   ship.ship_class_id = dude->ship_types[type_index];
   ship.faction_or_government_id = dude->government_id;
   ship.boarded_target_latch = 0;
-  ship.post_hit_mode_hint = -1;
+  ship.fleet_recovery_hint = -1;
   ship.cloak_transition_latch = 0;
   ship.cloak_fade_progress = 0.0F;
   ship.ai_maneuver_timer_ms = 0.0F;
@@ -1859,7 +1859,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
   }
 
   // Stellar defense-fleet trickle (Ghidra 0x0041d6e0 tail): scan the system's
-  // 16 nav stellars; for the first one whose field_0x47 latch is set and whose
+  // 16 nav stellars; for the first one whose defense_fleet_mounted latch is set and whose
   // present_ship_count budget is positive but whose live defenders number below
   // one wave (max_ship_count % 10), spawn one defender and decrement the
   // budget. The original stops at the first satisfying stellar (at most one
@@ -1871,7 +1871,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
     }
     Stellar &stellar =
         state.scenario.stellars[static_cast<std::size_t>(nav - 0x80)];
-    if (stellar.field_0x47 == 0 || stellar.present_ship_count <= 0) {
+    if (stellar.defense_fleet_mounted == 0 || stellar.present_ship_count <= 0) {
       continue;
     }
     int present = 0;
@@ -2047,7 +2047,7 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.ai_state_code = 0;
   ship.ai_control_mode = 0;
   ship.boarded_target_latch = 0;
-  ship.post_hit_mode_hint = -1;
+  ship.fleet_recovery_hint = -1;
   ship.cloak_transition_latch = 0;
   ship.cloak_fade_progress = 0.0F;
   ship.ai_hostility_accumulator = 0;
@@ -2386,7 +2386,7 @@ bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
   if (outfit_slot == -1 && weapon_bank == -1) {
     // Resolve the bay weapon that would hold this class: first by direct
     // class match, then by base-sprite clone source (clone-family) fallback --
-    // the same mapping Ship_LaunchCarriedShipFromBay uses.
+    // the same mapping Ship_RecoverCarriedShipToBay uses.
     const ShipClass *target_cls =
         state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80));
     const std::int16_t target_clone_source =
