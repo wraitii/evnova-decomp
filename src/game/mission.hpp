@@ -185,7 +185,8 @@ Mission_CheckReactionConditionSatisfied(const GameState &state,
 
 // Ghidra 0x00440aa0 Mission_ClearMisnSlotAssignments. Releases every ship
 // assigned to the mission-fleet slot (clearing its fleet/targeting state and,
-// when the travel scene owns the world (state.in_travel_scene), despawning
+// when the destination window owns the world
+// (state.travel_destination_window_open), despawning
 // it), optionally runs the slot's on-abort payload (Bible OnAbort, +0x5e8),
 // then clears the slot's accepted/active latches. `acceptance` is forwarded to
 // any mission the on-abort payload starts via the S opcode. The ambient-roll
@@ -208,8 +209,19 @@ struct MissionDialogText {
 // UI sink for the mission debrief text-reader dialogs (MisnActive +0x3d Comp
 // on success, +0x3f Fail on failure). The landing gate invokes it with the
 // composed dialog text and its variant; the flight-layer caller wires it to
-// NovaUi_RunTextReaderDialog. Unset sinks keep the pre-port TODO logging.
+// NovaUi_RunTextReaderDialog. Unset sinks log a TODO instead.
 using MissionDebriefSink = std::function<void(const MissionDialogText &text)>;
+
+// Ghidra Ui_LoadSelectionDialogResource (0x004c6d50) + Stellar_BuildTravel-
+// DestinationDescription (0x004444f0): loads a dësc id, runs the ^-placeholder
+// pass at load time, then the mission wildcard pass. `offering_list` selects
+// the offer-row arm (mission_id = definition index); the active arm reads the
+// accepted mission slot. Returns empty text when the resource is absent.
+[[nodiscard]] MissionDialogText
+Mission_LoadSelectionDialogText(const GameState &state,
+                                std::uint16_t desc_id,
+                                bool offering_list,
+                                std::int16_t mission_id);
 
 // Ghidra 0x00440410 Mission_ResolveMissionSuccess. Shows the success debrief
 // dialog (+0x3d Comp dësc) through `debrief` when wired, runs the success
@@ -251,15 +263,22 @@ void Mission_ResolveMisnSlot(GameState &state,
 // objective evaluation for one active mission slot: drives the
 // objective-complete/failed latches from the goal counters (ShipGoal 0-6),
 // quick-fails overdue missions, and runs the completion payload / auto-abort
-// resolution on the first objective-complete transition.
-void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
-                                                  std::int16_t mission_slot,
-                                                  std::uint32_t now_ms);
+// resolution on the first objective-complete transition. `debrief` receives
+// the ShipDone (+0x43) reader dialog on the first completion; unset sinks log
+// a TODO instead.
+void Mission_HandleMissionOrSurrenderShipReaction(
+    GameState &state,
+    std::int16_t mission_slot,
+    std::uint32_t now_ms,
+    const MissionDebriefSink &debrief = {});
 
 // Ghidra 0x00443760 Mission_TickShipInteractionReactions. Per-tick driver
-// over the 16 active-mission slots (TickSystems scope 0xb).
-void Mission_TickShipInteractionReactions(GameState &state,
-                                          std::uint32_t now_ms);
+// over the 16 active-mission slots (TickSystems scope 0xb). `debrief` is
+// forwarded to each slot's objective evaluation (ShipDone reader dialog).
+void Mission_TickShipInteractionReactions(
+    GameState &state,
+    std::uint32_t now_ms,
+    const MissionDebriefSink &debrief = {});
 
 // Ghidra 0x00458802 slice of Stellar_HandleStellarEntryAndExit (and the game
 // -start init at Ship_InitGameplayDataTables): redraws the per-definition
@@ -310,12 +329,15 @@ enum class MissionOfferResult {
 // Ghidra 0x004438d0 Mission_ProcessInteractionReactionSlotResources. Landing
 // interaction pass for one slot: mission-cargo pickup/drop-off at the
 // TravelStel and final delivery at the ReturnStel (Bible PickupMode /
-// DropOffMode). `landed_stellar_id` is a 0-based stellar index (the driver
-// rebases the 0x80-based context id).
+// DropOffMode). `debrief` receives the LoadCargo (+0x39) / DumpCargo (+0x3b)
+// reader dialogs the original runs inline; unset sinks log a TODO instead.
+// `landed_stellar_id` is a 0-based stellar index (the driver rebases
+// the 0x80-based context id).
 void Mission_ProcessInteractionReactionSlotResources(
     GameState &state,
     std::int16_t mission_slot,
-    std::int16_t landed_stellar_id);
+    std::int16_t landed_stellar_id,
+    const MissionDebriefSink &debrief = {});
 
 // Ghidra 0x00443780 Mission_TickReactionSlotsForTravelInteraction. The
 // landing gate: evaluates objectives, processes cargo interactions, and
@@ -340,12 +362,13 @@ void Mission_TickReactionSlotsForTravelInteraction(
 
 // Ghidra 0x00440370 Mission_TryConsumeMissionInteractionResources. Gates a
 // mission interaction on the player hauling `count` tons: rejects (after
-// showing the original's STR# 0x7d2 0x165/0x166 denial dialog, not yet
-// reconstructed) when total mass or free cargo space is short, otherwise
-// dirties the inventory/loadout latch and succeeds.
-[[nodiscard]] bool
-Mission_TryConsumeMissionInteractionResources(GameState &state,
-                                              std::int16_t count);
+// showing the original's STR# 0x7d2 0x165/0x166 denial dialog through
+// `debrief`) when total mass or free cargo space is short, otherwise dirties
+// the inventory/loadout latch and succeeds.
+[[nodiscard]] bool Mission_TryConsumeMissionInteractionResources(
+    GameState &state,
+    std::int16_t count,
+    const MissionDebriefSink &debrief = {});
 
 struct GameDate;
 struct Ship;

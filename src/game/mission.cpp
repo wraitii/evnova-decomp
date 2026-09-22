@@ -290,7 +290,7 @@ namespace {
 // gates as the original. `reference` is the original param_2 offering stellar
 // passed by Mission_ResolveMissionStellarTargets (0x0043d240).
 [[nodiscard]] std::int16_t MissionReferenceStellar(const GameState &state) {
-  if (state.in_travel_scene) {
+  if (state.travel_scene_ctx) {
     const auto current = state.player.current_system_id;
     if (current >= 0 &&
         static_cast<std::size_t>(current) < state.scenario.systems.size()) {
@@ -605,24 +605,48 @@ CollectStellarLocatorCandidates(const GameState &state,
     return false;
   }
 
-  // ---- Gate 2: AvailRecord vs the current system's reputation ------------
+  // ---- Gate 2: AvailRecord vs reputation / domination --------------------
   if (def.avail_record != 0) {
-    if (def.avail_record == -32000 || def.avail_record == -32001) {
-      // Bible: offered when the player has dominated the (selected) stellar /
-      // any stellar. Domination state is not modeled yet (TODO(decomp)):
-      // fail open like the domination arms passing.
+    std::int16_t reputation = 0;
+    if (state.player.current_system_id >= 0 &&
+        state.player.current_system_id <
+            static_cast<std::int16_t>(state.system_reputation.size())) {
+      reputation = state.system_reputation[static_cast<std::size_t>(
+          state.player.current_system_id)];
+    }
+    bool record_ok = false;
+    if (def.avail_record < -31999) {
+      // Bible -32000 dominated the stellar in question / -32001 dominated at
+      // least one stellar. The original only evaluates these outside the
+      // travel-scene context (g_travel_scene_ctx == 0); with the destination
+      // window up the value falls through to the ordinary reputation compare
+      // below. Unknown values past -32001 match no domination arm and fail.
+      if (!state.travel_scene_ctx) {
+        if (def.avail_record == -32000) {
+          record_ok =
+              selected_index >= 0 &&
+              selected_index <
+                  static_cast<std::int16_t>(state.scenario.stellars.size()) &&
+              state.scenario.stellars[static_cast<std::size_t>(selected_index)]
+                      .dominated != 0;
+        } else if (def.avail_record == -32001) {
+          for (const Stellar &stellar : state.scenario.stellars) {
+            if (stellar.is_available && stellar.dominated != 0) {
+              record_ok = true;
+              break;
+            }
+          }
+        }
+      } else {
+        record_ok = reputation <= def.avail_record;
+      }
+    } else if (def.avail_record < 1) {
+      record_ok = reputation <= def.avail_record;
     } else {
-      std::int16_t reputation = 0;
-      if (state.player.current_system_id >= 0 &&
-          state.player.current_system_id <
-              static_cast<std::int16_t>(state.system_reputation.size())) {
-        reputation = state.system_reputation[static_cast<std::size_t>(
-            state.player.current_system_id)];
-      }
-      if (def.avail_record < 0 ? !(reputation <= def.avail_record)
-                               : !(def.avail_record <= reputation)) {
-        return false;
-      }
+      record_ok = def.avail_record <= reputation;
+    }
+    if (!record_ok) {
+      return false;
     }
   }
 
@@ -748,21 +772,10 @@ CollectStellarLocatorCandidates(const GameState &state,
   // latch for a p\xebrs offer whose AvailStel is not a direct stellar (a
   // mode-2 target is always in the current system). A direct-AvailStel offer,
   // a mode-3 adjacency collision, or a script activation is unaffected.
-  const auto discovery_root = [&](std::int16_t system_id) -> std::int16_t {
-    if (system_id < 0 ||
-        system_id >= static_cast<std::int16_t>(state.scenario.systems.size())) {
-      return -1;
-    }
-    const System &system =
-        state.scenario.systems[static_cast<std::size_t>(system_id)];
-    return system.visibility_root_system_id != -1
-               ? system.visibility_root_system_id
-               : system_id;
-  };
   if (def.link_system_filter < kResourceIdBase ||
       def.link_system_filter >= kResourceIdBase + 0x800) {
     const std::int16_t player_root =
-        discovery_root(state.player.current_system_id);
+        NovaSystem_ResolveDiscoverySlot(state, state.player.current_system_id);
     for (const std::int16_t locator :
          {def.travel_stellar_locator, def.return_stellar_locator}) {
       if (locator > 0x7f && locator < 0x880) {
@@ -775,7 +788,8 @@ CollectStellarLocatorCandidates(const GameState &state,
               state.scenario.stellars[static_cast<std::size_t>(stellar_index)]
                   .system_id;
           if (destination_system >= 0 &&
-              discovery_root(destination_system) == player_root) {
+              NovaSystem_ResolveDiscoverySlot(state, destination_system) ==
+                  player_root) {
             return false;
           }
         }
@@ -914,6 +928,8 @@ ResolveMissionCurrentSystem(GameState &state,
                : fallback;
   }
   const auto current = state.player.current_system_id;
+  const std::int16_t player_root =
+      NovaSystem_ResolveDiscoverySlot(state, current);
   const auto choose_random = [&state](
                                  const std::vector<std::int16_t> &candidates,
                                  std::int16_t no_match) {
@@ -929,7 +945,9 @@ ResolveMissionCurrentSystem(GameState &state,
       const auto &system = state.scenario.systems[i];
       if (static_cast<std::int16_t>(i) != current &&
           NovaSystem_IsSystemVisible(state, static_cast<std::int16_t>(i)) &&
-          system.has_explored_flag) {
+          system.has_explored_flag &&
+          NovaSystem_ResolveDiscoverySlot(
+              state, static_cast<std::int16_t>(i)) != player_root) {
         candidates.push_back(static_cast<std::int16_t>(i));
       }
     }
@@ -978,7 +996,8 @@ ResolveMissionCurrentSystem(GameState &state,
   const auto matches = [&](std::int16_t index) {
     const auto &system =
         state.scenario.systems[static_cast<std::size_t>(index)];
-    if (!NovaSystem_IsSystemVisible(state, index) || system.government_id < 0) {
+    if (!NovaSystem_IsSystemVisible(state, index) || system.government_id < 0 ||
+        NovaSystem_ResolveDiscoverySlot(state, index) == player_root) {
       return false;
     }
     const auto govt = system.government_id;
@@ -1528,7 +1547,7 @@ bool Mission_ActivateAtSlot(GameState &state,
   // which has no target ships / no return stellar resolves immediately. The
   // offering roll is cleared AFTER this resolve, so a script it starts sees
   // the pre-clear availability state (order preserved from the original).
-  if (state.system_transition_active && !state.in_travel_scene &&
+  if (state.system_transition_active && !state.travel_scene_ctx &&
       (active.flags_primary & 0x0001U) != 0U &&
       runtime.travel_stellar_reached && active.target_ship_count == 0 &&
       active.return_stellar_id == -1) {
@@ -1774,11 +1793,11 @@ bool Mission_CheckReactionConditionSatisfied(const GameState &state,
 // assigned to the mission-fleet slot: clears its fleet link, restores the
 // class-default AI behavior when it held a target, and re-enters AI state 2.
 // When emit_completion_payload is set it then runs the mission's on-abort
-// payload (Bible OnAbort, MisnActive +0x5e8). While the travel scene owns the
-// world (state.in_travel_scene, the original's g_travel_scene_ctx) the
-// released ships are despawned instead: the landing pass runs while the
-// destination window owns the world, so the released fleet must not linger
-// into the flight scene.
+// payload (Bible OnAbort, MisnActive +0x5e8). When the destination window
+// owns the world (state.travel_destination_window_open, the original's
+// g_travel_destination_window != 0) the released ships are despawned instead:
+// the landing pass runs while that window is up, so the released fleet must
+// not linger into the flight scene.
 void Mission_ClearMisnSlotAssignments(GameState &state,
                                       std::int16_t mission_slot,
                                       bool emit_completion_payload,
@@ -1801,7 +1820,7 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
       ship.squad_leader_ship_slot = -1;
       NovaAi_EnterState2ClearPrimaryTarget(state, ship);
     }
-    if (state.in_travel_scene) {
+    if (state.travel_destination_window_open) {
       ship.is_active = false;
     }
   }
@@ -1882,9 +1901,13 @@ void Mission_ResolveMissionSuccess(GameState &state,
       comp_text = desc->text;
       comp_variant = desc->dialog_variant;
       if (!desc->status.empty()) {
-        NovaLog::Todo("mission success debrief desc {} status string not "
-                      "displayed (0x004982a0)",
-                      comp_text_id);
+        // The trailing dësc status string is a QuickTime movie file name: the
+        // original plays it through Ui_PlayMovieFileModal (0x0049db00) when
+        // g_pref_quicktime_movies is on. The port defers the movie panel.
+        NovaLog::Todo("mission debrief desc {} status movie '{}' skipped "
+                      "(QuickTime movie panel unported)",
+                      comp_text_id,
+                      desc->status);
       }
       Mission_ExpandStringPlaceholders(state, comp_text);
       comp_text =
@@ -1966,9 +1989,11 @@ void Mission_ResolveMissionFailure(GameState &state,
       fail_text = desc->text;
       fail_variant = desc->dialog_variant;
       if (!desc->status.empty()) {
-        NovaLog::Todo("mission failure debrief desc {} status string not "
-                      "displayed (0x004982a0)",
-                      fail_text_id);
+        // QuickTime status movie (Ui_PlayMovieFileModal 0x0049db00); deferred.
+        NovaLog::Todo("mission debrief desc {} status movie '{}' skipped "
+                      "(QuickTime movie panel unported)",
+                      fail_text_id,
+                      desc->status);
       }
       Mission_ExpandStringPlaceholders(state, fail_text);
       fail_text =
@@ -2011,21 +2036,31 @@ bool NovaStellar_AreStellarsEquivalent(const GameState &state,
   return a->pos_x == b->pos_x && a->pos_y == b->pos_y && a->name == b->name;
 }
 
-bool Mission_TryConsumeMissionInteractionResources(GameState &state,
-                                                   std::int16_t count) {
+bool Mission_TryConsumeMissionInteractionResources(
+    GameState &state, std::int16_t count, const MissionDebriefSink &debrief) {
+  const auto show_denial = [&](std::uint16_t entry) {
+    // Resource_AppendStringEntry + Ui_RunTravelSelectionDialog(0,0,0): a bare
+    // STR# 0x7d2 text with no art/status arm.
+    if (debrief) {
+      const std::optional<std::string> text =
+          NovaHud_LoadStringEntry(0x7d2, entry);
+      if (text && !text->empty()) {
+        debrief(MissionDialogText{*text, 0});
+      }
+    } else {
+      NovaLog::Todo(
+          "mission interaction denial STR# 0x7d2 0x{:x} has no UI sink", entry);
+    }
+  };
   if (count > 0) {
     if (Ship_ComputeShipTotalCargoCapacity(state) < count) {
-      // The original shows the STR# 0x7d2 0x165 "not enough cargo space"
-      // selection dialog. UI-owned; not reconstructed (TODO(decomp)).
-      NovaLog::Todo("mission interaction denied: cargo capacity below {} tons",
-                    count);
+      // STR# 0x7d2 0x165 "not enough cargo space".
+      show_denial(0x165);
       return false;
     }
     if (Player_ComputeRemainingCargoSpace(state) < count) {
-      // STR# 0x7d2 0x166 "not enough free cargo space" dialog.
-      NovaLog::Todo("mission interaction denied: free cargo space below {} "
-                    "tons",
-                    count);
+      // STR# 0x7d2 0x166 "not enough free cargo space".
+      show_denial(0x166);
       return false;
     }
   }
@@ -2137,7 +2172,7 @@ void Mission_RerollOfferingRolls(GameState &state) {
 void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
   // g_last_system_for_ambient_rolls = -1: the clean-room ambient-roll cache
   // latch is not modelled (see Mission_ClearMisnSlotAssignments).
-  state.in_travel_scene = false;
+  state.travel_scene_ctx = false;
   state.mission_speaker_ship_slot = -1;
   // g_travel_destination_window = 0 and g_starmap_selected_system_id = -1
   // have no clean-room counterpart: the travel window is an SDL modal and the
@@ -2229,13 +2264,16 @@ bool Mission_RunAvailLocOffers(
 // (Bible ShipGoal: 0 destroy, 1 disable, 2 board, 3 escort, 4 observe,
 // 5 rescue, 6 chase-off; -1 no goal), fails overdue missions, and runs the
 // completion payload + auto-abort resolution when the objective first
-// completes. The deadline arm is suppressed while the travel scene owns the
-// world (state.in_travel_scene): the landing gate (0x00443780) runs with the
-// destination window up, which clears g_travel_scene_ctx only after the
-// pass.
-void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
-                                                  std::int16_t mission_slot,
-                                                  std::uint32_t now_ms) {
+// completes. The deadline arm is suppressed while the destination window owns
+// the world (state.travel_destination_window_open, the original's
+// g_travel_destination_window != 0): the landing gate (0x00443780) runs with
+// the destination window up and the original keeps g_travel_destination_window
+// nonzero for the whole pass.
+void Mission_HandleMissionOrSurrenderShipReaction(
+    GameState &state,
+    std::int16_t mission_slot,
+    std::uint32_t now_ms,
+    const MissionDebriefSink &debrief) {
   const auto slot = static_cast<std::size_t>(mission_slot);
   MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
   if (!runtime.is_active) {
@@ -2371,11 +2409,11 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
     }
   }
   // Deadline arm: an expired TimeLimit quick-fails the mission, except while
-  // the travel scene owns the world (g_travel_scene_ctx != 0 in the original:
-  // the landing pass resolves missions docked, never on the clock). The
-  // STR# 0x7d2 0x11d "mission failed" overlay + transition-table cue 3 are
-  // skipped for invisible missions (flags-accept 0x0400).
-  if (!runtime.is_failed && !state.in_travel_scene &&
+  // the landing destination window is up (g_travel_destination_window != 0 in
+  // the original: the landing pass resolves missions docked, never on the
+  // clock). The STR# 0x7d2 0x11d "mission failed" overlay + transition-table
+  // cue 3 are skipped for invisible missions (flags-accept 0x0400).
+  if (!runtime.is_failed && !state.travel_destination_window_open &&
       mission.time_limit_days_remaining < 1 &&
       mission.time_limit_days_remaining > -32000) {
     runtime.is_failed = true;
@@ -2398,11 +2436,24 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
   // missions, resolve the slot. The +0x43 completion dialog is UI-owned.
   if (!runtime.is_failed && runtime.objective_complete &&
       !was_objective_complete) {
-    if (mission.brief_description_ids[7] != -1) {
-      NovaLog::Todo("mission goal-complete dialog (misn {} id {}) not "
-                    "reconstructed yet",
-                    mission.mission_template_id,
-                    mission.brief_description_ids[7]);
+    // Ui_LoadSelectionDialogResource +
+    // Stellar_BuildTravelDestinationDescription
+    // + Ui_RunTravelSelectionDialog (show_art_and_status=1), gated on the
+    // ShipDone desc id (+0x43) != -1.
+    const std::int16_t ship_done_id = mission.brief_description_ids[7];
+    if (ship_done_id != -1) {
+      MissionDialogText message = Mission_LoadSelectionDialogText(
+          state, static_cast<std::uint16_t>(ship_done_id), false, mission_slot);
+      if (!message.text.empty()) {
+        if (debrief) {
+          debrief(message);
+        } else {
+          NovaLog::Todo(
+              "mission ShipDone dialog (misn {} id {}) has no UI sink",
+              mission.mission_template_id,
+              ship_done_id);
+        }
+      }
     }
     if (mission.ship_goal != -1) {
       Mission_RunMisnScriptPayload(state,
@@ -2419,23 +2470,25 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
 // Ghidra 0x00443760 Mission_TickShipInteractionReactions. Per-tick driver
 // over the 16 active-mission slots (TickSystems scope 0xb).
 void Mission_TickShipInteractionReactions(GameState &state,
-                                          std::uint32_t now_ms) {
+                                          std::uint32_t now_ms,
+                                          const MissionDebriefSink &debrief) {
   for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
     Mission_HandleMissionOrSurrenderShipReaction(
-        state, static_cast<std::int16_t>(slot), now_ms);
+        state, static_cast<std::int16_t>(slot), now_ms, debrief);
   }
 }
 
 // Ghidra 0x004438d0 Mission_ProcessInteractionReactionSlotResources. Landing
 // interaction pass for one slot: handles mission-cargo pickup/drop-off at the
 // TravelStel and final delivery at the ReturnStel. The pickup/drop-off desc
-// dialogs are UI-owned and logged when they would fire (TODO(decomp)).
+// dialogs are routed through `debrief`.
 // `landed_stellar_id` is a 0-based stellar index (the original passes
 // ai_secondary_target_slot, which indexes g_stellar_defs directly).
 void Mission_ProcessInteractionReactionSlotResources(
     GameState &state,
     std::int16_t mission_slot,
-    std::int16_t landed_stellar_id) {
+    std::int16_t landed_stellar_id,
+    const MissionDebriefSink &debrief) {
   const auto slot = static_cast<std::size_t>(mission_slot);
   ActiveMission &mission = state.active_missions[slot];
   MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
@@ -2444,14 +2497,23 @@ void Mission_ProcessInteractionReactionSlotResources(
     if (mission.pickup_mode == 1 && !mission.carrying_resources) {
       // Pick up here: gate on hauling the special-ship count as tonnage.
       if (Mission_TryConsumeMissionInteractionResources(
-              state, mission.cargo_qty_tons)) {
+              state, mission.cargo_qty_tons, debrief)) {
         mission.carrying_resources = true;
         runtime.travel_stellar_reached = true;
-        if (mission.brief_description_ids[2] != -1) {
-          NovaLog::Todo("mission cargo-loaded desc (misn {} id {}) not "
-                        "reconstructed yet",
-                        mission.mission_template_id,
-                        mission.brief_description_ids[2]);
+        const std::int16_t load_id = mission.brief_description_ids[2];
+        if (load_id != -1) {
+          MissionDialogText message = Mission_LoadSelectionDialogText(
+              state, static_cast<std::uint16_t>(load_id), false, mission_slot);
+          if (!message.text.empty()) {
+            if (debrief) {
+              debrief(message);
+            } else {
+              NovaLog::Todo(
+                  "mission cargo-loaded dialog (misn {} id {}) has no UI sink",
+                  mission.mission_template_id,
+                  load_id);
+            }
+          }
         }
       }
     } else {
@@ -2459,11 +2521,20 @@ void Mission_ProcessInteractionReactionSlotResources(
     }
     if (mission.drop_off_mode == 0 && mission.carrying_resources) {
       mission.carrying_resources = false;
-      if (mission.brief_description_ids[3] != -1) {
-        NovaLog::Todo("mission cargo-dropped desc (misn {} id {}) not "
-                      "reconstructed yet",
-                      mission.mission_template_id,
-                      mission.brief_description_ids[3]);
+      const std::int16_t dump_id = mission.brief_description_ids[3];
+      if (dump_id != -1) {
+        MissionDialogText message = Mission_LoadSelectionDialogText(
+            state, static_cast<std::uint16_t>(dump_id), false, mission_slot);
+        if (!message.text.empty()) {
+          if (debrief) {
+            debrief(message);
+          } else {
+            NovaLog::Todo(
+                "mission cargo-dropped dialog (misn {} id {}) has no UI sink",
+                mission.mission_template_id,
+                dump_id);
+          }
+        }
       }
       state.InvalidateDerivedStatCaches();
     }
@@ -2474,11 +2545,20 @@ void Mission_ProcessInteractionReactionSlotResources(
       (runtime.objective_complete || mission.ship_goal == -1 ||
        (mission.ship_goal == 3 && mission.goal_counter_a < 1))) {
     mission.carrying_resources = false;
-    if (mission.brief_description_ids[3] != -1) {
-      NovaLog::Todo("mission cargo-dropped desc (misn {} id {}) not "
-                    "reconstructed yet",
-                    mission.mission_template_id,
-                    mission.brief_description_ids[3]);
+    const std::int16_t dump_id = mission.brief_description_ids[3];
+    if (dump_id != -1) {
+      MissionDialogText message = Mission_LoadSelectionDialogText(
+          state, static_cast<std::uint16_t>(dump_id), false, mission_slot);
+      if (!message.text.empty()) {
+        if (debrief) {
+          debrief(message);
+        } else {
+          NovaLog::Todo(
+              "mission cargo-dropped dialog (misn {} id {}) has no UI sink",
+              mission.mission_template_id,
+              dump_id);
+        }
+      }
     }
     state.InvalidateDerivedStatCaches();
   }
@@ -2506,21 +2586,22 @@ void Mission_TickReactionSlotsForTravelInteraction(
       landed_stellar_id >= kResourceIdBase
           ? static_cast<std::int16_t>(landed_stellar_id - kResourceIdBase)
           : landed_stellar_id;
-  // The original runs this pass with g_travel_scene_ctx set to the landing
-  // window handle (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30
-  // clears it only after the pass): the deadline arm stays suppressed and
-  // released mission ships despawn while the destination window owns the
-  // world.
-  state.in_travel_scene = true;
+  // The original runs this pass with g_travel_destination_window set to the
+  // landing window handle (NovaUi_RunTravelDestinationInteractionLoop
+  // 0x00491f30 creates it before the pass and destroys it after): the deadline
+  // arm stays suppressed and released mission ships despawn while the
+  // destination window owns the world.
+  state.travel_destination_window_open = true;
   bool resolved_a_success = false;
   for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
     if (!state.active_mission_runtime_flags[slot].is_active) {
       continue;
     }
     const auto mission_slot = static_cast<std::int16_t>(slot);
-    Mission_HandleMissionOrSurrenderShipReaction(state, mission_slot, now_ms);
+    Mission_HandleMissionOrSurrenderShipReaction(
+        state, mission_slot, now_ms, debrief);
     Mission_ProcessInteractionReactionSlotResources(
-        state, mission_slot, landed_index);
+        state, mission_slot, landed_index, debrief);
     ActiveMission &mission = state.active_missions[slot];
     MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
     if (NovaStellar_AreStellarsEquivalent(
@@ -2543,14 +2624,15 @@ void Mission_TickReactionSlotsForTravelInteraction(
         Mission_ResolveMissionFailure(state, mission_slot, now_ms, debrief);
       }
     }
-    Mission_HandleMissionOrSurrenderShipReaction(state, mission_slot, now_ms);
+    Mission_HandleMissionOrSurrenderShipReaction(
+        state, mission_slot, now_ms, debrief);
   }
   if (resolved_a_success) {
     // Side-effect call: refreshes availability and the resolved-locator
     // cache.
     (void)Mission_EvaluateMissionLists(state);
   }
-  state.in_travel_scene = false;
+  state.travel_destination_window_open = false;
 }
 
 // Ghidra 0x00426d10 Mission_ShowMissionShipAnnouncement.
@@ -2582,7 +2664,7 @@ void Mission_ShowMissionShipAnnouncement(GameState &state,
   // Stellar_BuildTravelDestinationDescription(0, -1) (0x004444f0): the
   // wildcard pass with the mission context cleared -- mission destination
   // tokens expand to their [Error] sentinels, <OSN> to the speaking ship's
-  // personality name (read from the DAT_0077430e speaker latch).
+  // personality name (read from the g_mission_speaker_ship_slot latch).
   *text = Mission_ExpandMissionWildcards(state,
                                          *text,
                                          /*offering_list=*/false,
@@ -2819,13 +2901,20 @@ void Mission_TickShipHailLadder(GameState &state,
     allow = false;
   }
   // Flags 0x400 + LinkMission: the linked mission must currently offer from
-  // a ship (the original runs the check with g_travel_scene_ctx = 1).
-  if ((flags & 0x400U) != 0U && pers.link_mission_id != -1 &&
-      !Mission_CheckMissionShipInteractionEligibility(state,
-                                                      pers.link_mission_id,
-                                                      /*interaction_context=*/
-                                                      true)) {
-    allow = false;
+  // a ship (the original runs the check with g_travel_scene_ctx = 1 and the
+  // speaker latched to this ship, restoring both after the call).
+  if ((flags & 0x400U) != 0U && pers.link_mission_id != -1) {
+    state.travel_scene_ctx = true;
+    state.mission_speaker_ship_slot = ship.ship_instance_id;
+    const bool eligible = Mission_CheckMissionShipInteractionEligibility(
+        state,
+        pers.link_mission_id,
+        /*interaction_context=*/true);
+    state.travel_scene_ctx = false;
+    state.mission_speaker_ship_slot = -1;
+    if (!eligible) {
+      allow = false;
+    }
   }
   // Flags 0x800: silent while the ship holds AI state 2 (clear primary).
   if ((flags & 0x800U) != 0U && ship.ai_state_code == 2) {

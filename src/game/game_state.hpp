@@ -1508,22 +1508,32 @@ struct GameState {
   std::array<std::int16_t, 0x300> ship_class_threshold_rolls{};
   // Ghidra DAT_00774ae2: the context the interaction walk last ran in.
   std::int16_t mission_interaction_context = 0;
-  // Ghidra DAT_0077430e: the ship instance currently speaking a mission-ship
-  // announcement (latched around Mission_ShowMissionShipAnnouncement calls;
-  // -1 none). The <OSN> mission-text wildcard expands to the speaker's
-  // personality display name.
+  // Ghidra g_mission_speaker_ship_slot (0x0077430e): the ship instance
+  // currently speaking a mission-ship announcement (latched around
+  // Mission_ShowMissionShipAnnouncement calls; -1 none). The <OSN> mission-text
+  // wildcard expands to the speaker's personality display name.
   std::int16_t mission_speaker_ship_slot = -1;
   // Mirrors Ghidra g_mission_interaction_window (0x00774AE4): true while a
   // Mission BBS / offer window is open; read by Mission_ActivateMissionAtSlot
   // (0x0043f100). Owned by MissionInteractionWindowScope.
   bool mission_offer_window_open = false;
-  // Ghidra g_travel_scene_ctx (0x007d2b78): the landing DLOG 1000 window
-  // handle, nonzero while the travel-destination window owns the world --
+  // Ghidra g_travel_scene_ctx (0x00773eea): the travel-scene context byte.
+  // Raised around the flight-scene mission interactions -- the hail ladder
+  // (0x00433542), the player hail command (0x00454910), the board offer
+  // (0x0045b071..0x0045b16f) -- and by the Mission_ExecuteMisnScriptEngine
+  // 'S' opcode, so locator/eligibility code can tell a flight-scene lookup
+  // from a docked activation. Cleared after each, and defensively by the
+  // mission loader reset (0x0043bbc3), the travel-destination loop
+  // (0x00491f30), the land-command entry (0x00457fa7) and the bar window
+  // (0x0047c90b); it is 0 while landed/docked. The port defaults it false.
+  bool travel_scene_ctx = false;
+  // Ghidra g_travel_destination_window (0x007d2b78): the landing DLOG 1000
+  // window handle, nonzero while the destination window owns the world --
   // i.e. during Mission_TickReactionSlotsForTravelInteraction's landing pass
-  // (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30 clears it right
-  // after the pass). Gates the deadline quick-fail (0x00443c60) and the
-  // Mission_ClearMisnSlotAssignments despawn arm (0x00440aa0).
-  bool in_travel_scene = false;
+  // (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30 creates it before
+  // the pass and destroys it after). Gates the deadline quick-fail (0x00443c60)
+  // and the Mission_ClearMisnSlotAssignments despawn arm (0x00440aa0).
+  bool travel_destination_window_open = false;
   // Ghidra g_is_system_transition_active (0x007354a9): 1 while the blocking
   // docked/landing visit owns the world. Set at the start of
   // Stellar_RunDockAndLaunchSequence (0x00455e19), cleared at 0x0045612d in its
