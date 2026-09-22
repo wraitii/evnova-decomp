@@ -1058,16 +1058,14 @@ void NovaAi_UpdateShipAI(GameState &state,
     }
     // Dispatch precedence (Ship_UpdateShipAI 0x00401000): a ship holding a
     // stellar assignment runs Ship_DefenseFleetPrioritizePlayerThreat and
-    // skips the behavior supervisors entirely. Otherwise availability-driven
-    // hulls (class Flags3 bit 0x1/0x2) with no squad leader run the
-    // mining/destroyer supervisor, and everything else dispatches on
-    // ai_behavior_code.
+    // skips the behavior supervisors entirely. Otherwise asteroid-miner hulls
+    // (class Flags3 bit 0x1/0x2) with no squad leader run the asteroid-miner
+    // supervisor, and everything else dispatches on ai_behavior_code.
     const std::int16_t behavior = ship.ai_behavior_code;
     const ShipClass *dispatch_class = state.scenario.Ship(
         static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    const bool availability_hull =
-        dispatch_class != nullptr &&
-        (dispatch_class->availability_flags & 3U) != 0U;
+    const bool asteroid_miner_hull =
+        dispatch_class != nullptr && dispatch_class->IsAsteroidMiner();
     bool mission_stellar_attack = false;
     if (ship.mission_fleet_slot >= 0 &&
         static_cast<std::size_t>(ship.mission_fleet_slot) <
@@ -1083,9 +1081,9 @@ void NovaAi_UpdateShipAI(GameState &state,
     } else if (ship.defense_fleet_home_stellar_id != -1) {
       // Ghidra 0x00405120 Ship_DefenseFleetPrioritizePlayerThreat.
       NovaAi_DefenseFleetPrioritizePlayerThreat(state, ship);
-    } else if (availability_hull && ship.squad_leader_ship_slot == -1) {
-      // Ghidra 0x00402980 Ship_UpdateShipAiAvailabilityBehavior.
-      NovaAi_UpdateAvailabilityBehavior(state, ship);
+    } else if (asteroid_miner_hull && ship.squad_leader_ship_slot == -1) {
+      // Ghidra 0x00402980 Ship_UpdateShipAiAsteroidMinerBehavior.
+      NovaAi_UpdateAsteroidMinerBehavior(state, ship);
     } else if (behavior == 1) {
       NovaAi_UpdateBehavior0x01(state, ship, now_ms);
     } else if (behavior == 2) {

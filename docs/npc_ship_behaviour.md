@@ -213,7 +213,7 @@ existing primary slot instead. See
 
 A hull whose class Flags3 has bit 0x1 ("destroys asteroids") or 0x2
 ("scoops asteroid debris") with no squad leader runs
-`Ship_UpdateShipAiAvailabilityBehavior` (0x00402980) ahead of its behavior
+`Ship_UpdateShipAiAsteroidMinerBehavior` (0x00402980) ahead of its behavior
 code: it arms the scripted asteroid manoeuvre (state 0x10), the
 freeflight-anchor cargo pick-up (state 0x11), or a wander to the *nearest*
 adjacent travel stellar (`Stellar_FindNearestAdjacentTravelStellar`

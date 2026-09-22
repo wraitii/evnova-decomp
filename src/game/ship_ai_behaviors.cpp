@@ -1012,14 +1012,14 @@ namespace {
 
 } // namespace
 
-// Ghidra 0x00402980 Ship_UpdateShipAiAvailabilityBehavior. Supervisor for
+// Ghidra 0x00402980 Ship_UpdateShipAiAsteroidMinerBehavior. Supervisor for
 // ships whose class Flags3 has bit 0x1 (Bible "ship destroys asteroids") or
 // 0x2 ("ship scoops asteroid debris"). The dispatcher runs it in preference
-// to the normal ai_behavior_code branch when availability_flags & 3 and the
-// ship has no squad leader. Arms the scripted asteroid manoeuvre (state 0x10),
-// the freeflight-anchor cargo pick-up (state 0x11), or the nearest-adjacent-
+// to the normal ai_behavior_code branch when Flags3 & 3 and the ship has no
+// squad leader. Arms the scripted asteroid manoeuvre (state 0x10), the
+// freeflight-anchor cargo pick-up (state 0x11), or the nearest-adjacent-
 // travel-stellar wander ladder; a hostile contact escalates to state 3.
-void NovaAi_UpdateAvailabilityBehavior(GameState &state, Ship &ship) {
+void NovaAi_UpdateAsteroidMinerBehavior(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     ship.ai_state_code = 0;
     ship.ai_control_mode = 0;
@@ -1034,9 +1034,9 @@ void NovaAi_UpdateAvailabilityBehavior(GameState &state, Ship &ship) {
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   const bool destroys_asteroids =
-      cls != nullptr && (cls->availability_flags & 1U) != 0U;
+      cls != nullptr && (cls->flags3 & ShipClass::kDestroysAsteroids) != 0U;
   const bool scoops_debris =
-      cls != nullptr && (cls->availability_flags & 2U) != 0U;
+      cls != nullptr && (cls->flags3 & ShipClass::kScoopsAsteroidDebris) != 0U;
 
   if (ship.ai_hostility_accumulator < 1 ||
       ship.primary_target_ship_slot == -1) {

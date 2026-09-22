@@ -155,7 +155,7 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
 
 // Ghidra Stellar_ShipImmuneToStellarCrash (0x0046e210). A ship survives flying
 // into a fatal stellar (availability_flags 0x100) when its class carries ship
-// availability_flags 0x20, or -- for the player only -- when the player owns
+// Flags3 0x20, or -- for the player only -- when the player owns
 // any outfit whose mod slots include ModType 0x2a. Deliberately distinct from
 // Stellar_ShipHasGravityShielding (0x0046e120): the NPC flags_secondary 0x40
 // (inertialess) gate and the ModType 0x26 (inertial dampener)/0x29 (gravity
@@ -165,7 +165,7 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
 [[nodiscard]] bool Stellar_ShipImmuneToStellarCrash(const GameState &state,
                                                     const Ship &ship) {
   const ShipClass *ship_class = ShipClassFor(state, ship);
-  if (ship_class != nullptr && (ship_class->availability_flags & 0x20U) != 0U) {
+  if (ship_class != nullptr && (ship_class->flags3 & 0x20U) != 0U) {
     return true;
   }
   // The outfit scan is player-only: NPC ships (ship_instance_id != 0) return

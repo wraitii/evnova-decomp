@@ -253,10 +253,10 @@ void NovaAi_UpdateShipState(GameState &state,
           // with the ship "breaking away". Ghidra draws
           // NovaRandom_Range(200)+300 (300..499) for open-space ships, or
           // NovaRandom_Range(0x4b)+100 (100..174) for route-limited
-          // (availability_flags bit 2) ships.
+          // (Flags3 bit 2) ships.
           std::uniform_int_distribution<std::int32_t> dist(
-              (sc2 && (sc2->availability_flags & 2) != 0) ? 100 : 300,
-              (sc2 && (sc2->availability_flags & 2) != 0) ? 174 : 499);
+              (sc2 && (sc2->flags3 & 2) != 0) ? 100 : 300,
+              (sc2 && (sc2->flags3 & 2) != 0) ? 174 : 499);
           ship.ai_maneuver_timer_ms = static_cast<float>(dist(state.rng));
         }
       }

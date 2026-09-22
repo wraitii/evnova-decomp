@@ -547,7 +547,7 @@ TEST_CASE("fatal stellar crash gates on flags, transparency, and immunity",
         stellar.collision_mask.anchor_x = 1.5F;
         stellar.collision_mask.anchor_y = 1.5F;
         stellar.pos_x = overlap ? 0 : 100;
-        state.scenario.ships[0].availability_flags = class_flags;
+        state.scenario.ships[0].flags3 = class_flags;
         Ship &target = state.ShipAt(1);
         target.ship_instance_id = npc ? 1 : 0;
         target.collision_mask.mask = &kStellarDot;
@@ -560,7 +560,7 @@ TEST_CASE("fatal stellar crash gates on flags, transparency, and immunity",
   CHECK_FALSE(run_crash(/*fatal=*/true, /*overlap=*/true, /*npc=*/true, 0));
   CHECK(run_crash(/*fatal=*/false, /*overlap=*/true, /*npc=*/true, 0));
   CHECK(run_crash(/*fatal=*/true, /*overlap=*/false, /*npc=*/true, 0));
-  // Ship-class availability_flags 0x20 grants crash immunity (0x0046e210).
+  // Ship-class Flags3 0x20 grants crash immunity (0x0046e210).
   CHECK(run_crash(/*fatal=*/true, /*overlap=*/true, /*npc=*/true, 0x20));
 }
 
