@@ -697,6 +697,124 @@ TEST_CASE("mission random locator uses the current travel stellar as anchor") {
   CHECK(state.mission_target_resolutions[0].travel_stellar_id == -1);
 }
 
+// Ghidra 0x0043d510 (disassembled at 0x0043da4c/0x0043db4d): the random
+// allied-government stellar family compares the target government against
+// g_system_defs indexed by the STELLAR slot (not the candidate's own system),
+// excludes an exact stellar-government match, and ORs in the real alliance
+// relation. A stellar can therefore qualify solely because the unrelated
+// system at the same index is governed by the target.
+TEST_CASE("stellar allied locator reads the same-index system government") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = 15005;
+  definition.return_stellar_locator = -1;
+
+  state.scenario.governments.resize(8);
+  state.scenario.systems.resize(3);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+    system.has_explored_flag = true;
+  }
+  state.scenario.systems[0].nav_defs[0] = 0x80; // reference system
+  state.scenario.systems[1].nav_defs[0] = 0x81;
+  state.scenario.systems[2].nav_defs[0] = 0x82;
+  state.scenario.systems[0].government_id = 1;
+  state.scenario.systems[1].government_id = 5; // same slot as stellar 1
+  state.scenario.systems[2].government_id = 0;
+
+  state.scenario.stellars.resize(3);
+  for (auto &stellar : state.scenario.stellars) {
+    stellar.is_available = true;
+    stellar.is_defined = true;
+    stellar.flags = 0x81;
+    stellar.strength_capacity = 1;
+    stellar.strength = 1;
+    stellar.destroyed_days_remaining = 1;
+  }
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[0].government_id = 1; // reference anchor
+  state.scenario.stellars[1].system_id = 1;
+  state.scenario.stellars[1].government_id = 7; // not allied to 5
+  state.scenario.stellars[2].system_id = 2;
+  state.scenario.stellars[2].government_id = 5; // exact, excluded
+  state.travel.selected_stellar_id = 0x80;
+
+  Mission_ResolveMissionStellarLocators(state);
+  CHECK(state.mission_target_resolutions[0].travel_stellar_id == 1);
+}
+
+// Ghidra 0x0043d510: the 30000..30999 share-class stellar family guards its
+// DoGovtsShareClass call with `wanted != govt`, so a stellar of the exact
+// target government is not selectable by that id even though it trivially
+// shares classes with itself.
+TEST_CASE("stellar share-class locator excludes the exact government") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = 30005;
+  definition.return_stellar_locator = -1;
+
+  state.scenario.governments.resize(8);
+  state.scenario.governments[5].classes[0] = 2;
+  state.scenario.governments[6].classes[0] = 2;
+  state.scenario.systems.resize(3);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+    system.has_explored_flag = true;
+  }
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.systems[1].nav_defs[0] = 0x81;
+  state.scenario.systems[2].nav_defs[0] = 0x82;
+
+  state.scenario.stellars.resize(3);
+  for (auto &stellar : state.scenario.stellars) {
+    stellar.is_available = true;
+    stellar.is_defined = true;
+    stellar.flags = 0x81;
+    stellar.strength_capacity = 1;
+    stellar.strength = 1;
+    stellar.destroyed_days_remaining = 1;
+  }
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[0].government_id = 1;
+  state.scenario.stellars[1].system_id = 1;
+  state.scenario.stellars[1].government_id = 5; // exact, excluded
+  state.scenario.stellars[2].system_id = 2;
+  state.scenario.stellars[2].government_id = 6; // shares class 2
+  state.travel.selected_stellar_id = 0x80;
+
+  Mission_ResolveMissionStellarLocators(state);
+  CHECK(state.mission_target_resolutions[0].travel_stellar_id == 2);
+}
+
+// Ghidra 0x0043e6f0: the system allied family's rejection-sampling loop guards
+// its Government_AreGovtsAllied call with `wanted != govt`, so the exact target
+// government is not selectable. A lone exact-match system leaves the family
+// with no candidate and the populate arm stores -1.
+TEST_CASE("system allied locator excludes an exact government twin") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.current_system_locator = 15005;
+  definition.travel_stellar_locator = -1;
+  definition.return_stellar_locator = -1;
+
+  state.scenario.governments.resize(8);
+  state.scenario.systems.resize(2);
+  state.scenario.systems[0].is_visible = true;
+  state.scenario.systems[0].government_id = 1;
+  state.scenario.systems[1].is_visible = true;
+  state.scenario.systems[1].government_id = 5; // exact match only
+  state.player.current_system_id = 0;
+
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK(state.active_missions[0].current_system_id == -1);
+}
+
 // Regression for Ghidra 0x00448670 Mission_RunAvailLocOffers:
 // an ordinary decline removes the offer from the current interaction walk and
 // must not immediately present the same definition again in that context.
