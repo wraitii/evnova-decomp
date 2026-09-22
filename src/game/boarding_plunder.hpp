@@ -118,10 +118,10 @@ void EnsureTransitionSounds(GameState &state);
 // Ghidra 0x0045a3d0 Player_HandleBoardTargetCommand. The player's one-shot
 // "board target" command (input.board edge in the port): validates range /
 // relative velocity / heading alignment / boardability of the primary target,
-// then dispatches the plunder window (plain ships) or the mission arms
-// (TODO(decomp)). Denial feedback is STR# 0x7d2 overlays plus a centered
-// error beep queued on GameState.pending_ui_sounds. The plain-ship dispatch
-// runs the modal synchronously (blocking the flight loop, as the original
+// then dispatches the mission arms, the personality recovery / offer-window
+// arms, or the plunder window. Denial feedback is STR# 0x7d2 overlays plus a
+// centered error beep queued on GameState.pending_ui_sounds. The dispatch runs
+// the modal windows synchronously (blocking the flight loop, as the original
 // blocks in its own loop).
 void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                                      SdlAudio &audio,

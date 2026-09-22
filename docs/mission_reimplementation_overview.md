@@ -99,6 +99,10 @@ Related: Ghidra `0x00447f00 System_GetSystemDefFlagByte` is exactly the
   mask (`mïsn +0x656/+0x65a` via `NovaOutfit_EvaluateRequireMask`), the Ship
   restriction (+0x5a), Flags 0x2000/0x4000 class arms, the PayVal credits gate,
   locator-candidate sanity, and the same-system (visibility-root) denial.
+  AvailRecord -32000 (dominated selected stellar) and -32001 (any dominated
+  stellar) are evaluated only while `g_travel_scene_ctx == 0`; with the board
+  offer context raised (0x0045b071) the value falls through to the ordinary
+  `g_system_reputation` compare.
 - `0x0043F100` `Mission_ActivateMissionAtSlot`: the on-accept payload
   (mïsn +0x15b set-expression: chain bits, X system-reveal, S auto-start) runs
   at the end. Acceptance UI (Brief dialog payload +0x34 with starmap access,
@@ -257,7 +261,8 @@ Counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`:
 - **Board/rescue — `Player_HandleBoardTargetCommand` 0x0045a3d0**:
   `goal_counter_b++` on the target's fleet for both the board-cargo arm
   (pickup_mode 2, after `Mission_TryConsumeMissionInteractionResources`,
-  carrying_resources latch, STR# 0x7d2 0x6a overlay without the CREC cargo name)
+  carrying_resources latch, STR# 0x7d2 0x6a + optional 0x6b + commodity name
+  (STR# 0xfa1 / res 0x238c) + 0x6c overlay)
   and the rescue special-ship arm (`ship_goal` 2/5 + flags 0x0001 + single-ship
   fleet; overlay 0x7e, ai_maneuver_timer 100); both set the target's +0xB9
   boarded latch.

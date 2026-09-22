@@ -153,6 +153,17 @@ void NovaGovernment_ProcessFactionCombatEvent(
     std::int16_t event_code,
     std::int16_t mission_fleet_slot);
 
+// Ghidra 0x004102e0 Government_PropagateHostilityFromAttack. Alerts eligible
+// behavior-3/4 responders related to the victim to target the attacker. Public
+// wrapper over the file-local PropagateHostilityFromPlayerAttack implementation
+// (src/game/collision.cpp); the board-command plunder fallbacks (Ghidra
+// 0x0045aa20 generic, 0x0045b372 link_mission_id == -1, 0x0045b932 enforcer
+// personalities; attacker = the player) are the callsites added here.
+// `attacker` must be the player slot (0), matching the original's player-attack
+// scan.
+void NovaGovernment_PropagateHostilityFromAttack(
+    GameState &state, const Ship &target_ship, std::int16_t attacker_ship_slot);
+
 // Ghidra 0x00401800 Ship_ScanPlayerForContraband. An eligible NPC warship or
 // interceptor within 100 px of the player may scan for contraband (single
 // 76% RNG gate). It handles the first active mission whose ScanMask matches

@@ -637,6 +637,17 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
 
 } // namespace
 
+// Public wrapper for the file-local Government_PropagateHostilityFromAttack
+// port above (canonical citation at its primary site), so the
+// Player_HandleBoardTargetCommand plunder fallback (0x0045a9f3 / 0x0045ab0f)
+// reuses the same responder scan.
+void NovaGovernment_PropagateHostilityFromAttack(
+    GameState &state,
+    const Ship &target_ship,
+    std::int16_t attacker_ship_slot) {
+  PropagateHostilityFromPlayerAttack(state, target_ship, attacker_ship_slot);
+}
+
 // Public checkpoint to the file-local SquadRoot walk above (see its canonical
 // citation) so Shot_HandleShot's player target-chain arm reuses the exact same
 // chain semantics as Weapon_CanWeaponHitTarget.
