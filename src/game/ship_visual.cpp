@@ -773,6 +773,31 @@ void NovaShip_TickCloakFadeState(GameState &state,
   if (ship.cloak_fade_progress > 0.0F && NovaAiShip_IsDestroyed(ship)) {
     ship.cloak_transition_latch = -2;
   }
+
+  // Hull-rect jitter (Ghidra 0x00428340 at 0x0042b0b2): a partially cloaked
+  // hull is nudged by an independent random offset on each axis in
+  // [-m, m], m = trunc(progress / g_cloak_jitter_divisor_f32 (10.0)); every
+  // composite layer (hull, glow, lights, weapon, alt) gets the same offsets.
+  // Consumes the two NovaRandom_Range rolls the original spends here so the
+  // session RNG stream stays aligned. The original skips the whole block when
+  // the hull Sprite is null (0x0042b0a7); the port gates on the class's decoded
+  // base image.
+  const ShipClass *hull_class = ShipClassFor(state, ship);
+  const bool has_hull_sprite =
+      hull_class != nullptr && hull_class->base_image_id != 0;
+  if (has_hull_sprite && ship.cloak_fade_progress > 0.0F &&
+      ship.cloak_fade_progress < 32.0F) {
+    const auto magnitude =
+        static_cast<std::int32_t>(ship.cloak_fade_progress / 10.0F);
+    const std::int32_t range = magnitude * 2 + 1;
+    ship.cloak_jitter_x =
+        static_cast<std::int16_t>(magnitude - RandomBelow(state.rng, range));
+    ship.cloak_jitter_y =
+        static_cast<std::int16_t>(magnitude - RandomBelow(state.rng, range));
+  } else {
+    ship.cloak_jitter_x = 0;
+    ship.cloak_jitter_y = 0;
+  }
 }
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, cloak-ability cache tail. The
@@ -846,6 +871,67 @@ NovaShipTintColor NovaShip_ResolveTintColor(const GameState &state,
     blue = 0x20;
   }
   return NovaShipTintColor{red, green, blue};
+}
+
+// Ghidra 0x00428340 Ship_UpdateVisualState cloak render slice. See the header
+// for the field semantics; this is the pure derivation the SDL draw options
+// consume. Constants decoded from data: g_cloak_fade_progress_max (0x00575314)
+// = 32.0, g_cloak_jitter_divisor_f32 (0x00575374) = 10.0. The per-channel
+// dim is a C integer truncation of (resolved - progress) (x87 FIST plus the
+// sign-corrected truncation idiom at 0x0042b1b7..), then a sub-2 result
+// collapses to 0 when the resolved channel is below 0x10, else 2.
+ShipCloakPresentation NovaShip_CloakPresentation(
+    const GameState &state, const Ship &ship, const NovaShipTintColor &tint) {
+  ShipCloakPresentation p;
+  const float progress = ship.cloak_fade_progress;
+  if (!(progress > 0.0F)) {
+    return p;
+  }
+  const std::array<std::int16_t, 3> resolved{tint.red, tint.green, tint.blue};
+  const auto dim_tint = [progress](std::int16_t channel) -> std::int16_t {
+    const auto dimmed =
+        static_cast<std::int16_t>(static_cast<float>(channel) - progress);
+    if (dimmed < 2) {
+      return channel < 0x10 ? 0 : 2;
+    }
+    return dimmed;
+  };
+  p.progress = progress;
+  if (progress < 32.0F) {
+    // Partial fade: additive ghost whose per-channel intensity falls with the
+    // fade; the glow/light/weapon layers are capped so they vanish with it.
+    p.additive = true;
+    p.hull_tint = {
+        dim_tint(resolved[0]), dim_tint(resolved[1]), dim_tint(resolved[2])};
+    p.effect_cap = 32.0F - progress;
+    p.weapon_cap = 40.0F - progress;
+    p.jitter_x = static_cast<float>(ship.cloak_jitter_x);
+    p.jitter_y = static_cast<float>(ship.cloak_jitter_y);
+    return p;
+  }
+  // Full fade: the original sets hull brightness 0x40 (no blit at all) except
+  // for the player, a player escort (squad_leader_ship_slot == 0), or a hull
+  // the player's screen scanner reveals, which get brightness 0x1e. That
+  // brightness gives src_factor = tint + 2 and a 30/32 destination retention;
+  // the port approximates it with a source-alpha blend (documented
+  // divergence). The glow/light/shield layers are hidden outright, but the
+  // weapon layer still runs through the shared cap block at 0x0042b7f2.
+  const bool reveal = ship.ship_instance_id == 0 ||
+                      ship.squad_leader_ship_slot == 0 ||
+                      state.player.cloak_scanner_reveal_screen == 1;
+  p.effect_cap = 0.0F;
+  p.weapon_cap = 40.0F - progress;
+  if (!reveal) {
+    p.hidden = true;
+    return p;
+  }
+  float source_weight = 0.0F;
+  for (std::int16_t channel : resolved) {
+    source_weight = std::max(source_weight,
+                             static_cast<float>(dim_tint(channel) + 2) / 32.0F);
+  }
+  p.hull_alpha = source_weight;
+  return p;
 }
 
 } // namespace game

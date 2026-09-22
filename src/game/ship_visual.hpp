@@ -54,6 +54,41 @@ struct NovaShipTintColor {
 [[nodiscard]] NovaShipTintColor
 NovaShip_ResolveTintColor(const GameState &state, const Ship &ship);
 
+// The per-frame cloak render state derived from the fade progress (Ghidra
+// 0x00428340 0x0042b0b2..0x0042b758). The original mutates each ship Sprite's
+// brightness (+0xA2) and RGB tint channels (+0xA4/a6/a8) and, for a partial
+// fade, nudges the hull rect. The SDL renderer instead folds this into the
+// draw options:
+//   - partial fade (0 < progress < 32): the hull/alt draw additively
+//     (dst + src*tint/32) with per-channel hull_tint = trunc(resolved -
+//     progress) clamped to 0/2, the glow/light/weapon intensities capped at
+//     effect_cap / weapon_cap, and every composite layer jittered by
+//     cloak_jitter_x/y.
+//   - full fade (progress >= 32): the hull and alt are not blitted (brightness
+//     0x40) unless the player, a player escort (squad_leader_ship_slot == 0),
+//     or the player's screen scanner can see it, in which case the hull draws
+//     as a faint ghost (hull_alpha); hidden marks the no-blit case. The
+//     glow/light/shield layers are hidden, but the weapon layer still draws
+//     under the shared 40 - progress cap (0x0042b7f2).
+struct ShipCloakPresentation {
+  bool hidden = false;   // brightness 0x40: hull/alt blit skipped
+  bool additive = false; // partial fade: dst + src*tint/32
+  float progress = 0.0F; // 0..32
+  std::array<std::int16_t, 3> hull_tint = {0x20, 0x20, 0x20};
+  float hull_alpha = 1.0F;  // full-fade ghost source weight
+  float effect_cap = 32.0F; // glow/light cap (32 - progress)
+  float weapon_cap = 32.0F; // weapon-flash cap (40 - progress)
+  float jitter_x = 0.0F;
+  float jitter_y = 0.0F;
+};
+
+// Ghidra 0x00428340 Ship_UpdateVisualState cloak render slice. `resolved_tint`
+// is NovaShip_ResolveTintColor for the hull. Pure; no SDL.
+[[nodiscard]] ShipCloakPresentation
+NovaShip_CloakPresentation(const GameState &state,
+                           const Ship &ship,
+                           const NovaShipTintColor &resolved_tint);
+
 // Decoded sh\x8an base-image fields (Bible names in parentheses) plus the
 // rotation metadata used to index frames by heading.
 struct ShipVisualDescriptor {
@@ -247,7 +282,11 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
 // The original reads the ship-class swarming bit rather than the cloaking
 // outfit's ModVal 0x0001; under kApplyOriginalBugFixes the fade gates on the
 // device bit instead. A still-visible wreck (progress > 0) latches -2 so the
-// fade continues to clear through the lower 8.0 visibility threshold.
+// fade continues to clear through the lower 8.0 visibility threshold. While
+// 0 < progress < 32 the per-frame jitter offsets shared by every composite
+// sprite layer are drawn from the session RNG (two
+// NovaRandom_Range(2*trunc(progress/10)+1) rolls) and stored on the Ship for
+// the renderer.
 void NovaShip_TickCloakFadeState(GameState &state,
                                  Ship &ship,
                                  float elapsed_ticks);

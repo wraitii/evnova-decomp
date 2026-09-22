@@ -558,6 +558,14 @@ struct Ship {
   // Signed cloak transition state (Ghidra ShipState +0xC8D8): positive starts
   // fading into cloak, negative starts fading out, and zero is stable.
   std::int16_t cloak_transition_latch = 0; // +0xC8D8
+  // Cloak render jitter (Ghidra 0x00428340 at 0x0042b0b2): a partially cloaked
+  // ship's composite sprite rects are each nudged by the same per-frame random
+  // offset on each axis in [-trunc(progress/10), +trunc(progress/10)]
+  // (g_cloak_jitter_divisor_f32 0x00575374 = 10.0). Computed in
+  // NovaShip_TickCloakFadeState and consumed by SpaceflightView::DrawShipSprite
+  // for the hull, glow, light, weapon and alt layers.
+  std::int16_t cloak_jitter_x = 0;
+  std::int16_t cloak_jitter_y = 0;
   // Per-ship cached cloak presentation capabilities, lazily populated by
   // NovaShip_RefreshCloakAbilityCaches (Ship_UpdateVisualState 0x00428340
   // tail) from ModType 30 bits 0x0002/0x0001 (screen/radar) and ModType 17 bit

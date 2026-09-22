@@ -860,23 +860,44 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
   // the colored layers instead of the reverse.
   const float layer_alpha = emergence.hull_alpha * (1.0F - emergence.white_mix);
 
+  // Cloak render slice (Ship_UpdateVisualState 0x00428340 0x0042b0b2..). A
+  // fully cloaked hull the player cannot reveal has hull/alt skipped (hull
+  // brightness 0x40); a partially cloaked hull is an additive ghost whose
+  // composite layer rects all take the same per-frame jitter. The
+  // glow/light/shield layers are hidden outright, but the weapon layer still
+  // draws under the shared 40 - progress cap.
+  const NovaShipTintColor tint = NovaShip_ResolveTintColor(state, ship);
+  const ShipCloakPresentation cloak =
+      NovaShip_CloakPresentation(state, ship, tint);
+  const float hull_x = ship.pos_x + cloak.jitter_x;
+  const float hull_y = ship.pos_y + cloak.jitter_y;
+
   SpriteDrawOptions hull_opts;
-  hull_opts.alpha_mod = layer_alpha;
+  hull_opts.alpha_mod = layer_alpha * cloak.hull_alpha;
   // Base-hull tint from Ship_ResolveShipTintColor (0x0046e470): the player uses
   // the global paint, NPCs their personality/faction color. See
   // SpriteDrawOptions.tint_rgb5 for the SDL approximation.
-  {
-    const NovaShipTintColor tint = NovaShip_ResolveTintColor(state, ship);
+  if (cloak.additive) {
+    // Partial cloak: brightness 0x20 collapses BlitPixel_TintRgb15Span to the
+    // additive `dst + src*tint/32`; hull_tint already carries
+    // resolved-progress.
+    hull_opts.additive = true;
+    hull_opts.tint_rgb5 = cloak.hull_tint;
+  } else if (cloak.progress >= 32.0F) {
+    // Full-fade ghost: hull_alpha carries the brightness-0x1e source weight,
+    // so leave the hull untinted rather than darkening it a second time.
+    hull_opts.tint_rgb5 = std::nullopt;
+  } else {
     hull_opts.tint_rgb5 =
         std::array<std::int16_t, 3>{tint.red, tint.green, tint.blue};
   }
   ApplyFog(hull_opts);
-  if (hull_opts.alpha_mod > 0.0F) {
+  if (!cloak.hidden && hull_opts.alpha_mod > 0.0F) {
     DrawSprite(platform.renderer(),
                sprite.base,
                frame,
-               ship.pos_x,
-               ship.pos_y,
+               hull_x,
+               hull_y,
                camera_x,
                camera_y,
                viewport_w,
@@ -887,16 +908,20 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
   // and a thrust-driven additive intensity (NovaShip_TickWeaponSpriteAnd-
   // RunningLights folds the per-ship fog into it for NPCs).
   if (sprite.has_glow && !sprite.glow.frames.empty() &&
-      ship.engine_glow_intensity > 0.0F) {
+      ship.engine_glow_intensity > 0.0F && cloak.effect_cap > 0.0F) {
     SpriteDrawOptions opts;
-    opts.alpha_mod = ship.engine_glow_intensity * (1.0F - emergence.white_mix);
+    // engine_glow_intensity is normalized 0..1 while effect_cap is the
+    // original's 0..32 tint units, so compare in the same scale.
+    opts.alpha_mod =
+        std::min(ship.engine_glow_intensity, cloak.effect_cap / 32.0F) *
+        (1.0F - emergence.white_mix);
     opts.additive = true;
     ApplyFog(opts);
     DrawSprite(platform.renderer(),
                sprite.glow,
                frame,
-               ship.pos_x,
-               ship.pos_y,
+               hull_x,
+               hull_y,
                camera_x,
                camera_y,
                viewport_w,
@@ -904,53 +929,64 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
                opts);
   }
   // Running lights and weapon effects over the hull (additive, intensity from
-  // the visual tick).
+  // the visual tick). Every composite layer shares the hull's cloak jitter
+  // (0x0042b0b2 writes the same offset into each Sprite rect).
   if (sprite.has_light) {
     DrawShipEffectLayer(platform.renderer(),
                         sprite.light,
                         frame,
-                        ship.pos_x,
-                        ship.pos_y,
+                        hull_x,
+                        hull_y,
                         camera_x,
                         camera_y,
                         viewport_w,
                         viewport_h,
-                        ship.light_intensity * (1.0F - emergence.white_mix),
+                        std::min(ship.light_intensity, cloak.effect_cap) *
+                            (1.0F - emergence.white_mix),
                         /*visible_threshold=*/1.0F,
                         fog_murk_);
   }
   if (sprite.has_weapon) {
-    DrawShipEffectLayer(platform.renderer(),
-                        sprite.weapon,
-                        frame,
-                        ship.pos_x,
-                        ship.pos_y,
-                        camera_x,
-                        camera_y,
-                        viewport_w,
-                        viewport_h,
-                        ship.weapon_sprite_flash_level *
-                            (1.0F - emergence.white_mix),
-                        /*visible_threshold=*/0.0F,
-                        fog_murk_);
+    DrawShipEffectLayer(
+        platform.renderer(),
+        sprite.weapon,
+        frame,
+        hull_x,
+        hull_y,
+        camera_x,
+        camera_y,
+        viewport_w,
+        viewport_h,
+        std::min(ship.weapon_sprite_flash_level, cloak.weapon_cap) *
+            (1.0F - emergence.white_mix),
+        /*visible_threshold=*/0.0F,
+        fog_murk_);
   }
   // Alt overlay sheet (sh\x8an AltImageID), an ordinary blend over the hull.
   // The frame is alternate_sprite_cycle_index * FramesPer + heading_frame,
   // advanced by NovaShip_TickSpriteAnimation.
-  if (sprite.has_alt && !sprite.alt.frames.empty() && layer_alpha > 0.0F) {
+  if (sprite.has_alt && !sprite.alt.frames.empty() && layer_alpha > 0.0F &&
+      !cloak.hidden) {
     const int alt_frame =
         ComposeShipFrameIndex(ship,
                               ship.alternate_sprite_cycle_index,
                               sprite.frames_per_rotation,
                               std::max(1, sprite.alt_set_count));
     SpriteDrawOptions opts;
-    opts.alpha_mod = layer_alpha;
+    opts.alpha_mod = layer_alpha * cloak.hull_alpha;
+    if (cloak.additive) {
+      // The alt sheet copies the hull's cloak tint/jitter (0x0042b4b0).
+      opts.additive = true;
+      opts.tint_rgb5 = cloak.hull_tint;
+    } else if (cloak.progress >= 32.0F) {
+      opts.tint_rgb5 = std::nullopt;
+    }
     ApplyFog(opts);
     DrawSprite(platform.renderer(),
                sprite.alt,
                alt_frame,
-               ship.pos_x,
-               ship.pos_y,
+               hull_x,
+               hull_y,
                camera_x,
                camera_y,
                viewport_w,
