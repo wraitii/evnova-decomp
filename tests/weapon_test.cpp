@@ -1762,7 +1762,7 @@ TEST_CASE("mode-4 shots follow the owner class turreted-above container flag",
   REQUIRE(state.active_shots.size() == 1);
   CHECK_FALSE(state.active_shots[0].draws_above_ships);
 
-  state.scenario.ships[0].availability_flags = 0x0040;
+  state.scenario.ships[0].flags3 = 0x0040;
   state.active_shots.clear();
   REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
   REQUIRE(state.active_shots.size() == 1);

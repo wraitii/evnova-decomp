@@ -586,7 +586,7 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
                    : 1.0F;
   s.flags_secondary = ReadBe16(bytes, 0x62);
   if (bytes.size() >= 0x728) {
-    s.availability_flags = ReadBe16(bytes, 0x726);
+    s.flags3 = ReadBe16(bytes, 0x726);
   }
   // The string block and store masks are copied verbatim by
   // NovaData_LoadScenarioResourceTables (0x004bd3c0).  Only the scripts used

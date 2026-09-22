@@ -995,7 +995,7 @@ void NovaAi_SelectGeneralWeaponBank(GameState &state, Ship &ship) {
 // Ghidra 0x0040d7e0 Weapon_SelectUnguidedWeaponBank. Fallback that arms the
 // highest-damage fireable unguided bank: modes -1/0/6, or mode 7 when there
 // is no primary target. Mode 0 additionally passes only when the weapon's
-// flags_quaternary bit 0 or the ship class's availability bit 0 is clear.
+// flags_quaternary bit 0 or the ship class's Flags3 bit 0 is clear.
 void NovaAi_SelectUnguidedWeaponBank(GameState &state, Ship &ship) {
   const ShipClass *cls = ShipClassFor(state, ship);
   std::int16_t best_bank = -1;
@@ -1014,9 +1014,8 @@ void NovaAi_SelectUnguidedWeaponBank(GameState &state, Ship &ship) {
     const bool has_target = ship.primary_target_ship_slot != -1;
     const bool mode_ok =
         mode == -1 || (mode == 6) || (mode == 7 && !has_target) ||
-        (mode == 0 &&
-         (((weapon->flags_quaternary & 1U) == 0U) ||
-          (cls != nullptr && (cls->availability_flags & 1U) == 0U)));
+        (mode == 0 && (((weapon->flags_quaternary & 1U) == 0U) ||
+                       (cls != nullptr && (cls->flags3 & 1U) == 0U)));
     if (!mode_ok) {
       continue;
     }

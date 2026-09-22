@@ -335,10 +335,10 @@ std::vector<std::int16_t> BuildShipyardIds(const GameState &state,
     if (ship.display_name.empty() || random_percent <= 0 ||
         roll > random_percent || !HasTech(stellar, ship.tech_level))
       continue;
-    if ((ship.availability_flags & 0x0200U) != 0U &&
+    if ((ship.flags3 & 0x0200U) != 0U &&
         !MeetsRequire(state, ship.require_lo, ship.require_hi))
       continue;
-    if ((ship.availability_flags & 0x0100U) != 0U &&
+    if ((ship.flags3 & 0x0100U) != 0U &&
         !NovaControlExpression_Evaluate(ship.availability_expr, expr))
       continue;
     ids.push_back(static_cast<std::int16_t>(i + 0x80));
@@ -346,7 +346,7 @@ std::vector<std::int16_t> BuildShipyardIds(const GameState &state,
   // 0x00469e90 uses the corresponding ship-class flag 0x4000.
   for (std::size_t i = 0; i < ids.size(); ++i) {
     const ShipClass *ship = state.scenario.Ship(ids[i]);
-    if ((ship->availability_flags & 0x4000U) == 0U)
+    if ((ship->flags3 & 0x4000U) == 0U)
       continue;
     const auto weight = ship->display_weight;
     ids.erase(std::remove_if(

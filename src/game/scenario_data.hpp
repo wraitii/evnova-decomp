@@ -378,7 +378,20 @@ struct ShipClass {
   // call receives this value as a playback speed multiplier.
   float jump_duration_multiplier = 1.0F; // ShipClassDef +0x44
   std::uint16_t flags_secondary = 0;     // Flags2
-  std::uint16_t availability_flags = 0;  // Flags3
+  // Bible Flags3 ("Even more flags!"). Bits 0x1/0x2 mark a scripted
+  // asteroid-work/miner hull (Bible "ship destroys asteroids" / "ship scoops
+  // asteroid debris"); 0x100/0x200/0x4000 are unrelated shipyard-availability
+  // bits in the same field.
+  static constexpr std::uint16_t kDestroysAsteroids = 0x0001;
+  static constexpr std::uint16_t kScoopsAsteroidDebris = 0x0002;
+  std::uint16_t flags3 = 0; // Flags3
+
+  // Scripted asteroid-work/miner hull: Flags3 bit 0x1 or 0x2. The Ghidra
+  // dispatcher Ship_UpdateShipAI (0x00401000) routes these to
+  // Ship_UpdateShipAiAsteroidMinerBehavior (0x00402980).
+  [[nodiscard]] bool IsAsteroidMiner() const {
+    return (flags3 & (kDestroysAsteroids | kScoopsAsteroidDebris)) != 0;
+  }
 
   std::int16_t max_gun = 0;    // MaxGun
   std::int16_t max_turret = 0; // MaxTur

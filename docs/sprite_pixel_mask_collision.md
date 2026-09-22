@@ -188,7 +188,7 @@ current-system nav stellars. Excluded: inactive, already destroyed
 (`death_timer_active > 0 || armor <= 0`) and crash-immune ships.
 
 `Stellar_ShipImmuneToStellarCrash` (0x0046e210, ported): class
-`availability_flags & 0x20`, or (player only) an owned outfit with ModType
+`Flags3 & 0x20`, or (player only) an owned outfit with ModType
 0x2a. Distinct from stellar gravity shielding - the NPC `flags_secondary 0x40`
 (inertialess) gate and ModType 0x26 (inertial dampener)/0x29 (gravity
 resistance) do *not* count.

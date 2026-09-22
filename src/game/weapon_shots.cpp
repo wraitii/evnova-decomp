@@ -246,7 +246,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
     const ShipClass *owner_cls = ShipClassFor(
         state, state.ShipAt(static_cast<std::size_t>(owner_ship_slot)));
     shot.draws_above_ships =
-        owner_cls != nullptr && (owner_cls->availability_flags & 0x0040U) != 0U;
+        owner_cls != nullptr && (owner_cls->flags3 & 0x0040U) != 0U;
   }
   constexpr float kDegPerRad = 180.0F / 3.14159265358979323846F;
   // Shot heading in game degrees throughout; the muzzle geometry converts back
