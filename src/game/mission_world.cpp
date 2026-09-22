@@ -262,14 +262,16 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
 //   deactivation unless a post-holdoff wait keeps the slot busy).
 // Events with no TimeLimit (duration == -1, the absent-slot sentinel) are
 // never touched.
-// Under kApplyOriginalBugFixes four confirmed quirks are corrected: Random is
-// a true 1..100 percent roll (the original draws 0..100 and tests <=); a
-// multi-year date range is the contiguous interval the Bible describes (the
-// original applies the month/day bound in every year); a duration-0 event runs
-// OnEnd once instead of twice (the original leaves the slot active with a zero
-// holdoff); and the post-end wait uses PostHoldoff (the original reloads
-// PreHoldoff at duration end, so with PreHoldoff == 0 the slot never
-// deactivates and re-runs OnEnd daily).
+// Under kApplyOriginalBugFixes four confirmed quirks are corrected (see
+// docs/known_original_bugs.md, crön entries): Random is a true 1..100 percent
+// roll (the original draws 0..100 and tests <=); a multi-year date range is
+// the contiguous interval the Bible describes (the original applies the
+// month/day bound in every year); a duration-0 event runs OnEnd once instead
+// of twice (the original leaves the slot active with a zero holdoff); and the
+// post-end wait uses PostHoldoff while latching duration_counter to -1 after
+// OnEnd (the original reloads PreHoldoff at duration end and leaves the
+// counter at 0, so the slot re-runs OnStart/OnEnd after the wait and never
+// deactivates).
 void Mission_TickDailyCronEvents(GameState &state) {
   const std::size_t count = std::min(state.scenario.cron_events.size(),
                                      state.cron_event_states.size());

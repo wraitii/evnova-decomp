@@ -145,8 +145,8 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 | 0x3088 | u16[0x100] | disaster def ids |
 | 0x3288 | u16[0x100] | disaster values (system ids, 0xffff default) |
 | 0x3488 | u16[0x80] | junk item counts (`g_junk_defs+0x22`) |
-| 0x3590 | u16[0x200] | cron event ids |
-| 0x3990 | u16[0x200] | cron event values |
+| 0x3590 | u16[0x200] | cron event duration counters. An inactive slot is written as the `0xffff` sentinel (`PilotFile_SaveGameCore` 0x004c7dd0 writes the `0xffff/0xffff` pair), and the loader treats either counter `>= 0` as active (`PilotFile_LoadSave` 0x004cb260). Writing the live counters for a retired slot resurrects it on reload (deactivation leaves the holdoff at 0), so save must emit the sentinel. |
+| 0x3990 | u16[0x200] | cron event holdoff counters; same `0xffff` sentinel rule as 0x3590 |
 | 0x3d90 | u16[0x800] | per-system mutable reinforcement cooldown (`SystemDef +0xC4` `reinf_cooldown_days`; the decompiler also renders it as `dude_prob + 0x1c`, which is the same offset) |
 | 0x4d90 | u16[0x800] | per-stellar regeneration countdown (`StellarDef +0x47C` `destroyed_days_remaining`, reference `stelDestroyed`). Restore: `<1` → `destroyed_days_remaining = -1` and live strength reset to capacity; `>=1` → `destroyed_days_remaining = value` and live strength `-1` |
 | 0x5d90 | u16[4] | escort group-order command codes by class category (`g_target_category_command`); copied onto each active non-player squad-leading ship at load |
@@ -165,7 +165,7 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 | Addr | Name | Role |
 |---|---|---|
 | 0x004c7db0 | `PilotFile_SaveGame` (was `Stellar_SetTravelDestination`) | Trampoline: guards on `DAT_00863f09`, then calls the saver with the current jump/travel destination as a 0-based `g_stellar_defs` index. This IS the pilot save entry point. Callers: `Menu_RunNewGameFlow` (initial save, index from `Stellar_FindNearestAvailableTravelStellar`), `Stellar_RunDockAndLaunchSequence` (`ship->ai_secondary_target_slot`), `Ship_HandlePlayerShipCore`. |
-| 0x004c7dd0 | `PilotFile_SaveGameCore` | Saver core: builds `Pilots:<pilot name>.plt` (prefix from `Prefs_SetPilotsPathPrefix` 0x004bd0c0), allocates block1 (0xe952) + block2 (0x66fe), fills all fields, writes `[u32 sz][data]` twice + ship-name trailer, closes. Guards on `DAT_00863f0a`. |
+| 0x004c7dd0 | `PilotFile_SaveGameCore` | Saver core: builds `Pilots:<pilot name>.plt` (prefix from `Prefs_SetPilotsPathPrefix` 0x004bd0c0), allocates block1 (0xe952) + block2 (0x66fe), fills all fields, writes `[u32 sz][data]` twice + ship-name trailer, closes. Guards on `DAT_00863f0a`. Writes the `0xffff/0xffff` crön counter pair for inactive slots (see block-2 0x3590/0x3990). |
 | 0x004cb260 | `PilotFile_LoadSave` | Loader (Open Pilot + startup auto-resume): reads `[u32 sz1][data1]` → restores PilotState; `[u32 sz2][data2]` → restores FleetState/world; then ship-name trailer. Derives the pilot name from the file path (after last ':', before '.'). Returns 0 ok; -0x2b missing/empty; -0x2a/-0x2d invalid block2; -0x2e repairs applied. |
 | 0x008725b0 | `PilotSave_DecodeBlock` | Leaves plaintext blocks whose first u16 is below 0x800 alone; otherwise tail-calls the symmetric XOR transform at 0x0046f960 with `(data, size, 0xb36a210f)`. Both save blocks in the archived retail pilots use this encoding. |
 | 0x004c7d40 | `PilotFile_RecordLastPilotPath` | Writes `Pilots:Last Pilot` (`g_pilots_path_prefix` + EVNova.ini [130] S4) with the pilot file path (the *last-pilot marker file*, consumed by `PilotData_AutoresumeLastPilot` at startup). Called at end of both save and load. |
