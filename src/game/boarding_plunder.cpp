@@ -18,6 +18,7 @@
 #include "../sdl_platform.hpp"
 #include "../util/format.hpp"
 #include "button_label.hpp"
+#include "docked_dialog.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -29,8 +30,10 @@
 #include "outfit.hpp"
 #include "pict_texture.hpp"
 #include "scenario_data.hpp"
+#include "selection_text_dialog.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
+#include "ship_spawn.hpp"
 #include "ship_visual.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
@@ -433,6 +436,20 @@ void QueueUiSound(GameState &state,
       GameState::PendingUiSound{index, priority_width});
 }
 
+// The board command's "airlock" cue (g_sound_handle_airlock, snd 390). The
+// original queues that dedicated handle with priority width 8; it lives in the
+// contiguous gameplay_sounds cache (200..455). The plunder/offer windows are
+// synchronous modals, so the flight loop's pending_ui_sounds drain would only
+// fire after the window closed; the cue is played directly instead (the window
+// already plays its own cues through the same device).
+void PlayAirlockCue(SdlAudio &audio, const GameState &state) {
+  const auto &sound =
+      state.gameplay_sounds[390 - GameState::kGameplaySoundFirstId];
+  if (sound.has_value()) {
+    audio.Play(*sound, 1.0F, 1.0F, /*sound_key=*/390, /*priority_width=*/8);
+  }
+}
+
 void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
   // str_index is the 1-based STR# 0x7d2 entry number.
   auto text = NovaHud_LoadStringEntry(0x7d2, str_index);
@@ -440,6 +457,15 @@ void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
     // Board denials show for 0x168 frames (the doc's recorded duration).
     NovaHud_ShowOverlayMessage(
         state, std::move(*text), 0xe0, 0xe0, 0xe0, 0x168);
+  }
+}
+
+// Post-hit recovery overlays (STR# 0x7d2 0x7f/0x80/0x81) show for 0xfa frames
+// with the default overlay color, matching the original's
+// NovaHud_ShowOverlayMessage(..., 0xfa, 0, 0xc, ...) calls.
+void ShowPostHitOverlay(GameState &state, std::uint16_t str_index) {
+  if (auto text = NovaHud_LoadStringEntry(0x7d2, str_index)) {
+    NovaHud_ShowOverlayMessage(state, std::move(*text), std::uint64_t{0xfa});
   }
 }
 
@@ -468,6 +494,10 @@ struct BoardRangeSpan {
   }
   return {};
 }
+
+// Defined later in this anonymous namespace; used by the board-command arms.
+std::string LoadBoardMiscString(std::uint16_t index, std::string fallback);
+std::string CargoName(const GameState &state, int cargo_type);
 
 } // namespace
 
@@ -506,12 +536,12 @@ void Boarding_ResetShipAndAttackersAfterBoarding(GameState &state, Ship &ship) {
 // Clean-room summary (see docs/boarding_plunder_capture.md for the full map):
 // Validates the player's board command against the primary target (fire
 // -restricted target, same system, close range, matched heading, low relative
-// velocity, target crew >= 1), then dispatches the boarding/plunder window
-// (plain ships). Mission arms and the post-hit escort/fighter arms are
-// TODO(decomp) below. Entry: called on the 'b' edge during flight; the modal
-// renders the live game view through `view`/`hud` while it is open. Exit:
-// returns with the target boarded or an STR# 0x7d2 denial overlay queued.
-// Confidence: high on gates, dispatch arms partially reconstructed.
+// velocity, target crew >= 1), then dispatches the mission arms, the
+// personality recovery / offer-window arms, or the plunder window (all
+// below). Entry: called on the 'b' edge during flight; the modal windows
+// render the live game view through `view`/`hud` while open. Exit: returns
+// with the target boarded or an STR# 0x7d2 denial overlay queued.
+// Confidence: high.
 void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                                      SdlAudio &audio,
                                      GameState &state,
@@ -632,9 +662,8 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
   // pickup_mode-2 cargo pickup and the Bible ShipGoal 2/5 + flags 0x0001
   // single-ship rescue arm write goal_counter_b, set the target's boarded
   // latch and clear other ships' targeting before falling through to the
-  // capture flow. Inactive-mission ships board like plain ships. The
-  // mission-ship interaction window branch (pers-linked targets,
-  // 0x00442510) is not reachable in the port yet (TODO(decomp)).
+  // capture flow. Inactive-mission ships board like plain ships; the
+  // pers-linked offer window is handled in the dispatch below.
   if (target.mission_fleet_slot != -1) {
     const auto mission_idx =
         static_cast<std::size_t>(target.mission_fleet_slot);
@@ -643,35 +672,80 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
       const std::uint16_t mission_flags = mission.flags_primary;
       if (mission.pickup_mode == 2) {
         // Board-for-cargo: the interaction resource gate; on denial the
-        // mission's own STR# 0x7d2 0x165/0x166 dialog shows (logged TODO in
-        // Mission_TryConsumeMissionInteractionResources) and the command
-        // silently returns, exactly like the original's bVar5 path.
+        // mission's own STR# 0x7d2 0x165/0x166 dialog shows over the flight
+        // view (Ui_RunTravelSelectionDialog), then the command falls through
+        // to the generic STR# 0x82 denial overlay (Ghidra 0x0045ad60 sets
+        // cVar12 = 0 and jumps to the shared 0x168-frame denial).
+        const auto show_mission_dialog = [&](const MissionDialogText &message) {
+          if (!message.text.empty()) {
+            NovaUi_RunTextReaderDialog(
+                platform,
+                state,
+                message.text,
+                false,
+                [&] { view.DrawGameFrame(platform, state, hud); },
+                message.dialog_variant);
+          }
+        };
         if (!Mission_TryConsumeMissionInteractionResources(
-                state, mission.cargo_qty_tons)) {
+                state, mission.cargo_qty_tons, show_mission_dialog)) {
+          // The failed consume leaves cVar12 = 0, so the command reaches the
+          // generic STR# 0x82 denial (0x168 frames).
+          QueueUiSound(state, 3, 1);
+          ShowBoardingOverlay(state, 0x82); // "You can't board this ship."
           return;
         }
         mission.goal_counter_b =
             static_cast<std::int16_t>(mission.goal_counter_b + 1);
         mission.carrying_resources = true;
-        // Cargo pickup overlay: STR# 0x7d2 0x6a + " " + optional 0x6b + the
-        // cargo item name (CREC table) + " " + 0x6c. The name table is not
-        // loaded in the port, so the message shows without the item name.
-        // TODO(decomp): CREC cargo-name table (DAT_0069d2cc) + 0x6b/0x6c
-        // composition.
-        if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x6a)) {
-          NovaHud_ShowOverlayMessage(state,
-                                     *text,
-                                     /*duration_frames=*/std::uint64_t{0xfa});
+        // Cargo pickup overlay (Ghidra 0x0045ac7e): STR# 0x7d2 0x6a + " " +
+        // optional 0x6b + " " + the cargo-type name (STR# 0xfa1 / res 0x238c)
+        // + " " + 0x6c. A leading '*' on the name suppresses the 0x6b article
+        // and is stripped from the displayed name.
+        std::string cargo_name = CargoName(state, mission.cargo_type_id);
+        const bool name_masked = !cargo_name.empty() && cargo_name[0] == '*';
+        std::string overlay = LoadBoardMiscString(0x6a, "You retrieved ");
+        overlay += ' ';
+        if (!name_masked) {
+          overlay += LoadBoardMiscString(0x6b, "the");
+          overlay += ' ';
+        } else {
+          cargo_name.erase(0, 1);
         }
+        overlay += cargo_name;
+        overlay += ' ';
+        overlay += LoadBoardMiscString(0x6c, "from this ship.");
+        NovaHud_ShowOverlayMessage(
+            state, overlay, static_cast<std::uint64_t>(0xfa));
         QueueUiSound(state, 4, 8);
       } else if ((mission.ship_goal == 2 || mission.ship_goal == 5) &&
                  (mission_flags & 0x0001U) != 0U &&
                  mission.target_ship_count == 1) {
-        // Rescue/board-captain arm. flags 0x0008 swaps the generic STR# 0x7d2
-        // 0x7e "boarding" message for a class-name message whose tail strings
-        // (DAT_0072d5cc / g_player_ship_name) are not reconstructed.
-        // TODO(decomp).
-        ShowBoardingOverlay(state, 0x7e);
+        // Rescue/board-captain arm (Ghidra 0x0045ae12). The generic
+        // completion line is STR# 0x7d2 0x7e ("Target ship has been
+        // boarded."). Mission Flags 0x0008 (the Bible's 100-fuel auto-abort
+        // penalty, i.e. a fuel-transfer mission) swaps in a class-name voice
+        // line: "<class>:  <DAT_0072d5cc>, <player ship>." DAT_0072d5cc is
+        // the first slot of the preloaded Pascal-string table
+        // NovaData_LoadDisplayNamePstringTables (0x004c7040) fills from STR#
+        // 0x7d2 entries 3..10; its shipped text is "Energy transfer
+        // complete" (the same line the AI refuel overlay at 0x00407b92
+        // uses). Both arms use overlay duration 0xfa.
+        if ((mission_flags & 0x0008U) == 0U) {
+          if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x7e)) {
+            NovaHud_ShowOverlayMessage(
+                state, std::move(*text), static_cast<std::uint64_t>(0xfa));
+          }
+        } else {
+          std::string overlay = target_class->display_name;
+          overlay += ":  ";
+          overlay += LoadBoardMiscString(0x3, "Energy transfer complete");
+          overlay += ", ";
+          overlay += state.player.ship_name;
+          overlay += '.';
+          NovaHud_ShowOverlayMessage(
+              state, overlay, static_cast<std::uint64_t>(0xfa));
+        }
         QueueUiSound(state, 4, 8);
         mission.goal_counter_b =
             static_cast<std::int16_t>(mission.goal_counter_b + 1);
@@ -725,22 +799,193 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
     }
   }
 
-  // Post-hit arms (fleet_recovery_hint 0/-1 => "Fighter captured." carrier-bay
-  // conversion; hint >= 1 with escort capacity => direct escort conversion)
-  // depend on ShipClass_HasPlayerBayCapacityFor (0x004694a0, the fighter-bay
-  // outfit scan), which the port does not model yet. They are reachable only
-  // for carriers that surrendered after combat; the plain plunder window
-  // handles the common path. TODO(decomp).
-  if (target.fleet_recovery_hint >= 1 &&
-      NovaShip_CanPlayerHaveMoreEscorts(state)) {
-    NovaLog::Todo("board: post-hit escort conversion arm skipped "
-                  "(fleet_recovery_hint >= 1)");
+  // ---- Recovery / plunder dispatch (Ghidra 0x0045a8b6, 0x0045b071,
+  // 0x0045b1c0, 0x0045b200, 0x0045b360) --------------------------------------
+  // The main dispatch handles plain or active-failed mission hulls except
+  // personalities 0x3ff/0x3fe (Ghidra 0x0045a85f). A separate plain-hull
+  // fallback at 0x0045b3b2 still plunders 0x3fe; 0x3ff cannot pass the
+  // earlier boardability gate. The main arm branches on the target personality:
+  //   pers_def_slot == -1                       -> fleet-recovery arms below
+  //   link_mission_id == -1                     -> bay hint-0, else plunder +
+  //                                                PropagateHostility
+  //   link_mission_id != -1, Flags 0x0200 clear -> bay hint-0, else plunder
+  //   link_mission_id != -1, Flags 0x0200 set   -> mission offer window if the
+  //                                                def is eligible, else
+  //                                                plunder
+  // The board command's Flags 0x0200 arm is the *opposite* polarity from the
+  // hail command (0x00454910), which runs the offer window when 0x0200 is
+  // clear. The plain-hull fleet_recovery_hint arms (Ghidra 0x0045aa10):
+  //   hint == 0  -> recover the player's own disabled bay fighter (0x80)
+  //   hint == -1 -> capture the generic disabled hull into the bay (0x81)
+  //   hint >= 1  -> the player's disabled escort rejoins (0x7f), gated on
+  //                 escort room; otherwise it plunders
+  // Both bay arms require player bay capacity (ShipClass_HasPlayerBayCapacity-
+  // For 0x004694a0). A live (active, not failed) mission ship falls straight to
+  // the boarded latch with no window; a declined offer returns before the
+  // latch / target clearing (the original's bVar4).
+  bool plain_or_failed = target.mission_fleet_slot == -1;
+  if (!plain_or_failed && target.mission_fleet_slot >= 0 &&
+      target.mission_fleet_slot <
+          static_cast<std::int16_t>(GameState::kMaxActiveMissions)) {
+    const MissionRuntimeFlags &runtime =
+        state.active_mission_runtime_flags[static_cast<std::size_t>(
+            target.mission_fleet_slot)];
+    plain_or_failed = runtime.is_active && runtime.is_failed;
+  }
+  const bool has_bay_room =
+      NovaShipClass_HasPlayerBayCapacityFor(state, target.ship_class_id);
+  const bool has_escort_room = NovaShip_CanPlayerHaveMoreEscorts(state);
+  bool handled = false;
+  bool propagate_before_plunder = false;
+
+  const auto recover_into_bay = [&](std::uint16_t overlay_entry) {
+    target.fleet_recovery_hint = -1;
+    target.ai_behavior_code = 5;
+    target.squad_leader_ship_slot = 0;
+    target.shield_points = 0.0F;
+    target.armor_points = NovaAi_ComputeMaxArmorPoints(state, target);
+    target.ai_secondary_target_slot = -1;
+    // Ghidra 0x00415ea0: top the carrier bay back up and deactivate the
+    // recovered hull.
+    NovaShip_RecoverCarriedShipToBay(state, target);
+    QueueUiSound(state, 4, 8);
+    ShowPostHitOverlay(state, overlay_entry);
+  };
+
+  const std::int16_t pers_slot = target.pers_def_slot;
+  const PersDef *target_pers =
+      pers_slot >= 0 && static_cast<std::size_t>(pers_slot) <
+                            state.scenario.pers_defs.size()
+          ? &state.scenario.pers_defs[static_cast<std::size_t>(pers_slot)]
+          : nullptr;
+  const bool enforcer_personality = pers_slot == 0x3ff || pers_slot == 0x3fe;
+
+  if (plain_or_failed && !enforcer_personality) {
+    if (target_pers == nullptr) {
+      // Generic (personality-less) hull.
+      if (target.fleet_recovery_hint < 1 || !has_escort_room) {
+        if (has_bay_room && target.fleet_recovery_hint == 0) {
+          recover_into_bay(0x80); // "Fighter repaired."
+          handled = true;
+        } else if (has_bay_room && target.fleet_recovery_hint == -1) {
+          recover_into_bay(0x81); // "Fighter captured."
+          handled = true;
+        } else {
+          // Plunder fallback: the victim's responders are alerted to the
+          // player's attack (Ghidra 0x0045a9f3).
+          propagate_before_plunder = true;
+        }
+      } else {
+        // Escort rejoin (Ghidra 0x0045aa30): behavior 6, armor restored to
+        // max*{1/3|0.1}+1, AI runtime reset, and the escort's cargo bins
+        // folded back into the player's.
+        target.ai_behavior_code = 6;
+        target.squad_leader_ship_slot = 0;
+        target.boarded_target_latch = 0;
+        target.escort_origin_mark =
+            static_cast<std::int8_t>(target.fleet_recovery_hint == 1 ? 1 : 0);
+        target.fleet_recovery_hint = -1;
+        const float max_armor = NovaAi_ComputeMaxArmorPoints(state, target);
+        const float armor_fraction =
+            (target_class->capability_flags & 0x10U) != 0U ? 0.1F
+                                                           : (1.0F / 3.0F);
+        target.armor_points = max_armor * armor_fraction + 1.0F;
+        NovaShip_ResetAiBehaviorRuntimeFields(target);
+        for (std::size_t bin = 0; bin < target.cargo_bins.size(); ++bin) {
+          state.inventory.cargo_bins[bin] = static_cast<std::int16_t>(
+              state.inventory.cargo_bins[bin] + target.cargo_bins[bin]);
+        }
+        state.InvalidateDerivedStatCaches();
+        QueueUiSound(state, 4, 8);
+        ShowPostHitOverlay(state, 0x7f); // "Escort repaired."
+        handled = true;
+      }
+    } else if (target_pers->link_mission_id == -1) {
+      // Personality with no board-linked mission: bay hint-0 recovery, else
+      // plunder with PropagateHostility (Ghidra 0x0045b200).
+      if (has_bay_room && target.fleet_recovery_hint == 0) {
+        recover_into_bay(0x80); // "Fighter repaired."
+        handled = true;
+      } else {
+        propagate_before_plunder = true;
+      }
+    } else if ((target_pers->flags_primary & 0x0200U) == 0U) {
+      // Personality with a board-linked mission but Flags 0x0200 clear: bay
+      // hint-0 recovery, else the plunder window with no hostility
+      // (Ghidra 0x0045a8b7).
+      if (has_bay_room && target.fleet_recovery_hint == 0) {
+        recover_into_bay(0x80); // "Fighter repaired."
+        handled = true;
+      }
+    } else {
+      // Personality with a board-linked mission and Flags 0x0200 set: the
+      // original raises g_travel_scene_ctx and the speaker latch, tests
+      // eligibility, and on success runs the offer window (Ghidra 0x0045b071);
+      // an ineligible def falls through to the plunder window with the latch
+      // still up. Both clear at 0x0045b16f. The def's Flags 0x0100 retires the
+      // personality after the window, accepted or not; a non-accept returns
+      // before the boarded latch / target clearing.
+      state.travel_scene_ctx = true;
+      state.mission_speaker_ship_slot = target_slot;
+      if (Mission_CheckMissionShipInteractionEligibility(
+              state,
+              target_pers->link_mission_id,
+              /*interaction_context=*/true)) {
+        const std::uint16_t offer_flags = target_pers->flags_primary;
+        const std::int16_t offer_mission_id = target_pers->link_mission_id;
+        PlayAirlockCue(audio, state);
+        const MissionOfferResult offer = NovaMission_RunOfferWindow(
+            platform,
+            audio,
+            state,
+            offer_mission_id,
+            [&platform, &state, &view, &hud]() {
+              view.DrawGameFrame(platform, state, hud);
+            });
+        if ((offer_flags & 0x0100U) != 0U && pers_slot >= 0 &&
+            static_cast<std::size_t>(pers_slot) <
+                state.scenario.pers_defs.size()) {
+          // PersDef +0x620 present latch.
+          state.scenario.pers_defs[static_cast<std::size_t>(pers_slot)].alive =
+              false;
+        }
+        handled = true;
+        if (offer != MissionOfferResult::kAccepted) {
+          state.travel_scene_ctx = false;
+          state.mission_speaker_ship_slot = -1;
+          return;
+        }
+      }
+      // Ineligible Flags-0x0200 offer: fall through to the plunder window.
+    }
+  } else if (target.mission_fleet_slot == -1) {
+    // Shareware Enforcer personality on a plain hull (Ghidra 0x0045b3b2).
+    propagate_before_plunder = true;
+  } else {
+    // Live (active, not failed) mission ship: the original falls straight to
+    // the boarded latch without opening a window.
+    handled = true;
   }
 
-  QueueUiSound(state, 4, 8); // the "boarded" cue repeats 8x in the original
-  const BoardingWindowResult result =
-      NovaUi_RunBoardingPlunderWindow(platform, audio, state, view, hud);
-  (void)result;
+  if (propagate_before_plunder) {
+    // Alert the victim's responders to the player's attack.
+    NovaGovernment_PropagateHostilityFromAttack(state, target, 0);
+  }
+
+  if (!handled) {
+    // g_sound_handle_airlock (snd 390), priority width 8.
+    PlayAirlockCue(audio, state);
+    const BoardingWindowResult result =
+        NovaUi_RunBoardingPlunderWindow(platform, audio, state, view, hud);
+    (void)result;
+  }
+
+  // Clear g_travel_scene_ctx and the speaker latch (0x0045b16f), after the
+  // eligible offer window or the ineligible fall-through plunder window.
+  if (state.travel_scene_ctx) {
+    state.travel_scene_ctx = false;
+    state.mission_speaker_ship_slot = -1;
+  }
 
   // After the interaction: latch + clear every ship targeting the boarded
   // hull (Ship_ClearOtherShipsTargetingShip 0x00415dc0; the port's

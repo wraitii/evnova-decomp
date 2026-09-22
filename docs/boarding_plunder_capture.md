@@ -36,7 +36,7 @@ Port home: `src/game/boarding_plunder.{hpp,cpp}`; ship swap in
 2. No primary target → no-op.
 3. Player cloak-visibility threshold active → silent no-op.
 4. Target eligible: `field_0xb9 == 0` or (no mission fleet and
-   `post_hit_mode_hint >= 0`), AND `Ship_IsShipFireRestricted(target)`,
+   `fleet_recovery_hint >= 0`), AND `Ship_IsShipFireRestricted(target)`,
    AND target active, same system, `pers_def_slot != 0x3ff`,
    AND not destroyed. On failure: error sound + STR# 0x7d2 **0x82**
    ("You can't board this ship."), overlay duration 0x168.
@@ -51,20 +51,52 @@ Port home: `src/game/boarding_plunder.{hpp,cpp}`; ship swap in
    `class.crew (capture_power) >= 1` else STR# **0x82**. (Bible: "Ships with 0
    crew can't be boarded".)
 9. Mission arms: active-mission fleet bounty handling, cargo pickup
-   (`Mission_TryConsumeMissionInteractionResources`), escort repair
-   ("Escort repaired." 0x7e / "Fighter repaired." 0x7f).
+   (`Mission_TryConsumeMissionInteractionResources`), and the rescue/board
+   completion line (STR# 0x7d2 0x7e, or the flags-0x0008 class-name voice line
+   below).
+   - **Rescue / board-captain** (ShipGoal 2/5, Flags 0x0001, a single special
+     ship): the completion line is STR# 0x7d2 **0x7e** ("Target ship has been
+     boarded."). When mission **Flags 0x0008** is also set (the Bible's
+     100-fuel auto-abort penalty, i.e. a fuel-transfer mission), the overlay
+     becomes the class-name voice line `"<class>:  <STR# 0x7d2 entry 3>,
+     <player ship>."` (Ghidra 0x0045ae40). Entry 3 is preloaded into
+     `DAT_0072d5cc` by `NovaData_LoadDisplayNamePstringTables` (0x004c7040)
+     as "Energy transfer complete" — the same line the AI refuel overlay at
+     0x00407b92 uses. Both arms show for 0xfa frames.
 10. Play the "boarded" effect `_DAT_00591a74`, hide the travel selection sprite,
-    redraw viewport/radar, then dispatch by target class:
-    - plain non-mission ship → **plunder window** (below).
-    - mission ship with special flags → mission interaction window or plunder
-      window.
-    - `post_hit_mode_hint == 0/-1` + capturable class → immediate escort/
-      fighter conversion arms (post-hit surrender): behavior 5 + launch from
-      carrier bay, or behavior 6 escort conversion with armor restore
-      `max_armor * {0.3333|0.1} + 1.0` (00575588/78/80) and cargo transfer.
-11. On return: `target.field_0xb9 = 1`, clear other ships targeting it.
-12. Player velocity is matched to the target on success
-    (`player.vel = target.vel`) before the dispatch.
+    redraw viewport/radar, match the player velocity to the target, then
+    dispatch. The main recovery/plunder arm runs for a plain hull
+    (`mission_fleet_slot == -1`) or an active-failed mission hull, except the
+    Shareware Enforcer personalities 0x3ff/0x3fe. A separate plain-hull
+    fallback still plunders 0x3fe and propagates hostility; 0x3ff fails the
+    earlier boardability gate. For a live (active, not failed) mission ship,
+    the original sets boardability true and falls through to the latch with no
+    window (it does *not* error). The main arm branches on the target personality:
+    - `pers_def_slot == -1` → generic fleet-recovery arms by
+      `fleet_recovery_hint`: `0` + bay room → 0x80 fighter recovery; `-1` + bay
+      room → 0x81 capture; `>= 1` + escort room → behavior 6 escort rejoin with
+      armor restore `max_armor * {0.3333|0.1} + 1.0` (00575588/78/80) and cargo
+      transfer; otherwise plunder with `PropagateHostilityFromAttack`.
+    - `link_mission_id == -1` → hint-0 + bay room → 0x80 recovery, else plunder
+      with `PropagateHostilityFromAttack`.
+    - `link_mission_id != -1`, PersDef Flags 0x0200 clear → hint-0 + bay room →
+      0x80 recovery, else plunder with no hostility.
+    - `link_mission_id != -1`, Flags 0x0200 set → if
+      `Mission_CheckMissionShipInteractionEligibility` (0x00441b40) passes, run
+      `NovaUi_RunMissionOfferWindow` (0x00442510) and retire the personality
+      when Flags 0x0100 is set; an ineligible def falls through to the plunder
+      window, and a declined/failed offer returns before the boarded latch.
+    The Flags 0x0200 gate in the board command is the **opposite polarity** from
+    the hail command (0x00454910), which runs the offer window when 0x0200 is
+    clear.
+11. On return: `target.field_0xb9 = 1`, clear other ships targeting it. A
+    declined/failed mission offer and a failed cargo consume return before this
+    latch (the decompile's `bVar4`).
+
+`fleet_recovery_hint` (ShipState +0xC8DE) is written when a player-squad hull
+is disabled/surrenders, recording its fleet origin so recovery can route:
+`-1` = no fleet origin (cleared every live frame; a plain disabled hull),
+`0` = player bay fighter, `1`/`2` = player escort (by `escort_origin_mark`).
 
 ### 1.2 Offer roll (0x00484230)
 
@@ -209,7 +241,7 @@ shipped window layout is `docs/reference/boarding.jpg`.
   `pers_def_slot = -1`, `voice_type_mode = rand(2)` overridden by class
   inherent_attributes_govt voice mode.
 - `ShipClass_HasPlayerBayCapacityFor` (0x004694a0): fighter-bay outfit /
-  escort-capacity counting (used by the post-hit arms and swap gating).
+  escort-capacity counting (used by the fleet-recovery arms and swap gating).
 
 ## 2. Port contract and divergences
 
@@ -254,11 +286,14 @@ shipped window layout is `docs/reference/boarding.jpg`.
 
 ### Documented divergences
 
-- The original gates the plain-ship dispatch through
-  `ShipClass_HasPlayerBayCapacityFor` (0x004694a0) + `post_hit_mode_hint`,
-  routing fighter-class targets to the carrier arms ("Fighter captured." pool
-  0x80 / "Fighter repaired." pool 0x7f); the port always opens the plunder
-  window.
+- The carrier/escort recovery and personality dispatch matches the original
+  branch structure (generic personality-less arms; personality
+  `link_mission_id == -1`; Flags 0x0200 clear; Flags 0x0200 set offer window).
+  The board command's Flags 0x0200 arm runs the offer window, the reverse of the
+  hail command's polarity; both are recorded in their Ghidra plate comments. A
+  live (active, not failed) mission ship falls straight to the boarded latch.
+  The failed pickup-mode-2 cargo consume shows the generic STR# 0x7d2 0x82
+  denial after the mission's 0x165/0x166 dialog, matching 0x0045ad60.
 - `g_expression_ship_class_id` license gate is modelled as target-class license
   runtime state (ScenarioData has no license runtime; treat all as licensed
   unless loaded).
