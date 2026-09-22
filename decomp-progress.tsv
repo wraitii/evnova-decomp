@@ -175,7 +175,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00431500	Frame_RerollPlayerStatModifiers	src/game/spaceflight_player_state.cpp	100%	NovaFrame_RerollPlayerStatModifiers: rand(0x15)+0x5a ([90,114]) into stat modifiers [2]/[3]. Wired at the in-flight jump arrival only (PlayerTick_JumpArrivalBlock, original 0x0044fa15); removed from the launch tail, which jitters the first pair only. Gameplay consumer of the quartet remains provisional.
 0x00431530	Shot_UpdateShotGuidance	src/game/weapon_shots.cpp	95%	NovaWeapon_UpdateShotGuidance: full guidance_state machine (0 normal mode-1 homing, 1 asteroid-decoy tracking with asteroid-slot target, 998 lost-target inert latch, 999 interference weave), Bible Seeker jamming/cloak/lock-drop/owner-retarget behaviors, normalized homing after the strict shot_age > elapsed_ticks*15 gate, and raw 21 ms replay for state-1/state-999 turns, random opportunities, the 300-call signed spaceflight-counter phase, mode-6 95/5 acceleration blend, and mode-5 freefall bomb/mine 1-degree weathervaning. Exact low-refresh multi-call RNG interleaving across multiple simultaneous shots remains a minor clean-room scheduling divergence.
 0x00432470	System_UpdateSystemAndStellarDisplayState	src/game/targeting.cpp	67%	Scope 3 (NovaTargeting_UpdateStellarAvailability) homes every loaded system nav stellar globally, refreshes is_available, and faithfully treats StellarDef +0x46 as a domination latch: visible availability_flags-0x20 stellars set it, but the pass never clears it. Discovery propagation and sprite-set bookkeeping remain incomplete.
-0x00432EA0	Frame_MeasureFrameTiming		0%	
+0x00432EA0	Frame_MeasureFrameTiming	src/game/frame_timing.hpp	40%	The original's wall-clock 21 ms floor + exponentially smoothed g_avg_frame_tick_scale EMA is replaced by the port's outer-step scheduler; the raw-call conversion it derives (21 ms * 0.03 = 0.63 normalized ticks) is centralised as RawSpaceflightCallTicks (0x00432ea0 cited inline). The per-frame published tick scale lives on GameState instead of the original global, so the EMA smoothing itself is not reproduced.
 0x00433050	Ship_HandleShip	src/game/spaceflight.cpp	100%	NovaShip_IntegrateNpcMovement (spaceflight_movement.cpp) plus Stub_HandleShips/TickShipHandleDestructionDebrisPuffs (spaceflight.cpp), Mission_TickShipHailLadder (mission.cpp) and NovaWeapon_TickNpcWeaponBanks (weapon_banks.cpp). Branches ported: validation/reset prologue; per-bank cooldown decay, ionization pin and mode-99 reload; disabled 0.995 damping + player-led escort conversion / Frame_ShouldTriggerAutoRepairTick auto-repair / post_hit_mode_hint STR# 0x7d2 surrender; personality shield_armor_scale pin; hail ladder; velocity-match tug (player thrust x0.25 quirk) + 30-tick +0xB4 expiry; cloak upkeep and fuel/shield drain (shared spaceflight_detail::NovaShip_ApplyCloakShieldDrain; BUGFIX(original) gates the original's per-second-rate early stop); zero-accel zero-velocity; position integration; ionization decay/ramp; turn + effective-max shield/armor regen; heading wrap; state-2/mode-4 jump spin-up; thrust; turn-bank phase ramp and +-4 bias; weapon handoff; maneuver timer; death timer + player-led cargo transfer + debris puffs; fuel recharge / capacity clamp; aggro decay; derelict glow; destroyed 1-in-3 launch-bay ejection with weapon-counter zeroing (all replayed on the 21 ms call cadence). The movement clamp/threshold uses NovaShip_ComputeEffectiveMaxSpeedPxPerTick, applying the +1.5x player-led-squad tail (DAT_005757b8). Branch accounting complete: the two divergences are accepted platform substitutions, not missing behavior -- g_playerShipPresentationDirty (immediate-mode HUD redraw) and the 21 ms raw-call constant replay via the shared elapsed/0.63 cadence. The ionization decay/ramp now runs at its original position inside NovaShip_IntegrateNpcMovement (after position integration, before turn/regen), so the turn and thrust blocks read the freshly decayed intensity. The velocity-match +0xC8DC/+0xB4 producer is wired (Shot_UpdateBeamHitQueue's negative-impulse arm via NovaWeapon_ResolveDirectWeaponHit), the class-0x2ff thrust/turn-bank/HUD-maneuver-timer gate exception is handled (holds_course + skip), and the surrender overlay's shared g_hud_overlay_text_color is faithful.
 0x00435830	Shot_HandleShot	src/game/weapon_shots.cpp	100%	NovaWeapon_TickShots follows Shot_HandleShot ordering. Outer expiry (system_id != current || life_time <= 0) runs the impact block only when still in-system and life > k_shot_expiry_min_life_f32 (-32000.0), then retires with life_time=-2; plain (flags_primary 0x8000 clear) weapons spawn the single default impact sprite only when impact_effect_id > 0 and the original's always-zero effect id quirk is preserved, while 0x8000 weapons take the area helper plus the splash-damage pass over active ships within splash_radius on both axes (owner immunity, capability 0x400 skip, flags_secondary 0x400 suppression, Weapon_ApplyWeaponOnHitEffects, truncated Reload aggro delta). The live branch latches -1 on the crossing frame and still guides/moves/animates, so linked submunitions and the impact now fire one tick later, matching the original. flags_tertiary 0x4 resets the owner's bank cooldown to Reload each live frame. The continuous SWParticle trail arm is ported (Bible Particles/PartVel/PartLifeMin/PartLifeMax/PartColor +0x24..0x2c, 0.60..1.40 variants, range-overwrites-speed-slot-zero quirk); smoke-trails preference suppression wired. The per-shot shot_fade_rate quads are modelled exactly: TickShots latches the PRE-advance words -- ordinary a2 = 32-progress (negative rate) or min(progress,0x1f) (positive), additive (flags_tertiary 0x2) a2 = 0x20 with the a4 RGB corner = progress for negative (which never advances visibility, the original quirk) or max(4,32-progress) for positive, and the no-fade additive path full 0x20. The renderer uses the latched alpha natively (ordinary (32-a2)/32, additive corner/32, additive blend); the particle trail now passes 32-a2 as its blend weight. The animated display frame is latched before the animation increment and the ProxSafety flags2 0x1|0x2 reset overrides it to frame 0. Flags1 0x0001 animated sprites accumulate normalized 30 Hz ticks against Bible BeamWidth and reset to zero; Bible Decay accumulates with strict interval comparison and increments damage_decay_points. Target-chain arm now ported with the one-time pre/post-decrement guidance-age crossing gate; expiry constant corrected to k_shot_expiry_min_life_f32 = -32000.0 (0x005754b8) and the sprite +0x14 visible/prepared gate documented (consumed substitutes). Renderer parity: Frame_UpdateSpriteDistanceIntensity's per-sprite +0xaa word is reproduced by Sprite_DistanceBrightness (32-bit float product with the original 32-bit integer wrap); the shot draw passes the original anchor floor(full_width/2) on BOTH axes (0x00435f29, the width reused on y -- an original quirk) and smoke uses floor(width/2)/floor(height/2); the smoke +0xa2..+0xa8 = 0x20 tint is equivalent to full alpha + fog. Only the original's short-position snap is not reproduced (sub-pixel renderer divergence). The player target-chain arm is ported (one-time pre/post-decrement crossing gate); its recomputed-guard decompile ambiguity is documented.
 0x00436910	Asteroid_UpdateSprites	src/game/asteroid.cpp	80%	NovaAsteroid_UpdateSprites ports the state half (deactivate on inactive/integrity<=-32000/no_asteroids_latch; integrate target_pos by target_vel and wander_frame_accumulator by wander_speed in 30Hz ticks). Viewport handling is SpaceflightView::WrapAsteroids; sprite bind + frame draw is DrawAsteroids (spin id 800+wander_type, frame trunc(wander_frame_accumulator) wrapped by the set frame count); both cite this address in src/game/spaceflight_view.cpp. DIVERGENCE (documented, deliberate): the original culls an off-window record (own frame extent; negative side 1.5x span, positive 0.5x) and deactivates it, with Frame_TickSystems refilling via Asteroid_Spawn(place_in_ring=1) on a ring of radius ~1.5*center_y; WrapAsteroids instead teleports the record in world space using the largest loaded frame span for both threshold and distance and never deactivates. This masks the original's 'small asteroids vanish at high resolution' defect (ring refills landing outside the cull window) rather than reproducing it; identified plausibly, fixed by divergence. Distance fog applied in SpaceflightView::DrawAsteroids (Sprite_DistanceBrightness + ApplyFog; see docs/system_murk_rendering.md). TODO(decomp): g_ai_target_refresh_needed slot-0 promotion branch not modelled; per-record Sprite +0x54 frame count taken from the loaded spin set (all shipped asteroid sets 50x50/36) rather than a runtime Sprite.
@@ -315,11 +315,10 @@ address	name	impl_file	reimpl_pct	comment
 0x0045CFC0	NovaUi_SetupGameplayPanelColors		0%	
 0x0045D030	Frame_RollProximityScanDetection	src/game/radar_panel.cpp	100%	Frame_RollProximityScanDetection: odds = clamp(system interference - owned ModType-24 sum, 0, 100); roll(0..99)+1 <= odds latches GameState.proximity_scan_detected (g_proximity_scan_detected 0x007caba0). Wired to TickSystems scope 0xc.
 0x0045D0A0	NovaUi_RebuildStellarRadarPanel	src/game/hud_renderer.cpp	100%	Backdrop/IFF-black fill and radar rect translate are reproduced inside HudRenderer::DrawRadarPanel. The original's offscreen radar-buffer rebuild and ~10 dirty/presentation flags are replaced by the port redrawing the cockpit + radar each frame; the flags are internal to the replaced compositor and fan out only to RefreshGameplayPanels' panel redraws (no gameplay consumer), so this is a platform-equivalent replacement. No remaining output gap.
-0x0045D287	NovaUi_BlitGameplayClipRect		0%	
 0x0045D320	NovaUi_RefreshGameplayPanels	src/game/hud_renderer.cpp	40%	Only the >=15-tick target-status poll cadence on the original 60 Hz clock (250 ms; g_last_target_status_poll_tick/g_target_status_blink_phase) and the radar dispatch are reproduced, as HudRenderer members; the other panel dirty-dispatch paths are replaced by unconditional per-frame draw calls. Evidenced remaining omission: the whole dirty-dispatch state machine is not ported. The g_playerInventoryAndLoadoutDirty reader (0x0045d43d) is the cargo/mission redraw latch and DOES NOT call Outfit_RecomputeOutfitDerivedState, so contraband-scan latches stay cleared after a fine; the latch itself has no port equivalent because panels redraw every frame.
 0x0045D600	NovaUi_DrawStellarRadarPanel	src/game/hud_renderer.cpp	85%	HudRenderer::DrawRadarPanel: 1/32 blip scale with ceil rounding, stellar disc tiers from full sprite-frame width (0x20 default; thresholds 90/200), 2x2 QuickDraw-style station/density-scanner boxes (mass>=100), cloak visibility gate, non-IFF DimRadar contacts with selected target blinking BrightRadar, IFF relation colours with selected target blinking grey, black IFF backdrop, far-from-origin arrow sharing the 15-tick blink phase (7000000 dist-sq, 25..50px shaft, +-135deg 6px wings), static while scan detected decoded from the real ppat 128..137 (pixpat_image.cpp) and re-rolled once per >=15-tick radar poll. The static/contacts branch itself is latched on the poll (radar_static_active_) because g_proximity_scan_detected is re-rolled every simulation tick but the original samples it only inside the dirty-gated draw. force_empty is now a DrawRadarPanel parameter: the docked renderer (NovaLanded_RunWindow) passes true, standing in for the original's g_is_system_transition_active, which brackets only the blocking docked/landing visit (writes 0x00455e19/0x0045612d/0x00489241/0x004b32bc). Flight renders pass false; it is deliberately never derived from travel.engaging. tagged [improvement]; static RNG is a private stream, not the shared NovaRandom; original center-dot under static draws at an uninitialized cursor and is skipped.
 0x0045E400	NovaUi_DrawTravelStatusPanel	src/game/hud_renderer.cpp	95%	Faithful rewrite: idle (STR# 0x7d2 0x156 "Nav System Off" @top+22 label) / transfer (0x157 "Stellar Navigation" @+12 + stellar name @+29 value) / jump (0x159 "Hyperspace" @+12 + destination @+29 value) titles, the "No Destination"/"Unexplored System" cases, the hold-timer colour switch and the >=100 fuel gate. Remaining: the in-jump-range probe still uses a visibility+distance approximation instead of the original's SystemDef adjacency/availability_flags 0x3000 test (TODO(decomp); exact table/endpoint unresolved).
-0x0045E9C0	NovaUi_DrawPlayerShieldArmorPanels		0%	
+0x0045E9C0	NovaUi_DrawPlayerShieldArmorPanels	src/game/hud_renderer.cpp	80%	HudRenderer::Draw (0x0045e9c0 cited in the sibling header) draws the shield and armor life bars inside their anchored .ntf panel rects via DrawLifeBar, filling current/max fraction. Divergences: the original's per-panel saved-backdrop restore is replaced by redrawing the full cockpit PICT, and the DrawContext 1x1-run fill becomes an SDL rectangle fill; the exact 0x0045ea66 sub-rect geometry is expressed through HudBar_FillRect rather than byte-for-byte.
 0x0045EA66	NovaUi_DrawPlayerShieldBar	src/game/hud_renderer.cpp	95%	Faithful: aspect-driven fill geometry via HudBar_FillRect + DrawLifeBar, wide left-anchored floor(width*fraction) and tall bottom-anchored ceil(height*fraction); max uses the outfit/personality-inclusive Ship_ComputeShipMaxShieldPoints (0x00463550) via NovaAi_ComputeMaxShieldPoints; over-max verified against live disasm to draw the full panel rect. The original's clean-cockpit pre-blit and dirty-rect blit-back are replaced by the per-frame cockpit redraw (platform-equivalent compositor); the armor-bar chain is a separate draw call. UNVERIFIED: the original cut multiplies width by shield/max in x87 extended precision; the port uses double, so exact floor boundary values are not bit-verified (sub-pixel, boundary-only).
 0x0045EBE8	NovaUi_DrawPlayerArmorBar	src/game/hud_renderer.cpp	95%	Faithful: aspect-driven fill geometry shared with the shield bar (HudBar_FillRect + DrawLifeBar; wide floor, tall bottom-anchored ceil); max uses the outfit/personality-inclusive NovaAi_ComputeMaxArmorPoints (Ship_ComputeShipMaxArmor 0x004637a0); over-max verified against live disasm to draw the full panel rect. The clean-cockpit pre-blit / dirty-rect restore are replaced by the per-frame cockpit redraw. UNVERIFIED: original x87 extended-precision width*(armor/max) vs the port's double; exact floor boundary values not bit-verified (sub-pixel, boundary-only).
 0x0045EFE0	NovaUi_DrawPlayerFuelPanel	src/game/hud_renderer.cpp	95%	Fuel panel shim: validates the fuel panel rect and routes to the shared life-bar fill; the reserve overlay and disabled suppression live in the shared 0x0045F086 path. The panel's clean-cockpit pre-blit is replaced by the per-frame cockpit redraw. Inherits the shared fill's UNVERIFIED x87-extended vs port-double boundary-rounding limit.
@@ -445,7 +444,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046A680	Player_HasAnyCargoMissionOrJunk	src/game/outfit.cpp	100%	Checks the six player cargo bins, active carried mission cargo with valid type/quantity, and all junk counts; deliberately does not inspect owned outfits. Wired into the Player Info cargo summary path.
 0x0046A730	Ship_ComputeShipTotalCargoCapacity	src/game/outfit.cpp	100%	Port as Ship_ComputeShipTotalCargoCapacity: class Holds (ShipClassDef.cargo_holds +0x0 / shp payload 0x00) plus, for every owned outfit, owned_count * ModType-2 (cargo space) ModVal per slot (16-bit product truncation mirrored). Player baseline for Player_ComputeFleetCargoCapacity (0x00469760). Renamed from Ship_ComputeShipTotalMass after disassembly proved ModType 2 is cargo space, not mass.
 0x0046A7C0	Player_ComputeRemainingCargoSpace	src/game/outfit.cpp	100%	Full 0x0046a7c0 formula: ship capacity minus carried, with escort-freighter holds absorbing bins/junk overflow before mission cargo and any remainder are charged to the ship. Single-ship branch is not clamped (callers clamp; e.g. 0x0049c050). The escort branch now activates because Player_ComputeFleetCargoCapacity (0x00469760) models escort freighters.
-0x0046A870	NovaUi_RedrawGameplayViewportAndRadar		0%	
+0x0046A870	NovaUi_RedrawGameplayViewportAndRadar	src/game/spaceflight_view.cpp	70%	The synchronous gameplay viewport + radar redraw is expressed structurally: SpaceflightView::Draw rebuilds the world each frame and HudRenderer::DrawRadarPanel (0x0045d600) redraws the radar. The original's saved-backdrop ClearSurface14/DrawContext fill and the g_is_system_transition_active skip of SpriteWorld_RenderLayers are preserved (transition fills the space tint only). No offscreen surface exists in the SDL port.
 0x0046AAD0	NovaAudio_QueueCenteredSound	src/sdl_audio.cpp	95%	SdlAudio::Play queues exactly one centered SDL voice and carries the original second argument as priority_width (minimum 1), rather than replaying it as a repeat count. Direct callsites preserve verified ranks: menu focus/intro 10, menu reveal/hyperspace 0x32, combat chatter 0x0f, ordinary transition cues 1. SDL stream conversion replaces the original descriptor/backend plumbing.
 0x0046AB00	NovaAudio_PreStageJumpSoundBySeconds	src/game/spaceflight.cpp	25%	The warp-up cue is not pre-staged by seconds in the port: it plays on the hold-begin latch (NovaTravel_Tick) and the fire waits on the live voice count, subsume the staging. The duration-scale folding is ported inline at the play call: the original stores 65536/multiplier, while SDL receives the chassis multiplier as playback speed (0.91..2.08) via NovaTravel_PlayerJumpDurationMultiplier. Remaining: the original's seconds-based pre-stage scheduling is not modelled.
 0x0046AB60	NovaAudio_UpdateCenteredGainFromPreference	src/game/preferences.hpp	100%	Maps sound_volume * 8 through the original [0,0x100] centered-level clamp and Audio_AllocateVoiceSlot's 0x80 per-channel cap, then normalizes the backend's level * sample >> 7 scale for SDL master gain.
@@ -482,7 +481,6 @@ address	name	impl_file	reimpl_pct	comment
 0x0046C930	Outfit_HasScannerTargetUntargetableCapability	src/game/targeting.cpp	100%	scanned inside NovaTargeting ScannerCapabilities: any owned outfit modType 0x1e with modVal bit 0x04 (kCloakScanner untargetable flag) across primary+alt mod slots; original's tri-state memo cache not reproduced (scan is once per targeting-command press).
 0x0046CA60	Outfit_HasCloakScannerTargetCloakedCapability	src/game/targeting.cpp	100%	scanned inside NovaTargeting ScannerCapabilities: any owned outfit modType 0x1e with modVal bit 0x08 (cloaked-targeting flag); same no-cache note as the untargetable sibling.
 0x0046CB90	Outfit_HasMiningScoopOutfit	src/game/outfit.cpp	100%	Ported as NovaOutfit_HasMiningScoopOutfit: ModType 0x1F across the four mod slots; player branch scans owned outfits, NPC branch scans class default outfit slots.
-0x0046CC60	Sprite_SetContainerIfChanged		0%	
 0x0046CCA0	Mission_AccumulatePlayerContributeMask	src/game/outfit.cpp	100%	Ported as NovaOutfit_AccumulatePlayerContributeMask (outfit.cpp): ship-class baseline + active+defined ränk Contribute mask + owned outfits + active crön events. Rank arm byte-verified against ränk runtime +0x14/+0x18 (payload +0x0e/+0x12); DecodeRank field order corrected to match the ResForge TMPL and the salary/contribute consumers.
 0x0046CD80	Outfit_EvaluateRequireMask		0%	Require-mask satisfaction routed through the ship-class-seeded ContributeMask (landed_store MeetsRequire)
 0x0046CDD0	Stellar_ComputeShipJumpDepth		0%	
@@ -529,12 +527,6 @@ address	name	impl_file	reimpl_pct	comment
 0x0046F3F0	Weapon_ApplyWeaponOnHitEffects	src/game/collision.cpp	65%	Direct hits apply ionization unattenuated (impact_pos NULL); splash hits attenuate by squared distance inside splash_radius and OR the color. The gameplay-surface==8 overwrite branch of field_0xb0 remains TODO(decomp).
 0x0046F500	ResourceArchive_OpenNamedSearchingPaths	src/brgr_archive.cpp	80%	Port enumerates resolved install subfolders and the support folder's Nova Plug-ins with std::filesystem (EnumerateRezArchives) and opens each .rez, replacing the Mac-style runtime path-list search; case-insensitive .rez match preserved.
 0x0046F690	Resource_CountFilesByExtInFolder		0%	
-0x0046F740	DrawContext_AllocateFromPictResource		0%	
-0x0046F850	Hud_LoadOverlaySurfaceFromSpinImage		0%	
-0x0046F8E0	DrawContext_PushCurrentAndSet		0%	
-0x0046F910	DrawContext_RestorePreviousCurrent		0%	
-0x0046F920	DrawContext_DestroyIfOwned		0%	
-0x0046F940	DrawContextHandle_GetContextPtr		0%	
 0x0046FA30	Profile_PrintTimingsEntry		0%	
 0x0046FBF0	Particles_ClearAllPools		0%	
 0x0046FC10	Profile_ResetAllEntrySlots		0%	
@@ -551,130 +543,19 @@ address	name	impl_file	reimpl_pct	comment
 0x00470220	NovaDebugLog_PrintNcbSetStringContent		0%	
 0x00470390	NovaDebugLog_PrintLine		0%	
 0x004703C0	Profile_SharedStreamPresent		0%	
-0x004703E0	BlitPixieInterface_CopyRect		0%	
-0x00470680	BlitPixie_BlitRectTintedOrPalette		0%	
-0x00470960	BlitPixie_BlitRectMasked		0%	
-0x00470C20	BlitPixie_BlitRectMaskInverted		0%	
-0x00470EE0	BlitPixie_BlitRectRleCommandStream		0%	
-0x004711E0	BlitPixie_BlitRectRawCopy		0%	
 0x00471800	BlitPixie_CopyRectRegionBetweenFrames	src/game/sprite_mask.cpp	60%	The boolean overlap query is ported inline in SpriteMask_TestOverlap; the original's shared rectangle-size/stride assertions and pixel-stride shift are subsumed by the RGBA masks. The name's blit origin is not reproduced (it is a collision query).
-0x00471920	BlitPixie_CopyRectFromFrameMasked		0%	
-0x004719D0	SpriteFrame_ConvertColorToSurfaceDepth		0%	
-0x00471A70	BlitRope_CopyRowsMasked		0%	
-0x00471B70	BlitRope_CopyRowsMaskInverted		0%	
-0x00471CF0	BlitRope_CopyRows		0%	
-0x00471D30	BlitRope_CopyRowsTintedRgb15		0%	
-0x00471DC0	BlitRope_CopyRowsSkipTransparent		0%	
-0x00471E10	SpriteRleCommandStream_DecodeUnclipped		0%	unscaled command renderer referenced in notes
-0x00471E90	SpriteRleCommandStream_DecodeClippedRow		0%	
-0x00472000	SpriteRleCommandStream_ByteSwap		0%	resource byte-swap helper referenced in decode notes
 0x00472190	SpriteRleCommandStream_SkipToRowCount	src/game/sprite_mask.cpp	50%	RLE run/row walk replaced by direct opaque-bitmap iteration in SpriteMask_TestOverlap; command 2 = opaque, 3 = transparent, 1 = end-of-row, 0 = terminator semantics are represented by the bitmap + intersection scan.
-0x00472420	SpriteRleCommandStream_AdvanceRowsAndBlit		0%	
-0x00472510	SpriteRleCommandStream_BlendColorRuns		0%	
-0x00472900	SpriteRleCommandStream_BlitTintedRgb15		0%	SDL replacement: the decoded tint/fog math (brightness_level + distance_brightness + space_color + RGB tint) is expressed by SpriteDrawOptions.alpha_mod/additive/fog_murk in sprite_world.cpp rather than porting this RLE command-stream walker; see BlitPixel_TintRgb15Span 0x004736c0.
-0x00472B30	SpriteRleCommandStream_BlitRaw		0%	
-0x00472BB0	SpriteRleCommandStream_BlitIndexedOrRgb15		0%	
-0x00472CF0	SpriteRleCommandStream_BlitIndexedRaw		0%	
-0x00472D70	SpriteRleCommandStream_BlitTintedRgb15Clipped		0%	
-0x004730D0	SpriteRleCommandStream_BlitRawClipped		0%	
-0x00473270	SpriteRleCommandStream_BlitIndexedOrRgb15Clipped		0%	
-0x00473500	SpriteRleCommandStream_BlitIndexedRawClipped		0%	
-0x004736A0	Color_ClampTo5Bit		0%	
-0x004736C0	BlitPixel_TintRgb15Span		0%	SDL replacement: the RGB555 bit-sliced additive-tint/fog span (DECODED: f = src*(1-d/32)+space_color*d/32, then out = f*(tint+32-br)/32 + dst*br/32) is expressed by SpriteDrawOptions.alpha_mod/additive/fog_murk/fog_color + SDL blend modes in sprite_world.cpp BlitFrame. The fog is a two-pass masked mix toward fog_color (occludes dst like the original) with a d>=0x1f snap; exact per-channel >>5 truncation is not reproduced (SDL_Renderer has no shader), so mid-range fog is at most one 5-bit step brighter.
-0x00473B60	BlitPixel_CopyOrSpan		0%	
-0x00473C20	BlitPixel_TranslateIndexedSpan		0%	
-0x00473DC0	BlitPixel_CopySkipTransparentSpan		0%	
-0x00473E00	BlitPixel_RemapTintSpan		0%	
-0x00473FA0	BlitPixel_CopyIndirectKeyedSpan		0%	
-0x004740D0	NovaSetup_LoadIndexedSpriteLookupBanks		0%	
-0x00474300	NovaSetup_FreeIndexedSpriteLookupBanks		0%	
-0x00474350	BlitPixel_CopySpan		0%	
-0x00474410	BlitPixel_FillSpan		0%	
 0x004744A0	Sprite_Create	src/game/sprite_world.cpp	60%	Sprite object model (empty frame set + current frame index) mirrored by game::Sprite; Sprite_AddFrame/Release/SetCurrentFrame/TheFrame implement the frame-array ownership and clamps; creation resets runtime state; the original's error slots and update/draw callback slots are not populated
-0x00474720	Sprite_InitOrAllocate		0%	
-0x00474970	Sprite_CreateFromSequentialFrameResources		0%	
 0x00474AB0	Sprite_CreateFromSpriteSheetResources	src/game/sprite_world.cpp	25%	SpriteAsset::LoadSpin implements the tile-grid frame-set construction (parse sp.x9an descriptor, decode named rl.x91D sheet into per-tile frames, upload textures, per-frame centre anchors) consumed by the spin store (stellars +1000, weapon shots +3000, star field 700); frames are assignable onto a live Sprite via Sprite_AssignAsset (Sprite_CreateFromSpriteSheetResources -> Sprite_AssignSpriteSet opening); DrawContext creation and render/present plumbing not reconstructed
 0x00474E90	Sprite_CreateFromMultiFrameResource	src/rle_sprite_sheet.cpp	100%	Sprite_CreateFromMultiFrameResource rl\x91D decode
-0x00475050	Sprite_Clone		0%	
-0x00475470	SpriteList_FreeStruct		0%	
-0x004754A0	SpriteList_ReleaseMembers		0%	
-0x00475550	Sprite_PrepareFramesAndAttachResourceData		0%	
-0x004756C0	Sprite_ReleasePreparedFramesAndDetachResourceData		0%	
 0x00475740	Sprite_AddFrame	src/game/sprite_world.cpp	80%	Sprite::AddFrame appends a reference-counted SpriteFrameImage to the sprite's frame list (shared_ptr refcount), returning the new index or -1 on null; frame capacity growth mirrors Sprite_AddFrame's array growth
-0x00475800	Sprite_InvokeDrawOrUpdateProc		0%	
 0x00475830	Sprite_SetCurrentFrame	src/game/sprite_world.cpp	70%	Sprite::SetCurrentFrame resolves the requested index exactly as the original: negative clamps to 0, otherwise `index % num_frames` (Ghidra 0x00475830 `param_2 % *(int*)(sprite+0x54)`). The wrap (not a clamp) is what fixes the Manticore/Argosy engine glow: their shän glow sheet carries a single FramesPer=36 rotation while the base sheet carries 3/6 rows, so the composed `row*FramesPer + heading` index must fold back to the heading frame; the previous clamp stuck the glow on the last frame (reads as snapping to straight up). Same modulo resolution applied to Sprite::TheFrame and the SpriteAsset DrawSprite overload, which is the actual ship-layer draw path. The per-frame anchor delta/position bookkeeping the original also performs here is realised at draw time in DrawSprite (see 0x00475AF0 row).
-0x00475940	Sprite_SetUpdateCallback		0%	
-0x00475970	Sprite_SetDrawProcValidated		0%	
-0x00475A60	Sprite_SetFrameRange		0%	
 0x00475AF0	Sprite_SetPositionFromCurrentFrameAnchor	src/game/sprite_world.cpp	70%	per-frame anchor alignment reimplemented: SpriteAnchorTransform/Sprite_AnchorToScreen computes the top-left given the frame-local anchor and DrawSprite aligns the frame's stored anchor (or Sprite_DrawOptions.anchor_* override, e.g. a shot's gun-fire point) to the world position, matching Sprite_SetPositionFromCurrentFrameAnchor placing the anchor on the world point; anchor data is stored per frame (Ghidra SpriteFrame +0x2a/+0x2c, centre for tile/sheet sets); Sprite::SetPositionFromCurrentFrameAnchor records the located position
-0x00475B80	Sprite_SetVisible		0%	
 0x00475BE0	Sprite_TestBoundingCircleOverlap	src/game/sprite_mask.cpp	90%	Clean-room SpriteMask_TestBoundingCircleOverlap: half-height radius, top-left + half-height centre, strict < on squared distance. Used as the fallback when an entity has no resolved mask.
 0x00475C80	Sprite_TestPixelMaskOverlap	src/game/sprite_mask.cpp	90%	Clean-room SpriteMask_TestOverlap: intersects the two anchored frame bounds and returns true when any pixel is opaque in both, mirroring BlitPixie_CopyRectRegionBetweenFrames (0x00471800) + SpriteRleCommandStream_SkipToRowCount (0x00472190). Masks are decoded from the rl\x91D RGBA alpha (alpha >= threshold = opaque). The original's fatal missing-prepared-frame/mask assertions are not reproduced.
-0x00475E20	Sprite_TestOpaquePixelAtPoint		0%	
-0x00475EC0	Sprite_IsRectInsideCurrentFrameInsetBounds		0%	
+0x00475E20	Sprite_TestOpaquePixelAtPoint	src/nova_app.cpp	80%	NovaHud_TrackFocusHoverIndex + MenuSpriteContainsOpaquePixel reproduce the inclusive-bounds then opaque-pixel hover test (the bounds pre-check is shared as ContainsInclusive in src/util/geometry.hpp); the decoded focus-sprite alpha replaces the RLE command-stream walk-and-compare.
 0x00475F70	Sprite_AssignSpriteSet	src/game/sprite_world.cpp	55%	Sprite_AssignAsset binds a SpriteAsset's frames onto a live Sprite as reference-counted frame images retaining the shared set (keeps the SDL textures alive); rebinds the frame set like Sprite_AssignSpriteSet; per-sprite world placement/sprite-set table still not reconstructed
-0x004760C0	Sprite_CompileFrames		0%	
-0x00476400	SpriteFrame_CreateFromRect		0%	
-0x004765D0	SpriteFrame_CreateFromSpriteRect		0%	
-0x00476800	SpriteFrame_CreateFromCicnResource		0%	
-0x004769D0	SpriteFrame_ClearHandle		0%	
-0x004769E0	Sprite_FreeDrawContext		0%	
-0x004769F0	SpriteFrame_AllocateEmpty		0%	
 0x00476BD0	Sprite_Release	src/game/sprite_world.cpp	80%	Sprite::Release clears the frame set, dropping each frame image's refcount (shared_ptr frees the SDL handle at zero); mirrors Sprite_Release releasing the frame refs at teardown
-0x00476C70	Sprite_Destroy		0%	
-0x00476CB0	SpriteFrame_PushAsCurrentContext		0%	
-0x00476D10	SpriteFrame_RebuildRowOffsets		0%	
-0x00476E10	SpriteFrame_EnsurePrepared		0%	
-0x00476F10	SpriteFrame_ResetPreparedState		0%	
-0x00476F80	SpriteFrame_EnsureLoaded		0%	
-0x00477070	SpriteFrame_ReleaseOverlayState		0%	
-0x004770D0	SpriteLayer_Create		0%	
-0x00477120	SpriteLayer_Free		0%	
-0x00477140	SpriteLayer_AppendSprite		0%	
-0x004771C0	SpriteLayer_RemoveSprite		0%	
-0x00477240	SpriteLayer_SetId		0%	
-0x00477250	SpriteLayer_PrepareSprites		0%	
-0x00477290	SpriteLayer_ReleasePreparedSprites		0%	
-0x004772D0	Ship_TestSpriteLayerOverlaps		0%	
-0x00477630	Sprite_ClearLastError		0%	
-0x00477640	Sprite_AllocateOwnerWithLayer		0%	
-0x00477910	SpriteFrame_CreateFromRenderOwner		0%	
-0x00477AF0	Stub_SpriteNoOp		0%	
-0x00477B00	SpriteWorld_AppendLayerTail		0%	Sprite-layer chain builder: append-to-tail is what makes append order draw order. Not reimplemented as a runtime call; the port reproduces the resulting fixed precedence in SpaceflightView::Draw (see docs/ship_sprite_rendering_path.md).
-0x00477B50	SpriteWorld_RemoveLayerFromChain		0%	
-0x00477BA0	SpriteWorld_PrepareAllLayers		0%	
-0x00477C10	SpriteWorld_ClearSurface14		0%	
-0x00477C40	RenderOwner_PushSurfaceAsCurrentContext		0%	
-0x00477C70	DrawContext_RestoreOwnerContext		0%	
-0x00477C90	SpriteWorld_SetRectCopyProc		0%	
-0x00477CE0	SpriteWorld_SetPreRenderHook		0%	
-0x00477CF0	SpriteWorld_SetPostRenderHook		0%	
-0x00477D00	SpriteWorld_SetTargetFps		0%	
-0x00477D60	SpriteWorld_SetEffectColor		0%	
-0x00477F10	Sprite_CompositeCurrentFrameToContext		0%	
-0x00477F30	SpriteFrame_DrawFrameToCurrentContext		0%	
-0x00477FA0	SpriteWorld_RenderLayers		0%	Walks the 14-layer chain head-to-tail and invokes each sprite's draw proc inline, so layer chain order == draw order. Replaced structurally by SpaceflightView::Draw; the decoded chain is in docs/ship_sprite_rendering_path.md.
-0x004781F0	SpriteWorld_UpdateAnimatedSprites		0%	
-0x00478480	SpriteWorld_PresentDirtySprites		0%	
-0x00478BB0	SpriteWorld_DrawSpriteAgainstDirtyList		0%	
-0x00478CF0	SpriteWorld_PruneInactiveSprites		0%	
-0x00478D70	SpriteWorld_AppendDirtyRect		0%	
-0x00478E20	SpriteWorld_MarkDirty		0%	
-0x00478E40	SpriteWorld_CanUseDirtyRectFastPath		0%	
-0x00478E50	SpriteWorld_ReleaseAllSpriteFrames		0%	
-0x00478F10	SpriteWorld_CanRender		0%	
-0x00478F20	SpriteWorld_FreeDrawContext		0%	
-0x00478F30	SpriteWorld_CreateDrawContextFromResource		0%	
-0x00478FA0	SpriteWorld_CreateDrawContextFromImage		0%	
-0x00479070	Sprite_CompositeFrameToNewSurface		0%	
-0x004791B0	Sprite_InvalidateRenderOwnerRect		0%	
-0x004791D0	Sprite_InvertRect		0%	
-0x00479210	SpriteWorld_SetChannelFillForDepth		0%	
-0x00479250	SpriteWorld_NotFoundSentinel		0%	
-0x00479260	SpriteWorld_CopyRectToSurfaceAndFill		0%	
-0x004794A0	SpriteWorld_ClearFillState		0%	
-0x004794B0	Sprite_SetLastError		0%	
-0x004794D0	Sprite_ReportFatalError		0%	
 0x00479590	Beam_DrawBlendedSegment	src/game/spaceflight_view.cpp	60%	Alpha-clamp + profile handoff ported into DrawBeamBlendedLine (spaceflight_view.cpp); endpoint clipping delegated to SDL and 15-bit surface blending replaced by 8-bit alpha. SWBeams_SetupAndClipSegment scope not reproduced.
 0x004797B0	Beam_BlendLineSegment	src/game/spaceflight_view.cpp	60%	Per-pixel alpha walk (start ramp / plateau / end fade, Bresenham step order) ported into DrawBeamBlendedLine; RGB555 blend arithmetic replaced by SDL alpha-blended points.
 0x00479C50	SWBeams_DrawBeamSegment		0%	Pixel-copy primitive used only by the erase/save-restore pass; subsumed by SDL back buffering. Deliberately skipped.
@@ -686,16 +567,9 @@ address	name	impl_file	reimpl_pct	comment
 0x0047B3C0	SWBeams_SetupAndClipSegment		0%	Software clip-rect walk; SDL clips rendered points to the viewport. Deliberately skipped.
 0x0047B710	Rect_AlignCenterIn		0%	
 0x0047B7A0	Resource_IsResourceTypePresent		0%	
-0x0047B7C0	SWParticles_DefaultPoolSize		0%	
 0x0047B7D0	Stub_NoOp_0047b7d0		0%	
-0x0047B7E0	SWParticles_AllocatePool		0%	
-0x0047B870	SWParticles_FreePool		0%	
-0x0047B8C0	SWParticles_ResetEntries		0%	
-0x0047B940	SWParticles_SetViewOrigin		0%	
 0x0047B960	SWParticles_SpawnParticle	src/game/impact_effects.cpp	80%	SWParticle allocation is the vector append inside NovaEffects_SpawnWeaponImpactParticleBurst: writes the original 8.8 fixed pos/vel, life, blend_mode and packed color. The original free-head recycling into a 100000-slot pool is not modelled; the clean-room uses a growable vector, which is not gameplay-visible.
-0x0047BB30	SWParticles_RestoreSavedPixels		0%	
 0x0047BDD0	SWParticles_DrawParticles	src/game/spaceflight_view.cpp	80%	Ported as SpaceflightView::DrawSwParticles: projects each 8.8 fixed particle to the screen and draws a 1x1 logical-pixel SDL point (SDL expands it by display density, so retina gets a 2x2 backing block). SDL alpha deliberately follows the original 16-bit soft-particle path, clamping life/32 to full opacity; the original 24-bit branch instead wrote opaque pixels. BUGFIX(original) gated on kApplyOriginalBugFixes: the original never murk-fogs particles, so the port dims each point's alpha by (1 - distance_brightness/32) via Sprite_DistanceBrightness; see docs/system_murk_rendering.md. Dirty-pixel save/restore is not reproduced.
-0x0047C3A0	SWParticles_UpdateDirtyPixels		0%	
 0x0047C800	SWParticles_Update	src/game/impact_effects.cpp	95%	Ported as NovaEffects_TickSwParticles: decrements life and integrates the 8.8 fixed position by velocity; dead entries are erased. Gravity is 0 in the shipped game (SWParticles_AllocatePool(100000,0)), so vel_y is not advanced. The original present-hook call is bounded by the outer flight loop's 21 ms minimum frame; the port banks whole logical calls at that 47.62/s maximum cadence. Fixed-pool free-list/high-water bookkeeping is replaced by vector erasure.
 0x0047C8E0	NovaUi_RunBarWindow	src/game/docked_bar_dialog.cpp	65%	docked/screen modal via NovaLanded_RunWindow: Spaceport backdrop PICT 0x2134 (via g_travel_overlay_sprite_handle, FUN_0048e970) drawn at native size in a contained placement, with the destination stellar's own planet picture (PICT 0x2710+link_a_id, or its custom pict id at engage_highlight_frame>=0x80 per FUN_0048e970) drawn 1:1 into the Spaceport DITL-0x3e8 outer panel (612x285, the pict's natural size); destination name centred in the header band; the stellar's landing description (desc block key 0x64917363 at the raw stellar resource id, Ui_LoadSelectionDialogResource) word-wrapped into the inner panel, falling back to credits/fuel/hull status lines when absent; services in the DITL-0x3e8 two-column x4-row button layout at the lower left/right using the real three-state button strips (normal 0x1d4c.., pressed 0x1d4f.., grey 0x1d52..). Button state follows the original: mouse-hover = pressed art, unavailable slots (per StellarDef travel_flags/fuel/credits, mirroring NovaUi_RedrawTravelActionButtons 0x004a0220) = grey, no keyboard focus highlight; input is first-letter shortcuts (r/f,c/t,o,s,n,b; Enter/Esc leave) not WASD; refuel billed, armor/shields auto-repaired free on landing (Stellar_RunDockAndLaunchSequence 0x00455e10; there is no docked Repair button in the original); icon glyphs, the Communications frame and the desc placeholder expansion (<=1) still mocked; the sub-window modals render as real on-screen dialogs via NovaLanded_RunSubWindowDialog (src/game/docked_dialog.cpp): each service's Nova Graphics 3 frame PICT (0x2135 Shipyard/0x2136 Outfit/0x2137 Bar/0x2139 Mission BBS/0x213d Map/0x213e Trade) over the re-layered docked backdrop 0x2134 under a dim scrim, heading + Leave, Esc/Enter/click to close; on modal entry the AvailLoc-3 offer pass (0x00491f30's g_misn_list_page_group=3 + Mission_RunAvailLocOffers(3) 0x00448670 slice) runs over a dock snapshot via Mission_RunAvailLocOffers + NovaMission_RunOfferWindow; the Bar modal itself (0x0047c8e0 loop, 0x0047cfe0 draw, 0x004a2810/0x004a26e0 button strip, 0x0047cdb0 input callback) is reconstructed in docked_bar_dialog.cpp RunBarDialog: DLOG 0x3f5/0x3fd window over backdrop PICT 0x2137/0x2138, desc(stellar+10000) prompt panel, Leave/Gamble/Holovid/Hire Escort strip with g/r, w/n, h/e keys, the Holovid news window (0x0047d180/0x0047d370/0x0047d600), the credits<1 STR# 0x7d2 0x169 gamble denial, and the Hire Escort gate 0x00468920 opening the hire-mode shipyard loop; the action-6 AvailLoc-1 bar offer timer arm is ported with its original 15-tick entry delay and recurring randomized recheck; the gambling window (0x0047dc50, NovaUi_RunBarGamblingWindow) remains TODO(decomp). Bar prompt: RunBarDialog loads the destination desc at (0-based stellar index + 10000) (NovaLanded_BarDescriptionId), matching ai_secondary_target_slot+10000 (Earth 10000, Port Kane 10009), not the raw-id landing description. Prompt drawn with the shared Geneva-9 screen font (DAT_00735684/86) via DrawDialogFilledText, first baseline top+9 (DrawContext_DrawPascalStringInFilledRect 0x004bcd30), not Geneva 12. Layering fix: the bar draw is split into draw_bar_contents (no Present) and draw_frame (contents + Present); nested modals (mission offers, text readers) receive draw_bar_contents so the bar is layered beneath their window in one backbuffer before the single Present (passing the presenting draw_frame had them draw into an already-swapped backbuffer). Bar/news use native local DLOG placements after background redraw, matching input/probe coordinates and restoring the parent on exit.
 0x0047CFE0	NovaUi_DrawTravelDestinationServicesWindow	src/game/docked_bar_dialog.cpp	75%	Ported in RunBarDialog's draw frame: window fill + backdrop PICT 0x2137/0x2138 blitted over the window rect Bar/news use native local DLOG placements after background redraw, matching input/probe coordinates and restoring the parent on exit.
@@ -752,11 +626,11 @@ address	name	impl_file	reimpl_pct	comment
 0x0048B860	Menu_KeySettingsDraw	src/game/preferences.cpp	85%	DrawKeySettingsDialog uses native PICT 0x8b, resource row geometry, original black/white selected-cell inversion, key names, and preserved menu background; exact native key-name table text/metrics remain incomplete Preferences and Key Settings use native local DLOG geometry with contained placement and scoped restoration.
 0x0048BBB0	NovaHud_ReleaseTransientResources		0%	
 0x0048BC20	NovaAudio_PlayTransitionEffectsWait		0%	
-0x0048BC90	NovaHud_UpdateLayoutState		0%	
+0x0048BC90	NovaHud_UpdateLayoutState	src/nova_app.cpp	80%	This is the main-menu entrance overlay layout, not the in-flight HUD: InitializeMenuEntrance seeds each row's reveal counter half the preceding strip's frame count behind (0.5 multiplier at DAT_00575938) and UpdateMenuEntrance advances them. 0x0048bc90 cited inline.
 0x0048BF40	Hud_FreeTransientEffects		0%	
 0x0048BFB0	Frame_TickTimerDecayAndEffects		0%	
 0x0048C210	NovaHud_UpdateFocusAnimationState	src/nova_app.cpp	70%	UpdateMenuCenterPreview: fade eases ±4/ms toward 0x20 and the lane switches only after decay (verified against NovaHud_RenderFocusOverlay's tinted/opaque blit paths); the once-per-ms tick and the sprite pixel-test are folded into the SDL frame loop
-0x0048C3C0	NovaHud_RenderOverlays		0%	
+0x0048C3C0	NovaHud_RenderOverlays	src/nova_app.cpp	60%	Main-menu overlay compositor folded into NovaRender_RedrawAndPresentFrame (0x0048c3c0 cited inline): top logo strip, the three button-slide reveal strips (PICT 608-610) and the focus sprites draw at their authored origins. The original's offscreen DrawContext push/blit and per-channel jitter-scroll offsets are replaced by direct SDL draws at the computed origins; the jitter-scroll and decay-counter motion is approximated by the reveal counters. (Name is a misnomer: this is menu chrome, not the in-flight HUD.)
 0x0048C580	NovaHud_RenderFocusOverlay	src/nova_app.cpp	80%	Center-preview draw: rest state = OR-composite of the frame into the backdrop (BlitRaw -> BlitPixel_CopyOrSpan
 0x0048C730	NovaUi_RunTradeCenterWindow	src/game/docked_trade_dialog.cpp	85%	Trade Center modal. Model in trade_center.cpp (NovaTradeCenter_OpenSession builds the 8-row table: STR# 0xfa4 base prices scaled by Stellar_TradeConnective 1/2/4 with scale 1.25/1.1/1.5, disaster overrides, two junk rows); SDL modal in docked_trade_dialog.cpp (RunTradeCenterDialog) loads DITL 0x3e9 geometry, colours the rows from the c\x9alr list palette (list_text/list_background/list_hilite), draws the grid/summary/banner and handles buy/sell/selection, dispatches the initial AvailLoc-4 mission offer and timed rechecks, and is dispatched from NovaLanded_RunSubWindowDialog. Alt buy/sell runs the DLOG 0x3eb quantity prompt (NovaUi_RunStoreQuantityPrompt 0x0049e8e0, modifier 0x800) composited over the live trade center. Gaps: nested starmap/player-info/mission-computer actions; footer mission-cargo clause simplified; button strip drawn inline. Native local trade DLOG placement contains only when needed, with window-point probe conversion and scoped restoration.
 0x0048D190	NovaUi_HandleTradeCenterInput	src/game/docked_trade_dialog.cpp	75%	Runs inline in RunTradeCenterDialog: Esc/Enter/Leave close, DIK up/down cycle selection (NovaTradeCenter_CycleSelection), b/s buy/sell, alt quantity prompt (RunStoreQuantityPrompt), mouse button + row hit test. Gaps: starmap/player-info/mission-computer actions TODO(decomp).
@@ -888,7 +762,6 @@ address	name	impl_file	reimpl_pct	comment
 0x004B4320	NovaPrefs_ResetToDefaults	src/game/preferences.cpp	85%	NovaPreferences::ResetToDefaults sets all modeled dialog preferences, CE starmap-border state (port default ON; the original defaulted OFF), and key bindings, then applies NovaPrefs_ApplyLockedPreferences (the port's fixed quality/graphics values); legacy/sensitivity globals remain unmodeled
 0x004B4400	NovaPrefs_ResetKeyBindings	src/game/preferences.cpp	90%	KeyBindings::ResetToDefaults writes the full short[0x52] defaults incl panel-suppressed aliases; flight navigation row verified. Plate comment corrected: slot 0x12/0x0c is self-destruct (with 0x38/0x6f arm modifier, 0x00451970), not zoom; route-map zoom is the separate raw minus/equals channel
 0x004B4690	Game_ResetNewGameState	src/game/new_pilot_flow.cpp	25%	Fresh-world reset entry (called from Menu_RunNewGameFlow 0x00489d70). Ported slices: SetNewGameDateAndStrings (the calendar seed via DrawContext_ReadRenderParams 0x004bbb10) and NovaNewPilot_ResetStellarStrengthForNewGame (0x004b46bc..0x004b4760: set dominated from availability_flags 0x20 [Bible "starts the game dominated"], seed live Strength -1 with the pinned countdown for availability_flags 0x40 starts-destroyed bodies, else reset live Strength to the capacity with destroyed_days_remaining 0). Remaining: faction reputation/mission-flag reset (Stub_ResetReputationAndWorldTables logs it), outfit/weapon-bank zeroing and the other tail scopes. NOTE: the local-clock+250 calendar seed set here is the pre-override fallback; Menu_RunNewGameFlow passes the char-template start date (+0x134/+0x136/+0x138) afterwards. Confidence: high on the ported slices. Now also zeroes the 10,000 control bits (0x004b477e) via Stub_ResetReputationAndWorldTables and reloads the scenario tables (which clears the resource-derived mutable state the original's tail scopes reset: personalities, nebulae, system fog); remaining tail scopes (beam-hit/impact/freeflight pools, asteroid pool, region-trigger defs, ambient particles) are reinitialised at flight/reset boundaries or unmodelled.
-0x004B4CF0	Sprite_CompileFramesAndDiscardSourceData		0%	
 0x004B4E10	FUN_004b4e10		0%	
 0x004B4EE0	ShipClass_LoadShipClassVisualAndLaunchData	src/game/ship_visual.cpp	74%	Gameplay/launch fields now fully decoded: animation_cycle_count (+0xA00 <- shan+0x04 BaseSetCount, or 1 when prefs.ship_animations off) and alt_sprite_cycle_count via the scenario ship pass, plus skill_variance_percent is correctly the separate sh\xefp SkillVar (+0x9F8, clamped [1,50]). sh.x9an descriptor field decode (base/alt/glow/light/weap/shield ids+sizes, FramesPer, Flags, AnimDelay, WeapDecay) verified, including glow layer fields + 0x16, the LightImageID/WeapImageID roles, and the +0x36..0x3e BlinkMode/BlinkValA-D running-light program (the Ghidra gun/turret exit names there are wrong; real exit geometry starts at +0x48). Exit geometry is decoded at scenario load: ExitType family X/Y arrays use +0x48/+0x50 +16g+2q and Z uses +0x90+8g+2q. Raw base_set_count (+0x04), alt_image_id (+0x0c) and alt_sprite_cycle_count (AltSetCount +0x10, or 1 when the ship-animations preference is off) plus shield_image_id (+0x40) are stored on ShipClass; the renderer loads the alt and shield sheets and draws the alt. DIVERGENCE: the Flags 0x100 affine-skew heading table (field_0xab4) is not built; ComposeShipBaseRow/ComposeShipFrameIndex use the linear heading map (inert for all shipped data).
 0x004B6620	FUN_004b6620		0%	
@@ -904,14 +777,6 @@ address	name	impl_file	reimpl_pct	comment
 0x004B6920	DrawContext_StoreScaledValue	src/game/nova_font.cpp	100%	NovaText draw path scales the logical point size by the active presentation/backing-pixel factor before obtaining a font handle; original fixed-point scale storage and non-text uses remain TODO(decomp) Marked 100%: reimplemented on SDL_ttf via NovaFontCache/NovaText_*; the original QuickDraw/Mac Toolbox metric engine (fixed-point scale storage, text-resource draw path) is intentionally not reproduced.
 0x004B6940	FUN_004b6940		0%	
 0x004B6960	FUN_004b6960		0%	
-0x004B6990	DrawContext_SetRgbColor		0%	
-0x004B69D0	DrawContext_SetFillRgbColor		0%	
-0x004B6A10	DrawContext_FillRect16		0%	
-0x004B6B90	DrawContext_FillRect16WithCurrentColor		0%	
-0x004B6BC0	DrawContext_InvertRect		0%	
-0x004B6EC0	DrawContext_FillRect16WithFillColor		0%	
-0x004B6EF0	DrawContext_FrameRect16WithCurrentColor		0%	
-0x004B7230	BlitPixel_MapIndexedRectToRgb555		0%	
 0x004B73B0	FUN_004b73b0		0%	
 0x004B74C0	FUN_004b74c0		0%	
 0x004B76D0	FUN_004b76d0		0%	
@@ -919,16 +784,10 @@ address	name	impl_file	reimpl_pct	comment
 0x004B81E0	FUN_004b81e0		0%	
 0x004B8300	FUN_004b8300		0%	
 0x004B8400	FUN_004b8400		0%	
-0x004B8530	DrawContext_BlitClippedRect		0%	
-0x004B8A70	DrawContext_GetClipRect		0%	
-0x004B8A90	DrawContext_SetCurrent		0%	
-0x004B8AA0	DrawContext_GetCurrent		0%	
 0x004B8AB0	FUN_004b8ab0		0%	
 0x004B8AC0	FUN_004b8ac0		0%	
 0x004B8AD0	FUN_004b8ad0		0%	
 0x004B8AE0	FUN_004b8ae0		0%	
-0x004B8C20	Render_ReleaseWindowDC		0%	
-0x004B8C40	Render_RebindWindowSurface		0%	
 0x004B8CA0	Resource_LoadStringEntry	src/game/hud_overlay.cpp	95%	Port helper NovaHud_LoadStringEntry/DecodeStringEntry take 1-based entry numbers like the original; on a missing pool/entry it returns nullopt (empty string in the original) so callers keep literal fallbacks.
 0x004B8D50	Rect_Offset		0%	
 0x004B8D80	FUN_004b8d80		0%	
@@ -938,17 +797,12 @@ address	name	impl_file	reimpl_pct	comment
 0x004B8ED0	Resource_LoadPictAsImageWithColorRemap	src/pict_image.cpp	85%	Resource_LoadPictAsImage: BitsRect family (0x90/0x91/0x98-0x9b) incl. 8-bit indexed + 1-bit + RGB555 + demoted-24-bit paths via the ported opcode walker; the optional post-load color-remap tail (DAT_0085faee) is NOT ported (confirmed dead: all callers pass remap off)
 0x004B9050	Resource_LoadPictAsImage	src/pict_image.cpp	100%	Resource_LoadPictAsImage: wrapper over LoadWithColorRemap with remap off; used for loading/startup splash PICTs and dialog DITL image items
 0x004B9060	FUN_004b9060		0%	
-0x004B9070	DrawContext_BlitImageToRect		0%	
-0x004B9130	Image_Destroy		0%	
-0x004B9140	Rect_SetFromImageBounds		0%	
 0x004B9160	FUN_004b9160		0%	
 0x004B9170	FUN_004b9170		0%	
 0x004B9180	FUN_004b9180		0%	
 0x004B92D0	FUN_004b92d0		0%	
 0x004B9410	FUN_004b9410		0%	
-0x004B9790	DrawContext_DrawLineRelative		0%	
 0x004B97E0	DrawContext_DrawLineTo	src/game/services_buttons.cpp	20%	DrawThreeStateButtonArrow ports the unclipped 45-degree 2x2-pen slice: decrement larger coordinate endpoint on each axis, then stamp both arms; general slopes, clipping, other pen sizes and draw-context cursor bookkeeping remain unported.
-0x004BA2F0	DrawContext_SetCursorPosAdjusted		0%	
 0x004BA320	FUN_004ba320		0%	
 0x004BA350	DrawContext_DrawCircleInRect	src/game/hud_renderer.cpp	100%	DrawRadarDisc: midpoint circle outline (8-way, 1px plot, d=1-r) with the same centre/radius derivation from the radar-clipped rect. The fat-pixel filled-run branch is for context pixel scale != 1; port contexts are always 1x1, so it is unreachable and the output is equivalent. No remaining gap.
 0x004BB260	FUN_004bb260		0%	
@@ -959,15 +813,10 @@ address	name	impl_file	reimpl_pct	comment
 0x004BBA50	FUN_004bba50		0%	
 0x004BBA60	FUN_004bba60		0%	
 0x004BBA70	FUN_004bba70		0%	
-0x004BBA80	RenderOwner_GetRectPtr		0%	
-0x004BBA90	RenderOwner_GetRect		0%	
-0x004BBAA0	RenderOwner_GetDrawContextHandle		0%	
-0x004BBAB0	DrawContext_BindFromRenderOwner		0%	
 0x004BBAD0	FUN_004bbad0		0%	
 0x004BBAE0	FUN_004bbae0		0%	
 0x004BBAF0	FUN_004bbaf0		0%	
-0x004BBB10	DrawContext_ReadRenderParams		0%	
-0x004BBB80	Resource_LoadCicn		0%	
+0x004BBB80	Resource_LoadCicn	src/cicn_image.cpp	80%	Resource_LoadCicnAsImage decodes the extended color-icon payload (0x004bbb80 cited inline): mask rowbytes / reserved-word gate, bits-per-pixel, 1-bit mask + complementary rowbytes, then the row decoder FUN_004d2bd0. The resource lookup half of the original wrapper is done separately by NovaResource_Load, so only the 'cicn' fetch/release is not reproduced here.
 0x004BBBF0	FUN_004bbbf0		0%	
 0x004BBCB0	FUN_004bbcb0		0%	
 0x004BBCC0	FUN_004bbcc0		0%	
@@ -1062,10 +911,8 @@ address	name	impl_file	reimpl_pct	comment
 0x004CEF50	Dialog_ParseItemList	src/brgr_archive.cpp	70%	DITL item parser reimplemented as NovaResource_LoadDialogItems: BE count, rect/type bytes, per-type tail skip, even align; validates the 8 docked Spaceport buttons
 0x004CF1C0	FUN_004cf1c0		0%	
 0x004CF760	UiWindow_CreateFromDialogResource	src/game/ui_dialog.cpp	60%	Ported on SDL: DLOG+DITL load and authored window-local geometry; placement is selected during the interaction frame without mutating renderer state during resource loading. Original window-surface allocation is replaced by SDL compositing.
-0x004CF890	UiWindow_Destroy		0%	
 0x004CF960	UiPanel_GetEntryInfo		0%	
 0x004CF9F0	UiPanel_SetEntryRect		0%	
-0x004CFA40	UiWindow_SetDrawCallback		0%	
 0x004CFA60	FUN_004cfa60		0%	
 0x004CFAC0	UiPanel_GetEntryTextPascalIndexed		0%	
 0x004CFB10	FUN_004cfb10		0%	
@@ -1075,11 +922,9 @@ address	name	impl_file	reimpl_pct	comment
 0x004CFC60	FUN_004cfc60		0%	
 0x004CFC70	FUN_004cfc70		0%	
 0x004CFCA0	UiPanel_SetTextEntrySelectionRange		0%	
-0x004CFD30	UiWindow_GetRect		0%	
 0x004CFD40	UiControl_SetValue		0%	
 0x004CFD80	UiControl_GetValue		0%	
 0x004CFD90	FUN_004cfd90		0%	
-0x004CFDB0	UiWindow_MarkDirty		0%	
 0x004CFDC0	FUN_004cfdc0		0%	
 0x004CFDD0	UiWindow_RunInteractionLoop	src/game/ui_dialog.cpp	55%	Ported per-frame modal loop: background redraw, scoped contained dialog placement, matching inverse mouse mapping and window-point probe bounds. Original window-stack compositing is replaced by SDL; existing keyboard/default-control and callback gaps remain.
 0x004D0610	FUN_004d0610		0%	
@@ -1088,10 +933,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004D0B70	FUN_004d0b70		0%	
 0x004D0BD0	FUN_004d0bd0		0%	
 0x004D0D00	UiWindow_Draw	src/game/ui_dialog.cpp	65%	Ported control drawer: bevel triples Static text (type 8) now wraps via WrapDescriptionLines with real Ascent/LineHeight metrics, top-aligned and clipped to the item rect; edit text/selection/caret clip to the field rect inset by 3 (0x004bcd30/ NovaText_DrawText semantics). The item pass saves and restores the renderer clip through util::RenderClipScope.
-0x004D16F0	NovaUi_BlitDirtyWindowSurfaces		0%	Blits dirty window surfaces to the render context. 0% unported.
-0x004D17A0	DrawContext_SaveAndSetOwnerContext		0%	
 0x004D17B0	NovaRender_GetMainWindowOwner		0%	
-0x004D17C0	UiWindow_GetDrawContextHandle		0%	Window record -> draw context handle. 0% unported.
 0x004D17E0	NovaMouse_GetWindowRelativePosition		0%	Mouse minus current window record origin. 0% unported.
 0x004D1810	FUN_004d1810		0%	
 0x004D1890	FUN_004d1890		0%	
@@ -1282,7 +1124,6 @@ address	name	impl_file	reimpl_pct	comment
 0x004DB826	FUN_004db826		0%	
 0x004DB831	FUN_004db831		0%	
 0x004DB9B0	FUN_004db9b0		0%	
-0x004DBB13	DrawContext_GetClipRect		0%	
 0x004DBB37	FUN_004dbb37		0%	
 0x004DBC5E	FUN_004dbc5e		0%	
 0x004DBCE3	FUN_004dbce3		0%	

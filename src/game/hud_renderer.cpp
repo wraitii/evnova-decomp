@@ -474,7 +474,8 @@ void HudRenderer::Draw(SdlPlatform &platform,
   // onto the cockpit art before the other panels refresh.
   DrawRadarPanel(platform, state, force_empty_radar);
 
-  // Life-support bars, drawn inside their genuine top-right-strip rects. The
+  // Life-support bars (Ghidra 0x0045e9c0 NovaUi_DrawPlayerShieldArmorPanels),
+  // drawn inside their genuine top-right-strip rects. The
   // Federation shield/armor/fuel slots are x=35..184 at y=200/216/234, and
   // each fills from the left by the current/max fraction.
   // Before the first movement update fills the stats cache the bars read as

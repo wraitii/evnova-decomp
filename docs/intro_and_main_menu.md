@@ -285,8 +285,12 @@ the OS render-owner surface.
 3. Blit the 6 focus sprites at `DAT_007d24cc[i] + DAT_007d2544` / `DAT_007d24ce[i] +
    DAT_007d2546` via `BlitPixie_BlitRectRleCommandStream` (0x00470ee0; RLE command-stream
    renderers `SpriteRleCommandStream_DecodeUnclipped` 0x00471e10 / `..._DecodeClippedRow`
-   0x00471e90) — the sprite→surface blit entry to replace with SDL `SDL_RenderTexture`.
-4. `NovaHud_RenderOverlays` (0x0048c3c0) then `NovaHud_RenderFocusOverlay`.
+   0x00471e90) — the sprite→surface blit entry replaced by SDL `SDL_RenderTexture`
+   (the whole `BlitPixie`/`SpriteRleCommandStream` software renderer is triaged to
+   `decomp-skipped.tsv` under `blitter`).
+4. `NovaHud_RenderOverlays` (0x0048c3c0) then `NovaHud_RenderFocusOverlay`. The
+   `NovaHud_` prefix on 0x0048c3c0/0x0048bc90 is a misnomer: these drive the
+   main-menu logo/button-slide animation, not the in-flight HUD.
 5. Restore the owner context, blit the offscreen surface to it, and on mode 1 commit/present
    (`NovaRender_CommitFrame` 0x004b6850 → `NovaRender_QueuePresentAndSwap`; in the port,
    `SdlPlatform::Present`).
@@ -313,7 +317,7 @@ labelled blit wrapped by `DrawContext_BlitImageToRect`, and
 |------|------|
 | `0x004873b0` `NovaRender_RedrawAndPresentFrame` | central menu/in-game frame renderer |
 | `0x004861b0` `NovaHud_TrackFocusHoverIndex` | menu focus sprite hover hit-test |
-| `0x0048c3c0` `NovaHud_RenderOverlays` | HUD overlay compositor |
+| `0x0048c3c0` `NovaHud_RenderOverlays` | main-menu overlay compositor (misnomer: not the in-flight HUD) |
 | `0x004aaf60` `NovaUi_PresentStartupSplashFrame` | startup splash (PICT 0x83) |
 | `0x004ab070` `NovaUi_PresentLoadingSplashFrame` | loading splash (PICT 0x1fa4) |
 | `0x004ab1b0` `NovaUi_RunProgressBarReveal` | seed + expand-in reveal of the startup loading bar |
