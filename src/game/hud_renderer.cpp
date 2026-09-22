@@ -6,6 +6,7 @@
 #include "../pixpat_image.hpp"
 #include "../sdl_platform.hpp"
 #include "../util/format.hpp"
+#include "../util/geometry.hpp"
 #include "escort_commands.hpp"
 #include "hud_overlay.hpp"
 #include "nova_font.hpp"
@@ -1199,15 +1200,26 @@ constexpr std::uint32_t kRadarBlinkHalfPeriodMs = 250; // 15 ticks at 60 Hz
   return value > static_cast<float>(truncated) ? truncated + 1 : truncated;
 }
 
+// HudPanelRect is the cockpit layout's int16 QD rect; bridge to the shared
+// integer SDL_Rect algebra in util/geometry.hpp.
+[[nodiscard]] SDL_Rect ToSdlRect(const HudPanelRect &rect) {
+  return SDL_Rect{rect.left, rect.top, rect.width(), rect.height()};
+}
+
 // Rect_Intersect (0x004b8df0) is a QD SectRect: it clips `blip` to
 // `radar` and reports whether any area survives (empty when edges touch).
 [[nodiscard]] bool IntersectRadarRect(HudPanelRect &blip,
                                       const HudPanelRect &radar) {
-  blip.left = std::max(blip.left, radar.left);
-  blip.top = std::max(blip.top, radar.top);
-  blip.right = std::min(blip.right, radar.right);
-  blip.bottom = std::min(blip.bottom, radar.bottom);
-  return blip.left < blip.right && blip.top < blip.bottom;
+  const auto clipped =
+      evnova::util::IntersectRect(ToSdlRect(blip), ToSdlRect(radar));
+  if (!clipped.has_value()) {
+    return false;
+  }
+  blip.left = static_cast<std::int16_t>(clipped->x);
+  blip.top = static_cast<std::int16_t>(clipped->y);
+  blip.right = static_cast<std::int16_t>(clipped->x + clipped->w);
+  blip.bottom = static_cast<std::int16_t>(clipped->y + clipped->h);
+  return true;
 }
 
 void DrawRadarPoint(SDL_Renderer *renderer,

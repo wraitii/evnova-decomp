@@ -3,6 +3,7 @@
 #include "compatibility.hpp"
 
 #include "../brgr_archive.hpp"
+#include "../util/geometry.hpp"
 #include "boarding_plunder.hpp"
 #include "game_state.hpp"
 #include "government.hpp"
@@ -2326,11 +2327,37 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
               runtime.objective_complete = true;
               break;
             }
-            // Cloaked ships require the original's sprite-rect intersection
-            // with the gameplay surface. TODO(decomp(0x00443c60)) skipped:
-            // the clean-room Ship has no sprite-rect/viewport model yet, so
-            // cloaked targets are never "seen" and observe missions whose
-            // targets stay cloaked cannot complete.
+            // Cloaked targets are seen only while fully on the gameplay
+            // surface: the original insets the surface rect by half the hull
+            // frame and Sects it with the sprite's screen rect (Rect_Inset
+            // 0x004b8dc0 / Rect_Intersect 0x004b8df0). The clean-room Ship has
+            // no Sprite handle, but the collision mask carries the same
+            // current-frame full extents (anchor = ceil(frame/2), refreshed
+            // by RefreshCollisionMasks), with the collision radius as the
+            // fallback when the pixel-mask pass is disabled.
+            const bool has_frame = ship.collision_mask.HasMask();
+            const int half_w =
+                has_frame ? static_cast<int>(ship.collision_mask.anchor_x)
+                          : static_cast<int>(ship.collision_radius_px);
+            const int half_h =
+                has_frame ? static_cast<int>(ship.collision_mask.anchor_y)
+                          : static_cast<int>(ship.collision_radius_px);
+            const int screen_x =
+                state.viewport_center_x +
+                static_cast<int>(std::lround(ship.pos_x - state.player.pos_x));
+            const int screen_y =
+                state.viewport_center_y +
+                static_cast<int>(std::lround(ship.pos_y - state.player.pos_y));
+            const SDL_Rect surface{
+                0, 0, state.viewport_center_x * 2, state.viewport_center_y * 2};
+            const SDL_Rect sprite{
+                screen_x - half_w, screen_y - half_h, half_w * 2, half_h * 2};
+            if (evnova::util::IntersectRect(
+                    evnova::util::InsetRect(surface, half_w, half_h), sprite)
+                    .has_value()) {
+              runtime.objective_complete = true;
+              break;
+            }
           }
         }
       }

@@ -1720,3 +1720,72 @@ TEST_CASE("mission offer target helper rebases a stale docked stellar") {
   state.player.ai_secondary_target_slot = 0x85;
   CHECK(Mission_OriginalAiSecondaryTargetSlot(state) == 7);
 }
+
+// Goal-4 (observe) cloaked-target visibility: the original sects the hull
+// frame's screen rect with the gameplay surface inset by half the frame. A
+// mission ship carrying a ModType-17 cloak (so Ship_CanMaintainCloakState is
+// true) counts as observed only while it is fully on screen.
+TEST_CASE("observe mission counts a cloaked mission ship only when on screen") {
+  const auto setup = [] {
+    GameState state;
+    state.viewport_center_x = 320;
+    state.viewport_center_y = 200;
+    state.player.current_system_id = 0;
+
+    ActiveMission &mission = state.active_missions[0];
+    mission.ship_goal = 4;          // Bible ShipGoal: observe.
+    mission.current_system_id = -6; // -6: the player's current system.
+    mission.target_ship_count = 1;
+    mission.mission_target_count = 1;
+    mission.goal_count_remaining = 1;
+    mission.brief_description_ids[7] = -1; // no completion desc dialog.
+    state.active_mission_runtime_flags[0].is_active = true;
+
+    // One ship class whose default loadout carries a ModType-17 cloak.
+    state.scenario.ships.resize(1);
+    state.scenario.ships[0].default_outfit_ids[0] = 0x80;
+    state.scenario.ships[0].default_outfit_counts[0] = 1;
+    state.scenario.outfits.resize(1);
+    state.scenario.outfits[0].mod_type = 0x11;
+
+    Ship &ship = state.ships_[1];
+    ship.is_active = true;
+    ship.mission_fleet_slot = 0;
+    ship.ship_class_id = 0;
+    ship.ship_instance_id = 1; // NPC
+    ship.current_system_id = 0;
+    ship.armor_points = 100.0F;
+    ship.shield_points = 100.0F;
+    ship.fuel_points = 100.0F;
+    return state;
+  };
+
+  SECTION("fully on screen completes the objective") {
+    GameState state = setup();
+    state.ships_[1].pos_x = 0.0F;
+    state.ships_[1].pos_y = 0.0F;
+
+    Mission_HandleMissionOrSurrenderShipReaction(state, 0, 0);
+
+    CHECK(state.active_mission_runtime_flags[0].objective_complete);
+  }
+
+  SECTION("off screen leaves the objective incomplete") {
+    GameState state = setup();
+    state.ships_[1].pos_x = 1000.0F; // screen x well past the 640px surface.
+
+    Mission_HandleMissionOrSurrenderShipReaction(state, 0, 0);
+
+    CHECK_FALSE(state.active_mission_runtime_flags[0].objective_complete);
+  }
+
+  SECTION("an uncloaked mission ship is seen even off screen") {
+    GameState state = setup();
+    state.scenario.ships[0].default_outfit_counts[0] = 0; // no cloak device.
+    state.ships_[1].pos_x = 1000.0F;
+
+    Mission_HandleMissionOrSurrenderShipReaction(state, 0, 0);
+
+    CHECK(state.active_mission_runtime_flags[0].objective_complete);
+  }
+}
