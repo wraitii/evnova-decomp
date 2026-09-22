@@ -474,7 +474,10 @@ CollectStellarLocatorCandidates(const GameState &state,
 
 // Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility, offering
 // slice (the BBS list builder calls it with the interaction context clear and
-// param_2 = 0). Evaluates the original's ten definition-level gates in order:
+// recompute_reaction = false). `interaction_context` is the original's
+// g_travel_scene_ctx; `recompute_reaction` is its separate param_2, which
+// refreshes the MisnDef +0x16 availability cache read by gate [1]. Evaluates
+// the original's ten definition-level gates in order:
 // [0] AvailStel locator vs the selected/landed stellar, [1] cached
 // availability expression, [2] AvailRecord vs system reputation, [3]
 // AvailRating vs combat rating, [4] AvailRandom vs the per-definition roll,
@@ -484,11 +487,12 @@ CollectStellarLocatorCandidates(const GameState &state,
 // candidate sanity checks and the same-system denial arm. The earlier top
 // gates (AvailStel < -31999, AvailRandom < 1, AvailLoc -1, AvailLoc-2 context,
 // page-lane selection) also live here.
-[[nodiscard]] bool CheckOfferingEligibility(const GameState &state,
+[[nodiscard]] bool CheckOfferingEligibility(GameState &state,
                                             std::size_t def_index,
                                             std::int16_t page_group,
-                                            bool interaction_context) {
-  const MissionDef &def = state.scenario.missions[def_index];
+                                            bool interaction_context,
+                                            bool recompute_reaction) {
+  MissionDef &def = state.scenario.missions[def_index];
   const auto def_id = static_cast<std::int16_t>(def_index);
 
   // ---- Top gates (0x00441b4f..) ------------------------------------------
@@ -601,6 +605,16 @@ CollectStellarLocatorCandidates(const GameState &state,
   }
 
   // ---- Gate 1: cached availability expression ----------------------------
+  // Ghidra 0x00442310: the original's second argument (param_2) only requests
+  // that this definition's availability expression be re-evaluated and the
+  // result cached at MisnDef +0x16 before the gate reads it. It is distinct
+  // from the interaction context (g_travel_scene_ctx): the hail ladder runs
+  // with the context set but param_2 clear, while the board command and the
+  // target-action hail both recompute. Gate [1] below reads the same field.
+  if (recompute_reaction) {
+    def.is_available_runtime =
+        Mission_CheckReactionConditionSatisfied(state, def.availability_expr);
+  }
   if (!def.is_available_runtime) {
     return false;
   }
@@ -816,7 +830,7 @@ CollectStellarLocatorCandidates(const GameState &state,
 // priority: the original's selection sort (0x0043d0c0 bucket pass) emits the
 // highest MisnDef +0x128 priority first, ties in definition order.
 [[nodiscard]] std::vector<std::int16_t>
-EvaluateMissionPage(const GameState &state, std::int16_t page_group) {
+EvaluateMissionPage(GameState &state, std::int16_t page_group) {
   std::vector<std::int16_t> result;
   for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
     const auto &mission = state.scenario.missions[index];
@@ -825,7 +839,10 @@ EvaluateMissionPage(const GameState &state, std::int16_t page_group) {
     if (!mission.present) {
       continue;
     }
-    if (CheckOfferingEligibility(state, index, page_group, false)) {
+    // List builder sweeps with param_2 = 0; the availability cache was
+    // refreshed in bulk by NovaResources_EvaluateAvailability before the
+    // lane walk.
+    if (CheckOfferingEligibility(state, index, page_group, false, false)) {
       result.push_back(static_cast<std::int16_t>(index));
     }
   }
@@ -2757,9 +2774,10 @@ bool Ship_HasAnyCargoLootOrActiveMission(const GameState &state) {
 }
 
 // Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility.
-bool Mission_CheckMissionShipInteractionEligibility(const GameState &state,
+bool Mission_CheckMissionShipInteractionEligibility(GameState &state,
                                                     std::int16_t mission_id,
-                                                    bool interaction_context) {
+                                                    bool interaction_context,
+                                                    bool recompute_reaction) {
   if (mission_id < 0 ||
       static_cast<std::size_t>(mission_id) >= state.scenario.missions.size()) {
     return false;
@@ -2767,7 +2785,8 @@ bool Mission_CheckMissionShipInteractionEligibility(const GameState &state,
   return CheckOfferingEligibility(state,
                                   static_cast<std::size_t>(mission_id),
                                   /*page_group=*/0,
-                                  interaction_context);
+                                  interaction_context,
+                                  recompute_reaction);
 }
 
 // Ghidra 0x00454910 Ship_HandlePlayerTargetActionCommand, post-accept arm.
@@ -2912,10 +2931,13 @@ void Mission_TickShipHailLadder(GameState &state,
   if ((flags & 0x400U) != 0U && pers.link_mission_id != -1) {
     state.travel_scene_ctx = true;
     state.mission_speaker_ship_slot = ship.ship_instance_id;
+    // Original 0x00433572 pushes param_2 = 0: the hail ladder runs with the
+    // interaction context set but does not refresh the availability cache.
     const bool eligible = Mission_CheckMissionShipInteractionEligibility(
         state,
         pers.link_mission_id,
-        /*interaction_context=*/true);
+        /*interaction_context=*/true,
+        /*recompute_reaction=*/false);
     state.travel_scene_ctx = false;
     state.mission_speaker_ship_slot = -1;
     if (!eligible) {

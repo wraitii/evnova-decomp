@@ -477,13 +477,20 @@ void Mission_ClearActiveReactionMission(GameState &state);
 
 // Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility public
 // wrapper (the BBS list builder uses the internal offering slice with the
-// interaction context clear). `interaction_context` mirrors the original's
-// g_travel_scene_ctx set around ship-offering calls: AvailLoc 2 defs are
-// then the only eligible lane, the AvailStel locator gate relaxes to a pass,
-// and the cargo gate switches to the "carrying >= 1 ton" arm. The original's
-// param_2 recompute-reaction-cache arm (0x77f642) is TODO(decomp).
-[[nodiscard]] bool Mission_CheckMissionShipInteractionEligibility(
-    const GameState &state, std::int16_t mission_id, bool interaction_context);
+// interaction context clear and no reaction recompute). `interaction_context`
+// mirrors the original's g_travel_scene_ctx set around ship-offering calls:
+// AvailLoc 2 defs are then the only eligible lane, the AvailStel locator gate
+// relaxes to a pass, and the cargo gate switches to the "carrying >= 1 ton"
+// arm. `recompute_reaction` is the original's second argument (param_2): when
+// true the caller requested a re-evaluation of this definition's availability
+// expression, cached at MisnDef +0x16 and read by eligibility gate [1]. The
+// board command and the target-action hail pass true; the hail ladder passes
+// false even though it also runs with the interaction context set.
+[[nodiscard]] bool
+Mission_CheckMissionShipInteractionEligibility(GameState &state,
+                                               std::int16_t mission_id,
+                                               bool interaction_context,
+                                               bool recompute_reaction);
 
 // Ghidra 0x00454910 Ship_HandlePlayerTargetActionCommand, post-accept arm
 // (runs inline): after a mission offered by a personality ship is accepted,

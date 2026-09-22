@@ -930,7 +930,8 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
       if (Mission_CheckMissionShipInteractionEligibility(
               state,
               target_pers->link_mission_id,
-              /*interaction_context=*/true)) {
+              /*interaction_context=*/true,
+              /*recompute_reaction=*/true)) {
         const std::uint16_t offer_flags = target_pers->flags_primary;
         const std::int16_t offer_mission_id = target_pers->link_mission_id;
         PlayAirlockCue(audio, state);
