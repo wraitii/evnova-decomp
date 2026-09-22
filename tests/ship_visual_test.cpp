@@ -507,4 +507,137 @@ TEST_CASE("cloak ability caches populate lazily and reset when out of system",
   CHECK(p.cloak_damage_deactivate_latch == -1);
 }
 
+TEST_CASE("cloak render presentation follows the fade slice",
+          "[ship][visual][cloak][render]") {
+  // Ghidra 0x00428340 0x0042b0b2..: partial fade is an additive ghost whose
+  // per-channel hull intensity falls with progress; full fade hides the hull
+  // unless the player/reveal rules apply.
+  GameState state;
+  Ship ship;
+  ship.ship_instance_id = 1; // NPC
+  ship.squad_leader_ship_slot = 5;
+  ship.pers_def_slot = -1;
+  const NovaShipTintColor tint{0x20, 0x20, 0x20};
+
+  // No fade: an ordinary draw.
+  ship.cloak_fade_progress = 0.0F;
+  ShipCloakPresentation p = NovaShip_CloakPresentation(state, ship, tint);
+  CHECK_FALSE(p.hidden);
+  CHECK_FALSE(p.additive);
+  CHECK(p.hull_alpha == Catch::Approx(1.0F));
+
+  // Partial fade: additive, per-channel tint = resolved - progress (0x20 - 16).
+  ship.cloak_fade_progress = 16.0F;
+  ship.cloak_jitter_x = -2;
+  ship.cloak_jitter_y = 1;
+  p = NovaShip_CloakPresentation(state, ship, tint);
+  CHECK_FALSE(p.hidden);
+  CHECK(p.additive);
+  CHECK(p.hull_tint[0] == 0x10);
+  CHECK(p.hull_tint[1] == 0x10);
+  CHECK(p.hull_tint[2] == 0x10);
+  CHECK(p.effect_cap == Catch::Approx(16.0F));
+  CHECK(p.weapon_cap == Catch::Approx(24.0F));
+  CHECK(p.jitter_x == Catch::Approx(-2.0F));
+  CHECK(p.jitter_y == Catch::Approx(1.0F));
+
+  // Near the top of the fade a sub-2 channel collapses to the 2 floor.
+  ship.cloak_fade_progress = 31.0F;
+  p = NovaShip_CloakPresentation(state, ship, tint);
+  CHECK(p.hull_tint[0] == 2);
+  CHECK(p.effect_cap == Catch::Approx(1.0F));
+
+  // The dim is a truncation, not a round: (0x20 - 16.5) = 15.5 -> 15.
+  ship.cloak_fade_progress = 16.5F;
+  p = NovaShip_CloakPresentation(state, ship, tint);
+  CHECK(p.hull_tint[0] == 15);
+
+  // A resolved channel below 0x10 collapses to 0 instead of 2.
+  ship.cloak_fade_progress = 16.0F;
+  p = NovaShip_CloakPresentation(
+      state, ship, NovaShipTintColor{0x08, 0x08, 0x08});
+  CHECK(p.hull_tint[0] == 0);
+
+  // Full fade with no reveal: hidden (brightness 0x40, hull/alt skipped), but
+  // the shared weapon cap still applies (0x0042b7f2).
+  ship.cloak_fade_progress = 32.0F;
+  p = NovaShip_CloakPresentation(state, ship, tint);
+  CHECK(p.hidden);
+  CHECK(p.weapon_cap == Catch::Approx(8.0F));
+}
+
+TEST_CASE("full cloak ghosts the player, escorts and screen-scanner reveals",
+          "[ship][visual][cloak][render]") {
+  // Ghidra 0x00428340 0x0042b714: brightness 0x1e (faint ghost) for the
+  // player, a player escort, or a hull the player's screen scanner reveals.
+  GameState state;
+  Ship ship;
+  ship.pers_def_slot = -1;
+  ship.cloak_fade_progress = 32.0F;
+  const NovaShipTintColor tint{0x20, 0x20, 0x20};
+
+  // Generic un-revealed NPC: hull/alt skipped, weapon cap still 40 - p.
+  ship.ship_instance_id = 1;
+  ship.squad_leader_ship_slot = 7;
+  state.player.cloak_scanner_reveal_screen = 0;
+  ShipCloakPresentation hidden = NovaShip_CloakPresentation(state, ship, tint);
+  CHECK(hidden.hidden);
+  CHECK(hidden.weapon_cap == Catch::Approx(8.0F));
+
+  // The player's own hull ghosts (src weight = (2 + 2)/32).
+  ship.ship_instance_id = 0;
+  ShipCloakPresentation p = NovaShip_CloakPresentation(state, ship, tint);
+  CHECK_FALSE(p.hidden);
+  CHECK_FALSE(p.additive);
+  CHECK(p.hull_alpha == Catch::Approx(0.125F));
+  CHECK(p.weapon_cap == Catch::Approx(8.0F));
+
+  // A player escort (squad_leader_ship_slot == 0) ghosts.
+  ship.ship_instance_id = 1;
+  ship.squad_leader_ship_slot = 0;
+  CHECK_FALSE(NovaShip_CloakPresentation(state, ship, tint).hidden);
+
+  // The player's screen-reveal scanner reveals any hull.
+  ship.squad_leader_ship_slot = 7;
+  state.player.cloak_scanner_reveal_screen = 1;
+  CHECK_FALSE(NovaShip_CloakPresentation(state, ship, tint).hidden);
+}
+
+TEST_CASE("partial cloak draws the hull jitter from the session RNG",
+          "[ship][visual][cloak][render]") {
+  // Ghidra 0x00428340 0x0042b0b2: m = trunc(progress/10), each axis offset in
+  // [-m, m] from two NovaRandom_Range(2m+1) rolls.
+  GameState state;
+  ShipClass cls{};
+  cls.base_image_id = 1; // the jitter needs a hull sprite (0x0042b0a7)
+  SetShipClass(state, cls);
+  Ship ship;
+  ship.ship_instance_id = 1;
+  ship.squad_leader_ship_slot = 7;
+  ship.armor_points = 1.0F;
+
+  // progress < 10 -> magnitude 0, so both offsets clamp to 0.
+  ship.cloak_fade_progress = 5.0F;
+  ship.cloak_transition_latch = 1;
+  NovaShip_TickCloakFadeState(state, ship, 1.0F);
+  CHECK(ship.cloak_jitter_x == 0);
+  CHECK(ship.cloak_jitter_y == 0);
+
+  // progress ~25 -> magnitude 2, each offset within [-2, 2].
+  ship.cloak_fade_progress = 25.0F;
+  ship.cloak_transition_latch = 1;
+  NovaShip_TickCloakFadeState(state, ship, 1.0F);
+  CHECK(ship.cloak_jitter_x >= -2);
+  CHECK(ship.cloak_jitter_x <= 2);
+  CHECK(ship.cloak_jitter_y >= -2);
+  CHECK(ship.cloak_jitter_y <= 2);
+
+  // A stable/clear fade resets the offsets.
+  ship.cloak_fade_progress = 0.0F;
+  ship.cloak_transition_latch = 0;
+  NovaShip_TickCloakFadeState(state, ship, 1.0F);
+  CHECK(ship.cloak_jitter_x == 0);
+  CHECK(ship.cloak_jitter_y == 0);
+}
+
 } // namespace game

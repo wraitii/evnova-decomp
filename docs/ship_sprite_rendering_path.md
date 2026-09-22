@@ -397,3 +397,47 @@ coasting and again under a maneuver/station hold, and ramps the afterburner
 level at up to +2/frame to 32; the inertialess arm ramps toward
 `round(speed*32*0.75/eff_max)` capped 24. The NPC `Ship_HandleShip` drive is
 faithful.
+
+## Cloak rendering
+
+`Ship_UpdateVisualState` (0x00428340) does not have a dedicated cloak draw; it
+rewrites each per-ship Sprite's brightness (`+0xA2`) and RGB tint
+(`+0xA4/a6/a8`) and the blit dispatch (`BlitPixie_BlitRectRawCopy` 0x004711e0)
+picks the routine from those fields. `NovaShip_CloakPresentation`
+(`ship_visual.cpp`) derives the equivalent draw state from
+`cloak_fade_progress`, and `SpaceflightView::DrawShipSprite` folds it into
+`SpriteDrawOptions`:
+
+| progress | brightness | effect |
+|----------|------------|--------|
+| `0` | class `base_transparency` | ordinary draw |
+| `0 < p < 32` | `0x20` (16bpp) | additive ghost `dst + src*tint/32`; `tint = trunc(resolved - p)` clamped to 0/2; hull/alt jitter |
+| `>= 32`, player / escort / screen-revealed | `0x1e` | faint ghost |
+| `>= 32`, otherwise | `0x40` | no blit (invisible) |
+
+The blend kernel `BlitPixel_TintRgb15Span` (0x004736c0) computes
+`src*(tint + 0x20 - brightness)/0x20 + dst*brightness/0x20`. At brightness
+`0x20` this collapses to the additive form the port uses (`SpriteDrawOptions
+.additive` + `tint_rgb5`). At `0x40` the >8-bit dispatch has no branch, so the
+sprite is skipped. A partial fade jitters every composite Sprite rect (hull,
+glow, lights, weapon, alt) by the same independent offset per axis in
+`[-trunc(p/g_cloak_jitter_divisor_f32, 10.0), +trunc(...)]`; the two
+`NovaRandom_Range` rolls are spent in
+`NovaShip_TickCloakFadeState` and the offsets stored on the Ship. The glow
+and light layers are capped at `32 - p` and the weapon-effect layer at
+`40 - p`; the glow, light and shield layers are hidden (`Sprite_SetVisible(0)`)
+once `p >= 32`, but the weapon layer still runs through the same shared cap
+block (0x0042b7f2, reached from both fade branches).
+
+The full-fade ghost condition is player (`ship_instance_id == 0`), player
+escort (`squad_leader_ship_slot == 0`), or the player's screen-scanner reveal
+(`cloak_scanner_reveal_screen == 1`, the ModType-30 `0x0002` bit). This is the
+executable's only consumer of the screen-reveal cache. Because SDL's normal
+blend cannot express the original's independent `dst*30/32` retention, the port
+approximates brightness `0x1e` with a source-alpha blend (`hull_alpha =
+(tint + 2)/32`); the additive fog term (mixing the source toward `space_color`
+before the tint) is likewise attenuated rather than added for the partial-fade
+path. A full-fade hull with brightness `0x40` skips the hull and alt blits,
+but its weapon layer still draws under the `40 - p = 8` cap; firing is blocked
+while cloaked, so that layer normally holds only the decaying flash of the
+last shot.
