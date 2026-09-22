@@ -2597,7 +2597,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                     Mission_CheckMissionShipInteractionEligibility(
                         state,
                         pers->link_mission_id,
-                        /*interaction_context=*/true);
+                        /*interaction_context=*/true,
+                        /*recompute_reaction=*/true);
               }
               if (linked_offer_eligible) {
                 // The mission offer renderer is the current clean-room window

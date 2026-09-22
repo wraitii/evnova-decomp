@@ -838,10 +838,38 @@ TEST_CASE("mission fuel gate requires one jump of fuel") {
   definition.flags_primary = 0x0008;
 
   state.player.fuel_points = kJumpFuelCost - 0.01F;
-  CHECK_FALSE(Mission_CheckMissionShipInteractionEligibility(state, 0, false));
+  CHECK_FALSE(Mission_CheckMissionShipInteractionEligibility(
+      state, 0, /*interaction_context=*/false, /*recompute_reaction=*/false));
 
   state.player.fuel_points = kJumpFuelCost;
-  CHECK(Mission_CheckMissionShipInteractionEligibility(state, 0, false));
+  CHECK(Mission_CheckMissionShipInteractionEligibility(
+      state, 0, /*interaction_context=*/false, /*recompute_reaction=*/false));
+}
+
+// Regression for the original's param_2 (Ghidra 0x00442310):
+// Mission_CheckMissionShipInteractionEligibility with recompute_reaction set
+// re-evaluates the definition's availability expression and caches it at
+// MisnDef +0x16, so a stale cache is corrected by the call and then read by
+// gate [1]. The hail ladder passes false and keeps the cached value.
+TEST_CASE("mission eligibility recompute refreshes the availability cache") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.avail_location = 0;
+  definition.avail_random = 100;
+  definition.availability_expr = "b1";
+  definition.is_available_runtime = false; // stale
+
+  state.control.bits.set(1); // satisfy "b1"
+
+  CHECK_FALSE(Mission_CheckMissionShipInteractionEligibility(
+      state, 0, /*interaction_context=*/false, /*recompute_reaction=*/false));
+  CHECK_FALSE(definition.is_available_runtime);
+
+  CHECK(Mission_CheckMissionShipInteractionEligibility(
+      state, 0, /*interaction_context=*/false, /*recompute_reaction=*/true));
+  CHECK(definition.is_available_runtime);
 }
 
 // Regression: a fresh new-game pilot landed at Tichel (system 0x81) must find
