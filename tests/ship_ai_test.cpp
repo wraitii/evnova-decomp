@@ -25,7 +25,7 @@ using game::NovaAi_FindBestAssistTargetForShip;
 using game::NovaAi_IsInboundThreatExceedingDefenses;
 using game::NovaAi_IssueEscortOrders;
 using game::NovaAi_UpdateShipAI;
-using game::NovaAiShip_CanInterceptCurrentPrimaryTarget;
+using game::NovaAiShip_CanTargetOutrunShooter;
 using game::NovaShip_AllocateShipSlot;
 using game::NovaTargeting_UpdateStellarAvailability;
 
@@ -623,9 +623,9 @@ TEST_CASE(
   state.player.vel_y = -10.0F;
   state.player.armor_points = 100.0F;
 
-  CHECK(NovaAiShip_CanInterceptCurrentPrimaryTarget(state, attacker));
+  CHECK(NovaAiShip_CanTargetOutrunShooter(state, attacker));
   state.player.vel_y = 0.0F;
-  CHECK_FALSE(NovaAiShip_CanInterceptCurrentPrimaryTarget(state, attacker));
+  CHECK_FALSE(NovaAiShip_CanTargetOutrunShooter(state, attacker));
 
   // Equal base speeds are where the guided-bank walk matters: the original
   // returns the non-strict `ship <= target` when no bank is found (0x00411183)
@@ -635,7 +635,7 @@ TEST_CASE(
   state.player.vel_y = -10.0F;
   attacker.npc_weapon_count_by_class.fill(0);
   attacker.npc_weapon_secondary_count_by_class.fill(0);
-  CHECK(NovaAiShip_CanInterceptCurrentPrimaryTarget(state, attacker));
+  CHECK(NovaAiShip_CanTargetOutrunShooter(state, attacker));
 }
 
 TEST_CASE("assist helper chooses the lowest positive candidate score") {

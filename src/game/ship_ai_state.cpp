@@ -727,7 +727,7 @@ void NovaAi_UpdateShipState(GameState &state,
           ship_class != nullptr && (ship_class->flags_secondary & 0x0002U) != 0;
       if (dx > kCombatCloseRange || dy > kCombatCloseRange) {
         if (!standoff) {
-          if (NovaAiShip_CanInterceptCurrentPrimaryTarget(state, ship)) {
+          if (NovaAiShip_CanTargetOutrunShooter(state, ship)) {
             if (ship.ai_behavior_code < 3) {
               ship.ai_state_code = 3;
               ship.ai_control_mode = 5;
@@ -840,7 +840,7 @@ void NovaAi_UpdateShipState(GameState &state,
     const float dy = std::abs(ship.pos_y - target.pos_y);
     if (!NovaAiShip_IsDisabled(state, target)) {
       if (dx > kCombatCloseRange || dy > kCombatCloseRange) {
-        if (NovaAiShip_CanInterceptCurrentPrimaryTarget(state, ship)) {
+        if (NovaAiShip_CanTargetOutrunShooter(state, ship)) {
           ship.ai_control_mode = ship.ai_behavior_code < 3 ? 5 : 0xe;
         } else if (ship.ai_control_mode != 0x11) {
           ship.ai_control_mode = 7;

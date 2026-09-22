@@ -933,7 +933,7 @@ void NovaAi_UpdateShipAI(GameState &state,
 
   // Fire-restricted ships skip the heavy behavior selection this frame.
   const bool restricted = NovaAiShip_IsDisabled(state, ship);
-  // Ship_CanShipInterceptCurrentPrimaryTarget reads the ship-local weapon
+  // Ship_CanTargetOutrunShooter reads the ship-local weapon
   // rows before the post-state auto-selector runs. Seed those rows once from
   // the assigned class so the intercept walk sees NPC guided banks too.
   NovaWeapon_EnsureNpcWeaponBanks(state, ship);
