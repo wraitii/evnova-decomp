@@ -1331,9 +1331,6 @@ int NovaStellar_SpawnDefenseFleetShip(GameState &state,
 // original bounds the ship-type index with `< 0x11`, which would read one
 // entry past the 16-slot ship_types table; that is unreachable in practice
 // (every producer stores 0..15), so the clean-room bounds at 16.
-// TODO(decomp) sprite_animation_timer seed from ShipClassDef
-// .combat_state_init_range (+0xa02): the clean-room ShipClass does not load
-// that field yet.
 int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
                                             std::int16_t dude_class_id,
                                             std::int16_t forced_ship_class_id,
@@ -1424,6 +1421,10 @@ int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
   if (cls != nullptr && cls->animation_cycle_count > 0) {
     ship.sprite_animation_cycle_index =
         RandomBelow(state, cls->animation_cycle_count);
+  }
+  if (cls != nullptr && cls->combat_state_init_range > 0) {
+    ship.sprite_animation_timer =
+        static_cast<float>(RandomBelow(state, cls->combat_state_init_range));
   }
   if (mission.ship_behavior == 0) {
     // ShipBehav 0: the fleet spawns hostile to the player.
