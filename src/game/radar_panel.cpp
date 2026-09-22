@@ -162,36 +162,6 @@ bool Outfit_HasCloakRadarVisibility(const GameState &state, const Ship &ship) {
   return false;
 }
 
-bool Player_HasCloakScannerReveal(const GameState &state,
-                                  std::uint16_t reveal_flag) {
-  for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
-       ++id) {
-    if (state.inventory.outfit_owned_count[id] <= 0 ||
-        id >= state.scenario.outfits.size()) {
-      continue;
-    }
-    const Outfit &o = state.scenario.outfits[id];
-    const auto matches = [&](std::int16_t mod_type, std::int16_t mod_val) {
-      return mod_type ==
-                 static_cast<std::int16_t>(OutfitEffect::kCloakScanner) &&
-             (static_cast<std::uint16_t>(mod_val) & reveal_flag) != 0U;
-    };
-    if (matches(o.mod_type, o.mod_val)) {
-      return true;
-    }
-    for (std::size_t i = 0; i < o.alt_mod_types.size(); ++i) {
-      if (matches(o.alt_mod_types[i], o.alt_mod_vals[i])) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool Player_HasCloakScannerRadarReveal(const GameState &state) {
-  return Player_HasCloakScannerReveal(state, 0x0001);
-}
-
 int Ship_ComputeScannerStrength(const GameState &state) {
   constexpr std::int16_t kInterferenceModType = 0x18; // ModType 24
   int strength = 0;

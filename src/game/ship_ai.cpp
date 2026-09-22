@@ -489,6 +489,11 @@ void BeginCloakTransition(GameState &state, Ship &ship) {
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
     return;
   }
+  // Player cloak-enter cue (snd 381): the original plays it when the latch is
+  // not already entering (latch < 1), before the latch transition below.
+  if (ship.ship_instance_id == 0 && ship.cloak_transition_latch < 1) {
+    state.cloak_enter_sound_pending = true;
+  }
   if (ship.cloak_fade_progress > 0.0F) {
     if (ship.cloak_transition_latch < 0) {
       ship.cloak_transition_latch = 0;
@@ -502,9 +507,14 @@ void BeginCloakTransition(GameState &state, Ship &ship) {
   }
 }
 
-void ClearCloakTransition(Ship &ship) {
+void ClearCloakTransition(GameState &state, Ship &ship) {
   if (!NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
     return;
+  }
+  // Player cloak-clear cue (snd 380): the original plays it when the latch is
+  // not already clearing (latch > -1), before the latch transition below.
+  if (ship.ship_instance_id == 0 && ship.cloak_transition_latch > -1) {
+    state.cloak_clear_sound_pending = true;
   }
   if (ship.cloak_fade_progress > 0.0F) {
     ship.cloak_transition_latch = -1;
@@ -521,7 +531,9 @@ void NovaAi_OnShipCloakStateEntered(GameState &state, Ship &ship) {
 }
 
 // Ghidra 0x00468190 Ship_OnShipCloakStateCleared.
-void NovaAi_OnShipCloakStateCleared(Ship &ship) { ClearCloakTransition(ship); }
+void NovaAi_OnShipCloakStateCleared(GameState &state, Ship &ship) {
+  ClearCloakTransition(state, ship);
+}
 
 // Ghidra 0x00411d00 Ship_UpdateShipCloakStateFromTraits.
 void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
@@ -529,25 +541,25 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   if (!NovaOutfit_HasCloakingDevice(state, ship) ||
       NovaAiShip_IsDisabled(state, ship)) {
     if (ship.cloak_fade_progress > 0.0F) {
-      NovaAi_OnShipCloakStateCleared(ship);
+      NovaAi_OnShipCloakStateCleared(state, ship);
     }
     return;
   }
   if (NovaOutfit_GetCloakFuelDrainFlags(state, ship) > 0 &&
       ship.fuel_points <= 0.0F) {
-    NovaAi_OnShipCloakStateCleared(ship);
+    NovaAi_OnShipCloakStateCleared(state, ship);
     return;
   }
   if (NovaOutfit_GetCloakShieldDrainFlags(state, ship) > 0 &&
       ship.shield_points <= 0.0F) {
-    NovaAi_OnShipCloakStateCleared(ship);
+    NovaAi_OnShipCloakStateCleared(state, ship);
     return;
   }
 
   const ShipClass *ship_class =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   if (ship_class == nullptr) {
-    NovaAi_OnShipCloakStateCleared(ship);
+    NovaAi_OnShipCloakStateCleared(state, ship);
     return;
   }
   bool should_enter = false;
@@ -614,7 +626,7 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   if (should_enter) {
     NovaAi_OnShipCloakStateEntered(state, ship);
   } else {
-    NovaAi_OnShipCloakStateCleared(ship);
+    NovaAi_OnShipCloakStateCleared(state, ship);
   }
 }
 
@@ -1551,14 +1563,14 @@ bool NovaAiShip_CanMaintainCloakState(const GameState &state,
   if (NovaAiShip_IsDisabled(state, ship)) {
     return false;
   }
-  // Locate a ModType 17 cloaking device and take its ModVal drain bits. The
-  // player scans owned outfits; NPCs scan the ship class's default outfit
-  // list (no escort exception here, unlike Ship_CanShipEngageTargetUnder-
-  // CloakRules' helper).
+  // Locate the ModType 17 cloaking device. The player scans owned outfits;
+  // NPCs scan the ship class's default outfit list (no escort exception here,
+  // unlike Ship_CanShipEngageTargetUnderCloakRules' helper). The original does
+  // not stop at the first match, so the last matching outfit wins.
   std::uint16_t mod_val = 0;
   bool has_cloak = false;
   const auto scan_outfit = [&mod_val, &has_cloak](const Outfit *outfit) {
-    if (outfit == nullptr || has_cloak) {
+    if (outfit == nullptr) {
       return;
     }
     if (outfit->mod_type == 0x11) {
@@ -1597,15 +1609,33 @@ bool NovaAiShip_CanMaintainCloakState(const GameState &state,
     return false;
   }
   // ModVal bits 0x0010..0x0080 gate on fuel, 0x0100..0x0800 on shields.
-  if (((mod_val & 0x00f0U) != 0U) && ship.fuel_points <= 0.0F) {
+  // BUGFIX(original): the original reads these nibbles from the matched
+  // ModType word (always 0x11) instead of ModVal, so its fuel gate is always
+  // active (nibble 1) and its shield gate never fires (nibble 0). Under the
+  // policy, use the device's real ModVal nibbles.
+  std::uint16_t gate_val = mod_val;
+  if constexpr (!kApplyOriginalBugFixes) {
+    gate_val = 0x11U;
+  }
+  if (((gate_val & 0x00f0U) != 0U) && ship.fuel_points <= 0.0F) {
     return false;
   }
-  if (((mod_val & 0x0f00U) != 0U) && ship.shield_points <= 0.0F) {
+  if (((gate_val & 0x0f00U) != 0U) && ship.shield_points <= 0.0F) {
     return false;
   }
-  if (ship.ship_instance_id == 0) {
-    // The player-only tail (station-hold latch + class Flags2 0x400) is
-    // decompiler-garbled in the original; TODO(decomp(0x00467e80)) provisional.
+  // Player-only tail: while the player is in the hyperspace spin-up/hold
+  // (ai_station_hold_timer > 0), the cloak cannot be maintained unless the
+  // flown ship class carries Bible shïp Flags2 0x0400 ("AI ships will cloak
+  // when hyperspacing"), which the original also applies to the player. The
+  // original indexes g_ship_class_defs unchecked; a missing class is treated
+  // as flag-clear (safe-fail).
+  if (ship.ship_instance_id == 0 && ship.ai_station_hold_timer > 0.0F) {
+    const ShipClass *ship_class = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (ship_class == nullptr ||
+        (ship_class->flags_secondary & 0x0400U) == 0U) {
+      return false;
+    }
   }
   return true;
 }

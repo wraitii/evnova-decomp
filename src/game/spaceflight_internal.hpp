@@ -26,4 +26,13 @@ void NovaShip_UpdateIonizationCharge(GameState &state,
                                      float effective_max_speed_px_per_tick,
                                      float elapsed_ticks);
 
+// Shared ModType-17 cloak shield upkeep of Ship_HandleShip (0x00433050) and
+// PlayerTick_InteractionCloakAndStatus (0x0044aa70). `shield_drain` is the
+// ModVal nibble (bits 0x0100..0x0800, values 1/2/4/8 per second). The original
+// stops draining once the per-second rate exceeds the pool, leaving that many
+// shields; the path under kApplyOriginalBugFixes drains and clamps at zero.
+void NovaShip_ApplyCloakShieldDrain(Ship &ship,
+                                    std::int16_t shield_drain,
+                                    float elapsed_ticks);
+
 } // namespace game::spaceflight_detail

@@ -221,12 +221,14 @@ bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship);
                                                       float &out_rate);
 
 // Ghidra 0x004680d0 Ship_OnShipCloakStateEntered. Starts the signed cloak
-// transition and drops shields when ModType 17 requests it.
+// transition, drops shields when ModType 17 requests it, and queues the
+// player cloak-enter cue (snd 381).
 void NovaAi_OnShipCloakStateEntered(GameState &state, Ship &ship);
 
 // Ghidra 0x00468190 Ship_OnShipCloakStateCleared. Starts the negative cloak
-// transition when the ship becomes visible enough to leave cloak.
-void NovaAi_OnShipCloakStateCleared(Ship &ship);
+// transition when the ship becomes visible enough to leave cloak, and queues
+// the player cloak-clear cue (snd 380).
+void NovaAi_OnShipCloakStateCleared(GameState &state, Ship &ship);
 
 // Ghidra 0x00411d00 Ship_UpdateShipCloakStateFromTraits. Re-evaluates the
 // NPC's cloak transition from its ModType 17 loadout, resources, class Flags2,
@@ -431,10 +433,11 @@ void NovaAi_IssueEscortOrders(GameState &state, Ship &ship);
     const GameState &state, const Ship &subject_ship, const Ship &other_ship);
 
 // Ghidra 0x00467e80 Ship_CanMaintainCloakState. Whether the ship can keep (or
-// enter) its cloaking state: not disabled, carries a ModType 17
-// cloaking device (player: owned outfits; NPC: the ship class's default
-// outfit list), and the device's configured fuel/shield drain flags are
-// satisfiable from current resources.
+// enter) its cloaking state: not disabled, carries a ModType 17 cloaking
+// device (player: owned outfits; NPC: the ship class's default outfit list;
+// last match wins), and the device's drain nibbles are satisfiable from
+// current resources. The original reads those nibbles from the ModType word
+// instead of ModVal; see the BUGFIX(original) note in the definition.
 [[nodiscard]] bool NovaAiShip_CanMaintainCloakState(const GameState &state,
                                                     const Ship &ship);
 

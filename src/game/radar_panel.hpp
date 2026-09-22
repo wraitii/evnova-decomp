@@ -53,17 +53,12 @@ struct Stellar;
                                                   const Ship &ship);
 
 // Cloak-scanner reveal bits (ModType 30 ModVal): 0x0001 reveals cloaked ships
-// on radar, 0x0002 on screen. The original resolves these through the
-// Outfit_HasCloakScannerReveal* predicate family (0x004652a0 surface, and the
-// sibling radar predicate) and caches the results into ShipState +0xC91C/
-// +0xC91E at spawn; that cache population is not reconstructed yet, so this
-// scans the owned inventory on demand.
-// TODO(decomp(0x004652a0)) port the cached ShipState cloak-scanner fields.
-[[nodiscard]] bool Player_HasCloakScannerReveal(const GameState &state,
-                                                std::uint16_t reveal_flag);
-
-// Radar-reveal bit (0x0001) of the above.
-[[nodiscard]] bool Player_HasCloakScannerRadarReveal(const GameState &state);
+// on radar, 0x0002 on screen. The original resolves these through
+// Outfit_HasCloakScannerRevealForSurface (0x004652a0) and caches the per-ship
+// results into ShipState +0xC91C/+0xC91E (Ship_UpdateVisualState 0x00428340
+// tail). See NovaOutfit_HasCloakScannerRevealForSurface in outfit.hpp and
+// NovaShip_RefreshCloakAbilityCaches in ship_visual.hpp; the radar draw reads
+// the cached player field directly.
 
 // Ghidra 0x004654b0 Outfit_HasPlayerOwnedOutfitType0x0E_Cached: whether the
 // player owns an outfit with ModType 14 (IFF colorized radar). The original

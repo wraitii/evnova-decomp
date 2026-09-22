@@ -1,4 +1,5 @@
 #include "game/game_state.hpp"
+#include "game/outfit.hpp"
 #include "game/ship_visual.hpp"
 
 #include <catch2/catch_approx.hpp>
@@ -430,6 +431,80 @@ TEST_CASE("destroyed non-pod hull seeds the destruction timer",
   CHECK(ship.death_timer_seeded);
   CHECK(ship.death_timer_active == Catch::Approx(20.0F));
   CHECK(ship.is_active);
+}
+
+TEST_CASE("cloak fade rate reads the device fast-fade bit under the bug fix",
+          "[ship][visual][cloak]") {
+  // BUGFIX(original): the original gates 1.5/0.75 on ShipClass.flags_secondary
+  // bit 0x0001 (swarming), not the ModType-17 device's ModVal 0x0001 ("Faster
+  // fading"); the shipped data inverts the intent. Under kApplyOriginalBugFixes
+  // the rate follows the device bit. See docs/known_original_bugs.md.
+  GameState state;
+  ShipClass cls;
+  cls.default_outfit_ids[0] = 0x80;
+  cls.default_outfit_counts[0] = 1;
+  state.scenario.ships.assign(1, cls);
+  state.scenario.outfits.assign(1, Outfit{});
+  state.scenario.outfits[0].mod_type = 0x11; // cloaking device
+
+  Ship ship;
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1; // NPC: class default loadout
+  ship.armor_points = 1.0F;  // alive
+  ship.cloak_transition_latch = 1;
+
+  // Swarming class bit set, but the device lacks ModVal 0x0001 -> slow.
+  cls.flags_secondary = 0x0001;
+  state.scenario.ships[0] = cls;
+  state.scenario.outfits[0].mod_val = 0x0002;
+  ship.cloak_fade_progress = 0.0F;
+  NovaShip_TickCloakFadeState(state, ship, 1.0F);
+  CHECK(ship.cloak_fade_progress == Catch::Approx(0.75F));
+
+  // Non-swarming class, device carries ModVal 0x0001 -> fast.
+  cls.flags_secondary = 0x0000;
+  state.scenario.ships[0] = cls;
+  state.scenario.outfits[0].mod_val = 0x0001;
+  ship.cloak_fade_progress = 0.0F;
+  ship.cloak_transition_latch = 1;
+  NovaShip_TickCloakFadeState(state, ship, 1.0F);
+  CHECK(ship.cloak_fade_progress == Catch::Approx(1.5F));
+}
+
+TEST_CASE("cloak ability caches populate lazily and reset when out of system",
+          "[ship][visual][cloak]") {
+  // Ghidra 0x00428340 tail. One outfit: primary ModType 30 radar reveal plus an
+  // alternate ModType 17 slot carrying the damage-deactivate bit.
+  GameState state;
+  ShipClass cls;
+  SetShipClass(state, cls);
+  state.scenario.outfits.assign(1, Outfit{});
+  state.scenario.outfits[0].mod_type = 0x1e;  // cloak scanner
+  state.scenario.outfits[0].mod_val = 0x0001; // radar reveal
+  state.scenario.outfits[0].alt_mod_types[0] = 0x11;
+  state.scenario.outfits[0].alt_mod_vals[0] = 0x0008; // damage-deactivate
+  state.inventory.outfit_owned_count[0] = 1;
+
+  Ship &p = state.player;
+  p.ship_instance_id = 0;
+  p.pers_def_slot = -1;
+  p.is_active = true;
+  p.current_system_id = 0;
+  p.cloak_scanner_reveal_screen = -1;
+  p.cloak_scanner_reveal_radar = -1;
+  p.cloak_damage_deactivate_latch = -1;
+
+  NovaShip_RefreshCloakAbilityCaches(state, p);
+  CHECK(p.cloak_scanner_reveal_screen == 0);
+  CHECK(p.cloak_scanner_reveal_radar == 1);
+  CHECK(p.cloak_damage_deactivate_latch == 1);
+
+  // An inactive hull is reset to the not-yet-computed sentinel.
+  p.is_active = false;
+  NovaShip_RefreshCloakAbilityCaches(state, p);
+  CHECK(p.cloak_scanner_reveal_screen == -1);
+  CHECK(p.cloak_scanner_reveal_radar == -1);
+  CHECK(p.cloak_damage_deactivate_latch == -1);
 }
 
 } // namespace game

@@ -558,14 +558,13 @@ struct Ship {
   // Signed cloak transition state (Ghidra ShipState +0xC8D8): positive starts
   // fading into cloak, negative starts fading out, and zero is stable.
   std::int16_t cloak_transition_latch = 0; // +0xC8D8
-  // Per-ship cached cloak-scanner presentation capabilities. The original
-  // populates +0xC91C/+0xC91E from ModType 30 bits 0x0002/0x0001 (screen/radar)
-  // in Ship_UpdateVisualState (0x00428340).
-  std::int16_t cloak_scanner_reveal_screen = 0; // +0xC91C
-  std::int16_t cloak_scanner_reveal_radar = 0;  // +0xC91E
-  // Cached ModType 17 bit 0x0008: cloaking deactivates when the ship takes
-  // damage. The visual/state updater refreshes this latch lazily.
-  std::int16_t cloak_damage_deactivate_latch = 0; // +0xC920
+  // Per-ship cached cloak presentation capabilities, lazily populated by
+  // NovaShip_RefreshCloakAbilityCaches (Ship_UpdateVisualState 0x00428340
+  // tail) from ModType 30 bits 0x0002/0x0001 (screen/radar) and ModType 17 bit
+  // 0x0008. -1 is the not-yet-computed sentinel; 0/1 are the resolved values.
+  std::int16_t cloak_scanner_reveal_screen = -1;   // +0xC91C
+  std::int16_t cloak_scanner_reveal_radar = -1;    // +0xC91E
+  std::int16_t cloak_damage_deactivate_latch = -1; // +0xC920
   // Ghidra ShipState +0xC922. Voice/comm identifier passed to the combat
   // chatter queue when a ship witnesses a kill. TODO(decomp): no producer
   // seeds this yet (personality/dude comm data); consumers read it as 0.
@@ -1844,6 +1843,13 @@ struct GameState {
   // One-shot audio requests consumed by the spaceflight loop.
   bool warp_up_sound_pending = false;
   bool warp_out_sound_pending = false;
+  // Player cloak transition cues. Ghidra Ship_OnShipCloakStateEntered
+  // (0x004680d0) / Cleared (0x00468190) queue NovaAudio_QueueCenteredSound at
+  // priority 8 for ship_instance_id == 0 only, on g_sound_handle_cloak_enter
+  // (snd 381, 0x00591a88) / _clear (snd 380, 0x00591a84). Those snd ids sit in
+  // the preloaded gameplay_sounds cache (200..455).
+  bool cloak_enter_sound_pending = false;
+  bool cloak_clear_sound_pending = false;
   // Cancel a playing 'Warp up' cue (SdlAudio::StopByKey on its key). Set by
   // the disabled-jump collapse (NovaTravel_Tick), mirroring the original's
   // NovaAudio_UnregisterCallbacks on the warp-up handle at 0x0044b0d0.

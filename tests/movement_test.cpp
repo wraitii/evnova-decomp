@@ -1326,3 +1326,63 @@ TEST_CASE("npc ionization ramp runs in the ship pass after decay") {
   CHECK(ship.ionization_points == 98.0F);
   CHECK(ship.vel_x == Catch::Approx(9.975F));
 }
+
+// --- Cloak upkeep drain (Ghidra 0x00433050 / Ship_HandleShip) ---
+
+TEST_CASE(
+    "npc cloak upkeep drains fuel at one unit per second per drain unit") {
+  // Ghidra 0x00433050 applies the ModType-17 fuel drain while the hull is past
+  // the cloak-visibility threshold: drain_flags * g_cloak_drain_per_unit_npc
+  // (0x00575470, an x87 double = 1/30) * g_avg_frame_tick_scale. The port uses
+  // the shared kCloakDrainPerUnit; nibble value 1 (bit 0x10) is 1 unit/sec
+  // (Bible ModType 17).
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  cls.base_fuel = 100; // keep the capacity clamp from zeroing the sample
+  cls.default_outfit_ids[0] = 0x80;
+  cls.default_outfit_counts[0] = 1;
+  state.scenario.ships.assign(1, cls);
+  state.scenario.outfits.assign(1, game::Outfit{});
+  state.scenario.outfits[0].mod_type = 0x11;  // cloaking device
+  state.scenario.outfits[0].mod_val = 0x0010; // fuel-drain nibble = 1
+
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1; // NPC
+  ship.is_active = true;
+  ship.cloak_fade_progress = 32.0F; // threshold active
+  ship.fuel_points = 10.0F;
+  ship.shield_points = 10.0F;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 3.0F); // 0.1 s
+
+  CHECK(ship.fuel_points == Catch::Approx(10.0F - 3.0F / 30.0F));
+  CHECK(ship.shield_points == Catch::Approx(10.0F)); // no shield nibble
+}
+
+TEST_CASE("npc cloak shield drain no longer stops at the per-second rate") {
+  // BUGFIX(original): the original compares the raw per-second drain rate to
+  // the shield pool, so the last `shield_drain` shields persist forever. Under
+  // kApplyOriginalBugFixes the drain continues and clamps at zero. See
+  // docs/known_original_bugs.md.
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  cls.default_outfit_ids[0] = 0x80;
+  cls.default_outfit_counts[0] = 1;
+  state.scenario.ships.assign(1, cls);
+  state.scenario.outfits.assign(1, game::Outfit{});
+  state.scenario.outfits[0].mod_type = 0x11;  // cloaking device
+  state.scenario.outfits[0].mod_val = 0x0400; // shield drain = 4/sec
+
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1; // NPC
+  ship.is_active = true;
+  ship.cloak_fade_progress = 32.0F; // threshold active
+  ship.fuel_points = 10.0F;
+  ship.shield_points = 0.1F; // below the 4/sec rate
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+
+  CHECK(ship.shield_points == 0.0F);
+}

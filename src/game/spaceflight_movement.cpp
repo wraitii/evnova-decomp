@@ -1,6 +1,7 @@
 #include "spaceflight.hpp"
 
 #include "../log.hpp"
+#include "compatibility.hpp"
 #include "frame_timing.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
@@ -372,6 +373,31 @@ void spaceflight_detail::NovaShip_UpdateIonizationCharge(
   }
   if (ship.vel_y < -ionized_cap) {
     ship.vel_y += damp_step;
+  }
+}
+
+// Shared ModType-17 cloak shield upkeep. `shield_drain` is the ModVal nibble
+// (bits 0x0100..0x0800) and kCloakDrainPerUnit is the original's 1/30 second
+// x87 double.
+void spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
+    Ship &ship, std::int16_t shield_drain, float elapsed_ticks) {
+  if (shield_drain <= 0) {
+    return;
+  }
+  // BUGFIX(original): the original only drains while the whole per-second rate
+  // (1/2/4/8) is affordable, so the last `shield_drain` shields persist. Under
+  // the policy, drain normally and clamp at zero.
+  bool drain = true;
+  if constexpr (!kApplyOriginalBugFixes) {
+    drain = static_cast<float>(shield_drain) <= ship.shield_points;
+  }
+  if (!drain) {
+    return;
+  }
+  ship.shield_points -=
+      static_cast<float>(shield_drain) * kCloakDrainPerUnit * elapsed_ticks;
+  if (ship.shield_points <= 0.0F) {
+    ship.shield_points = 0.0F;
   }
 }
 
@@ -747,31 +773,23 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // PlayerTick_InteractionCloakAndStatus). While the hull is at the cloak
   // visibility threshold, an unmaintainable cloak is cleared and the ModType-17
   // fuel (bits 0x10..0x80) and shield (bits 0x100..0x800) drains are applied.
-  // DAT_00575470 = 2.9045e-5 per drain unit and tick.
+  // Drain scale is the shared kCloakDrainPerUnit (Ghidra 0x00575470, an x87
+  // double = 1/30).
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
     if (!NovaAiShip_CanMaintainCloakState(state, ship)) {
-      NovaAi_OnShipCloakStateCleared(ship);
+      NovaAi_OnShipCloakStateCleared(state, ship);
     }
-    constexpr float kCloakDrainPerTick = 2.9045e-5F; // DAT_00575470
     const std::int16_t fuel_drain =
         NovaOutfit_GetCloakFuelDrainFlags(state, ship);
     if (fuel_drain > 0) {
       ship.fuel_points -=
-          static_cast<float>(fuel_drain) * kCloakDrainPerTick * elapsed_ticks;
+          static_cast<float>(fuel_drain) * kCloakDrainPerUnit * elapsed_ticks;
       if (ship.fuel_points <= 0.0F) {
         ship.fuel_points = 0.0F;
       }
     }
-    const std::int16_t shield_drain =
-        NovaOutfit_GetCloakShieldDrainFlags(state, ship);
-    if (shield_drain > 0 &&
-        static_cast<float>(shield_drain) <= ship.shield_points) {
-      ship.shield_points -=
-          static_cast<float>(shield_drain) * kCloakDrainPerTick * elapsed_ticks;
-      if (ship.shield_points <= 0.0F) {
-        ship.shield_points = 0.0F;
-      }
-    }
+    spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
+        ship, NovaOutfit_GetCloakShieldDrainFlags(state, ship), elapsed_ticks);
   }
 
   // --- Position integration + inertia-less special case. ---

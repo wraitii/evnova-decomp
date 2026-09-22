@@ -1,6 +1,7 @@
 #include "game/game_state.hpp"
 #include "game/ship_ai.hpp"
 #include "game/spaceflight.hpp"
+#include "game/spaceflight_internal.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -146,6 +147,21 @@ TEST_CASE("face-target stores the ship target bearing",
   // With no travel stellar selected, Alt still falls back to the ship target.
   CHECK(PlayerTick_FaceTargetCommand(state, input, /*arm_modifier_held=*/true));
   CHECK(state.player.ai_desired_heading_deg == 270);
+}
+
+TEST_CASE("cloak shield drain no longer stops at the per-second rate",
+          "[player][cloak]") {
+  // BUGFIX(original): the original compares the raw per-second drain rate to
+  // the shield pool, so the last `shield_drain` shields persist forever. Under
+  // kApplyOriginalBugFixes the drain continues and clamps at zero. See
+  // docs/known_original_bugs.md.
+  Ship ship;
+  ship.shield_points = 0.1F; // below the 4/sec rate
+
+  spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
+      ship, /*shield_drain=*/4, 1.0F);
+
+  CHECK(ship.shield_points == 0.0F);
 }
 
 } // namespace game

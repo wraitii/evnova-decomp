@@ -482,6 +482,9 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
   // PlayerTick_InteractionCloakAndStatus).
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
+    // Ship_UpdateVisualState's cloak-ability cache tail runs for every slot,
+    // resetting inactive/out-of-system hulls and lazily populating the rest.
+    NovaShip_RefreshCloakAbilityCaches(state, ship);
     if (!ship.is_active || ship.current_system_id != current_system) {
       continue;
     }
@@ -1458,11 +1461,11 @@ void PlayerTick_SelfDestructCommand(GameState &state,
 // slice (NovaShip_TickCloakFadeState), the force-clear when the cloak can no
 // longer be maintained, and while the ship sits past the visibility threshold
 // the outfit-driven fuel drain (both paths clamp at 0.0) and the shield drop
-// (Flags 0x0004 outfit) or per-tick shield drain. Drain scale DAT_00575690 =
-// 2.9045e-5 per drain-unit and tick (decoded 0x37f38c54); the panel-dirty
-// flags on the 10-frame cadence are implied by the immediate-mode HUD. The
-// player's Ship_UpdateVisualState cloak slice is co-located here because the
-// port has no per-frame player visual pass.
+// (Flags 0x0004 outfit) or per-tick shield drain. Drain scale is the shared
+// kCloakDrainPerUnit (Ghidra 0x00575690, an x87 double = 1/30); the
+// panel-dirty flags on the 10-frame cadence are implied by the immediate-mode
+// HUD. The player's Ship_UpdateVisualState cloak slice is co-located here
+// because the port has no per-frame player visual pass.
 void PlayerTick_InteractionCloakAndStatus(GameState &state,
                                           bool cloak_command_held,
                                           float elapsed_ticks) {
@@ -1477,22 +1480,22 @@ void PlayerTick_InteractionCloakAndStatus(GameState &state,
     if (!NovaAiShip_CanMaintainCloakState(state, p)) {
       state.pending_ui_sounds.push_back({3, 1});
     } else if (p.cloak_fade_progress > 0.0F || p.cloak_transition_latch > 0) {
-      NovaAi_OnShipCloakStateCleared(p);
+      NovaAi_OnShipCloakStateCleared(state, p);
     } else {
       NovaAi_OnShipCloakStateEntered(state, p);
     }
   }
   // Active-cloak upkeep.
+  NovaShip_RefreshCloakAbilityCaches(state, p);
   NovaShip_TickCloakFadeState(state, p, elapsed_ticks);
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(p)) {
     if (!NovaAiShip_CanMaintainCloakState(state, p) || fire_restricted) {
-      NovaAi_OnShipCloakStateCleared(p);
+      NovaAi_OnShipCloakStateCleared(state, p);
     }
-    constexpr float kCloakDrainPerTick = 2.9045e-5F; // DAT_00575690
     const std::int16_t fuel_drain = NovaOutfit_GetCloakFuelDrainFlags(state, p);
     if (fuel_drain > 0) {
       p.fuel_points -=
-          static_cast<float>(fuel_drain) * kCloakDrainPerTick * elapsed_ticks;
+          static_cast<float>(fuel_drain) * kCloakDrainPerUnit * elapsed_ticks;
       if (p.fuel_points <= 0.0F) {
         p.fuel_points = 0.0F;
       }
@@ -1500,16 +1503,8 @@ void PlayerTick_InteractionCloakAndStatus(GameState &state,
     if (NovaOutfit_HasCloakShieldDropOnActivation(state, p)) {
       p.shield_points = 0.0F;
     } else {
-      const std::int16_t shield_drain =
-          NovaOutfit_GetCloakShieldDrainFlags(state, p);
-      if (shield_drain > 0 &&
-          static_cast<float>(shield_drain) <= p.shield_points) {
-        p.shield_points -= static_cast<float>(shield_drain) *
-                           kCloakDrainPerTick * elapsed_ticks;
-        if (p.shield_points <= 0.0F) {
-          p.shield_points = 0.0F;
-        }
-      }
+      spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
+          p, NovaOutfit_GetCloakShieldDrainFlags(state, p), elapsed_ticks);
     }
   }
 }
@@ -2338,6 +2333,35 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                      /*priority_width=*/0x32);
         }
         state.warp_out_sound_pending = false;
+      }
+      // Player cloak transition cues. Ghidra Ship_OnShipCloakStateEntered
+      // (0x004680d0) / Cleared (0x00468190) queue NovaAudio_QueueCenteredSound
+      // at priority 8 for the player only, on g_sound_handle_cloak_enter
+      // (snd 381, 0x00591a88) / _clear (snd 380, 0x00591a84). Both ids are in
+      // the preloaded gameplay_sounds cache (200..455).
+      if (state.cloak_enter_sound_pending) {
+        state.cloak_enter_sound_pending = false;
+        const auto &sound =
+            state.gameplay_sounds[381 - GameState::kGameplaySoundFirstId];
+        if (sound.has_value()) {
+          audio.Play(*sound,
+                     1.0F,
+                     1.0F,
+                     /*sound_key=*/381,
+                     /*priority_width=*/8);
+        }
+      }
+      if (state.cloak_clear_sound_pending) {
+        state.cloak_clear_sound_pending = false;
+        const auto &sound =
+            state.gameplay_sounds[380 - GameState::kGameplaySoundFirstId];
+        if (sound.has_value()) {
+          audio.Play(*sound,
+                     1.0F,
+                     1.0F,
+                     /*sound_key=*/380,
+                     /*priority_width=*/8);
+        }
       }
 
       // Finish the system-entry branch before commands can observe the new

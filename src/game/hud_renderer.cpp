@@ -1606,8 +1606,10 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
           }
         }
       }
-      // Ships (slots 1..0x3f; 0 is the player).
-      const bool scanner_radar = Player_HasCloakScannerRadarReveal(state);
+      // Ships (slots 1..0x3f; 0 is the player). The player's cloak-scanner
+      // radar reveal comes from the lazily populated per-ship cache
+      // (Ship_UpdateVisualState 0x00428340 tail, Ghidra +0xC91E).
+      const bool scanner_radar = state.player.cloak_scanner_reveal_radar == 1;
       for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
         const Ship &ship = state.ShipAt(slot);
         if (!ship.is_active ||

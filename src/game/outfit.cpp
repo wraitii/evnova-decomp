@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 
 #include "compatibility.hpp"
 #include "freeflight_objects.hpp"
@@ -108,14 +109,24 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
   return false;
 }
 
-[[nodiscard]] const Outfit *FindCloakingDevice(const GameState &state,
-                                               const Ship &ship) {
-  const auto find_in = [&](std::int16_t outfit_id) -> const Outfit * {
+// Returns the first ModType 17 (cloaking device) effect in the ship's loadout,
+// in the original's per-outfit, per-slot first-match order: the player owned
+// inventory, or an NPC's class default loadout. The ModVal comes from the
+// matching slot, not the outfit's primary mod, so a device in an alternate
+// slot is handled correctly (the original reads the matched slot's value).
+[[nodiscard]] std::optional<Effect> FindCloakingEffect(const GameState &state,
+                                                       const Ship &ship) {
+  const auto find_in = [&](std::int16_t outfit_id) -> std::optional<Effect> {
     const Outfit *outfit = state.scenario.Outfit(outfit_id);
-    if (outfit != nullptr && OutfitHasCloakingDevice(*outfit, false)) {
-      return outfit;
+    if (outfit == nullptr) {
+      return std::nullopt;
     }
-    return nullptr;
+    for (const Effect &effect : OutfitEffects(*outfit)) {
+      if (effect.type == kCloakingDeviceModType) {
+        return effect;
+      }
+    }
+    return std::nullopt;
   };
 
   if (ship.ship_instance_id == 0) {
@@ -125,29 +136,30 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
       if (state.inventory.outfit_owned_count[index] <= 0) {
         continue;
       }
-      if (const Outfit *outfit =
+      if (std::optional<Effect> effect =
               find_in(static_cast<std::int16_t>(index + 0x80))) {
-        return outfit;
+        return effect;
       }
     }
-    return nullptr;
+    return std::nullopt;
   }
 
   const ShipClass *ship_class =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   if (ship_class == nullptr) {
-    return nullptr;
+    return std::nullopt;
   }
   for (std::size_t index = 0; index < ship_class->default_outfit_ids.size();
        ++index) {
     if (ship_class->default_outfit_counts[index] <= 0) {
       continue;
     }
-    if (const Outfit *outfit = find_in(ship_class->default_outfit_ids[index])) {
-      return outfit;
+    if (std::optional<Effect> effect =
+            find_in(ship_class->default_outfit_ids[index])) {
+      return effect;
     }
   }
-  return nullptr;
+  return std::nullopt;
 }
 
 // Player-side ModType-39 scan for Ship_ComputeIonizationDecayRate: each ion
@@ -466,29 +478,101 @@ bool NovaPlayer_IsInertialess(const GameState &state) {
 // Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags.
 std::int16_t NovaOutfit_GetCloakFuelDrainFlags(const GameState &state,
                                                const Ship &ship) {
-  const Outfit *outfit = FindCloakingDevice(state, ship);
-  return outfit == nullptr
-             ? 0
-             : static_cast<std::int16_t>(
-                   (static_cast<std::uint16_t>(outfit->mod_val) >> 4) & 0x0fU);
+  const std::optional<Effect> effect = FindCloakingEffect(state, ship);
+  return effect.has_value()
+             ? static_cast<std::int16_t>(
+                   (static_cast<std::uint16_t>(effect->val) >> 4) & 0x0fU)
+             : 0;
 }
 
-// Ghidra 0x00465090 Outfit_GetCloakShieldDrainFlags.
+// Ghidra 0x00465090 Outfit_GetCloakShieldDrainFlags. ModVal bits
+// 0x0100..0x0800.
 std::int16_t NovaOutfit_GetCloakShieldDrainFlags(const GameState &state,
                                                  const Ship &ship) {
-  const Outfit *outfit = FindCloakingDevice(state, ship);
-  return outfit == nullptr
-             ? 0
-             : static_cast<std::int16_t>(
-                   (static_cast<std::uint16_t>(outfit->mod_val) >> 12) & 0x0fU);
+  const std::optional<Effect> effect = FindCloakingEffect(state, ship);
+  return effect.has_value()
+             ? static_cast<std::int16_t>(
+                   (static_cast<std::uint16_t>(effect->val) >> 8) & 0x0fU)
+             : 0;
 }
 
 // Ghidra 0x00464e30 Outfit_HasCloakShieldDropOnActivation.
 bool NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
                                                const Ship &ship) {
-  const Outfit *outfit = FindCloakingDevice(state, ship);
-  return outfit != nullptr &&
-         (static_cast<std::uint16_t>(outfit->mod_val) & 0x0004U) != 0U;
+  const std::optional<Effect> effect = FindCloakingEffect(state, ship);
+  return effect.has_value() &&
+         (static_cast<std::uint16_t>(effect->val) & 0x0004U) != 0U;
+}
+
+// Ghidra 0x00464f60 Outfit_HasCloakDamageDeactivateFlag.
+bool NovaOutfit_HasCloakDamageDeactivateFlag(const GameState &state,
+                                             const Ship &ship) {
+  const std::optional<Effect> effect = FindCloakingEffect(state, ship);
+  return effect.has_value() &&
+         (static_cast<std::uint16_t>(effect->val) & 0x0008U) != 0U;
+}
+
+// Bible ModType 17 ModVal bit 0x0001 "Faster fading". No original function
+// reads it; see docs/known_original_bugs.md and NovaShip_TickCloakFadeState.
+bool NovaOutfit_HasCloakFastFade(const GameState &state, const Ship &ship) {
+  const std::optional<Effect> effect = FindCloakingEffect(state, ship);
+  return effect.has_value() &&
+         (static_cast<std::uint16_t>(effect->val) & 0x0001U) != 0U;
+}
+
+// Ghidra 0x004652a0 Outfit_HasCloakScannerRevealForSurface.
+bool NovaOutfit_HasCloakScannerRevealForSurface(const GameState &state,
+                                                const Ship &ship,
+                                                CloakScannerSurface surface) {
+  // Special sentinel hulls always reveal (the original's +0xC8D0 == 0x3ff).
+  if (ship.pers_def_slot == 0x3ff) {
+    return true;
+  }
+  const std::uint16_t reveal_bit =
+      surface == CloakScannerSurface::kScreen ? 0x0002U : 0x0001U;
+  const auto outfit_reveals = [reveal_bit](const Outfit &outfit) {
+    for (const Effect &effect : OutfitEffects(outfit)) {
+      if (effect.type ==
+              static_cast<std::int16_t>(OutfitEffect::kCloakScanner) &&
+          (static_cast<std::uint16_t>(effect.val) & reveal_bit) != 0U) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  if (ship.ship_instance_id == 0) {
+    for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
+         ++id) {
+      if (state.inventory.outfit_owned_count[id] <= 0) {
+        continue;
+      }
+      const Outfit *outfit =
+          state.scenario.Outfit(static_cast<std::int16_t>(id + 0x80));
+      if (outfit != nullptr && outfit_reveals(*outfit)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    return false;
+  }
+  for (std::size_t index = 0; index < ship_class->default_outfit_ids.size();
+       ++index) {
+    if (ship_class->default_outfit_counts[index] <= 0) {
+      continue;
+    }
+    const Outfit *outfit =
+        state.scenario.Outfit(ship_class->default_outfit_ids[index]);
+    if (outfit != nullptr && outfit_reveals(*outfit)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
