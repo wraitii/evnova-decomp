@@ -166,7 +166,7 @@ to select any particular combat mode. State `0x0d` has no launch call. A
 standoff class (`shïp` Flags2 `0x0002`, e.g. the carriers' `0x82`) selects mode
 `0x07`/`0x0e`/`0x05` from the max weapon range (`Weapon_GetShipMaxWeaponRange`
 0x0046cec0, x0.85, halved for a disabled target) rather than from
-`Ship_CanShipInterceptCurrentPrimaryTarget`.
+`Ship_CanTargetOutrunShooter`.
 
 Arrival clarification: the original random-dude and encounter-fleet spawners
 call `Stellar_SelectRandomAdjacentDestination`. Its 1-in-3 roll selects a

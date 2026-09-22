@@ -348,11 +348,13 @@ int NovaAi_GetShipJammingScore(const GameState &state,
   return score;
 }
 
-// Ghidra 0x00410f20 Ship_CanShipInterceptCurrentPrimaryTarget. The original's
-// final comparison is deliberately a strict base-speed comparison; the
-// preceding weapon-bank walk only establishes the guided/intercept context.
-bool NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
-                                                 const Ship &ship) {
+// Ghidra 0x00410f20 Ship_CanTargetOutrunShooter. The final base-speed
+// comparison is the live decision: true means the target is not slower than
+// the shooter (strict ship < target with a tracking bank, non-strict
+// ship <= target without); the weapon-bank walk only selects which strictness
+// applies. Both callers respond to true with evasive steering.
+bool NovaAiShip_CanTargetOutrunShooter(const GameState &state,
+                                       const Ship &ship) {
   const std::int16_t target_slot = ship.primary_target_ship_slot;
   if (target_slot < 0 ||
       !state.SlotInRange(static_cast<std::size_t>(target_slot))) {

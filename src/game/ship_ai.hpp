@@ -235,12 +235,12 @@ void NovaAi_OnShipCloakStateCleared(GameState &state, Ship &ship);
 // combat state, and target relationship. Weapon hits do not produce the fade.
 void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship);
 
-// Ghidra 0x00410f20 Ship_CanShipInterceptCurrentPrimaryTarget. Validates the
-// current target's activity/system, minimum hull mass, relative-velocity
-// bearing, and the caller/target class-speed relation.
-[[nodiscard]] bool
-NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
-                                            const Ship &ship);
+// Ghidra 0x00410f20 Ship_CanTargetOutrunShooter. Validates the current
+// target's activity/system, minimum hull mass, and relative-velocity bearing,
+// then reports whether the target's class base speed is at least the caller's
+// (true is a reason to evade).
+[[nodiscard]] bool NovaAiShip_CanTargetOutrunShooter(const GameState &state,
+                                                     const Ship &ship);
 
 // Ghidra 0x00412090 Ship_ScoreAssistTargetForShip. Scores `candidate` as a
 // potential target for `helper`; returns 0 when the candidate is not eligible.
