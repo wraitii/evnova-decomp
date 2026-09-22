@@ -38,6 +38,53 @@ TEST_CASE("mission lists use zero-based definition indices") {
   CHECK(result.page_zero != std::vector<std::int16_t>{0x80});
 }
 
+// Ghidra 0x00441b40 Gate 2: AvailRecord -32000 (the selected stellar is
+// dominated) / -32001 (any available stellar is dominated), evaluated only
+// outside the travel-scene context; otherwise the value falls through to the
+// ordinary reputation compare and fails.
+TEST_CASE("AvailRecord domination arms gate mission availability") {
+  GameState state;
+  state.scenario.missions.resize(2);
+  state.scenario.stellars.resize(2);
+  for (auto &mission : state.scenario.missions) {
+    mission.present = true;
+    mission.avail_random = 100;
+    mission.avail_location = 0;
+  }
+  state.scenario.missions[0].avail_record = -32000;
+  state.scenario.missions[1].avail_record = -32001;
+  state.travel.selected_stellar_id = 0x80; // zero-based stellar index 0
+  state.scenario.stellars[0].is_available = true;
+  state.scenario.stellars[1].is_available = true;
+
+  const auto contains = [](const std::vector<std::int16_t> &list,
+                           std::int16_t id) {
+    return std::find(list.begin(), list.end(), id) != list.end();
+  };
+
+  // Nothing dominated: neither definition is offered.
+  {
+    const auto lists = Mission_EvaluateMissionLists(state);
+    CHECK_FALSE(contains(lists.page_zero, 0));
+    CHECK_FALSE(contains(lists.page_zero, 1));
+  }
+  // The selected stellar is dominated: both arms match.
+  state.scenario.stellars[0].dominated = 1;
+  {
+    const auto lists = Mission_EvaluateMissionLists(state);
+    CHECK(contains(lists.page_zero, 0));
+    CHECK(contains(lists.page_zero, 1));
+  }
+  // A different stellar is dominated: only the "any dominated" arm matches.
+  state.scenario.stellars[0].dominated = 0;
+  state.scenario.stellars[1].dominated = 1;
+  {
+    const auto lists = Mission_EvaluateMissionLists(state);
+    CHECK_FALSE(contains(lists.page_zero, 0));
+    CHECK(contains(lists.page_zero, 1));
+  }
+}
+
 TEST_CASE("scenario ferry missions expose their decoded availability fields") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
@@ -412,6 +459,84 @@ TEST_CASE("mission cargo pickup follows PickupMode") {
   Mission_ProcessInteractionReactionSlotResources(state, 0, 0);
 
   CHECK_FALSE(mission.carrying_resources);
+}
+
+// Ui_LoadSelectionDialogResource + Stellar_BuildTravelDestinationDescription:
+// a dësc id loads its body text and dialog variant and expands the mission
+// wildcards against the given slot.
+TEST_CASE("mission selection dialog text loads and expands a desc") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.active_mission_runtime_flags[0].is_active = true;
+
+  const MissionDialogText message =
+      Mission_LoadSelectionDialogText(state, 9200, false, 0);
+  CHECK_FALSE(message.text.empty());
+}
+
+// Mission_HandleMissionOrSurrenderShipReaction FIRST-COMPLETION arm: the
+// ShipDone desc (+0x43) is handed to the debrief sink on the transition.
+TEST_CASE("mission ShipDone dialog reaches the debrief sink") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  auto &mission = state.active_missions[0];
+  auto &runtime = state.active_mission_runtime_flags[0];
+  runtime.is_active = true;
+  mission.ship_goal = 0; // destroy
+  mission.mission_target_count = 0;
+  mission.brief_description_ids[7] = 9200;
+
+  std::string text;
+  int calls = 0;
+  Mission_HandleMissionOrSurrenderShipReaction(
+      state, 0, 0, [&](const MissionDialogText &message) {
+        ++calls;
+        text = message.text;
+      });
+  CHECK(calls == 1);
+  CHECK_FALSE(text.empty());
+}
+
+TEST_CASE("landing reaction routes first ShipDone dialog to the debrief sink") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  auto &mission = state.active_missions[0];
+  auto &runtime = state.active_mission_runtime_flags[0];
+  runtime.is_active = true;
+  mission.ship_goal = 0;
+  mission.mission_target_count = 0;
+  mission.return_stellar_id = 1;
+  mission.brief_description_ids[7] = 9200;
+
+  int calls = 0;
+  Mission_TickReactionSlotsForTravelInteraction(
+      state,
+      /*landed_stellar_id=*/0x80,
+      0,
+      [&](const MissionDialogText &message) {
+        ++calls;
+        CHECK_FALSE(message.text.empty());
+      });
+
+  CHECK(runtime.objective_complete);
+  CHECK(calls == 1);
+}
+
+// Mission_TryConsumeMissionInteractionResources denial arm: STR# 0x7d2
+// 0x165 (total capacity short) is handed to the sink and the gate rejects.
+TEST_CASE("mission cargo denial dialog reaches the debrief sink") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  std::string text;
+  int calls = 0;
+  const bool ok = Mission_TryConsumeMissionInteractionResources(
+      state, 30000, [&](const MissionDialogText &message) {
+        ++calls;
+        text = message.text;
+      });
+  CHECK_FALSE(ok);
+  REQUIRE(calls == 1);
+  CHECK_FALSE(text.empty());
 }
 
 // Regression for Ghidra 0x0043f8c0 Mission_PopulateMissionSlotFromDef:
@@ -1330,7 +1455,7 @@ TEST_CASE("mission loader reset clears interaction latches") {
   state.mission_interaction_context = 3;
   state.mission_speaker_ship_slot = 7;
   state.script_mission_context_slot = 2;
-  state.in_travel_scene = true;
+  state.travel_scene_ctx = true;
   state.active_mission_runtime_flags[1].is_active = true;
   state.active_mission_runtime_flags[1].is_failed = true;
   state.control.SetControlBit(311, true);
@@ -1342,7 +1467,7 @@ TEST_CASE("mission loader reset clears interaction latches") {
   CHECK(state.mission_interaction_context == -1);
   CHECK(state.mission_speaker_ship_slot == -1);
   CHECK(state.script_mission_context_slot == -1);
-  CHECK_FALSE(state.in_travel_scene);
+  CHECK_FALSE(state.travel_scene_ctx);
   CHECK_FALSE(state.active_mission_runtime_flags[1].is_active);
   CHECK_FALSE(state.active_mission_runtime_flags[1].is_failed);
   CHECK_FALSE(state.control.ControlBit(311));
@@ -1444,6 +1569,37 @@ TEST_CASE("travel_stellar_reached gates the starmap T to R arrow") {
   // ReturnStel unavailable: the original keeps the TravelStel arrow.
   state.scenario.stellars[1].is_available = false;
   CHECK(BuildMissionTargetSystems(state) == std::vector<std::int16_t>{11});
+}
+
+// Ghidra 0x0043e6f0: the system locators reject a candidate whose
+// System_ResolveSystemDiscoverySlot equals the player's current slot, so a
+// mission never picks a discovery-twin of the system the player is in.
+TEST_CASE("system locators exclude same-discovery-slot twins") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.current_system_locator = 10005; // government 5
+  definition.travel_stellar_locator = 0x80;
+  definition.return_stellar_locator = 0x81;
+
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[0].system_id = 9;
+  state.scenario.stellars[1].system_id = 10;
+  state.scenario.systems.resize(3);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+  }
+  state.scenario.systems[0].government_id = 1;
+  state.scenario.systems[1].government_id = 5;
+  // System 1 shares system 0's discovery slot; system 2 is distinct.
+  state.scenario.systems[1].visibility_root_system_id = 0;
+  state.scenario.systems[2].government_id = 5;
+
+  state.player.current_system_id = 0;
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  // Only system 2 is both government 5 and on a different discovery slot.
+  CHECK(state.active_missions[0].current_system_id == 2);
 }
 
 // Bible mission Flags 0x0002 ("Don't show the red destination arrows") and

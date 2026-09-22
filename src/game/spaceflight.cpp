@@ -158,7 +158,8 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 // interaction flags are still absent.
 void Stub_TickReactionsAndNpcSpawns(GameState &state,
                                     SdlAudio &audio,
-                                    float elapsed_ticks) {
+                                    float elapsed_ticks,
+                                    const MissionDebriefSink &debrief) {
   // Frame_MeasureFrameTiming (0x00432ea0) admits one original spaceflight
   // iteration per 21 ms. Scope 0xb contains discrete counters and RNG draws,
   // so replay whole calls instead of tying them to the presentation rate.
@@ -169,7 +170,7 @@ void Stub_TickReactionsAndNpcSpawns(GameState &state,
     // The original's AI mode timers use a global millisecond tick source.
     const std::uint32_t now_ms =
         static_cast<std::uint32_t>(state.gameplay_now_ms);
-    Mission_TickShipInteractionReactions(state, now_ms);
+    Mission_TickShipInteractionReactions(state, now_ms, debrief);
     NovaFrame_UpdateCombatChatter(state, audio);
     NovaWeapon_TallyInboundWeaponThreat(state);
     // This countdown is normalized by g_avg_frame_tick_scale in the original;
@@ -530,7 +531,8 @@ void NovaFrame_TickSystems(GameState &state,
                            SdlAudio &audio,
                            bool run_full_tick,
                            float elapsed_ticks,
-                           const NovaPreferences &prefs) {
+                           const NovaPreferences &prefs,
+                           const MissionDebriefSink &debrief) {
   // g_avg_frame_tick_scale for this tick: the normalized 30 Hz scale the
   // collision mask-vs-circle decision (Ship_HandleSpritePairCollision
   // 0x004374f0) and other cadence consumers read. NovaWeapon_TickShots (scope
@@ -563,7 +565,8 @@ void NovaFrame_TickSystems(GameState &state,
   if (run_full_tick) {
     Stub_DrawStatus(
         state); // Full-tick proximity-scan roll (original scope 0xc).
-    Stub_TickReactionsAndNpcSpawns(state, audio, elapsed_ticks); // scope 0xb
+    Stub_TickReactionsAndNpcSpawns(
+        state, audio, elapsed_ticks, debrief); // scope 0xb
     // The first original scope-6 pass only refreshes target
     // flags/reacquisition; the full clean-room AI update belongs here, once,
     // after spawning.
@@ -1634,7 +1637,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                         audio,
                         /*run_full_tick=*/true,
                         /*elapsed_ticks=*/1.0F,
-                        prefs);
+                        prefs,
+                        [&](const MissionDialogText &message) {
+                          NovaUi_RunTextReaderDialog(
+                              platform,
+                              state,
+                              message.text,
+                              false,
+                              [&] { view.DrawGameFrame(platform, state, hud); },
+                              message.dialog_variant);
+                        });
   view.DrawGameFrame(platform, state, hud);
   platform.Present();
 
@@ -2555,19 +2567,27 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                       ? &state.scenario
                              .pers_defs[static_cast<std::size_t>(pers_slot)]
                       : nullptr;
+              // PersDef Flags 0x0200 clear -> the linked mission may offer on
+              // hail (opposite polarity from the board command). The original
+              // runs the eligibility test and the offer window with
+              // g_travel_scene_ctx = 1 and the speaking-ship latch set
+              // (0x00454910), restoring both after the arm.
+              bool linked_offer_eligible = false;
               if (pers != nullptr && pers->link_mission_id != -1 &&
-                  (pers->flags_primary & 0x0200U) == 0U &&
-                  Mission_CheckMissionShipInteractionEligibility(
-                      state,
-                      pers->link_mission_id,
-                      /*interaction_context=*/true)) {
-                // The original sets g_travel_scene_ctx and the speaking-ship
-                // latch around NovaUi_RunMissionOfferWindow. The
-                // mission offer renderer is the current clean-room window
+                  (pers->flags_primary & 0x0200U) == 0U) {
+                state.travel_scene_ctx = true;
+                state.mission_speaker_ship_slot = ship_target;
+                linked_offer_eligible =
+                    Mission_CheckMissionShipInteractionEligibility(
+                        state,
+                        pers->link_mission_id,
+                        /*interaction_context=*/true);
+              }
+              if (linked_offer_eligible) {
+                // The mission offer renderer is the current clean-room window
                 // shell; it accepts the same definition and paints over the
                 // live flight frame while the state-only post-accept arm below
                 // performs the replacement.
-                state.mission_speaker_ship_slot = ship_target;
                 const MissionOfferResult result = NovaMission_RunOfferWindow(
                     platform,
                     audio,
@@ -2576,7 +2596,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                     [&platform, &state, &view, &hud]() {
                       view.DrawGameFrame(platform, state, hud);
                     });
-                state.mission_speaker_ship_slot = -1;
                 if (result == MissionOfferResult::kAccepted) {
                   (void)Mission_HandleAcceptedShipInteraction(
                       state,
@@ -2595,6 +2614,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                 // swallow the held hail/cancel keys.
                 NovaUi_MarkTravelAndStatusPanelsDirty(state);
                 resync_frame_clock();
+              }
+              if (state.travel_scene_ctx) {
+                state.travel_scene_ctx = false;
+                state.mission_speaker_ship_slot = -1;
               }
             }
           }
@@ -2732,11 +2755,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 
       // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
       // cursor update.
-      NovaFrame_TickSystems(state,
-                            audio,
-                            /*run_full_tick=*/true,
-                            frame_time_ms / kOriginalTickMs,
-                            prefs);
+      NovaFrame_TickSystems(
+          state,
+          audio,
+          /*run_full_tick=*/true,
+          frame_time_ms / kOriginalTickMs,
+          prefs,
+          [&](const MissionDialogText &message) {
+            NovaUi_RunTextReaderDialog(
+                platform,
+                state,
+                message.text,
+                false,
+                [&] { view.DrawGameFrame(platform, state, hud); },
+                message.dialog_variant);
+          });
     }
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +

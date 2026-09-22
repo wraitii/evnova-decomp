@@ -487,8 +487,8 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
                                                      : state.player.ship_name);
   ReplaceMissionToken(result, "<PST>", ship_type);
   // <OSN>: the speaking mission ship's personality display name, read from
-  // the DAT_0077430e speaker latch (valid slots 1..0x3f only). Outside an
-  // announcement context it keeps the [Error] sentinel.
+  // the g_mission_speaker_ship_slot latch (valid slots 1..0x3f only). Outside
+  // an announcement context it keeps the [Error] sentinel.
   std::string speaker_name = "[Error]";
   if (state.mission_speaker_ship_slot >= 0 &&
       state.mission_speaker_ship_slot < 0x40) {
@@ -545,6 +545,26 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
         state, result, "<SRK", /*use_short_name=*/true);
   }
   return result;
+}
+
+MissionDialogText Mission_LoadSelectionDialogText(const GameState &state,
+                                                  std::uint16_t desc_id,
+                                                  bool offering_list,
+                                                  std::int16_t mission_id) {
+  MissionDialogText message;
+  const auto desc = NovaResource_LoadDescription(desc_id);
+  if (!desc) {
+    return message;
+  }
+  message.text = desc->text;
+  message.dialog_variant = desc->dialog_variant;
+  // Ui_LoadSelectionDialogResource runs the ^-placeholder pass at load time
+  // (0x004c6d50); the mission wildcard pass is Stellar_BuildTravelDestination-
+  // Description (0x004444f0).
+  Mission_ExpandStringPlaceholders(state, message.text);
+  message.text = Mission_ExpandMissionWildcards(
+      state, message.text, offering_list, mission_id);
+  return message;
 }
 
 namespace {

@@ -349,14 +349,16 @@ ExecuteMissionScriptCommand(GameState &state,
     if (operand >= kResourceIdBase && operand < 0x468) {
       const auto mission_id =
           static_cast<std::int16_t>(operand - kResourceIdBase);
-      // 0x00449c3c: the activation is wrapped in
-      // g_travel_scene_ctx = (g_is_system_transition_active == 0), restored
-      // afterwards, and resolves the mission's locator targets first.
-      const bool saved_travel_scene = state.in_travel_scene;
-      state.in_travel_scene = !state.system_transition_active;
+      // Mission_ExecuteMisnScriptEngine (0x00449370) 'S' opcode: the
+      // activation runs with g_travel_scene_ctx =
+      // (g_is_system_transition_active
+      // == 0), restored afterwards, and resolves the mission's locator targets
+      // first.
+      const bool saved_travel_scene = state.travel_scene_ctx;
+      state.travel_scene_ctx = !state.system_transition_active;
       Mission_ResolveMissionStellarTargets(state, mission_id);
       (void)Mission_ActivateAtSlot(state, mission_id, acceptance);
-      state.in_travel_scene = saved_travel_scene;
+      state.travel_scene_ctx = saved_travel_scene;
     }
     return true;
   case 'C':

@@ -803,15 +803,8 @@ namespace {
                                                 std::uint16_t desc_id,
                                                 bool offering_arm,
                                                 std::int16_t mission_id) {
-  MissionDialogText message;
-  if (const auto desc = NovaResource_LoadDescription(desc_id)) {
-    message.text = desc->text;
-    message.dialog_variant = desc->dialog_variant;
-    Mission_ExpandStringPlaceholders(state, message.text);
-    message.text = Mission_ExpandMissionWildcards(
-        state, message.text, offering_arm, mission_id);
-  }
-  return message;
+  return Mission_LoadSelectionDialogText(
+      state, desc_id, offering_arm, mission_id);
 }
 
 [[nodiscard]] std::optional<std::size_t>
