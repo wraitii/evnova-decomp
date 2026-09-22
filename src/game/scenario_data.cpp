@@ -874,6 +874,15 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (bytes.size() >= 0x445) {
     st.schedule_script = ReadCStringBounded(bytes, 0x345, 0xff);
   }
+  // Bible OnDominate / OnRelease (StellarDef +0x68 / +0x167). The loader
+  // CString_Copy's the fixed 255-byte fields verbatim from payload +0x36 and
+  // +0x135 (0x004bd3c0: `special_tech + 0x52` = +0x68; `field_0x167`).
+  if (bytes.size() >= 0x37) {
+    st.on_dominate_script = ReadCStringBounded(bytes, 0x36, 0xff);
+  }
+  if (bytes.size() >= 0x136) {
+    st.on_release_script = ReadCStringBounded(bytes, 0x135, 0xff);
+  }
   return st;
 }
 

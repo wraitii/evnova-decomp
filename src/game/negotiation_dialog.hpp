@@ -30,11 +30,12 @@
 // SCOPE: the bribe-cost computation, denied derivation (incl. the government
 // policy-flag override), bribe-eligibility gate, Greetings/refusal status
 // ladders, the payment window (rendered each frame over the interaction
-// window, boarding-plunder style) and the bribe-success landing handoff are
-// reconstructed. The Demand Tribute / Release branch (reputation decrement,
+// window, boarding-plunder style), the bribe-success landing handoff, and the
+// Demand Tribute / Release middle-button branch (reputation decrement,
 // Government_ProcessFactionCombatEvent, defense-fleet spawns via
-// Stellar_SpawnDefenseFleetShip, domination latches and
-// Mission_ExecuteReactionScript) is deferred with a loud Todo(decomp).
+// NovaStellar_SpawnDefenseFleetShip, the domination latch, and
+// Mission_ExecuteReactionScript on the stellar's OnDominate/OnRelease
+// scripts) are reconstructed.
 
 #include <cstdint>
 #include <random>
@@ -76,7 +77,9 @@ enum class NegotiationExit : std::uint8_t {
 // (name, destination description, Status: word) and the three comm buttons,
 // and loops until the player closes the channel, pays an accepted bribe (which
 // arms the normal proximity-based landing approach), or the platform quits.
-// The Demand Tribute / Release button is deferred (loud Todo).
+// The middle Demand Tribute / Release button runs the domination / release
+// branch (reputation drop, faction crime event, defense-fleet spawn,
+// OnDominate / OnRelease scripts).
 [[nodiscard]] NegotiationExit
 NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                                      GameState &state,

@@ -11,11 +11,13 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
+#include "mission_script.hpp"
 #include "nova_font.hpp"
 #include "nova_random.hpp"
 #include "pict_texture.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
+#include "ship_spawn.hpp"
 #include "spaceflight_view.hpp"
 #include "sprite_world.hpp"
 
@@ -41,25 +43,24 @@ using evnova::util::TruncateToInt32;
 
 namespace {
 
-// ---- Deferred Demand Tribute / Release hooks (TODO(decomp)) ----------------
-// The middle button's branch in NovaUi_RunTravelDestinationInteractionWindow
-// (0x00480030, local_11e == 3) is intentionally NOT reconstructed yet. It
-// spans (decomp, verified 2024 read):
-//
-//   Government_ProcessFactionCombatEvent 0x00466fc0
-//     (system_id, government_id, 3, -1) per attack/demand pulse (now ported as
-//     NovaGovernment_ProcessFactionCombatEvent; this branch itself is still
-//     deferred)
-//   Stellar_SpawnDefenseFleetShip (defense-fleet spawns, capped by
-//     StellarDef max_ship_count/present_ship_count bookkeeping)
-//   the domination latch: StellarDef.dominated = 1, tribute status
-//     (STR# 0xbba msg 25/26), present_ship_count reset, plus the release
-//     mirror branch (msg 35/36, dominated = 0)
-//   Mission_ExecuteReactionScript 0x00448020 on the stellar's reaction
-//     scripts (StellarDef field_0x68 / 0x167)
-//
-// All are called only from that branch, so no stub declaration is emitted
-// here.
+// ---- Demand Tribute / Release (middle button, Ghidra 0x00480030) ----------
+// The middle button asks a free body to pay tribute, or releases a dominated
+// one. Both only apply to stellars without availability flag 0x20. The label
+// is Demand Tribute / Release by the stellar->dominated state. The flow:
+//   * Demand Tribute (not dominated): flags the interaction denied, drops the
+//     current system's reputation to min_status - 1 when the threshold is
+//     reached, fires faction combat event 3, then either dismisses the demand
+//     (combat rating < 0x3200 and no cheat) or, when no garrison is present
+//     and this is the first demand this window, dominates the body (5x event
+//     3, status 0x1a planet / 0x1b station, clears the selected destination,
+//     sets g_pers_defs[0x3fe].alive, dominated=1, domination_days=0, runs the
+//     OnDominate script) or calls in the garrison (status 2, rescale
+//     present_ship_count, spawn the first wave) when it is refused.
+//   * Release (dominated): status 0x24 planet / 0x25 station, clears the
+//     selection, dominated=0, re-seeds present_ship_count from max_ship_count,
+//     drops the reputation, and runs the OnRelease script.
+// The g_travel_interaction_has_attacked latch is reset at window open, so a
+// single window can only dominate once.
 
 // ---- Resource ids (EV Nova Graphics 3 / Nova Data) ------------------------
 // The destination-interaction window's backdrop PICT (DLOG 0x3f1) and the
@@ -91,6 +92,10 @@ constexpr std::uint16_t kBtnRelease = 0x20;       // pool 0x1f "Release"
 constexpr std::uint16_t kBtnDemandTribute = 0x2d; // pool 0x2c "Demand Tribute"
 constexpr std::uint16_t kBtnAcceptPrice = 0x1e;   // pool 0x1d "Accept Price"
 constexpr std::uint16_t kBtnLowerPrice = 0x1f;    // pool 0x1e "Lower Price"
+
+// g_player_combat_rating_points gate for a Demand Tribute attempt (Ghidra
+// 0x00480d60: CMP 0x3200). Below this the target dismisses the demand.
+constexpr std::int32_t kCombatRatingForTribute = 0x3200;
 
 // STR# 0x7d2 entries used here (1-based; pool = entry - 1):
 constexpr std::uint16_t kMiscClearedToDock = 0x5f; // "you're cleared to dock."
@@ -768,7 +773,9 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   NovaLog::Info("opening destination-interaction dialog 0x3f1 for stellar {}",
                 static_cast<int>(stellar_id));
 
-  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  // Mutable: the Demand Tribute / Release action writes dominated,
+  // present_ship_count and domination_days on this row.
+  Stellar *stellar = state.scenario.StellarMutable(stellar_id);
   if (stellar == nullptr) {
     NovaLog::Warn("target stellar {} not in the scenario; cancelling the "
                   "interaction dialog",
@@ -782,6 +789,9 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   // original's latch persists across windows; the port re-rolls per run
   // (TODO(decomp): latch persistence divergence).
   const std::int16_t random_index = RandomBelow(state.rng, 5);
+  // Ghidra 0x00480088..0x00480098 sets action_index_a to -1 and copies it
+  // into action_index_b as the destination interaction opens.
+  state.travel.interaction_action_index_b = -1;
   const int bribe_random_latch = RandomBelow(state.rng, 100);
 
   // Denied latch (g_travel_interaction_denied_state): the stellar's
@@ -797,6 +807,12 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
       sys_index >= 0
           ? state.system_reputation[static_cast<std::size_t>(sys_index)]
           : 0;
+  const auto reputation_meets_threshold = [&]() {
+    return sys_index >= 0 && stellar->min_status > -0x7fff &&
+           stellar->min_status != 0x7fff &&
+           stellar->min_status <=
+               state.system_reputation[static_cast<std::size_t>(sys_index)];
+  };
   bool denied =
       (stellar->min_status == 0x7fff) ||
       (stellar->min_status != -0x7fff && sys_rep < stellar->min_status);
@@ -1085,6 +1101,125 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
     }
   };
 
+  // Middle button: Demand Tribute when the body is free, Release when it is
+  // dominated (Ghidra 0x00480c88..0x004810c0). The original latches
+  // g_travel_interaction_has_attacked at window open and only lets the first
+  // press dominate; a second press draws the "defense fleet incoming" line
+  // and mounts the garrison instead.
+  bool has_attacked = false;
+  const auto run_tribute_action = [&]() {
+    if ((stellar->availability_flags & 0x20) != 0U) {
+      return;
+    }
+    const bool is_station = (stellar->flags & 0x10U) != 0U;
+    if (!stellar->dominated) {
+      // Demand Tribute. The attempt counts as a crime (faction event 3),
+      // and the top button switches to Offer Bribe on the redraw.
+      denied = true;
+      frame.button_labels[1] = LoadButtonLabel(kBtnOfferBribe, "Offer Bribe");
+      if (reputation_meets_threshold()) {
+        state.system_reputation[static_cast<std::size_t>(sys_index)] =
+            static_cast<std::int16_t>(stellar->min_status - 1);
+      }
+      NovaGovernment_ProcessFactionCombatEvent(
+          state, state.player.current_system_id, stellar->government_id, 3, -1);
+      if (state.player_combat_rating_points < kCombatRatingForTribute &&
+          !state.cheat_mode_active) {
+        // Too puny: the target laughs the demand off (status message 1).
+        frame.status =
+            LoadStatusVariant(random_index, 1).value_or(frame.status);
+        return;
+      }
+      if (!has_attacked && stellar->present_ship_count < 1 &&
+          stellar->defense_fleet_mounted == 0) {
+        // No garrison present: five crime pulses, then the body pays tribute.
+        for (int pulse = 0; pulse < 5; ++pulse) {
+          NovaGovernment_ProcessFactionCombatEvent(
+              state,
+              state.player.current_system_id,
+              stellar->government_id,
+              3,
+              -1);
+        }
+        frame.status = NovaHud_LoadStringEntry(kStatusStr,
+                                               is_station ? std::uint16_t{0x1b}
+                                                          : std::uint16_t{0x1a})
+                           .value_or(frame.status);
+        state.travel.engage_timer = 0;
+        state.travel.selected_stellar_id = -1;
+        // g_pers_defs[0x3fe].alive = 1 (the tribute/ambush sentinel row).
+        if (state.scenario.pers_defs.size() > 0x3fe) {
+          state.scenario.pers_defs[0x3fe].alive = true;
+        }
+        stellar->dominated = 1;
+        stellar->domination_days = 0;
+        // The middle button flips to Release on the redraw.
+        frame.button_labels[2] = LoadButtonLabel(kBtnRelease, "Release");
+        Mission_ExecuteReactionScript(state, stellar->on_dominate_script);
+      } else {
+        // The demand is refused: the defense fleet is called in (status 2).
+        frame.status =
+            LoadStatusVariant(random_index, 2).value_or(frame.status);
+        if (stellar->defense_fleet_mounted == 0) {
+          for (int pulse = 0; pulse < 5; ++pulse) {
+            NovaGovernment_ProcessFactionCombatEvent(
+                state,
+                state.player.current_system_id,
+                stellar->government_id,
+                3,
+                -1);
+          }
+          // Rescale the staged garrison to a tenth (offset 100), then mount
+          // the first wave. max_ship_count < 0x3e9 uses the whole present
+          // count; otherwise the last digit is the wave size.
+          int spawn_count = 0;
+          const int max_ships = stellar->max_ship_count;
+          if (max_ships < 0x3e9) {
+            spawn_count = stellar->present_ship_count;
+            stellar->present_ship_count = 0;
+          } else {
+            stellar->present_ship_count -= max_ships % 10;
+            spawn_count = max_ships % 10;
+            if (stellar->present_ship_count < 0) {
+              spawn_count += stellar->present_ship_count;
+              stellar->present_ship_count = 0;
+            }
+          }
+          for (int i = 0; i < spawn_count; ++i) {
+            (void)NovaStellar_SpawnDefenseFleetShip(state, stellar_id);
+          }
+        }
+      }
+      has_attacked = true;
+    } else {
+      // Release: the body stops paying tribute, its reputation threshold
+      // collapses, and the full garrison re-forms (status 0x24/0x25).
+      frame.status = NovaHud_LoadStringEntry(kStatusStr,
+                                             is_station ? std::uint16_t{0x25}
+                                                        : std::uint16_t{0x24})
+                         .value_or(frame.status);
+      state.travel.engage_timer = 0;
+      state.travel.selected_stellar_id = -1;
+      stellar->dominated = 0;
+      // The middle button flips back to Demand Tribute on the redraw.
+      frame.button_labels[2] =
+          LoadButtonLabel(kBtnDemandTribute, "Demand Tribute");
+      const int max_ships = stellar->max_ship_count;
+      if (max_ships < 0x3e9) {
+        stellar->present_ship_count = max_ships;
+      } else if (max_ships < 0x2711) {
+        stellar->present_ship_count = max_ships / 10 - 100;
+      } else {
+        stellar->present_ship_count = max_ships / 10 - 1000;
+      }
+      if (reputation_meets_threshold()) {
+        state.system_reputation[static_cast<std::size_t>(sys_index)] =
+            static_cast<std::int16_t>(stellar->min_status - 1);
+      }
+      Mission_ExecuteReactionScript(state, stellar->on_release_script);
+    }
+  };
+
   // NovaInputQueue_FlushAllCommands: the original discards pending input when
   // the window opens (called five times in 0x00480030).
   while (platform.PollTextEvent().has_value()) {
@@ -1136,12 +1271,7 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
           break;
         case 2:
           if (frame.tribute_enabled) {
-            // Demand Tribute / Release (action 3) is deferred: domination
-            // latch, defense-fleet spawns, faction combat event and reaction
-            // scripts (see the file-head note).
-            NovaLog::Todo("target-action: Demand Tribute / Release branch of "
-                          "NovaUi_RunTravelDestinationInteractionWindow is not "
-                          "reconstructed");
+            run_tribute_action();
           }
           break;
         default:

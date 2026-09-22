@@ -319,6 +319,19 @@ TEST_CASE("stellar defense-battery weapon decodes and resolves by bank",
   CHECK(data.Weapon(hg_kania->weapon_id) == nullptr);
 }
 
+TEST_CASE("stellar OnDominate/OnRelease scripts decode",
+          "[scenario][stellar][domination]") {
+  // The loader copies the 255-byte control-bit strings from sp\x9ab payload
+  // +0x36 and +0x135 into StellarDef +0x68 / +0x167 (0x004bd3c0). Earth
+  // carries the shipped OnDominate string; the base data has no OnRelease.
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const Stellar *earth = data.Stellar(0x80);
+  REQUIRE(earth != nullptr);
+  CHECK(earth->on_dominate_script == "b6100");
+  CHECK(earth->on_release_script.empty());
+}
+
 TEST_CASE("outfit tail fields decode at their real payload offsets",
           "[scenario][data]") {
   ScenarioData data;
