@@ -2280,8 +2280,12 @@ void Mission_HandleMissionOrSurrenderShipReaction(
     return;
   }
   ActiveMission &mission = state.active_missions[slot];
-  // Auto-abort missions with no goal and exhausted target count drop their
-  // completion latch before re-evaluation.
+  // Head guards and arm order line-diffed against 0x00443c60 (decompile +
+  // disasm 0x00443c95..0x00443f66): the auto-abort reset clears the latch on
+  // ship_goal == -1 && target_ship_count > 0 && goal_count_remaining < 1 &&
+  // flags 0x0001, was_objective_complete is sampled after it, and the per-goal
+  // arms run only when !(goal_count_remaining < mission_target_count &&
+  // target_ship_count != 0) -- that pair clears the latch and skips them.
   if (mission.ship_goal == -1 && mission.target_ship_count > 0 &&
       mission.goal_count_remaining < 1 &&
       (mission.flags_primary & 0x0001U) != 0U) {
@@ -2342,8 +2346,10 @@ void Mission_HandleMissionOrSurrenderShipReaction(
         }
       }
       // Goal 4 (observe): in the mission system, some fleet ship must be
-      // seen (uncloaked, or cloaked but onscreen).
-      if (goal == 4 && !runtime.objective_complete) {
+      // seen (uncloaked, or cloaked but onscreen). Suppressed while the
+      // player death/game-over bookkeeping is latched (DAT_00596d38 != 0).
+      if (goal == 4 && !runtime.objective_complete &&
+          !state.game_over_pending) {
         const std::int16_t raw_system = mission.current_system_id;
         const std::int16_t resolved =
             (raw_system < 0 || raw_system >= 0x800)
