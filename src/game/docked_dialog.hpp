@@ -138,8 +138,10 @@ struct NewsTextPanels {
 // draws/hit-tests the single accept button from DITL entry 6 and suppresses
 // the decline slot, as 0x004a1820/0x004a1670 do. TODO(decomp) skipped: the
 // status-string panel (Ui_PlayMovieFileModal, DITL entry 4 -- a QuickTime
-// platform replacement). Port conveniences beyond the original: Esc counts as
-// decline, DIK arrows scroll.
+// platform replacement). Esc is deliberately ignored, matching 0x00447170
+// (no Esc arm, unlike the BBS poller 0x00440c90); the captions' first
+// lower-case letters act as button mnemonics and Return accepts, as the
+// original does. Port convenience beyond the original: DIK arrows scroll.
 [[nodiscard]] MissionOfferResult
 NovaMission_RunOfferWindow(SdlPlatform &platform,
                            SdlAudio &audio,

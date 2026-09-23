@@ -1022,21 +1022,24 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     platform.PublishProbeUi("mission_offer", std::move(rects));
   };
 
-  // Button captions: payload +0x75f/+0x77f C-strings truncated at the first
-  // non-lowercase byte (0x00442510 caption-normalisation loop), else the STR#
-  // 0x96 defaults (0x32 "Yes", or 0x1b "Okay" in the Flags-0x0004 arm;
-  // 0x33 "No").
+  // Button captions: payload +0x75f/+0x77f C-strings. 0x00442510's
+  // normalisation loop increments its index by 0x100, so it walks the two
+  // 256-byte caption buffers rather than the characters and only inspects each
+  // caption's first byte: when that byte is not an ASCII letter (checked via
+  // MWRuntime_ToLower, so either case passes) the whole caption is blanked and
+  // the STR# 0x96 default is used instead. The front letter is also the
+  // keyboard mnemonic.
   const auto payload_caption = [&](std::size_t offset) {
-    const auto *bytes = def->raw_payload.data();
-    std::string out;
-    for (std::size_t i = offset; i < def->raw_payload.size(); ++i) {
-      const char c = static_cast<char>(std::to_integer<unsigned>(bytes[i]));
-      if (c < 'a' || c > 'z') {
-        break;
-      }
-      out += c;
+    const std::string_view caption = PayloadCString(*def, offset);
+    if (caption.empty()) {
+      return std::string{};
     }
-    return out;
+    const auto lower = [](unsigned char c) { return std::tolower(c); };
+    const unsigned char first = static_cast<unsigned char>(caption.front());
+    if (lower(first) < 'a' || lower(first) > 'z') {
+      return std::string{};
+    }
+    return std::string{caption};
   };
   std::string accept_caption = payload_caption(0x75f);
   if (accept_caption.empty()) {
@@ -1095,6 +1098,34 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
       return MissionOfferResult::kActivationFailed;
     }
     return MissionOfferResult::kAccepted;
+  };
+  // 0x00442510's decline arm (action 2): the payload +0x58 desc
+  // (slot_aux_text) opens the text reader when present, then the decline
+  // reaction script (payload +0x25a) runs either way. Text composition mirrors
+  // the original (Ui_LoadSelectionDialogResource placeholder pass +
+  // Stellar_BuildTravelDestinationDescription('\0', -1)): the active-arm
+  // wildcard pass against slot -1, so mission-specific tokens fall back to
+  // their [Error] sentinels while player tokens still resolve. Shared by the
+  // decline-button click and the caption mnemonic.
+  const auto decline_offer = [&]() {
+    if (def->slot_aux_text_id >= 0x80) {
+      const MissionDialogText followup = LoadMissionText(
+          state, static_cast<std::uint16_t>(def->slot_aux_text_id), false, -1);
+      if (!followup.text.empty()) {
+        NovaUi_RunTextReaderDialog(platform,
+                                   state,
+                                   followup.text,
+                                   false,
+                                   render_background,
+                                   followup.dialog_variant);
+      }
+    }
+    Mission_ExecuteReactionScript(
+        state,
+        PayloadCString(*def, 0x25a),
+        MissionScriptContext{"offer decline"},
+        MakeAcceptanceSink(platform, state, render_background));
+    return MissionOfferResult::kDeclined;
   };
   // One window frame over the docked backing store. The original's draw
   // callback (NovaUi_DrawMissionOfferWindow 0x00447680) fills the
@@ -1216,12 +1247,34 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   bool mission_computer_command_was_held = false;
   while (!platform.quit_requested()) {
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
-      if (input->key == TextKey::escape) {
-        // Divergence: the original window exits only through its two buttons;
-        // Esc is the port's universal modal cancel and counts as a decline.
-        NovaLog::Todo("offer window Esc counts as decline; the original has "
-                      "no Esc exit (0x00442510)");
-        return MissionOfferResult::kDeclined;
+      // 0x00447170 has no Esc arm: unlike the BBS poller (0x00440c90, which
+      // maps 0x1b to exit) the offer window closes only through its buttons,
+      // Return, or the caption mnemonic, so Esc is deliberately ignored.
+      if (input->key == TextKey::character) {
+        // Ghidra 0x00447170 key arms: Return (0xd) is action 1 (accept, same
+        // in both arms); otherwise the first lower-case letter of a caption is
+        // that button's mnemonic. The original honours the mnemonics only when
+        // the two captions start with different letters; the decline mnemonic
+        // additionally requires the refusable arm.
+        const char key = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(input->character)));
+        const auto first_letter = [](const std::string &caption) {
+          return caption.empty()
+                     ? '\0'
+                     : static_cast<char>(std::tolower(
+                           static_cast<unsigned char>(caption.front())));
+        };
+        const char accept_key = first_letter(accept_caption);
+        const char decline_key = first_letter(decline_caption);
+        if (accept_key != '\0' && accept_key != decline_key &&
+            key == accept_key) {
+          return accept_offer();
+        }
+        if (normal_arm && decline_key != '\0' && accept_key != decline_key &&
+            key == decline_key) {
+          return decline_offer();
+        }
+        continue;
       }
       if (input->key == TextKey::enter) {
         // Ghidra 0x00447170 (sVar1 == 3/5, keycode 0xd): Return is action 1
@@ -1236,35 +1289,7 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
           return accept_offer();
         }
         if (normal_arm && Contains(decline_rect, point)) {
-          // 0x00442510's decline arm: the payload +0x58 desc (slot_aux_text)
-          // opens the text reader when present, then the decline reaction
-          // script (payload +0x25a) runs either way. Text composition
-          // mirrors the original (Ui_LoadSelectionDialogResource placeholder
-          // pass + Stellar_BuildTravelDestinationDescription('\0', -1)):
-          // the active-arm wildcard pass against slot -1, so mission-specific
-          // tokens fall back to their [Error] sentinels while player tokens
-          // still resolve.
-          if (def->slot_aux_text_id >= 0x80) {
-            const MissionDialogText followup = LoadMissionText(
-                state,
-                static_cast<std::uint16_t>(def->slot_aux_text_id),
-                false,
-                -1);
-            if (!followup.text.empty()) {
-              NovaUi_RunTextReaderDialog(platform,
-                                         state,
-                                         followup.text,
-                                         false,
-                                         render_background,
-                                         followup.dialog_variant);
-            }
-          }
-          Mission_ExecuteReactionScript(
-              state,
-              PayloadCString(*def, 0x25a),
-              MissionScriptContext{"offer decline"},
-              MakeAcceptanceSink(platform, state, render_background));
-          return MissionOfferResult::kDeclined;
+          return decline_offer();
         }
         // Arrow buttons (entries 9/10): Ghidra 0x00447170 enters its
         // hold-to-repeat loop when the press lands on the arrow, gated on the
