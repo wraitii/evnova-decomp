@@ -40,7 +40,7 @@ TEST_CASE("mission lists use zero-based definition indices") {
 
 // Ghidra 0x00441b40 Gate 2: AvailRecord -32000 (the selected stellar is
 // dominated) / -32001 (any available stellar is dominated), evaluated only
-// outside the travel-scene context; otherwise the value falls through to the
+// outside the in-flight context; otherwise the value falls through to the
 // ordinary reputation compare and fails.
 TEST_CASE("AvailRecord domination arms gate mission availability") {
   GameState state;
@@ -1601,7 +1601,7 @@ TEST_CASE("mission loader reset clears interaction latches") {
   state.mission_interaction_context = 3;
   state.mission_speaker_ship_slot = 7;
   state.script_mission_context_slot = 2;
-  state.travel_scene_ctx = true;
+  state.in_flight = true;
   state.active_mission_runtime_flags[1].is_active = true;
   state.active_mission_runtime_flags[1].is_failed = true;
   state.control.SetControlBit(311, true);
@@ -1613,7 +1613,7 @@ TEST_CASE("mission loader reset clears interaction latches") {
   CHECK(state.mission_interaction_context == -1);
   CHECK(state.mission_speaker_ship_slot == -1);
   CHECK(state.script_mission_context_slot == -1);
-  CHECK_FALSE(state.travel_scene_ctx);
+  CHECK_FALSE(state.in_flight);
   CHECK_FALSE(state.active_mission_runtime_flags[1].is_active);
   CHECK_FALSE(state.active_mission_runtime_flags[1].is_failed);
   CHECK_FALSE(state.control.ControlBit(311));

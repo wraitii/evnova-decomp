@@ -1522,16 +1522,18 @@ struct GameState {
   // Mission BBS / offer window is open; read by Mission_ActivateMissionAtSlot
   // (0x0043f100). Owned by MissionInteractionWindowScope.
   bool mission_offer_window_open = false;
-  // Ghidra g_travel_scene_ctx (0x00773eea): the travel-scene context byte.
-  // Raised around the flight-scene mission interactions -- the hail ladder
-  // (0x00433542), the player hail command (0x00454910), the board offer
-  // (0x0045b071..0x0045b16f) -- and by the Mission_ExecuteMisnScriptEngine
-  // 'S' opcode, so locator/eligibility code can tell a flight-scene lookup
-  // from a docked activation. Cleared after each, and defensively by the
-  // mission loader reset (0x0043bbc3), the travel-destination loop
-  // (0x00491f30), the land-command entry (0x00457fa7) and the bar window
-  // (0x0047c90b); it is 0 while landed/docked. The port defaults it false.
-  bool travel_scene_ctx = false;
+  // Ghidra g_in_flight (0x00773eea): the transient in-flight interaction
+  // context byte. Raised around the flight-scene mission interactions -- the
+  // hail ladder (0x00433542), the player hail command (0x00454c35), the board
+  // offer (0x0045b071..0x0045b16f) -- and by the
+  // Mission_ExecuteMisnScriptEngine 'S' opcode (0x00449370, set to
+  // !system_transition_active), so locator/eligibility code can tell an
+  // in-flight lookup from a docked activation. Cleared after each, and
+  // defensively by the mission loader reset (0x0043bbc3), the
+  // travel-destination loop (0x00491f30), the land-command entry (0x00457fa7)
+  // and the bar window (0x0047c90b); it is 0 while landed/docked. This is a
+  // context latch, not a persistent "player is flying" state. Defaults false.
+  bool in_flight = false;
   // Ghidra g_travel_destination_window (0x007d2b78): the landing DLOG 1000
   // window handle, nonzero while the destination window owns the world --
   // i.e. during Mission_TickReactionSlotsForTravelInteraction's landing pass

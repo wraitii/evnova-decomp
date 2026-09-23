@@ -942,13 +942,13 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
       }
     } else {
       // Personality with a board-linked mission and Flags 0x0200 set: the
-      // original raises g_travel_scene_ctx and the speaker latch, tests
+      // original raises g_in_flight and the speaker latch, tests
       // eligibility, and on success runs the offer window (Ghidra 0x0045b071);
       // an ineligible def falls through to the plunder window with the latch
       // still up. Both clear at 0x0045b16f. The def's Flags 0x0100 retires the
       // personality after the window, accepted or not; a non-accept returns
       // before the boarded latch / target clearing.
-      state.travel_scene_ctx = true;
+      state.in_flight = true;
       state.mission_speaker_ship_slot = target_slot;
       if (Mission_CheckMissionShipInteractionEligibility(
               state,
@@ -975,7 +975,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
         }
         handled = true;
         if (offer != MissionOfferResult::kAccepted) {
-          state.travel_scene_ctx = false;
+          state.in_flight = false;
           state.mission_speaker_ship_slot = -1;
           return;
         }
@@ -1004,10 +1004,10 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
     (void)result;
   }
 
-  // Clear g_travel_scene_ctx and the speaker latch (0x0045b16f), after the
+  // Clear g_in_flight and the speaker latch (0x0045b16f), after the
   // eligible offer window or the ineligible fall-through plunder window.
-  if (state.travel_scene_ctx) {
-    state.travel_scene_ctx = false;
+  if (state.in_flight) {
+    state.in_flight = false;
     state.mission_speaker_ship_slot = -1;
   }
 

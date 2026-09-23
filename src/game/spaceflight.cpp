@@ -2586,12 +2586,12 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
               // PersDef Flags 0x0200 clear -> the linked mission may offer on
               // hail (opposite polarity from the board command). The original
               // runs the eligibility test and the offer window with
-              // g_travel_scene_ctx = 1 and the speaking-ship latch set
+              // g_in_flight = 1 and the speaking-ship latch set
               // (0x00454910), restoring both after the arm.
               bool linked_offer_eligible = false;
               if (pers != nullptr && pers->link_mission_id != -1 &&
                   (pers->flags_primary & 0x0200U) == 0U) {
-                state.travel_scene_ctx = true;
+                state.in_flight = true;
                 state.mission_speaker_ship_slot = ship_target;
                 linked_offer_eligible =
                     Mission_CheckMissionShipInteractionEligibility(
@@ -2632,8 +2632,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                 NovaUi_MarkTravelAndStatusPanelsDirty(state);
                 resync_frame_clock();
               }
-              if (state.travel_scene_ctx) {
-                state.travel_scene_ctx = false;
+              if (state.in_flight) {
+                state.in_flight = false;
                 state.mission_speaker_ship_slot = -1;
               }
             }
