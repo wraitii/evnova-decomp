@@ -904,34 +904,46 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   // Header Status: word. A normal landable stellar draws no Status: line;
   // uninhabited / dominated / denied bodies draw "Status:" plus a colored
   // word ("Hostile" goes red once the system reputation has gone negative).
-  if ((stellar->flags & 0x20) != 0U) {
-    frame.status_word = NovaHud_LoadStringEntry(kMiscStr, kMiscUninhabited)
-                            .value_or("Uninhabited");
-    frame.status_word_color = kLightGrey; // SHORT_ARRAY_00733b50
-  } else if (stellar->dominated) {
-    frame.status_word =
-        NovaHud_LoadStringEntry(kMiscStr,
-                                (stellar->availability_flags & 0x20) != 0U
-                                    ? kMiscOwned
-                                    : kMiscDominated)
-            .value_or("Dominated");
-    // SHORT_ARRAY_00733b32 is runtime-initialized (unreadable .bss).
-    frame.status_word_color = kStatusOrange;
-  } else if (denied) {
-    if (sys_rep < 0) {
+  // The original recomputes this inside the window's redraw callback
+  // (0x004812c0), so a Demand Tribute that flips `denied` mid-window updates
+  // the header without reopening it; the port reruns this after the action.
+  const auto refresh_header_status = [&]() {
+    frame.status_word.clear();
+    frame.status_label.clear();
+    const std::int16_t sys_rep_now =
+        sys_index >= 0
+            ? state.system_reputation[static_cast<std::size_t>(sys_index)]
+            : 0;
+    if ((stellar->flags & 0x20) != 0U) {
+      frame.status_word = NovaHud_LoadStringEntry(kMiscStr, kMiscUninhabited)
+                              .value_or("Uninhabited");
+      frame.status_word_color = kLightGrey; // SHORT_ARRAY_00733b50
+    } else if (stellar->dominated) {
       frame.status_word =
-          NovaHud_LoadStringEntry(kMiscStr, kMiscHostile).value_or("Hostile");
-      frame.status_word_color = kRed;
-    } else {
-      frame.status_word = NovaHud_LoadStringEntry(kMiscStr, kMiscForbidden)
-                              .value_or("Forbidden");
+          NovaHud_LoadStringEntry(kMiscStr,
+                                  (stellar->availability_flags & 0x20) != 0U
+                                      ? kMiscOwned
+                                      : kMiscDominated)
+              .value_or("Dominated");
+      // SHORT_ARRAY_00733b32 is runtime-initialized (unreadable .bss).
       frame.status_word_color = kStatusOrange;
+    } else if (denied) {
+      if (sys_rep_now < 0) {
+        frame.status_word =
+            NovaHud_LoadStringEntry(kMiscStr, kMiscHostile).value_or("Hostile");
+        frame.status_word_color = kRed;
+      } else {
+        frame.status_word = NovaHud_LoadStringEntry(kMiscStr, kMiscForbidden)
+                                .value_or("Forbidden");
+        frame.status_word_color = kStatusOrange;
+      }
     }
-  }
-  if (!frame.status_word.empty()) {
-    frame.status_label =
-        NovaHud_LoadStringEntry(kMiscStr, kMiscStatusLabel).value_or("Status:");
-  }
+    if (!frame.status_word.empty()) {
+      frame.status_label = NovaHud_LoadStringEntry(kMiscStr, kMiscStatusLabel)
+                               .value_or("Status:");
+    }
+  };
+  refresh_header_status();
 
   // Initial status text (the branch ladder before the modal loop): welcome +
   // name when landing is open (or already dominated), the hostile prompt when
@@ -1272,6 +1284,9 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
         case 2:
           if (frame.tribute_enabled) {
             run_tribute_action();
+            // The demand can flip `denied` / `dominated`; the original
+            // redraws the header at that point (0x004812c0).
+            refresh_header_status();
           }
           break;
         default:
