@@ -110,7 +110,7 @@ Related: Ghidra `0x00447f00 System_GetSystemDefFlagByte` is exactly the
   restriction (+0x5a), Flags 0x2000/0x4000 class arms, the PayVal credits gate,
   locator-candidate sanity, and the same-system (visibility-root) denial.
   AvailRecord -32000 (dominated selected stellar) and -32001 (any dominated
-  stellar) are evaluated only while `g_travel_scene_ctx == 0`; with the board
+  stellar) are evaluated only while `g_in_flight == 0`; with the board
   offer context raised (0x0045b071) the value falls through to the ordinary
   `g_system_reputation` compare.
 - `0x0043F100` `Mission_ActivateMissionAtSlot`: the on-accept payload

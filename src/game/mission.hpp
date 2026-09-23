@@ -291,7 +291,7 @@ void Mission_RerollOfferingRolls(GameState &state);
 // m\xefsn definition decode itself runs inline in
 // ScenarioData::LoadFromArchives (which owns the 1000-entry table); this resets
 // the cross-cutting GameState the original clears around that decode: the
-// travel-scene/speaker/script-context latches, the option-gated active-slot and
+// in-flight/speaker/script-context latches, the option-gated active-slot and
 // control-bit clear, and the interaction shown/context latches. Call alongside
 // LoadFromArchives at session bootstrap (NovaGameSession_Run 0x00416100) and
 // fresh-world reloads, so a second new game cannot inherit the previous
@@ -478,7 +478,7 @@ void Mission_ClearActiveReactionMission(GameState &state);
 // Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility public
 // wrapper (the BBS list builder uses the internal offering slice with the
 // interaction context clear and no reaction recompute). `interaction_context`
-// mirrors the original's g_travel_scene_ctx set around ship-offering calls:
+// mirrors the original's g_in_flight set around ship-offering calls:
 // AvailLoc 2 defs are then the only eligible lane, the AvailStel locator gate
 // relaxes to a pass, and the cargo gate switches to the "carrying >= 1 ton"
 // arm. `recompute_reaction` is the original's second argument (param_2): when

@@ -290,12 +290,12 @@ namespace {
 // gates as the original. `reference` is the original param_2 offering stellar
 // passed by Mission_ResolveMissionStellarTargets (0x0043d240).
 [[nodiscard]] std::int16_t MissionReferenceStellar(const GameState &state) {
-  if (state.travel_scene_ctx) {
+  if (state.in_flight) {
     const auto current = state.player.current_system_id;
     if (current >= 0 &&
         static_cast<std::size_t>(current) < state.scenario.systems.size()) {
       // 0x0043d240 initializes this to zero and replaces it with the first
-      // nav stellar while g_travel_scene_ctx is set.
+      // nav stellar while g_in_flight is set.
       for (const std::int16_t nav :
            state.scenario.systems[static_cast<std::size_t>(current)].nav_defs) {
         if (nav >= kResourceIdBase && nav < kResourceIdBase + 0x800) {
@@ -496,7 +496,7 @@ SelectMissionStellarByLocator(GameState &state,
 // Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility, offering
 // slice (the BBS list builder calls it with the interaction context clear and
 // recompute_reaction = false). `interaction_context` is the original's
-// g_travel_scene_ctx; `recompute_reaction` is its separate param_2, which
+// g_in_flight; `recompute_reaction` is its separate param_2, which
 // refreshes the MisnDef +0x16 availability cache read by gate [1]. Evaluates
 // the original's ten definition-level gates in order:
 // [0] AvailStel locator vs the selected/landed stellar, [1] cached
@@ -629,7 +629,7 @@ SelectMissionStellarByLocator(GameState &state,
   // Ghidra 0x00442310: the original's second argument (param_2) only requests
   // that this definition's availability expression be re-evaluated and the
   // result cached at MisnDef +0x16 before the gate reads it. It is distinct
-  // from the interaction context (g_travel_scene_ctx): the hail ladder runs
+  // from the interaction context (g_in_flight): the hail ladder runs
   // with the context set but param_2 clear, while the board command and the
   // target-action hail both recompute. Gate [1] below reads the same field.
   if (recompute_reaction) {
@@ -653,10 +653,10 @@ SelectMissionStellarByLocator(GameState &state,
     if (def.avail_record < -31999) {
       // Bible -32000 dominated the stellar in question / -32001 dominated at
       // least one stellar. The original only evaluates these outside the
-      // travel-scene context (g_travel_scene_ctx == 0); with the destination
+      // in-flight context (g_in_flight == 0); with the destination
       // window up the value falls through to the ordinary reputation compare
       // below. Unknown values past -32001 match no domination arm and fail.
-      if (!state.travel_scene_ctx) {
+      if (!state.in_flight) {
         if (def.avail_record == -32000) {
           record_ok =
               selected_index >= 0 &&
@@ -1636,7 +1636,7 @@ bool Mission_ActivateAtSlot(GameState &state,
   // which has no target ships / no return stellar resolves immediately. The
   // offering roll is cleared AFTER this resolve, so a script it starts sees
   // the pre-clear availability state (order preserved from the original).
-  if (state.system_transition_active && !state.travel_scene_ctx &&
+  if (state.system_transition_active && !state.in_flight &&
       (active.flags_primary & 0x0001U) != 0U &&
       runtime.travel_stellar_reached && active.target_ship_count == 0 &&
       active.return_stellar_id == -1) {
@@ -2261,7 +2261,7 @@ void Mission_RerollOfferingRolls(GameState &state) {
 void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
   // g_last_system_for_ambient_rolls = -1: the clean-room ambient-roll cache
   // latch is not modelled (see Mission_ClearMisnSlotAssignments).
-  state.travel_scene_ctx = false;
+  state.in_flight = false;
   state.mission_speaker_ship_slot = -1;
   // g_travel_destination_window = 0 and g_starmap_selected_system_id = -1
   // have no clean-room counterpart: the travel window is an SDL modal and the
@@ -2998,10 +2998,10 @@ void Mission_TickShipHailLadder(GameState &state,
     allow = false;
   }
   // Flags 0x400 + LinkMission: the linked mission must currently offer from
-  // a ship (the original runs the check with g_travel_scene_ctx = 1 and the
+  // a ship (the original runs the check with g_in_flight = 1 and the
   // speaker latched to this ship, restoring both after the call).
   if ((flags & 0x400U) != 0U && pers.link_mission_id != -1) {
-    state.travel_scene_ctx = true;
+    state.in_flight = true;
     state.mission_speaker_ship_slot = ship.ship_instance_id;
     // Original 0x00433572 pushes param_2 = 0: the hail ladder runs with the
     // interaction context set but does not refresh the availability cache.
@@ -3010,7 +3010,7 @@ void Mission_TickShipHailLadder(GameState &state,
         pers.link_mission_id,
         /*interaction_context=*/true,
         /*recompute_reaction=*/false);
-    state.travel_scene_ctx = false;
+    state.in_flight = false;
     state.mission_speaker_ship_slot = -1;
     if (!eligible) {
       allow = false;

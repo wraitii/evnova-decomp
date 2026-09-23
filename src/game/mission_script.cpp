@@ -350,15 +350,15 @@ ExecuteMissionScriptCommand(GameState &state,
       const auto mission_id =
           static_cast<std::int16_t>(operand - kResourceIdBase);
       // Mission_ExecuteMisnScriptEngine (0x00449370) 'S' opcode: the
-      // activation runs with g_travel_scene_ctx =
+      // activation runs with g_in_flight =
       // (g_is_system_transition_active
       // == 0), restored afterwards, and resolves the mission's locator targets
       // first.
-      const bool saved_travel_scene = state.travel_scene_ctx;
-      state.travel_scene_ctx = !state.system_transition_active;
+      const bool saved_in_flight = state.in_flight;
+      state.in_flight = !state.system_transition_active;
       Mission_ResolveMissionStellarTargets(state, mission_id);
       (void)Mission_ActivateAtSlot(state, mission_id, acceptance);
-      state.travel_scene_ctx = saved_travel_scene;
+      state.in_flight = saved_in_flight;
     }
     return true;
   case 'C':
