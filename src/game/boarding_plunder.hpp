@@ -120,9 +120,10 @@ void EnsureTransitionSounds(GameState &state);
 // relative velocity / heading alignment / boardability of the primary target,
 // then dispatches the mission arms, the personality recovery / offer-window
 // arms, or the plunder window. Denial feedback is STR# 0x7d2 overlays plus a
-// centered error beep queued on GameState.pending_ui_sounds. The dispatch runs
-// the modal windows synchronously (blocking the flight loop, as the original
-// blocks in its own loop).
+// centered transition-table cue (denial index 3; mission/recovery fanfare
+// index 4) played immediately through the audio device -- not queued on
+// pending_ui_sounds, since this command runs the modal windows synchronously
+// (blocking the flight loop, as the original blocks in its own loop).
 void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                                      SdlAudio &audio,
                                      GameState &state,

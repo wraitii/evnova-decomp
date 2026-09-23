@@ -450,6 +450,29 @@ void PlayAirlockCue(SdlAudio &audio, const GameState &state) {
   }
 }
 
+// Plays a transition-table cue directly through the audio device
+// (g_transition_sound_handle_table[index] = snd 150 + index). The original
+// hands it to the sound engine via NovaAudio_QueueCenteredSound, so it sounds
+// as soon as the audio callback runs; the board command is a synchronous flow
+// that can open the plunder/offer modals, so leaving it on pending_ui_sounds
+// would only drain after the modal closed (same reason PlayAirlockCue bypasses
+// the queue). index 2 = confirm/taken, 3 = denial/error, 4 = boarded fanfare.
+void PlayTransitionCue(SdlAudio &audio,
+                       GameState &state,
+                       std::int16_t index,
+                       std::int16_t priority_width = 1) {
+  EnsureTransitionSounds(state);
+  if (index < 0 ||
+      index >= static_cast<std::int16_t>(state.transition_sounds.size())) {
+    return;
+  }
+  const auto &sound = state.transition_sounds[static_cast<std::size_t>(index)];
+  if (!sound.has_value()) {
+    return;
+  }
+  audio.Play(*sound, 1.0F, 1.0F, 150 + index, priority_width);
+}
+
 void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
   // str_index is the 1-based STR# 0x7d2 entry number.
   auto text = NovaHud_LoadStringEntry(0x7d2, str_index);
@@ -605,7 +628,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                   ((diag_class->capability_flags & 0x10) != 0 ? 0.1F
                                                               : 1.0F / 3.0F)
             : 0.0F);
-    QueueUiSound(state, 3, 1);
+    PlayTransitionCue(audio, state, 3, 1);
     ShowBoardingOverlay(state, 0x82); // "You can't board this ship."
     return;
   }
@@ -617,7 +640,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
   // ---- Relative velocity gate -------------------------------------------
   if (std::fabs(target.vel_x - player.vel_x) > kBoardVelocityGate ||
       std::fabs(target.vel_y - player.vel_y) > kBoardVelocityGate) {
-    QueueUiSound(state, 3, 1);
+    PlayTransitionCue(audio, state, 3, 1);
     ShowBoardingOverlay(state, 0x84); // "You're moving too fast to board..."
     return;
   }
@@ -626,7 +649,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
   const BoardRangeSpan span = TargetFrameSpan(target);
   if (std::fabs(target.pos_x - player.pos_x) > span.full_x * kBoardRangeShare ||
       std::fabs(target.pos_y - player.pos_y) > span.full_y * kBoardRangeShare) {
-    QueueUiSound(state, 3, 1);
+    PlayTransitionCue(audio, state, 3, 1);
     ShowBoardingOverlay(state, 0x83); // "You're not close enough to board..."
     return;
   }
@@ -691,7 +714,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                 state, mission.cargo_qty_tons, show_mission_dialog)) {
           // The failed consume leaves cVar12 = 0, so the command reaches the
           // generic STR# 0x82 denial (0x168 frames).
-          QueueUiSound(state, 3, 1);
+          PlayTransitionCue(audio, state, 3, 1);
           ShowBoardingOverlay(state, 0x82); // "You can't board this ship."
           return;
         }
@@ -717,7 +740,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
         overlay += LoadBoardMiscString(0x6c, "from this ship.");
         NovaHud_ShowOverlayMessage(
             state, overlay, static_cast<std::uint64_t>(0xfa));
-        QueueUiSound(state, 4, 8);
+        PlayTransitionCue(audio, state, 4, 8);
       } else if ((mission.ship_goal == 2 || mission.ship_goal == 5) &&
                  (mission_flags & 0x0001U) != 0U &&
                  mission.target_ship_count == 1) {
@@ -746,7 +769,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
           NovaHud_ShowOverlayMessage(
               state, overlay, static_cast<std::uint64_t>(0xfa));
         }
-        QueueUiSound(state, 4, 8);
+        PlayTransitionCue(audio, state, 4, 8);
         mission.goal_counter_b =
             static_cast<std::int16_t>(mission.goal_counter_b + 1);
         target.ai_maneuver_timer_ms = 100.0F;
@@ -764,7 +787,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
     NovaLog::Info("board: target slot {} ({}) denied — crew 0",
                   target_slot,
                   target_class->display_name);
-    QueueUiSound(state, 3, 1);
+    PlayTransitionCue(audio, state, 3, 1);
     ShowBoardingOverlay(state, 0x82); // "You can't board this ship."
     return;
   }
@@ -848,7 +871,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
     // Ghidra 0x00415ea0: top the carrier bay back up and deactivate the
     // recovered hull.
     NovaShip_RecoverCarriedShipToBay(state, target);
-    QueueUiSound(state, 4, 8);
+    PlayTransitionCue(audio, state, 4, 8);
     ShowPostHitOverlay(state, overlay_entry);
   };
 
@@ -896,7 +919,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
               state.inventory.cargo_bins[bin] + target.cargo_bins[bin]);
         }
         state.InvalidateDerivedStatCaches();
-        QueueUiSound(state, 4, 8);
+        PlayTransitionCue(audio, state, 4, 8);
         ShowPostHitOverlay(state, 0x7f); // "Escort repaired."
         handled = true;
       }
@@ -1448,26 +1471,6 @@ void DrawBoardWindow(SdlPlatform &platform,
 
   // Option buttons.
   DrawBoardOptionButtons(platform, font_cache, art, buttons, options, hovered);
-}
-
-// Plays a transition-table cue directly through the flight-loop-owned audio
-// device (the modal owns no device). Mirrors NovaAudio_QueueCenteredSound
-// on g_transition_sound_handle_table[index] with one voice at the supplied
-// allocator priority; index 2 = confirm/taken, 3 = denial/error.
-void PlayTransitionCue(SdlAudio &audio,
-                       GameState &state,
-                       std::int16_t index,
-                       std::int16_t priority_width = 1) {
-  EnsureTransitionSounds(state);
-  if (index < 0 ||
-      index >= static_cast<std::int16_t>(state.transition_sounds.size())) {
-    return;
-  }
-  const auto &sound = state.transition_sounds[static_cast<std::size_t>(index)];
-  if (!sound.has_value()) {
-    return;
-  }
-  audio.Play(*sound, 1.0F, 1.0F, 150 + index, priority_width);
 }
 
 void BoardShowOverlay(GameState &state,
