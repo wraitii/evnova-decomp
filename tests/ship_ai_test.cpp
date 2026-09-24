@@ -1221,6 +1221,168 @@ TEST_CASE("warship behavior leaves state 6 once no fighters remain") {
   CHECK(ship.ai_state_code == 6);
 }
 
+// Behavior 0x04 idle scan: with no acquireable weapons the primary-acquire
+// pass bails early, so the interceptor's own same-system random scan selects a
+// contact, caches it in +0x90, and enters state 7.
+TEST_CASE("interceptor behavior scans and caches its target") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+  // Keep class 0 off the Secondary Flags 0x0080 ammo-retreat arm so the scan
+  // result survives to the end of the supervisor.
+  state.scenario.ships[0].flags_secondary &=
+      static_cast<std::uint16_t>(~0x0080U);
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.armor_points = 100.0F;
+  state.player.shield_points = 100.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = -1;
+  ship.pers_def_slot = -1;
+  ship.mission_fleet_slot = -1;
+  ship.ai_behavior_code = 4;
+  ship.ai_state_code = 0;
+  ship.primary_target_ship_slot = -1;
+  ship.ai_cached_target_ship_slot = -1;
+  ship.ai_maneuver_timer_ms = 0.0F;
+  ship.armor_points = 1000.0F;
+  // No stocked weapons -> Weapon_ClassifyShipWeaponAmmoReadiness bucket 2, so
+  // Ship_AcquirePrimaryTargetForShip returns without a target.
+  ship.npc_weapon_count_by_class.fill(0);
+
+  for (int i = 0; i < 8; ++i) {
+    const int candidate = NovaShip_AllocateShipSlot(state, 0, 0);
+    REQUIRE(candidate > 0);
+    game::Ship &other = state.ShipAt(static_cast<std::size_t>(candidate));
+    other.current_system_id = 0;
+    other.ai_behavior_code = 1;
+    other.armor_points = 100.0F;
+    other.shield_points = 100.0F;
+  }
+
+  game::NovaAi_UpdateBehavior0x04(state, ship);
+  CHECK(ship.primary_target_ship_slot != -1);
+  CHECK(ship.ai_cached_target_ship_slot == ship.primary_target_ship_slot);
+  CHECK(ship.ai_state_code == 7);
+}
+
+// Behavior 0x04 cached-target maintenance (+0x90): an inactive cached slot is
+// dropped, an active one is kept.
+TEST_CASE("interceptor drops an inactive cached target") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+  state.player.is_active = false;
+
+  const int slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.faction_or_government_id = -1;
+  ship.ai_behavior_code = 4;
+  ship.ai_state_code = 2; // outside the 0/1/0x14 acquisition arm
+  ship.primary_target_ship_slot = -1;
+  ship.armor_points = 1000.0F;
+  ship.ai_cached_target_ship_slot = 5; // inactive slot
+
+  game::NovaAi_UpdateBehavior0x04(state, ship);
+  CHECK(ship.ai_cached_target_ship_slot == -1);
+
+  const int other_slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(other_slot > 0);
+  ship.ai_cached_target_ship_slot = static_cast<std::int16_t>(other_slot);
+  game::NovaAi_UpdateBehavior0x04(state, ship);
+  CHECK(ship.ai_cached_target_ship_slot == other_slot);
+}
+
+// Behavior 0x04 player challenge: the overlay only fires when a carried active
+// mission's ScanMask intersects the interceptor government's and no message is
+// already showing.
+TEST_CASE("interceptor challenge overlay gates on a matching carried mission") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+  REQUIRE(!state.scenario.governments.empty());
+  state.scenario.governments[0].scan_mask = 1;
+  state.scenario.ships[0].display_name = "Interceptor";
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.ship_name = "Testbed";
+
+  const int slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.faction_or_government_id = 0;
+  ship.ship_class_id = 0;
+
+  state.hud_overlay.active = false;
+  game::NovaAi_ShowInterceptorChallengeIfEligible(state, ship);
+  CHECK_FALSE(state.hud_overlay.active);
+  CHECK(state.pending_ui_sounds.empty());
+
+  state.active_missions[0].carrying_resources = true;
+  state.active_missions[0].scan_mask = 1;
+  state.active_mission_runtime_flags[0].is_active = true;
+  game::NovaAi_ShowInterceptorChallengeIfEligible(state, ship);
+  CHECK(state.hud_overlay.active);
+  CHECK(state.hud_overlay.message.find("Interceptor") != std::string::npos);
+  CHECK(state.hud_overlay.message.find("Testbed") != std::string::npos);
+  REQUIRE(state.pending_ui_sounds.size() == 1);
+  CHECK(state.pending_ui_sounds.back().transition_index == 4);
+}
+
+// Behavior 0x04 uses government Flags 0x0100 for the low-shield retreat where
+// behavior 0x03 uses 0x0010; only the former should disengage.
+TEST_CASE("interceptor low-shield retreat uses government Flags 0x0100") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+  REQUIRE(!state.scenario.governments.empty());
+  REQUIRE(state.scenario.systems.size() > 0);
+  state.scenario.ships[0].flags_secondary &=
+      static_cast<std::uint16_t>(~0x0080U);
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = 0;
+  state.player.armor_points = 100.0F;
+  state.player.shield_points = 100.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = 0;
+  ship.ship_class_id = 0;
+  ship.ai_behavior_code = 4;
+  ship.ai_state_code = 4;
+  ship.primary_target_ship_slot = 0;
+  ship.armor_points = 1000.0F;
+  ship.shield_points = 0.0F;
+  // Odds above MaxOdds (0) so the retreat predicate is satisfiable.
+  ship.ai_odds_score = 1.0F;
+
+  state.scenario.governments[0].max_odds = 0.0F;
+  state.scenario.systems[0].reinf_fleet = -1;
+
+  // Flags 0x0010 is the behavior-0x03 retreat bit: no disengage here.
+  state.scenario.governments[0].flags_primary = 0x0010;
+  game::NovaAi_UpdateBehavior0x04(state, ship);
+  CHECK(ship.ai_state_code == 4);
+
+  // Flags 0x0100 is the interceptor's own retreat bit.
+  state.scenario.governments[0].flags_primary = 0x0100;
+  game::NovaAi_UpdateBehavior0x04(state, ship);
+  CHECK(ship.ai_state_code == 3);
+}
+
 // ---------------------------------------------------------------------------
 // Ship_ApplyShipAiControls (0x00408150) combat/formation mode fidelity.
 // ---------------------------------------------------------------------------

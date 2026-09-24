@@ -529,9 +529,15 @@ struct Ship {
   // the evasive-break, and mode 0x10 steers at this value until it aligns and
   // drops back to mode 0x6.
   std::int16_t ai_evasive_heading_deg = 0; // +0x8E (Provisional)
-  // Ghidra ShipState raw short at +0x90 (unnamed): the travel target cache
-  // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810) clears to -1.
-  std::int16_t travel_target_cache = -1;         // +0x90 (Provisional)
+  // Per-ship cached target ship slot (Ghidra ShipState +0x90, untyped in the
+  // original DB). Cleared to -1 at ship init and by
+  // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810). Behavior 0x04
+  // Interceptor (0x00403de0) invalidates it when the slot goes inactive,
+  // excludes it from its random same-system target scan, and records the newly
+  // selected target here; Ship_UpdateShipAiState (0x00405590) forces 0 (the
+  // player) in its pers_def_slot 0x3ff Shareware-Enforcer arm. Name is
+  // provisional: the original DB field was untyped.
+  std::int16_t ai_cached_target_ship_slot = -1;  // +0x90 (Provisional)
   std::int16_t jump_destination_stellar_id = -1; // +0x92
   // Ghidra ShipState +0x94 (named jump_destination_system_id in the DB): the
   // system the ship is jumping toward / last jumped in from; -1 none, -2 the

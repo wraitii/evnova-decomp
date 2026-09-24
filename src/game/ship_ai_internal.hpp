@@ -61,6 +61,12 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
                                std::uint32_t now_ms);
 void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship);
 void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship);
+void NovaAi_UpdateBehavior0x04(GameState &state, Ship &ship);
+
+// Ghidra 0x00403de0 inline block: the interceptor's player-name challenge
+// overlay, shown when a carried mission matches the interceptor government's
+// ScanMask. Exposed for tests.
+void NovaAi_ShowInterceptorChallengeIfEligible(GameState &state, Ship &ship);
 
 [[nodiscard]] bool
 WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank);
