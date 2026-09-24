@@ -1113,10 +1113,10 @@ void NovaAi_UpdateShipAI(GameState &state,
         NovaAi_UpdateBehavior0x03(state, ship);
       }
     } else if (behavior == 4) {
-      // Ship_UpdateShipAiBehavior0x04_Interceptor (0x00403de0): reuse the
-      // reconstructed hostile path so an existing target is also promoted into
-      // state 4.
-      NovaAi_UpdateBehavior0x03(state, ship);
+      // Ship_UpdateShipAiBehavior0x04_Interceptor (0x00403de0): the
+      // interceptor supervisor proper (target-cache maintenance, same-system
+      // random scan, flags_primary 0x0100 retreat).
+      NovaAi_UpdateBehavior0x04(state, ship);
     } else if (behavior > 4) {
       // Ship_UpdateEscortAI (0x004048a0), now ported as
       // NovaAi_UpdateEscortAI (replaces the former force-state-10
@@ -2349,7 +2349,7 @@ void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
   ship.ai_state_code = 0;
   ship.ai_control_mode = 0;
   ship.jump_destination_stellar_id = -2;
-  ship.travel_target_cache = -1;
+  ship.ai_cached_target_ship_slot = -1;
   ship.escort_command_code = -1;
   ship.swarm_mate_ship_slot = -1;
   ship.resolved_squad_leader_ship_slot = -1;

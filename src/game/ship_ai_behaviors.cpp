@@ -1531,6 +1531,296 @@ void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
   }
 }
 
+// Ghidra 0x00403de0 inline block. The interceptor challenges the player by
+// name when a carried active mission's ScanMask intersects its government's
+// and no overlay is already showing. Builds "<class>:  <player>, <taunt>."
+// from STR# 0x7d2 0x17d..0x17f and queues voice cue 4 (the same cue as the
+// generic intercept taunt).
+void NovaAi_ShowInterceptorChallengeIfEligible(GameState &state, Ship &ship) {
+  if (state.hud_overlay.active) {
+    return;
+  }
+  const Government *govt =
+      ship.faction_or_government_id == -1
+          ? nullptr
+          : state.scenario.GovernmentByIndex(ship.faction_or_government_id);
+  if (govt == nullptr) {
+    return;
+  }
+  bool mission_match = false;
+  for (std::size_t i = 0; i < state.active_missions.size(); ++i) {
+    if (state.active_mission_runtime_flags[i].is_active &&
+        state.active_missions[i].carrying_resources &&
+        (state.active_missions[i].scan_mask & govt->scan_mask) != 0) {
+      mission_match = true;
+      break;
+    }
+  }
+  if (!mission_match) {
+    return;
+  }
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    return;
+  }
+  const std::uint16_t entry =
+      static_cast<std::uint16_t>(RandomBelow(state, 3)) + 0x17d;
+  const std::string taunt = NovaHud_LoadStringEntry(0x7d2, entry).value_or("");
+  std::string message = ship_class->display_name + ":  " +
+                        state.player.ship_name + ", " + taunt + ".";
+  NovaHud_ShowOverlayMessage(
+      state, std::move(message), 0xe0, 0xe0, 0xe0, 0x190U);
+  state.pending_ui_sounds.push_back({4, 1});
+}
+
+// Ghidra 0x00403de0 Ship_UpdateShipAiBehavior0x04_Interceptor. Interceptor
+// supervisor: government hold/aggression window, cached-target maintenance,
+// the state-0/1/0x14 idle acquisition and same-system random scan that enters
+// state 7 (challenging the player), the flags_primary 0x0100 low-shield
+// retreat, the state-4 loss-of-target and ammo-retreat arms, and the state-7
+// cloak revalidation/restore. The pers_def_slot 0x3ff Shareware-Enforcer arm
+// is intentionally not reproduced: Registration_SpawnLicenseEnforcer
+// (0x0046ac50) is unported and the clean-room models a registered game, so the
+// branch is unreachable and its shareware day-counter retarget is trial-only.
+void NovaAi_UpdateBehavior0x04(GameState &state, Ship &ship) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
+    return;
+  }
+  if (ship.ai_state_code == 0x16) {
+    return;
+  }
+
+  // TODO(decomp(0x00403de0)) skipped: the pers_def_slot 0x3ff Shareware
+  // Enforcer arm (shareware day-counter retarget). Registration_SpawnLicense-
+  // Enforcer (0x0046ac50) is unported and the clean-room models a registered
+  // game, so the branch is unreachable.
+
+  if (ship.ai_state_code == 9 || ship.ai_state_code == 0xf) {
+    return;
+  }
+
+  const auto ship_government = [&state, &ship]() -> const Government * {
+    return ship.faction_or_government_id == -1
+               ? nullptr
+               : state.scenario.GovernmentByIndex(
+                     ship.faction_or_government_id);
+  };
+
+  // Government hold window [-900, 0]: a non-threat-policy government drops a
+  // player-squad threat; a government with Flags 0x0004 instead turns hostile
+  // to an engageable player.
+  if (ship.faction_or_government_id != -1 &&
+      ship.ai_station_hold_timer > -900.0F &&
+      ship.ai_station_hold_timer <= 0.0F) {
+    if (const Government *govt = ship_government(); govt != nullptr) {
+      if ((govt->flags_primary & 0x0004U) == 0U) {
+        if ((govt->flags_primary & 0x0040U) != 0U &&
+            NovaTargeting_IsThreatToPlayerSquad(state, ship)) {
+          ship.primary_target_ship_slot = -1;
+          ship.ai_state_code = 0;
+        }
+      } else if (!NovaTargeting_IsThreatToPlayerSquad(state, ship) &&
+                 NovaAiShip_CanEngageTargetUnderCloakRules(
+                     state, state.player, ship)) {
+        NovaAi_SetShipHostileToPlayer(state, ship);
+        ship.primary_target_ship_slot = 0;
+        ship.ai_hostility_accumulator = 1;
+      }
+    }
+  }
+
+  // Threat escalation: live hostility with a target attacks unless already
+  // retreating/combat-held (3/7/9/0xf) or holding station.
+  if (ship.ai_hostility_accumulator > 0 &&
+      ship.primary_target_ship_slot != -1 && ship.ai_state_code != 3 &&
+      ship.ai_state_code != 7 && ship.ai_state_code != 9 &&
+      ship.ai_state_code != 0xf && ship.ai_station_hold_timer <= 0.0F) {
+    ship.ai_state_code = 4;
+  }
+
+  // Drop the cached target when its slot has gone inactive.
+  for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+    if (!state.ShipAt(slot).is_active &&
+        static_cast<std::int16_t>(slot) == ship.ai_cached_target_ship_slot) {
+      ship.ai_cached_target_ship_slot = -1;
+    }
+  }
+
+  // States 0/1/0x14 with no manoeuvre hold: acquire a contact, or (when
+  // targetless) run the interceptor's random same-system scan, then fall back
+  // to travel/jump selection.
+  const std::int16_t state_code = ship.ai_state_code;
+  if ((state_code == 0 || state_code == 1 || state_code == 0x14) &&
+      ship.ai_maneuver_timer_ms <= 0.0F) {
+    if (ship.primary_target_ship_slot == -1) {
+      NovaAi_AcquirePrimaryTarget(state, ship);
+      if (ship.primary_target_ship_slot != -1 &&
+          ship.ai_station_hold_timer <= 0.0F) {
+        ship.ai_state_code = 4;
+      }
+    } else if (ship.ai_station_hold_timer <= 0.0F &&
+               state.SlotInRange(
+                   static_cast<std::size_t>(ship.primary_target_ship_slot)) &&
+               state
+                   .ShipAt(
+                       static_cast<std::size_t>(ship.primary_target_ship_slot))
+                   .is_active &&
+               ship.ai_hostility_accumulator > 0) {
+      ship.ai_state_code = 4;
+    }
+
+    if (ship.primary_target_ship_slot == -1) {
+      const auto is_scan_candidate = [&state, &ship](std::size_t slot) {
+        if (slot == static_cast<std::size_t>(ship.ship_instance_id)) {
+          return false;
+        }
+        const Ship &other = state.ShipAt(slot);
+        return other.is_active &&
+               static_cast<std::int16_t>(slot) !=
+                   ship.ai_cached_target_ship_slot &&
+               other.ai_behavior_code != 4 &&
+               NovaAiShip_CanEngageTargetUnderCloakRules(state, other, ship) &&
+               ship.current_system_id == other.current_system_id;
+      };
+      int candidate_count = 0;
+      for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+        if (is_scan_candidate(slot)) {
+          ++candidate_count;
+        }
+      }
+      // The original re-rolls until it hits an eligible slot; the candidate
+      // count guarantees one exists and the bound guards the rejection loop
+      // against malformed state.
+      if (candidate_count > 0) {
+        for (int draw = 0; draw < 0x100 && ship.primary_target_ship_slot == -1;
+             ++draw) {
+          const auto pick = static_cast<std::size_t>(RandomBelow(state, 0x40));
+          if (!is_scan_candidate(pick)) {
+            continue;
+          }
+          ship.primary_target_ship_slot = static_cast<std::int16_t>(pick);
+          ship.ai_cached_target_ship_slot = static_cast<std::int16_t>(pick);
+          ship.ai_state_code = 7;
+          if (pick == 0) {
+            NovaAi_ShowInterceptorChallengeIfEligible(state, ship);
+          }
+        }
+      }
+    }
+
+    if (ship.primary_target_ship_slot == -1 && ship.ai_state_code == 0) {
+      ship.jump_destination_stellar_id = -2;
+      const std::int16_t stellar_id = NovaAi_SelectRandomAdjacentTravelStellar(
+          state, ship, /*strict_mode=*/false, /*unrestricted_only=*/true);
+      if (stellar_id == -1) {
+        if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+          NovaAi_EnterState2ClearPrimaryTarget(state, ship);
+        } else {
+          ship.ai_state_code = 6;
+        }
+      } else {
+        const Stellar *stellar = state.scenario.Stellar(stellar_id);
+        // Original quirk preserved: an active destination yields state 6.
+        if (stellar != nullptr && NovaTargeting_IsStellarActive(*stellar)) {
+          ship.ai_state_code = 6;
+        } else {
+          ship.ai_secondary_target_slot = stellar_id;
+          ship.ai_state_code = 1;
+        }
+      }
+    }
+  }
+
+  // Low-shield government retreat (Flags 0x0100): once engaged and below half
+  // shields, a fleet leader whose odds exceed MaxOdds disengages, with the
+  // threshold doubled while this system's allied reinforcements are still on
+  // cooldown.
+  if (ship.primary_target_ship_slot != -1 &&
+      ship.faction_or_government_id != -1 && ship.ai_state_code == 4) {
+    if (const Government *govt = ship_government();
+        govt != nullptr && (govt->flags_primary & 0x0100U) != 0U) {
+      const double max_shield = NovaAi_ComputeMaxShieldPoints(state, ship);
+      if (static_cast<double>(ship.shield_points) < max_shield * 0.5 &&
+          ship.ai_odds_score >= 0.0F) {
+        const System *sys = state.scenario.System(
+            static_cast<std::int16_t>(ship.current_system_id + 0x80));
+        if (sys != nullptr && sys->reinf_fleet >= 0) {
+          const FleetDef *fleet = state.scenario.Fleet(
+              static_cast<std::int16_t>(sys->reinf_fleet + 0x80));
+          const bool allied =
+              fleet != nullptr && fleet->government_id >= 0 &&
+              NovaGovernment_AreGovtsAllied(state.scenario,
+                                            ship.faction_or_government_id,
+                                            fleet->government_id);
+          bool retreat = false;
+          if (allied) {
+            const float cooldown =
+                state.reinforcement_countdown[static_cast<std::size_t>(
+                    ship.current_system_id)];
+            retreat = cooldown <= 0.0F
+                          ? govt->max_odds < ship.ai_odds_score
+                          : govt->max_odds * 2.0F < ship.ai_odds_score;
+          } else {
+            retreat = govt->max_odds < ship.ai_odds_score;
+          }
+          if (retreat) {
+            ship.ai_state_code = 3;
+          }
+        } else if (govt->max_odds < ship.ai_odds_score) {
+          ship.ai_state_code = 3;
+        }
+      }
+    }
+  }
+
+  // Loss of an attack target: disabled with no fireable non-secondary weapon.
+  if (ship.primary_target_ship_slot != -1 && ship.ai_state_code == 4) {
+    const auto target = static_cast<std::size_t>(ship.primary_target_ship_slot);
+    if (state.SlotInRange(target) &&
+        NovaAiShip_IsDisabled(state, state.ShipAt(target)) &&
+        !NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship)) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_state_code = 0;
+    }
+  }
+
+  // Ammo depletion: a secondary-ammo hull whose loadout is not fully ready
+  // retreats unless already in a retreat/standoff state.
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class != nullptr && (ship_class->flags_secondary & 0x0080U) != 0U &&
+      NovaWeapon_ClassifyAmmoReadiness(state, ship) != 0 &&
+      ship.ai_state_code != 2 && ship.ai_state_code != 3 &&
+      ship.ai_state_code != 0xb) {
+    ship.ai_state_code = 3;
+  }
+
+  // State 7: a target no longer engageable under cloak rules is dropped.
+  if (ship.primary_target_ship_slot != -1 && ship.ai_state_code == 7) {
+    const auto target = static_cast<std::size_t>(ship.primary_target_ship_slot);
+    if (state.SlotInRange(target) && !NovaAiShip_CanEngageTargetUnderCloakRules(
+                                         state, state.ShipAt(target), ship)) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+    }
+  }
+
+  // State 7 reacquisition: if the scan clears the target, restore the cached
+  // one so the interceptor keeps pursuing.
+  const std::int16_t saved_primary = ship.primary_target_ship_slot;
+  if (saved_primary != -1 && ship.faction_or_government_id != -1 &&
+      ship.ai_state_code == 7) {
+    NovaAi_AcquirePrimaryTarget(state, ship);
+    if (ship.primary_target_ship_slot == -1) {
+      ship.primary_target_ship_slot = saved_primary;
+      ship.ai_state_code = 7;
+    }
+  }
+}
+
 // Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03_WarshipCapture. The
 // plunder-flavored variant of hostile behavior 0x03, selected by the
 // dispatcher when the ship's faction has government flags_primary 0x1000
