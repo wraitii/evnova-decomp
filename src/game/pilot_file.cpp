@@ -59,6 +59,11 @@ void WriteBoundedCString(std::vector<std::byte> &bytes,
   bytes[offset + count] = std::byte{0};
 }
 
+// @port 0x004C7D40 100%
+// Ghidra 0x004c7d40 PilotFile_RecordLastPilotPath: writes the NUL-terminated
+// pilot path to EVNova.ini [130] S4 ("Pilots:Last Pilot"); called after a
+// successful save and load. The port writes the marker beside the save file
+// via PilotFileSaveDirectory.
 [[nodiscard]] bool
 RecordLastPilotPath(const std::filesystem::path &marker_dir,
                     const std::filesystem::path &pilot_path) {
@@ -110,6 +115,7 @@ void WriteU32(std::vector<std::byte> &out,
   std::memcpy(out.data() + offset, &v, sizeof(v));
 }
 
+// @port 0x008725B0 100%
 // Ghidra 0x008725b0 PilotSave_DecodeBlock. Plain blocks (first u16 < 0x800)
 // are left alone. Otherwise it tail-calls the symmetric XOR transform at
 // 0x0046f960 with (data, size, 0xb36a210f).
@@ -163,6 +169,7 @@ PilotFile PilotFile::Fresh() {
   return fresh;
 }
 
+// @port 0x004CD4B0 75% gameplay
 std::optional<CharacterTemplate>
 CharacterTemplate_Read(std::string_view block_key) {
   // Ghidra 0x004cd4b0 PilotData_InitializePlayerState (param_2 != 0): reads the
@@ -582,6 +589,16 @@ PilotFileStellarIndexFromResourceId(std::int16_t stellar_resource_id) {
              : stellar_resource_id;
 }
 
+// @port 0x004C7DD0 92% license
+// Ghidra 0x004c7dd0 PilotFile_SaveGameCore (row also covers the serialize
+// side): covers the block1/block2 offsets and framing, including active
+// escorts/fighters, përs active/visible flags, paint RGB5, date affixes,
+// missions, world state, nickname, and ship-name trailer. Active missions
+// retain the complete opaque 0x8e6 payload while modeled counters, runtime
+// DateTimeRec words, and all six script buffers are overlaid; block2 +0x2006
+// and +0x5efe are zero-filled because the original explicitly clears them.
+// Remaining: license-seed class-id behavior. ShipState +0x72 (active secondary
+// bank) is intentionally not written.
 std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
                                           std::int16_t jump_dest_stellar) {
   std::vector<std::byte> block1(kBlock1Size, std::byte{0});
@@ -1211,6 +1228,15 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
   return repairs ? PilotLoadError::kRepairsApplied : PilotLoadError::kOk;
 }
 
+// @port 0x004C7DB0 90% license
+// Ghidra 0x004c7db0 PilotFile_SaveGame -> 0x004c7dd0 PilotFile_SaveGameCore:
+// builds <nova_files>/<pilot>.plt, serializes the tracked state, writes it,
+// and records the last-pilot path. Remaining: the original license/runtime
+// guards and anti-piracy license-seed class-id zeroing are deliberately not
+// reconstructed. The jump/travel destination is rebased to the 0-based
+// g_stellar_defs index the original expects. Call sites ported: new-game
+// initial save, the launch tail (also on quit-from-dock), and the post-respawn
+// Strict-Play save.
 bool PilotFileSaveGame(const std::filesystem::path &pilots_dir,
                        const GameState &state,
                        std::int16_t jump_dest_stellar) {
@@ -1239,6 +1265,19 @@ bool PilotFileSaveGame(const std::filesystem::path &pilots_dir,
   return RecordLastPilotPath(pilots_dir, path);
 }
 
+// @port 0x004CB260 99% correctness,divergence
+// Ghidra 0x004cb260 PilotFile_LoadSave: file I/O, retail XOR decode, name/path
+// restore, definition repairs, inventory/world/mission/fleet state, përs
+// active/visible gates, paint RGB5, date affixes, mission deadline/display-
+// name/count/rearm transient rebuild, last-pilot marker, final availability/
+// discovery refresh, and player/escort transient reset are ported. The active
+// secondary bank (ShipState +0x72) is deliberately not restored: this loader
+// never touches it, so PilotFileApply preserves the pre-load
+// Ship_ResetPlayerShipState -1. block1+0x00 is read as a 0-based g_stellar_defs
+// index. Remaining: optional PilotDebug_WritePilotLog only.
+// DIVERGENCE(original): converted big-endian Mac pilot payloads and Pascal
+// nickname auto-detection are accepted by the Windows-format port; the
+// original Mac build read them natively.
 PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
                                  GameState &state) {
   // Ghidra 0x004cb260 PilotFile_LoadSave. Reads the whole file, restores the
@@ -1551,12 +1590,18 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   return result;
 }
 
+// @port 0x004CD030 90% correctness
+// Ghidra 0x004cd030 PilotFile_ProbeExists: reimplemented as a filesystem
+// is_regular_file probe (the original opens the file); used by the save tests.
 bool PilotFileProbeExists(const std::filesystem::path &path) {
   // Ghidra 0x004cd030: tries to open the file; nonzero when it exists.
   std::error_code ec;
   return std::filesystem::is_regular_file(path, ec);
 }
 
+// @port 0x004CD040 90% correctness
+// Ghidra 0x004cd040 PilotFile_Delete: probe-guarded remove, same guard
+// semantics as the original.
 void PilotFileDelete(const std::filesystem::path &path) {
   // Ghidra 0x004cd040: guarded by ProbeExists so only existing files are
   // touched (permadeath path).
@@ -1566,6 +1611,13 @@ void PilotFileDelete(const std::filesystem::path &path) {
   }
 }
 
+// @port 0x004CA120 90% gameplay
+// Ghidra 0x004ca120 PilotData_AutoresumeLastPilot: reads Last Pilot from the
+// SDL writable per-user preference path after staged startup loading; resolves
+// the saved path, runs the original pre-load NovaShip_ResetPlayerShipState, and
+// auto-activates only an exact-success load. Repaired (-0x2e) pilots are left
+// inactive for explicit Open Pilot handling. Remaining: reputation reset and
+// post-load region-event/mission reaction schedule reseeding.
 PilotLoadError PilotData_AutoresumeLastPilot(GameState &state) {
   const auto save_directory = PilotFileSaveDirectory();
   if (!save_directory) {
@@ -1593,6 +1645,11 @@ PilotLoadError PilotData_AutoresumeLastPilot(GameState &state) {
   return PilotFileLoadSave(path, state);
 }
 
+// @port 0x004CD290 80% gameplay
+// Ghidra 0x004cd290 PilotData_FindActivePilotName: scans the ch\x8ar archive
+// family (0x63688a72) in id order for flags bit 0 at block+0x132 (big-endian
+// u16) and returns that entry's registered name (stock: .Trader). Remaining:
+// EnsureBlockSize/registry-cache slice and the in-memory registry merge.
 std::string PilotData_FindActivePilotName() {
   // Ghidra 0x004cd290: scans the 0x63688a72 family in registry order; the
   // first entry with flags bit 0 set at block+0x132 donates its metadata

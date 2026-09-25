@@ -107,8 +107,11 @@ struct PilotTemplateEntry {
   return out;
 }
 
+// @port 0x004CD350 70% gameplay
 // Ghidra 0x004cd350 PilotData_ResolveStartType: the starting ship class from
 // the named character block (+4 minus 0x80; values < 0x80 resolve to class 0).
+// Remaining: the original's block grow/release and by-key access semantics are
+// not reproduced.
 [[nodiscard]] std::int16_t
 ResolveStartTypeFromTemplate(const std::string &template_name) {
   for (const auto &entry : EnumeratePilotTemplates()) {
@@ -148,6 +151,16 @@ struct NewPilotDraft {
   std::int16_t start_type_code = 0;
 };
 
+// @port 0x0048a7e0 75% gameplay,rng
+// One real divergence: the prefill/strip the original does in the caller
+// (Menu_RunNewGameFlow 0x00489da0 via NovaRandom_Range +
+// Resource_LoadStringEntry, then StripLeadingArticle/StripSubtitleSuffix at
+// 0x00489e0d-2a) is folded into this port and uses
+// std::uniform_int_distribution, so the RNG stream order can differ though the
+// STR# 0x80 name rows are the same. Deferrable approximations (no stock
+// observable): in-memory char registry merge not reconstructed
+// (pilot_file.hpp:222); ui_dialog owner-context/input-flush divergence
+// (ui_dialog.cpp:155-166);
 // Ghidra 0x0048a7e0 Menu_RunPilotSelectionDialog. DITL rows (1-based):
 // 4 = Strict Play checkbox (code 4), 8/9 = Full Name / Nickname edit texts
 // (prefilled from STR# 0x80 rows 1-3 / 4-6), 11 = Gender popup (MENU 0x1f4),
@@ -311,6 +324,11 @@ void Stub_LoadScenarioResourceTables(GameState &state, bool ship_animations) {
   state.system_reputation.assign(state.scenario.systems.size(), 0);
 }
 
+// @port 0x004B4220 10% gameplay
+// @port 0x004B4690 25% gameplay
+// Ghidra Game_ResetReputationAndAvailability (0x004b4220) and
+// Game_ResetNewGameState (0x004b4690) are only partially ported; their
+// control-bit/rating reset slices run inline in this stub.
 void Stub_ResetReputationAndWorldTables(GameState &state) {
   // Ghidra Game_ResetReputationAndAvailability (0x004b4220) and
   // Game_ResetNewGameState (0x004b4690). The latter zeroes the whole
@@ -517,12 +535,12 @@ void RecomputePlayerMeters(GameState &state) {
 }
 
 void ResetPlayerShipForNewGame(GameState &state) {
-  // Ghidra 0x004b3350 Ship_ResetPlayerShipState: fresh position/velocity,
-  // default class id, cleared targeting/travel/mission/AI fields and debuffs.
-  // The param_1!=0 fresh-game branch also seeds the player's starting credits
-  // to 10000 (g_ship_states->credits = 10000). Shield/armor/fuel are NOT
-  // finalized here: Menu_RunNewGameFlow recomputes them after the starting
-  // outfit counts are seeded (see RecomputePlayerMeters).
+  // Ghidra 0x004b3350 Ship_ResetPlayerShipState semantics; the param_1 != 0
+  // fresh-game branch seeds starting credits to 10000 (done here after the
+  // base reset). Shield/armor/fuel are recomputed later by
+  // RecomputePlayerMeters once the starting outfit counts are seeded. System
+  // placement is applied by PlacePlayerInStartSystem after the start system is
+  // picked.
   //
   // The system-dependent placement (start system, reinforcement timer, starmap
   // pan, spawn position) is applied later by PlacePlayerInStartSystem, after
@@ -706,7 +724,9 @@ void ResetStellarStrengthForNewGame(GameState &state) {
 
 } // namespace
 
-// Ghidra 0x004b3350 Ship_ResetPlayerShipState.
+// @port 0x004B3350 55% gameplay
+// Ghidra 0x004b3350 Ship_ResetPlayerShipState: fresh position/velocity,
+// default class id, cleared targeting/travel/mission/AI fields and debuffs.
 void NovaShip_ResetPlayerShipState(GameState &state) {
   // Ghidra 0x004b3350 does not overwrite g_player_ship_name. The selected
   // christening must survive this reset before the fresh pilot record is
@@ -766,6 +786,10 @@ void NovaNewPilot_ResetStellarStrengthForNewGame(GameState &state) {
   ResetStellarStrengthForNewGame(state);
 }
 
+// @port 0x00489d70 80% gameplay
+// TODO(decomp): remaining tail scopes (stellar hazard-marker
+// pass, live date-block copy, second PilotData_InitializePlayerState pass,
+// per-ship zeroing).
 bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                           GameState &state,
                           bool ship_animations,

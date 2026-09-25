@@ -167,6 +167,7 @@ bool NovaGovernment_DoGovtsShareClass(const ScenarioData &scenario,
   return false;
 }
 
+// @port 0x0046e860 95% gameplay
 // Ghidra 0x0046E860 Government_GetGovernmentPolicyFlag.
 bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
                                   std::int16_t govt_id,
@@ -545,6 +546,7 @@ void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
   }
 }
 
+// @port 0x0046f100 100%
 // Ghidra 0x0046f100 Government_IsShipGovernmentDerelict.
 bool NovaGovernment_IsGovernmentDerelict(const ScenarioData &scenario,
                                          std::int16_t government_id) {

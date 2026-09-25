@@ -52,6 +52,20 @@ SpriteMask SpriteMask_FromRgba(std::span<const std::uint8_t> rgba_pixels,
   return mask;
 }
 
+// @port 0x00471800 60% rendering
+// Ghidra 0x00471800 BlitPixie_CopyRectRegionBetweenFrames: the boolean overlap
+// query is ported in SpriteMask_TestOverlap below; the original's shared
+// rectangle-size/stride assertions and pixel-stride shift are subsumed by the
+// RGBA masks. The name's blit origin is not reproduced (it is a collision
+// query).
+// @port 0x00472190 50% rendering
+// Ghidra 0x00472190 SpriteRleCommandStream_SkipToRowCount: the RLE run/row
+// walk is replaced by direct opaque-bitmap iteration in SpriteMask_TestOverlap.
+// @port 0x00475c80 90% gameplay
+// Ghidra 0x00475c80 Sprite_TestPixelMaskOverlap: clean-room
+// SpriteMask_TestOverlap intersects the two anchored frame bounds and returns
+// true when any pixel is opaque in both. TODO(decomp): the original's fatal
+// missing-prepared-frame/mask assertions are not reproduced.
 bool SpriteMask_TestOverlap(const SpriteMask &a,
                             float a_world_x,
                             float a_world_y,
@@ -91,6 +105,7 @@ bool SpriteMask_TestOverlap(const SpriteMask &a,
   return false;
 }
 
+// @port 0x00475be0 90% gameplay
 bool SpriteMask_TestBoundingCircleOverlap(int a_width,
                                           int a_height_ignored,
                                           float a_world_x,

@@ -104,9 +104,12 @@ void DrawDialogFilledText(SdlPlatform &platform,
   SDL_SetRenderClipRect(platform.renderer(), nullptr);
 }
 
-// Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts: composes the news-window
-// texts shown by the Bar's Holovid button. Headline: a random STR# 0x1fa4
-// (Commercials) entry, falling back to STR# 0x7d2 0xbe when the pool is
+// @port 0x0047d600 85% ui
+// Divergence: the eligible disaster and crön slot subsets are built explicitly
+// instead of rejection-sampling the slot tables, and RNG draws use
+// GameState.rng. Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts: composes the
+// news-window texts shown by the Bar's Holovid button. Headline: a random STR#
+// 0x1fa4 (Commercials) entry, falling back to STR# 0x7d2 0xbe when the pool is
 // missing. Body, in precedence order: (1) the disaster report for an active
 // öops record (preferring one at the current stellar, or a target -2 record,
 // else any active one) composed from the STR# 0x7d2 fragments and the STR#
@@ -152,6 +155,7 @@ void NovaBar_ComposeNewsTexts(GameState &state,
   }
 }
 
+// @port 0x0047d180 80% ui
 // Ghidra 0x0047d180 NovaUi_RunTravelNewsWindow + 0x0047d370
 // NovaUi_DrawTravelNewsWindow (inline): the Holovid window (DLOG 0x3f6). The
 // news PICT is the destination government's news_pic_id, else the generic
@@ -159,6 +163,7 @@ void NovaBar_ComposeNewsTexts(GameState &state,
 // bottom-180) and the body panel at (left+10, top+170, right-4, bottom-10);
 // both are the original's filled+inverted rects, i.e. a black panel with
 // white wrapped Geneva-12 text. The input handler
+// @port 0x0047d560 90% ui
 // (NovaUi_HandleTravelNewsWindowInput 0x0047d560) runs inline in the modal loop
 // below: Esc/Return (key codes 0xd/0x1b) close with action 1, a primary click
 // inside the window rect closes, and the per-frame draw covers its action-6
@@ -264,7 +269,17 @@ std::string BarCommodityName(std::int16_t commodity) {
       .value_or("?");
 }
 
-// Ghidra 0x0047c8e0 NovaUi_RunTravelDestinationServicesWindow.
+// @port 0x0047c8e0 65% ui
+// TODO(decomp): icon glyphs, the Communications frame and the desc placeholder
+// expansion (<=1) still mocked; the gambling window (0x0047dc50,
+// NovaUi_RunBarGamblingWindow) remains unported. Ghidra 0x0047c8e0
+// NovaUi_RunTravelDestinationServicesWindow.
+// @port 0x0047cfe0 75% rendering
+// @port 0x004A2810 70% ui
+// @port 0x004A26E0 70% ui
+// Ghidra 0x004a2810 NovaUi_DrawTravelDestinationServicesButtons and 0x004a26e0
+// NovaUi_HandleTravelDestinationServicesButtons: the six-slot button strip
+// draw, hit-test and hover highlight run inline in RunBarDialog below.
 LandedExit RunBarDialog(SdlPlatform &platform,
                         SdlAudio &audio,
                         GameState &state,
@@ -399,8 +414,10 @@ LandedExit RunBarDialog(SdlPlatform &platform,
     // (DrawContext_DrawPascalStringInFilledRect 0x004bcd30 via the bar draw
     // 0x0047cfe0).
     DrawDialogFilledText(platform, font_cache, prompt_rect, prompt_text);
-    // The six-button strip. Hover highlights a slot the way
-    // 0x004a26e0's hit-test loop re-draws with the pressed art.
+    // Hit-test + hover highlight (0x004a26e0): slots 0/1/2/4 dispatch actions
+    // 1/2/3/5, inert slots redraw only, hovered enabled slot draws pressed art.
+    // TODO(decomp): the original's click-and-hold tracking loop (FUN_004b68f0
+    // pump) is approximated by per-event hit tests.
     const SDL_FPoint mouse = platform.mouse_position();
     constexpr SDL_Color kLabel{255, 255, 255, 255};
     constexpr SDL_Color kLabelGrey{128, 128, 128, 255};
@@ -604,6 +621,7 @@ NovaLanded_BarDescriptionId(std::int16_t stellar_id) {
   return static_cast<std::uint16_t>((stellar_id - kResourceIdBase) + 10000);
 }
 
+// @port 0x0047d370 95% ui
 // Ghidra 0x0047d370 NovaUi_DrawTravelNewsWindow panel geometry.
 NewsTextPanels NovaBar_NewsTextPanelRects(float window_w, float window_h) {
   return NewsTextPanels{

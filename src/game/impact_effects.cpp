@@ -180,6 +180,9 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
 
 // @port 0x004274d0 85% verify
 // Ghidra Weapon_SpawnWeaponImpactParticleBurst (0x004274d0).
+// @port 0x0047b960 80% rendering
+// TODO(decomp): the original free-head recycling into a 100000-slot pool is not
+// modelled;
 void NovaEffects_SpawnWeaponImpactParticleBurst(GameState &state,
                                                 float x,
                                                 float y,
@@ -348,6 +351,7 @@ void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
 // logical calls so the discrete lifetime/integration order remains faithful
 // while staying independent of the port's display refresh rate.
 
+// @port 0x0047c800 95% cadence
 // Ghidra SWParticles_Update (0x0047c800).
 void NovaEffects_TickSwParticles(GameState &state, float elapsed_ticks) {
   state.sw_particle_tick_accumulator +=

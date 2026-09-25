@@ -2016,6 +2016,7 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
   }
 }
 
+// @port 0x004AB970 40% rng
 // Ghidra 0x004ab970 NovaRandom_Reseed. The original reseeds the global LCG
 // with the current millisecond tick count at session bootstrap; we reseed the
 // clean-room mt19937 with an unrelated entropy source (random_device + the

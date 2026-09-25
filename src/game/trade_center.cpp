@@ -347,6 +347,10 @@ std::int16_t NovaTradeCenter_Sell(GameState &state,
   return static_cast<std::int16_t>(qty);
 }
 
+// @port 0x0048d5a0 95% gameplay
+// Ghidra 0x0048d5a0 NovaUi_TradeCenterCycleSelection: skip price-0 rows, wrap
+// 0..7. TODO(decomp): the port adds an all-disabled guard the original lacks
+// (its `while (price == 0)` spins forever on an all-zero table).
 void NovaTradeCenter_CycleSelection(const TradeCenterSession &session,
                                     std::int16_t &selected,
                                     bool previous) {

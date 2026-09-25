@@ -108,6 +108,7 @@ std::int16_t NovaWeapon_SelectTurretQuadrant(GameState &state,
 
 // @port 0x00455150 88% gameplay,audio
 // Ghidra 0x00455150 Weapon_FirePlayerWeaponBank.
+// @port 0x0046f270 90% gameplay
 void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      std::int16_t weapon_bank) {
   if (weapon_bank < 0 || weapon_bank >= 0x100) {
@@ -1038,6 +1039,10 @@ void NovaWeapon_PreloadFireSound(GameState &state,
   }
 }
 
+// @port 0x004B0740 25% audio
+// partial gameplay snd preload: resources 200..455 are decoded into the shared
+// session cache, covering the original weapon/effect/cloak handle range;
+// duration-table setup and original handle allocation remain deferred
 // Ghidra 0x004b0740 NovaAudio_PreloadGameplayData (partial: this covers the
 // weapon-fire slice of the original's startup snd preload; effect/cloak
 // ranges remain TODO(decomp)).

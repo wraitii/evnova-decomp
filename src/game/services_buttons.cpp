@@ -19,6 +19,7 @@ float ThreeStateButtonLabelBaseline(const SDL_FRect &rect) {
   return std::floor(rect.y + rect.h / 2.0F) + 5.0F;
 }
 
+// @port 0x004B97E0 20% rendering
 // Ghidra 0x004b97e0 DrawContext_DrawLineTo.
 // The unclipped 45-degree, 2x2-pen slice used by 0x004a3340; the general
 // line/clip path remains TODO(decomp). Both button painters call this helper.
@@ -211,6 +212,10 @@ void DrawPiece(SDL_Renderer *renderer,
 
 } // namespace
 
+// @port 0x004A2F50 60% ui
+// Ghidra 0x004a2f50 NovaUi_InitThreeStateButtonArt: the nine-strip art cache is
+// loaded by ServicesButtonArt::Initialize (the STR# 0x96 label table it builds
+// is consumed as direct NovaHud_LoadStringEntry calls at each call site).
 [[nodiscard]] bool ServicesButtonArt::Initialize(SdlPlatform &platform) {
   bool any = false;
   LoadStripImpl(platform, kStripBase + 0, normal_, any);
@@ -224,6 +229,17 @@ void DrawPiece(SDL_Renderer *renderer,
   return usable_;
 }
 
+// @port 0x004A3340 78% rendering,ui
+// Three-state body render via ServicesButtonArt::Draw (normal/pressed/disabled
+// strip pick) and the caption pass via DrawThreeStateButtonLabel: centred
+// text, or the 2px '^' up / '&' down chevron and '+'/'-' plus/minus icons,
+// matching the original's leading-byte branches. Store and text-view arrows
+// share DrawThreeStateButtonArrow: local integer centre, s=floor(h/10),
+// original endpoint adjustment and 2x2 pen stamps (9x5 footprint at both 23px
+// and 25px button heights). Gaps: the -3 caller-supplied-image arm and
+// plus/minus pen rasterisation remain approximate. Body uses native 13px caps
+// with the middle tile stretched between them; sub-26px buttons overlap the
+// caps (right cap last) rather than compressing them.
 void ServicesButtonArt::Draw(SdlPlatform &platform,
                              const SDL_FRect &rect,
                              ButtonState state) const {

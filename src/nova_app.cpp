@@ -35,9 +35,6 @@
 
 namespace {
 
-// The menu hover follows Sprite_TestOpaquePixelAtPoint (0x00475e20), whose
-// bounds check includes the bottom/right edge (unlike the dialogs'
-// Rect_ContainsPoint).
 using evnova::util::ContainsInclusive;
 using evnova::util::ToSdlColor;
 
@@ -232,6 +229,10 @@ void PublishMainMenuProbeUi(NovaRuntime &runtime) {
   runtime.platform.PublishProbeUi("main_menu", std::move(named));
 }
 
+// @port 0x00475e20 80% ui
+// The menu hover follows Sprite_TestOpaquePixelAtPoint (0x00475e20), whose
+// bounds check includes the bottom/right edge (unlike the dialogs'
+// Rect_ContainsPoint).
 [[nodiscard]] bool MenuSpriteContainsOpaquePixel(const NovaRuntime &runtime,
                                                  std::size_t index,
                                                  SDL_FPoint point) {
@@ -478,6 +479,7 @@ void RunStartupLoadStep(NovaRuntime &runtime, std::uint8_t step) {
   }
 }
 
+// @port 0x0048bc90 80% ui
 void InitializeMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
   runtime.menu_entrance_initialized = true;
   runtime.menu_top_animation_frame = 0;
@@ -547,6 +549,7 @@ void UpdateMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
   }
 }
 
+// @port 0x0048c210 70% ui
 void UpdateMenuCenterPreview(NovaRuntime &runtime, std::uint64_t now_ms) {
   if (!runtime.main_menu_center_preview_asset ||
       runtime.main_menu_center_preview_asset->textures.empty() ||
@@ -937,7 +940,9 @@ void DrawMenuStatusPanel(NovaRuntime &runtime) {
 }
 
 // Rebuilds the OR-composited rollover preview texture when the displayed
-// frame changes. Ghidra 0x0048c580 NovaHud_RenderFocusOverlay: at rest the
+// frame changes.
+// @port 0x0048c580 80% rendering
+// Ghidra 0x0048c580 NovaHud_RenderFocusOverlay: at rest the
 // frame is drawn through BlitPixie_BlitRectRawCopy -> BlitRaw, whose span
 // primitive BlitPixel_CopyOrSpan (0x00473b60) ORs each 16-bit source pixel
 // into the destination. The frames are authored for that: their "plate"
@@ -1007,7 +1012,9 @@ void UpdateCenterPreviewCompositedTexture(NovaRuntime &runtime) {
 
 } // namespace
 
-// Ghidra: 0x00503f30 NovaProgramEntry
+// @port 0x00503F30 100%
+// Ghidra: 0x00503f30 NovaProgramEntry: main wrapper; the port-only top-level
+// try/catch logs escaped exceptions (the original always had a console).
 int NovaProgramEntry() {
   // Diagnostic-only mission-script/control-bit trace; inert unless
   // EVN_MISSION_TRACE is set (the probe can toggle it at runtime).
@@ -1033,7 +1040,8 @@ int NovaProgramEntry() {
   }
 }
 
-// Ghidra: 0x004d2a80 NovaApp_Run
+// @port 0x004D2A80 100%
+// Ghidra: 0x004d2a80 NovaApp_Run: app entry / main menu loop.
 int NovaApp_Run(NovaRuntime &runtime) {
   // Platform_RegisterMainWindow / QuickTime_Initialize are replaced by SDL
   // setup.
@@ -1218,6 +1226,7 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
 }
 
 // Ghidra: 0x00486880 NovaMainLoop_Run
+// @port 0x00486880 100%
 void NovaMainLoop_Run(NovaRuntime &runtime) {
   while (!runtime.quit_requested && !runtime.platform.quit_requested()) {
     NovaMainLoop_UpdateFrame(runtime);
@@ -1226,6 +1235,7 @@ void NovaMainLoop_Run(NovaRuntime &runtime) {
 }
 
 // Ghidra: 0x00488080 NovaMainLoop_UpdateFrame
+// @port 0x00488080 90% ui
 void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
   runtime.platform.SetPlacement(PlaceContained(
       {1024.0F, 768.0F}, runtime.platform.logical_playfield_size()));
@@ -1420,6 +1430,10 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
 }
 
 // Ghidra: 0x004873b0 NovaRender_RedrawAndPresentFrame
+// @port 0x0048c3c0 60% rendering
+// TODO(decomp): the jitter-scroll and decay-counter motion is approximated by
+// the reveal counters.
+// @port 0x004873b0 100%
 void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   SDL_Renderer *const renderer = runtime.platform.renderer();
   // Main-menu art is authored for the 1024x768 canvas and is contained at
@@ -1588,6 +1602,7 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   }
 }
 
+// @port 0x004AB070 100%
 // Ghidra: 0x004ab070 NovaUi_PresentLoadingSplashFrame
 void NovaUi_PresentLoadingSplashFrame(NovaRuntime &runtime) {
   if (runtime.loading_splash_texture) {
@@ -1602,6 +1617,8 @@ void NovaUi_PresentLoadingSplashFrame(NovaRuntime &runtime) {
   SDL_RenderClear(runtime.platform.renderer());
 }
 
+// @port 0x004AAF60 100%
+// @port 0x004AB180 100%
 // Ghidra: 0x004aaf60 NovaUi_PresentStartupSplashFrame. The black pre-clear
 // here also subsumes NovaUi_ClearMainWindowAndHoldFrame (0x004ab180): that
 // routine's Frame_CommitFrameAndLatchTransitionWait (0x00467de0) plus its
@@ -1621,10 +1638,12 @@ void NovaUi_PresentStartupSplashFrame(NovaRuntime &runtime) {
   SDL_RenderClear(runtime.platform.renderer());
 }
 
+// @port 0x004AB3A0 100%
 // Ghidra: 0x004ab3a0 NovaUi_ProgressCallbackNoOp. The startup path passes this
 // as a progress sink where no redraw is wanted; kept as the faithful no-op.
 void NovaUi_ProgressCallbackNoOp() {}
 
+// @port 0x004AB1B0 80% cadence
 // Ghidra: 0x004ab1b0 NovaUi_RunProgressBarReveal
 void NovaUi_RunProgressBarReveal(NovaRuntime &runtime) {
   // The original resets value to 0 and seeds total from the 'ship' resource
@@ -1641,12 +1660,14 @@ void NovaUi_RunProgressBarReveal(NovaRuntime &runtime) {
       (outline.bottom - outline.top + 1) / 2;
 }
 
+// @port 0x004AB3B0 100%
 // Ghidra: 0x004ab3b0 NovaUi_AddProgressAndRedraw
 void NovaUi_AddProgressAndRedraw(NovaRuntime &runtime, double delta) {
   runtime.loading_progress_value += delta;
   NovaUi_RedrawProgressBar(runtime);
 }
 
+// @port 0x004AB3D0 85% rendering
 // Ghidra: 0x004ab3d0 NovaUi_RedrawProgressBar
 void NovaUi_RedrawProgressBar(NovaRuntime &runtime) {
   // The bar's c\x9alr offsets are relative to the same centre as the splash.
@@ -1727,7 +1748,12 @@ void NovaUi_RedrawProgressBar(NovaRuntime &runtime) {
   }
 }
 
-// Ghidra: 0x00486ed0 NovaGameMode_DispatchAction
+// @port 0x00486ed0 100%
+// @port 0x004C9E90 85% gameplay,ui
+// Ghidra: 0x00486ed0 NovaGameMode_DispatchAction. Also carries the inline
+// Menu_OpenPilotFileDialog (0x004c9e90) native chooser; the async result is
+// applied by NovaMainLoop_UpdateFrame. Remaining: reputation reset, error
+// dialogs, and the STR# 0x8c entry 0x34 repair warning.
 void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
   // Probe-harness hygiene (docs/probe_harness.md): every mode change drops the
   // outgoing screen's published rects so /probe/ui never reports stale layout
@@ -1770,9 +1796,6 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     break;
   }
   case GameModeAction::open_pilot:
-    // Ghidra 0x004c9e90 Menu_OpenPilotFileDialog. SDL supplies the native
-    // cross-platform chooser in place of GetOpenFileNameA; its asynchronous
-    // result is applied by NovaMainLoop_UpdateFrame on the main thread.
     if (!runtime.platform.ShowOpenPilotFileDialog()) {
       NovaLog::Info("Open Pilot file dialog is already active");
     }
@@ -1852,6 +1875,7 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
 // tokens to model actions. (The old 0x004d6260 NovaCommand_TranslateByInputMap
 // label was a misnomer: that function is the MetroWerks C-locale toupper,
 // MWRuntime_ToUpper, which the main loop uses only to fold command events.)
+// @port 0x004872a0 100%
 std::optional<GameModeAction> NovaCommand_DispatchToMode(char command) {
   switch (command) {
   case 'n':
@@ -1876,6 +1900,7 @@ std::optional<GameModeAction> NovaCommand_DispatchToMode(char command) {
 }
 
 // Ghidra: 0x004861b0 NovaHud_TrackFocusHoverIndex
+// @port 0x004861b0 100%
 std::optional<GameModeAction>
 NovaHud_TrackFocusHoverIndex(const NovaRuntime &runtime) {
   const auto mouse_position = runtime.platform.mouse_position();

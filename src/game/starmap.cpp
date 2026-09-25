@@ -1119,6 +1119,7 @@ std::string StarmapButtonLabel(StarmapButton button, bool show_borders) {
   return "?";
 }
 
+// @port 0x0049f1f0 90% ui
 void DrawButtons(SdlPlatform &platform,
                  NovaFontCache &font_cache,
                  const ServicesButtonArt &button_art,
@@ -1164,6 +1165,7 @@ void DrawButtons(SdlPlatform &platform,
   }
 }
 
+// @port 0x004AAB30 90% audio
 // Ghidra 0x004aab30 NovaUi_RunStarmapSearchDialog: the modal Find box (DLOG
 // 0xbbd, row 5 = edit text, activation 1 = Find, 3 = Cancel).
 // `render_background` is redrawn behind the box each frame. Returns the chosen
@@ -1208,6 +1210,7 @@ RunStarmapSearchDialog(SdlPlatform &platform,
 
 } // namespace
 
+// @port 0x004AA980 80% gameplay
 // Ghidra 0x004aa980 Mission_RebuildMissionTargetSystemList. Per active mission
 // emits ONE arrow system: the TravelStel system, replaced by the ReturnStel
 // system once travel_stellar_reached is set and the two differ (an unavailable
@@ -1278,6 +1281,7 @@ NovaUi_SystemFactionConflictStatusText(const GameState &state,
       .value_or("N/A");
 }
 
+// @port 0x004A99F0 90% rendering
 // Ghidra 0x004a99f0 Ui_DrawSystemRouteMap draw pass (see starmap.hpp). The
 // original re-renders NovaUi_DrawStarmapRoutesAndMarkers into a dedicated
 // square surface with g_starmap_pan_origin swapped to the current system and
@@ -1362,8 +1366,22 @@ NovaStarmap_MarkerIcons NovaStarmap_LoadMarkerIcons(SdlPlatform &platform) {
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x004A3AA0 85% gameplay,license
+// @port 0x004A4353 60% gameplay,ui
+// @port 0x004A9D10 50% rendering,ui
 // Ghidra 0x004a3aa0 NovaUi_RunStarmapWindow (clean-room modal loop).
+// The 0x004a9d10 NovaUi_EnableStarmapPoliticalOverlay slice is the Show/Hide
+// Borders action inline in the button switch below; hover highlighting is not
+// modelled.
 // ---------------------------------------------------------------------------
+// @port 0x0049eef0 70% ui
+// TODO(decomp): the original's separate press/release tracking loop and
+// per-event redraw blits are folded into the per-frame draw.
+// @port 0x00872550 100%
+// Ghidra 0x00872550 NovaUi_StarmapEnableBordersAction: the Show/Hide Borders
+// action enables the political overlay and continues the starmap inner loop;
+// ported inline in NovaStarmap_RunWindow's button switch (toggles
+// GameState::starmap_show_borders, .prf +0x76, and rebuilds the overlay).
 StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
                                     GameState &state,
                                     std::int16_t preselected_system_id,
@@ -1630,8 +1648,10 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
             button_clicked = true;
             switch (static_cast<StarmapButton>(i)) {
             case StarmapButton::kShowBorders:
-              // Ghidra 0x00872550 NovaUi_StarmapEnableBordersAction ->
-              // 0x004A9D10 NovaUi_EnableStarmapPoliticalOverlay.
+              // NovaUi_EnableStarmapPoliticalOverlay (0x004a9d10): the overlay
+              // grid is marked dirty on toggle-on, zoom and pan and rebuilt
+              // against the actual panel before the next draw; hover
+              // highlighting is not modelled.
               show_borders = !show_borders;
               overlay_needs_rebuild = true;
               break;

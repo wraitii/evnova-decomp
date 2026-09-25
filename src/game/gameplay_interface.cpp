@@ -144,6 +144,9 @@ HudPanelRect HudPanel_AnchorTopRight(const HudPanelRect &panel,
                       panel.bottom};
 }
 
+// @port 0x00488380 45% rendering
+// TODO(decomp): viewport-rect source + surface fill/blit + render integration
+// are not yet wired.
 GameplayViewportGeometry
 GameplayGeometry_FromSurface(const HudPanelRect &surface_rect) {
   // Ghidra 0x00488380 NovaView_UpdateGameplayViewport (mirrored exactly). The
@@ -195,7 +198,11 @@ GameplayGeometry_FromSurface(const HudPanelRect &surface_rect) {
   return g;
 }
 
-// Ghidra 0x004cda50 Ui_InstallGameplayInterfaceLayout.
+// @port 0x004CDA50 30% ui,rendering
+// Ghidra 0x004cda50 Ui_InstallGameplayInterfaceLayout: layout record decode
+// plus panel rect/color/font/background fill implemented. Remaining: the
+// government-resolution and background-PICT draw plus the radar rebuild are
+// not yet wired.
 std::optional<GameplayInterfaceLayout>
 NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id) {
   const auto payload = NovaResource_Load(kInterfaceLayoutType, interface_id);

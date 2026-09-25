@@ -105,6 +105,7 @@ OutfitModSlots(const Outfit &outfit) {
 
 } // namespace
 
+// @port 0x00491950 100%
 // Ghidra 0x00491950 step 5: scopes an outfit's Require bits to the government
 // encoded in RequireGovt. local_govt is the landed stellar's zero-based
 // government id (-1 = independent). The four bands come from the loader's
@@ -139,6 +140,8 @@ bool NovaLanded_RequireGovtAllows(const ScenarioData &scenario,
   return true;
 }
 
+// @port 0x0049458d 25% ui
+// TODO(decomp): original directional command mapping.
 // Ghidra 0x0049458d NovaUi_ShipyardSetCursorSlot. The session tracks the
 // 20-slot (4x5 grid) cursor selection and preserves/clears it across paging.
 std::int16_t LandedStoreSession::IdAtCursor() const {
@@ -457,6 +460,7 @@ bool NovaLanded_StellarSellsOutfits(const GameState &state,
                      [](std::int16_t tech) { return tech > 0; });
 }
 
+// @port 0x0049d640 100%
 // Ghidra 0x0049d640 Outfit_ComputeScaledPurchasePrice (tech-discount
 // truncation, threshold quanta). Both float-to-int conversions end with the
 // x87 FIST + residual/sign correction (ADD 0x7fffffff / SBB) that truncates
@@ -890,6 +894,8 @@ float NovaLanded_RankPriceScale(const GameState &state,
   return scale;
 }
 
+// @port 0x00498dc0 85% license
+// Registration/license-seed rejection remains deliberately unmodelled;
 // Ghidra 0x00498dc0 / 0x004948b0 / 0x00492f30: the base trade-in from
 // Ship_ComputeTradeInValue scaled through two identical tech-discount stages,
 // both using the current ship's tech level and the destination stellar's. The

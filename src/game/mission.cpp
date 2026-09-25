@@ -2140,6 +2140,7 @@ void Mission_ResolveMissionFailure(GameState &state,
   Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
 }
 
+// @port 0x0046efd0 100%
 bool NovaStellar_AreStellarsEquivalent(const GameState &state,
                                        std::int16_t stellar_a,
                                        std::int16_t stellar_b) {
@@ -2877,6 +2878,7 @@ void Mission_ClearActiveReactionMission(GameState &state) {
   state.mission_interaction_context = -1;
 }
 
+// @port 0x0046f140 100%
 // Ghidra 0x0046f140 Ship_HasAnyCargoLootOrActiveMission.
 bool Ship_HasAnyCargoLootOrActiveMission(const GameState &state) {
   for (const std::int16_t bin : state.inventory.cargo_bins) {

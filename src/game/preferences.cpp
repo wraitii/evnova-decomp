@@ -32,22 +32,6 @@ using evnova::util::Contains;
 namespace {
 
 // ---------------------------------------------------------------------------
-// Preferences dialog (Ghidra Menu_RunSettingsDialog, 0x00488650).
-//
-// DLOG 0xfa3 is a 336x296 local composition; its placement centres it in the
-// active window.
-// Its DITL carries the option checkboxes, the two slider stacks, the OK and
-// Key Settings buttons, and the label/value boxes. Item ordinals (1-based)
-// and the direction of each toggle are documented in
-// docs/preferences_keybindings.md and verified against the decompile.
-//
-// Control ordinals (1-based) -> NovaDialogItem::index (0-based):
-//   OK=1/0, Share=2/1, sound label=4/3, sound value=5/4, sound down/up=6/7
-//   /5/6, Intro=8/7, QuickTime=9/8, Smoke=10/9, window=11/10, ShipAnim=12/11,
-//   Engine=13/12, Running=14/13, Weapon=15/14, KeySettings=16/15,
-//   Parallax=18/17, Ambient=20/19, Hyperspace=21/20, CheckUpdates=22/21,
-//   brightness label=23/22, brightness value=24/23, brightness down/up=25/26
-//   /24/25.
 constexpr std::uint16_t kSettingsDialogId = 0xfa3;
 constexpr std::uint16_t kKeySettingsDialogId = 0xfa2;
 constexpr std::uint16_t kKeySettingsBackdropPict = 0x008b;
@@ -634,6 +618,10 @@ FindKeyBindingConflict(const std::array<std::uint16_t, 34> &bindings) {
   return std::nullopt;
 }
 
+// @port 0x0048b860 85% ui
+// TODO(decomp): exact native key-name table text/metrics remain incomplete.
+// Preferences and Key Settings use native local DLOG geometry with contained
+// placement and scoped restoration.
 // Ghidra 0x0048b860 Menu_KeySettingsDraw.
 void DrawKeySettingsDialog(SdlPlatform &platform,
                            NovaFontCache &font_cache,
@@ -754,6 +742,11 @@ std::string NovaPrefs_KeyCodeDisplayName(std::uint16_t key_code) {
   return KeyCodeName(key_code);
 }
 
+// @port 0x004B4400 90% gameplay
+// KeyBindings::ResetToDefaults writes the full short[0x52] defaults incl
+// panel-suppressed aliases; flight navigation row verified. Slot 0x12/0x0c is
+// self-destruct (with 0x38/0x6f arm modifier, 0x00451970), not zoom; route-map
+// zoom is the separate raw minus/equals channel
 // Ghidra 0x004b4400 NovaPrefs_ResetKeyBindings.
 void KeyBindings::ResetToDefaults() {
   // Values exactly as NovaPrefs_ResetKeyBindings (0x004b4400) writes them.
@@ -778,6 +771,7 @@ void KeyBindings::ResetToDefaults() {
   };
 }
 
+// @port 0x004B4320 85% gameplay
 // Ghidra 0x004b4320 NovaPrefs_ResetToDefaults.
 void NovaPreferences::ResetToDefaults() {
   bindings.ResetToDefaults();
@@ -817,7 +811,16 @@ void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs) {
   prefs.brightness = 3;
 }
 
-// Ghidra 0x004c7400 NovaPrefs_LoadOrInit.
+// @port 0x004C7400 82% ui,divergence
+// Ghidra 0x004c7400 NovaPrefs_LoadOrInit. Loads and validates the original
+// little-endian 0x8c-byte version-0x69 payload from the per-user support
+// folder (NovaPaths::SupportDirectory), resets bindings before applying the 34
+// persisted display rows, and forces the locked quality/graphics fields via
+// NovaPrefs_ApplyLockedPreferences while starmap_show_borders (+0x76) is read
+// normally. Legacy flags, sensitivity, and two opaque control shorts remain
+// unmodeled. DIVERGENCE(original): preferences live under the SDL per-user
+// support path instead of the original @: volume-relative path; a separate
+// "EV Nova Extra Prefs" INI for decomp-only settings is planned there.
 bool NovaPrefs_LoadFromFile(const std::filesystem::path &path,
                             NovaPreferences &prefs) {
   std::array<std::uint8_t, kPrefsFileSize> bytes{};
@@ -860,7 +863,13 @@ bool NovaPrefs_LoadFromFile(const std::filesystem::path &path,
   return true;
 }
 
-// Ghidra 0x004c7820 NovaPrefs_SaveToDisk.
+// @port 0x004C7820 82% ui,divergence
+// Ghidra 0x004c7820 NovaPrefs_SaveToDisk. Writes the original little-endian
+// 0x8c-byte version-0x69 payload at startup and both dialog commit points into
+// the per-user support folder; reserved/unsupported fields are zeroed like the
+// original allocator, while sensitivity and two opaque control shorts remain
+// unmodeled. DIVERGENCE(original): same support-directory path substitution as
+// NovaPrefs_LoadOrInit.
 bool NovaPrefs_SaveToFile(const std::filesystem::path &path,
                           const NovaPreferences &prefs) {
   // Zero initialization reproduces the original allocator and keeps legacy,
@@ -1214,6 +1223,26 @@ void DrawSettingsDialog(SdlPlatform &platform,
 } // namespace
 
 // Ghidra: 0x00488650 Menu_RunSettingsDialog
+// @port 0x00488650 95% ui
+// The Run in a Window checkbox is live and drives
+// SdlPlatform::ApplyWindowMode (SDL_SetWindowFullscreen).
+// TODO(decomp): the original forced Share Processor gate remains unmodelled.
+// Preferences dialog (Ghidra Menu_RunSettingsDialog, 0x00488650).
+//
+// DLOG 0xfa3 is a 336x296 local composition; its placement centres it in the
+// active window.
+// Its DITL carries the option checkboxes, the two slider stacks, the OK and
+// Key Settings buttons, and the label/value boxes. Item ordinals (1-based)
+// and the direction of each toggle are documented in
+// docs/preferences_keybindings.md and verified against the decompile.
+//
+// Control ordinals (1-based) -> NovaDialogItem::index (0-based):
+//   OK=1/0, Share=2/1, sound label=4/3, sound value=5/4, sound down/up=6/7
+//   /5/6, Intro=8/7, QuickTime=9/8, Smoke=10/9, window=11/10, ShipAnim=12/11,
+//   Engine=13/12, Running=14/13, Weapon=15/14, KeySettings=16/15,
+//   Parallax=18/17, Ambient=20/19, Hyperspace=21/20, CheckUpdates=22/21,
+//   brightness label=23/22, brightness value=24/23, brightness down/up=25/26
+//   /24/25.
 bool NovaMenu_RunSettingsDialog(
     SdlPlatform &platform,
     SdlAudio &audio,
@@ -1329,7 +1358,12 @@ bool NovaMenu_RunSettingsDialog(
   return false;
 }
 
+// @port 0x0048b280 88% ui
+// TODO(decomp): command-channel cadence remains approximate.
 // Ghidra 0x0048b280 Menu_RunKeySettingsDialog.
+// @port 0x0048b6d0 80% ui
+// TODO(decomp): original command-channel/key-release cadence is not reproduced
+// one-to-one.
 // Ghidra 0x0048b6d0 Menu_KeySettingsHandleInput runs inline in this modal.
 bool NovaMenu_RunKeySettingsDialog(
     SdlPlatform &platform,

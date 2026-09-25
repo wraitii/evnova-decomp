@@ -549,6 +549,7 @@ int FindLinkedTravelSlot(const GameState &state,
 
 } // namespace
 
+// @port 0x0046efb0 100%
 // Ghidra 0x0046efb0 Stellar_GetJumpSequenceDuration60Hz. The slots are filled
 // by the preload (NovaAudio_PreloadGameplayData 0x004b0740) and keep the 350
 // fallback for a missing/broken cue; see GameState::jump_duration_*.
@@ -1861,6 +1862,7 @@ void NovaTravel_Tick(GameState &state,
 // Plotted starmap route (state.travel.starmap_route; Ghidra DAT_00735404).
 // ---------------------------------------------------------------------------
 
+// @port 0x004A7E80 90% gameplay
 void NovaStarmap_NormalizeRoutePlan(GameState &state) {
   auto &route = state.travel.starmap_route;
   // Ghidra 0x004a7e80: drop a leading empty slot by shifting left, and clear
@@ -1876,6 +1878,7 @@ void NovaStarmap_NormalizeRoutePlan(GameState &state) {
   }
 }
 
+// @port 0x004A7FC0 90% gameplay
 void NovaStarmap_NormalizeRouteToCurrentSystem(GameState &state) {
   auto &route = state.travel.starmap_route;
   const std::int16_t first_hop =
@@ -1891,6 +1894,9 @@ void NovaStarmap_NormalizeRouteToCurrentSystem(GameState &state) {
   }
 }
 
+// @port 0x004A8080 90% gameplay
+// Ghidra 0x004a8080 NovaUi_SyncTravelSelectionFromStarmapRoute: arms the
+// travel slot and starmap destination from the first plotted hop.
 void NovaStarmap_SyncTravelSelectionFromRoute(GameState &state) {
   auto &t = state.travel;
   if (t.starmap_route[1] == -1) {

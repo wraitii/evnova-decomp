@@ -85,6 +85,10 @@ struct LoadedArchive {
   std::vector<ResourceRecord> records;
 };
 
+// @port 0x004CE4D0 80% correctness,verify
+// Ghidra 0x004ce4d0 ResourceArchive_OpenRez: ParseArchive reconstructs the
+// BRGR descriptor-table and big-endian resource.map parse into entries/records.
+// Remaining: verify the map-variant coverage against Ghidra.
 [[nodiscard]] std::optional<LoadedArchive>
 ParseArchive(const std::filesystem::path &path) {
   std::ifstream input{path, std::ios::binary | std::ios::ate};
@@ -225,6 +229,7 @@ ParseArchive(const std::filesystem::path &path) {
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x0046f500 80% correctness
 // Archive discovery (Resource_ValidateInstallFolders 0x004bd160,
 // ResourceArchive_OpenAllRezInNovaFiles 0x00872640,
 // ResourceArchive_OpenAllRezInNovaPlugins 0x0087265d,
@@ -298,6 +303,10 @@ public:
     return db;
   }
 
+  // @port 0x004CDFA0 95% correctness,verify
+  // Ghidra 0x004cdfa0 ResourceDb_FindRecord: walks the prepended DB list
+  // newest-first (reverse of load order); the first matching (type,id) wins.
+  // Remaining: verify archive-order selection against Ghidra.
   [[nodiscard]] std::optional<std::vector<std::byte>>
   Load(std::uint32_t type_code, std::uint16_t resource_id) {
     EnsureLoaded();
@@ -338,6 +347,10 @@ public:
   // ResourceData_FindByKey (0x004ce110): newest-first match on the registry
   // record name. Unlike the (type,id) accessors this compares names directly,
   // so an older archive can still satisfy a key the newest archive lacks.
+  // @port 0x004CE110 90% correctness,verify
+  // Ghidra 0x004ce110 ResourceData_FindByKey: newest-first match on the
+  // registry record name (backs ResourceData_AccessByKey).
+  // Remaining: verify archive-order selection against Ghidra.
   [[nodiscard]] std::optional<NovaResource> LoadByKey(std::uint32_t type_code,
                                                       std::string_view key) {
     EnsureLoaded();
@@ -358,6 +371,11 @@ public:
   // FUN_004ce2a0/FUN_004ce030 walk. ResourceData_GetSlotByIndex
   // (0x004ce030) deducts each archive's count from the head of the DB, so the
   // newest archive supplies slot 1.
+  // @port 0x004CE030 90% correctness,verify
+  // Ghidra 0x004ce030 ResourceData_GetSlotByIndex: newest-first walk,
+  // deducting each archive's matching-record count; within an archive records
+  // stay in map order.
+  // Remaining: verify archive-order selection against Ghidra.
   [[nodiscard]] std::optional<std::vector<std::byte>>
   LoadNthOfType(std::uint32_t type_code, std::size_t ordinal) {
     EnsureLoaded();
@@ -405,6 +423,18 @@ private:
             static_cast<std::ptrdiff_t>(entry.offset + entry.size)};
   }
 
+  // @port 0x00872640 90% license
+  // @port 0x0087265D 85% license
+  // Ghidra 0x00872640 ResourceArchive_OpenAllRezInNovaFiles: opens every
+  // case-insensitively sorted *.rez under <install>/Nova Files; 0x0087265d
+  // ResourceArchive_OpenAllRezInNovaPlugins opens <install>/Nova Plug-ins
+  // unconditionally (port has no licensing, matching a registered install),
+  // falling back to <install>/Plug-ins when absent. The support folder's
+  // Nova Plug-ins/*.rez loads last as the strongest layer (port extension).
+  // Remaining: the DAT_00bec160/DAT_00bec161 install flags are not modelled.
+  // @port 0x004BD160 40% correctness
+  // Ghidra 0x004bd160 Resource_ValidateInstallFolders: install-root and archive
+  // discovery runs in EnsureLoaded (helpers above).
   void EnsureLoaded() {
     if (loaded_) {
       return;
@@ -458,6 +488,11 @@ private:
                   install_root->string());
   }
 
+  // @port 0x004FF900 90% correctness,verify
+  // Ghidra 0x004ff900 ResourceDb_RegisterArchive: prepend semantics are
+  // modelled by loading archives oldest-first and walking archives_ in reverse
+  // for every lookup, so later archives shadow earlier ones.
+  // Remaining: verify prepend/shadowing semantics against Ghidra.
   void OpenArchive(const std::filesystem::path &path) {
     std::error_code ec;
     if (!std::filesystem::exists(path, ec) || ec) {
@@ -656,10 +691,11 @@ std::optional<NovaMainMenuStyle> NovaResource_LoadMainMenuStyle() {
   return style;
 }
 
+// @port 0x004BC2A0 85% audio
+// Ghidra 0x004BC2A0 NovaSound_LoadDecodedById. Resource acquisition is here;
+// its decode tail runs in NovaSound_Decode below.
 std::optional<std::vector<std::byte>>
 NovaResource_LoadSndData(std::uint16_t resource_id) {
-  // Ghidra 0x004BC2A0 NovaSound_LoadDecodedById. Resource acquisition is here;
-  // its decode tail runs in NovaSound_Decode below.
   // Silent on miss: the original probes whole contiguous ranges (the 200..455
   // gameplay table and 300..363 impact table in FUN_004b0740) and tolerates
   // the many ids that do not exist in Nova Sounds.rez, so a miss is normal.
@@ -667,6 +703,11 @@ NovaResource_LoadSndData(std::uint16_t resource_id) {
   return NovaResource_Load(kResourceTypeSnd, resource_id);
 }
 
+// @port 0x004D6E60 60% audio
+// Ghidra 0x004d6e60 (with 0x004d6900) NovaSound_DecodePayload: format-1 'ima4'
+// extended + 'NONE' 8-bit + format-2 'NONE' 8-bit sub-formats; covers menu
+// blips (600/601/602/603) and weapon fire sounds (snd 200..235). Other
+// AIFC/16-bit sub-forms remain unsupported.
 std::optional<NovaSoundData>
 NovaSound_Decode(std::span<const std::byte> resource_data) {
   // FUN_004d6e60 accepts the format-1/2/3 'snd' payload layouts Ghidra's
@@ -917,7 +958,9 @@ namespace {
 
 } // namespace
 
-// Ghidra 0x004cef50 Dialog_ParseItemList.
+// @port 0x004CEF50 70% ui
+// Ghidra 0x004cef50 Dialog_ParseItemList: BE count, rect/type bytes, per-type
+// tail skip, even align; validates the 8 docked Spaceport buttons.
 std::optional<std::vector<NovaDialogItem>>
 NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
   // The DITL payload is the raw resource (FUN_004cef50 receives the same via
@@ -1038,6 +1081,11 @@ NovaResource_LoadDialogDefinition(std::uint16_t dialog_id) {
   return def;
 }
 
+// @port 0x004CE300 80% gameplay
+// Ghidra 0x004ce300 ResourceData_AccessByKey: name-keyed lookup over the
+// ch\x9ar archive family (ResourceData_FindByKey + materialize semantics)
+// backing SetupFrames/InitializePlayerState. Remaining: the in-memory registry
+// merge and the block locking/initializer slice (needs a .plt writer).
 std::optional<NovaResource>
 NovaResource_AccessCharacterBlockByKey(std::string_view key) {
   // Ghidra 0x004ce300 ResourceData_AccessByKey -> ResourceData_FindByKey

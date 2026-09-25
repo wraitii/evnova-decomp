@@ -79,6 +79,9 @@ struct BitsRectLocation {
   std::size_t height = 0;
 };
 
+// @port 0x004FD0A0 70% rendering
+// Ghidra 0x004fd0a0 Pict_ParseDirectBitsRect (opcode scan). Remaining: v1
+// byte-opcode walking and the QuickTime 0x8200/0x8201 path.
 [[nodiscard]] std::optional<BitsRectLocation>
 WalkToBitsRect(std::span<const std::byte> bytes) {
   if (bytes.size() < 12) {
@@ -216,7 +219,11 @@ WalkToBitsRect(std::span<const std::byte> bytes) {
   return std::nullopt;
 }
 
-// Ghidra 0x004fcc00 Pict_DecodePixmapRows (row decoder referenced throughout).
+// @port 0x004FCC00 70% rendering
+// Ghidra 0x004fcc00 Pict_DecodePixmapRows: packbits + raw-copy paths, the
+// masked-rowBytes 1-byte/BE16 length rule, 1-bit expansion and 8-bit indexed
+// palette output used by PICTs 0x81/0x82/0x8b. Remaining: the depth-0x20
+// 4-component path and output-buffer aliasing details.
 [[nodiscard]] bool DecodePackBitsRow(std::span<const std::byte> encoded,
                                      std::span<std::uint8_t> output,
                                      std::size_t unit_size) {
@@ -355,12 +362,18 @@ using Palette = std::array<std::array<std::uint8_t, 3>, 256>;
 
 } // namespace
 
+// @port 0x004FCA30 80% rendering
+// @port 0x004FCAC0 60% rendering
+// @port 0x004B8ED0 85% rendering
+// @port 0x004B9050 100%
 // Ghidra 0x004b9050 Resource_LoadPictAsImage. The WithColorRemap variant
 // [0x004b8ed0] shares this decode path; its optional post-load remap through
 // the DAT_0085faee table is NOT ported here. That remap is confirmed dead
 // code at runtime: both direct callers of 0x004b8ed0 (0x004b9050 and
 // FUN_004b9060) pass a zero remap flag, so the post-load color-remap branch
-// is never taken and omitting it introduces no visual divergence.
+// is never taken and omitting it introduces no visual divergence. The
+// unsupported-PICT NovaLog::Todo below is the WalkToBitsRect/0x004fd0a0
+// decode scope (row 0x004FD0A0), not a gap of this wrapper.
 std::optional<PictImage>
 Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   const auto bits = WalkToBitsRect(pict_data);

@@ -100,6 +100,7 @@ void StoreRgb555(std::span<std::uint8_t> rgba_pixels,
 
 } // namespace
 
+// @port 0x00474e90 100%
 std::optional<RleSpriteSheet>
 RleSpriteSheet_Decode16(std::span<const std::byte> resource_data) {
   if (resource_data.size() < kHeaderSize) {

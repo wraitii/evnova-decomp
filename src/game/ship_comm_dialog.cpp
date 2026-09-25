@@ -391,6 +391,7 @@ LoadCommPrompt(std::int16_t random_index, std::uint16_t prompt_index) {
 // word-wrapped prompt panel (item 9), and the three context buttons. Panel
 // text is the shared 12-point screen font (DAT_00735684/DAT_00735686 =
 // Geneva 12 regular), left-aligned.
+// @port 0x0047fb70 80% ui
 void DrawShipCommDialog(SdlPlatform &platform,
                         const GameState &state,
                         SpaceflightView &view,
@@ -699,6 +700,9 @@ RunBribePayment(GameState &state, std::int32_t &bribe_cost, bool free_help) {
 }
 
 // The hail-info text (DAT_007d190c) the Greetings button shows for
+// @port 0x004819d0 90% rng
+// Branch 3 faction<0 skips instead of underflowing the resource id (guarded
+// against the original underflow).
 // Ghidra 0x004819d0 NovaUi_BuildShipCommHailInfoText. The four branches are
 // selected by the target's dude-def `hail_info_types` high nibble (with a
 // retry loop in the original) unless a personality Flags-0x8000/no-CommQuote
@@ -975,6 +979,7 @@ RunBribePayment(GameState &state, std::int32_t &bribe_cost, bool free_help) {
   return text;
 }
 
+// @port 0x00485970 95% ui
 void DrawEscortManagementDialog(SdlPlatform &platform,
                                 const GameState &state,
                                 SpaceflightView &view,
@@ -1132,6 +1137,14 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
   }
 }
 
+// @port 0x004853a0 90% ui
+// TODO(decomp): held-button tracking is not reproduced.
+// @port 0x004A1D90 90% ui
+// @port 0x004A1ED0 95% ui
+// Runs inline in DrawEscortManagementDialog: STR# 0x96 labels Close Channel,
+// Release, Upgrade/Cancel Upgrade and Sell/Cancel Sale; unavailable choices
+// use disabled art and a held pointer uses pressed art.
+// @port 0x004853a0 90% ui
 // Ghidra 0x004853a0 NovaUi_RunEscortShipManagementWindow; drawing function
 // 0x00485970 and button helpers 0x004a1d90/0x004a1ed0 run inline here.
 [[nodiscard]] bool RunEscortManagementDialog(SdlPlatform &platform,
@@ -1280,6 +1293,8 @@ bool NovaEscortManagement_ApplyAction(GameState &state,
 // ---------------------------------------------------------------------------
 // The ship-comm modal
 // ---------------------------------------------------------------------------
+// @port 0x0047e470 78% ui
+// TODO(decomp): fleet-def branches and full hail-info assembly are deferred.
 bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                                 GameState &state,
                                 std::int16_t ship_slot,

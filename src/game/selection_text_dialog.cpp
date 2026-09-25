@@ -26,8 +26,6 @@ using evnova::util::Contains;
 namespace {
 
 constexpr std::uint16_t kReaderDialogId = 0xbbb;
-// Custom-art arm (Ghidra 0x004982a0): variant >= 0x80 runs in DLOG 0xbbc with
-// the single backdrop PICT 0x214f and blits the variant PICT into entry 2.
 constexpr std::uint16_t kReaderArtDialogId = 0xbbc;
 constexpr std::uint16_t kReaderArtBackdropPict = 0x214f;
 constexpr std::int16_t kArtVariantThreshold = 0x80;
@@ -50,6 +48,12 @@ constexpr float kBottomMargin = 2.0F;
 
 } // namespace
 
+// @port 0x004BCD90 80% ui,rendering
+// Clean-room NovaTextScrollView ctor: stores the view/display rect and wraps
+// the text at the full DITL view width without an extra horizontal inset with
+// the shared Geneva-9 face and 11pt leading (NovaTextView_Create 0x004bcd90 +
+// NovaTextView_SetText). Gaps: original +0xc/+0x14 rect-field split and the
+// optional draw-context handle are structural.
 NovaTextScrollView::NovaTextScrollView(NovaFontCache &fonts,
                                        std::string_view text,
                                        const SDL_FRect &view_rect)
@@ -80,6 +84,8 @@ NovaTextScrollView::NovaTextScrollView(NovaFontCache &fonts,
   UpdateMaxScroll();
 }
 
+// @port 0x004BCE10 80% ui
+// @port 0x004BCE90 75% ui
 // NovaTextView_ScrollBy (0x004bce90) clamps the scroll against the content
 // height reported by NovaTextView_UpdateContentHeight (0x004bce10) =
 // NovaText_MeasureWrappedTextHeight, i.e. the wrapped text height only. The
@@ -96,12 +102,15 @@ void NovaTextScrollView::UpdateMaxScroll() {
   }
 }
 
-// Ghidra 0x00499270 NovaUi_ScrollSelectionText, immediate arm. Its
-// param_5 == 0 "smooth" arm would scale param_4 as px/sec by the elapsed 60Hz
-// ticks (x the 1/60 double at 0x005759b0); TODO(decomp(0x00499270)) skipped:
-// it is dead in the shipped binary -- every call site in the mission-offer
-// poll/run and the text-reader run/callback passes the immediate flag -- so
-// the port models only the +/-px step.
+// @port 0x00499270 85% correctness
+// The smooth param_5==0 elapsed-tick path (px_per_second * ticks) is skipped:
+// TODO(decomp(0x00499270)) skipped -- dead in the shipped binary, every call
+// site passes the immediate flag. Ghidra 0x00499270 NovaUi_ScrollSelectionText,
+// immediate arm. Its param_5 == 0 "smooth" arm would scale param_4 as px/sec by
+// the elapsed 60Hz ticks (x the 1/60 double at 0x005759b0);
+// TODO(decomp(0x00499270)) skipped: it is dead in the shipped binary -- every
+// call site in the mission-offer poll/run and the text-reader run/callback
+// passes the immediate flag -- so the port models only the +/-px step.
 void NovaTextScrollView::ScrollBy(float delta) {
   scroll_offset_ = std::clamp(scroll_offset_ + delta, 0.0F, max_scroll_);
 }
@@ -211,6 +220,14 @@ bool NovaTextScrollHold::Update(NovaTextScrollView &view,
   return view.scroll_offset() != before;
 }
 
+// @port 0x004BCF30 75% ui
+// NovaTextScrollView::Draw: clipped wrapped redraw at the view rect using the
+// scroll offset, with text starting at rect.left and wrapping to rect.right
+// (no extra 6px inset). The incoming bottom line is submitted as soon as its
+// line box enters the clip (not only once its baseline is inside), so its
+// upper half shows while scrolling in, matching the original's single clipped
+// DrawText over the whole run. Gaps: draw-context/owner-surface bookkeeping
+// and the per-button flash are approximated.
 // Ghidra 0x004bcf30 NovaTextView_Draw: the wrapped text is clipped to
 // the view rect and offset by the scroll position.
 void NovaTextScrollView::Draw(SdlPlatform &platform) const {
@@ -316,24 +333,13 @@ struct ReaderLayout {
   layout.text_area = rect(2);   // UiPanel entry 3
   layout.arrow_up = rect(4);    // UiPanel entry 5
   layout.arrow_down = rect(5);  // UiPanel entry 6
-  // The button caption is not the DITL title (entry 1 is a title-less
-  // userItem): the 0x004a2ac0 painter labels it from STR# 0x96 slot 0x1a
-  // (1-based entry 0x1b, "Okay"), like every selection dialog.
+  // The Okay caption is STR# 0x96 entry 0x1b (0x004a2ac0).
   if (const auto caption = NovaHud_LoadStringEntry(0x96, 0x1b)) {
     layout.done_caption = *caption;
   }
   return layout;
 }
 
-// Backdrop for the < 0x80 variant: three PICTs composed by
-// NovaUi_DrawSelectionDialogContent 0x00499870 in order body -> top ->
-// bottom: 0x214d (441x365) at window.y + height(0x214c), 0x214c (441x9) at
-// the window top, 0x214e (441x40) anchored to the window bottom (it wins
-// where the over-tall body overlaps). DAT_007d4bf0/4bf4 are overlapping
-// aliases of the image-slot array's entries 1/2 and stay set for the reader
-// -- the >= 0x80 art variant is the only path that zeroes them. Blits clip
-// to the window rect (the painter draws inside the modal window's context).
-// Loaded once per dialog, not per frame.
 struct ReaderBackdrop {
   std::unique_ptr<SdlTexture> top;    // 0x214c (variant < 0x80)
   std::unique_ptr<SdlTexture> body;   // 0x214d (variant < 0x80)
@@ -384,6 +390,32 @@ LoadBackdropPict(SdlPlatform &platform, std::uint16_t pict_id) {
 
 } // namespace
 
+// @port 0x004982a0 88% ui
+// TODO(decomp): desc status-string display (Ui_PlayMovieFileModal, a QuickTime
+// platform replacement), save/restore player
+// ai_secondary_target_slot/travel_transfer_mode around the map,
+// over-static-surface redraw variants, pressed-button flash during click
+// tracking. Background re-renders the live docked menu / flight view per frame
+// rather than replaying a captured snapshot (deliberate divergence; Custom-art
+// arm (Ghidra 0x004982a0): variant >= 0x80 runs in DLOG 0xbbc with the single
+// backdrop PICT 0x214f and blits the variant PICT into entry 2.
+// @port 0x00499870 60% rendering
+// @port 0x004A2AC0 40% ui,rendering
+// Ghidra 0x004a2ac0 OutfitterMenu_FUN_004a2ac0 reader draw slice: the Okay
+// button and DITL entry 5/6 scroll arrows are drawn inline in
+// NovaUi_RunTextReaderDialog below; the -3 caller-supplied-image arm and
+// plus/minus pen raster remain approximate.
+// TODO(decomp): the offscreen-surface owner switching and
+// DrawContext_BlitClippedRect composite are replaced by direct rendering to the
+// platform surface. Backdrop for the < 0x80 variant: three PICTs composed by
+// NovaUi_DrawSelectionDialogContent 0x00499870 in order body -> top ->
+// bottom: 0x214d (441x365) at window.y + height(0x214c), 0x214c (441x9) at
+// the window top, 0x214e (441x40) anchored to the window bottom (it wins
+// where the over-tall body overlaps). DAT_007d4bf0/4bf4 are overlapping
+// aliases of the image-slot array's entries 1/2 and stay set for the reader
+// -- the >= 0x80 art variant is the only path that zeroes them. Blits clip
+// to the window rect (the painter draws inside the modal window's context).
+// Loaded once per dialog, not per frame.
 void NovaUi_RunTextReaderDialog(SdlPlatform &platform,
                                 GameState &state,
                                 const std::string &text,

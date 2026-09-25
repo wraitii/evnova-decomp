@@ -256,6 +256,8 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
   return armed_lifetime < shot.life_ticks_remaining;
 }
 
+// @port 0x0046f3f0 65% gameplay
+// TODO(decomp): the gameplay-surface==8 overwrite branch of field_0xb0.
 // Ghidra Weapon_ApplyWeaponOnHitEffects (0x0046f3f0). Ionization is applied
 // unattenuated for the direct hit (the original passes impact_pos = NULL
 // there) and distance-attenuated inside the splash radius otherwise.
@@ -735,6 +737,7 @@ void NovaWeapon_ResolveShotExpiryImpact(GameState &state,
   }
 }
 
+// @port 0x0046f1e0 100%
 // Ghidra 0x0046f1e0 Frame_AddCombatRatingPoints.
 void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
   constexpr std::int32_t kMaxCombatRating = 10'000'000;

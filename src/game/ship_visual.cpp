@@ -32,6 +32,25 @@ constexpr std::size_t kMinDescriptorSize = 0x36;
 
 } // namespace
 
+// @port 0x004B4EE0 74% gameplay
+// Gameplay/launch fields fully decoded: animation_cycle_count (+0xA00 <-
+// shan+0x04 BaseSetCount, or 1 when prefs.ship_animations off) and
+// alt_sprite_cycle_count via the scenario ship pass, plus
+// skill_variance_percent is correctly the separate sh\xefp SkillVar (+0x9F8,
+// clamped [1,50]). sh.x9an descriptor field decode
+// (base/alt/glow/light/weap/shield ids+sizes, FramesPer, Flags, AnimDelay,
+// WeapDecay) verified, including glow layer fields + 0x16, the
+// LightImageID/WeapImageID roles, and the +0x36..0x3e BlinkMode/BlinkValA-D
+// running-light program (the Ghidra gun/turret exit names there are wrong;
+// real exit geometry starts at +0x48). Exit geometry is decoded at scenario
+// load: ExitType family X/Y arrays use +0x48/+0x50 +16g+2q and Z uses
+// +0x90+8g+2q. Raw base_set_count (+0x04), alt_image_id (+0x0c) and
+// alt_sprite_cycle_count (AltSetCount +0x10, or 1 when the ship-animations
+// preference is off) plus shield_image_id (+0x40) are stored on ShipClass; the
+// renderer loads the alt and shield sheets and draws the alt. DIVERGENCE: the
+// Flags 0x100 affine-skew heading table (field_0xab4) is not built;
+// ComposeShipBaseRow/ComposeShipFrameIndex use the linear heading map (inert
+// for all shipped data).
 std::optional<ShipVisualDescriptor>
 DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
   if (resource_data.size() < kMinDescriptorSize) {

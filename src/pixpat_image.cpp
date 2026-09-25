@@ -25,11 +25,15 @@ using evnova::util::ReadBe32;
 
 } // namespace
 
+// @port 0x004FDF40,0x0087293E 100%
+// @port 0x004BBD50 90% rendering
+// Ghidra 0x004fdf40 thunk_Resource_LoadPixPatAsImage -> 0x0087293e
+// Resource_LoadPixPatAsImage: the port calls the decoder body directly.
+// Ghidra 0x004bbd50 Resource_LoadPixPat is the resource-DB lookup wrapper that
+// feeds this decode; the port resolves the ppat first-match rather than the
+// original's LAST-match resource walk (documented divergence).
 std::optional<PictImage>
 Resource_LoadPixPatAsImage(std::span<const std::byte> ppat_data) {
-  // Ghidra 0x004bbd50 Resource_LoadPixPat (wrapper) -> 0x004fdf40
-  // thunk_Resource_LoadPixPatAsImage / 0x0087293e Resource_LoadPixPatAsImage
-  // (the PixPat decode; runs inline below).
   if (ppat_data.size() < 0x2c || ReadBe16(ppat_data, 0) != 1) {
     NovaLog::Warn("ppat: not a version-1 pixel pattern ({} bytes)",
                   ppat_data.size());

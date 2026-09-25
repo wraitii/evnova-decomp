@@ -561,6 +561,7 @@ bool NovaTargeting_IsStellarAdjacentToSystem(const System &sys,
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x0046e790 100%
 // Ghidra 0x0046E790 System_FindSystemContainingStellar.
 // ---------------------------------------------------------------------------
 // Returns the zero-based index of the first system (visible systems preferred,

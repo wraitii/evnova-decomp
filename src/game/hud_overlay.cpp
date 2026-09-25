@@ -9,6 +9,11 @@
 
 namespace game {
 
+constexpr std::uint64_t kOverlayTickMs = 21U;
+
+// @port 0x0047e2d0 80% ui
+// Immediate-mode rendering replaces the original temporary surface fill/blit.
+// TODO(decomp): edge/blit flags are not modelled.
 // Ghidra 0x0047e2d0 NovaHud_ShowOverlayMessage. The original stores param_2
 // (a tick countdown) in g_hud_overlay_msg_color, which
 // Frame_TickHudOverlayAndRouteMapTimers (0x0042f1b0) decrements it once per
@@ -16,8 +21,6 @@ namespace game {
 // original flight loop admits one such call per 21 ms at its maximum cadence;
 // the port uses that reference duration while keeping expiry independent of
 // the display refresh rate.
-constexpr std::uint64_t kOverlayTickMs = 21U;
-
 void NovaHud_ShowOverlayMessage(GameState &state,
                                 std::string message,
                                 std::uint8_t red,
@@ -41,6 +44,7 @@ void NovaHud_ShowOverlayMessage(GameState &state,
       state, std::move(message), 0xe0, 0xe0, 0xe0, duration_frames);
 }
 
+// @port 0x0047e430 85% ui
 // Ghidra 0x0047e430 NovaHud_ShowCachedOverlayMessage.
 void NovaHud_ShowCachedOverlayMessage(GameState &state, bool extend) {
   if (!state.hud_overlay.active || state.hud_overlay.message.empty()) {
@@ -112,6 +116,10 @@ NovaHud_DecodeStringEntry(std::span<const std::byte> pool,
   return out;
 }
 
+// @port 0x004B8CA0 95% correctness
+// Port helper NovaHud_LoadStringEntry/DecodeStringEntry take 1-based entry
+// numbers like the original; on a missing pool/entry it returns nullopt (empty
+// string in the original) so callers keep literal fallbacks.
 std::optional<std::string> NovaHud_LoadStringEntry(std::uint16_t resource_id,
                                                    std::uint16_t entry) {
   const auto bytes = NovaResource_Load(kResourceTypeStringTable, resource_id);
@@ -148,7 +156,9 @@ NovaResources_DecodeStringResource(std::span<const std::byte> resource) {
   return out;
 }
 
-// Ghidra 0x004c73b0 NovaResources_CopyStringResource.
+// @port 0x004C73B0 100%
+// Ghidra 0x004c73b0 NovaResources_CopyStringResource. Returns an owned string
+// rather than copying raw bytes to a caller buffer.
 std::optional<std::string>
 NovaResources_LoadStringResource(std::uint16_t resource_id) {
   const auto bytes = NovaResource_Load(kResourceTypeString, resource_id);
@@ -158,6 +168,12 @@ NovaResources_LoadStringResource(std::uint16_t resource_id) {
   return NovaResources_DecodeStringResource(*bytes);
 }
 
+// @port 0x004C7040 95% ui
+// Ghidra 0x004c7040 NovaData_LoadDisplayNamePstringTables: a sparse `STR `
+// override wins over the corresponding STR# entry (bases 1000/4000/4001/4002/
+// 4003). Existing UI sites load the fixed STR# tables directly instead of
+// materializing 0x100-byte Pascal-string caches; as-yet-unported consumers can
+// still lack entries.
 std::optional<std::string>
 NovaResources_LoadPatchedStringEntry(std::uint16_t fallback_pool,
                                      std::uint16_t entry,
