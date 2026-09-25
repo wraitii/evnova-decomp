@@ -2184,7 +2184,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   return true;
 }
 
-// @port 0x00436f70 85% rendering,synthetic
+// @port 0x00436f70 100% divergence,synthetic
 // Ghidra Asteroid_HandleSpritePairCollision (0x00436f70): the sprite-layer
 // callback installed on the 16 asteroid sprites. Ship_TestSpriteLayerOverlaps
 // invokes it for every (asteroid sprite, shot sprite) overlap. It resolves the
@@ -2196,9 +2196,10 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
 // late-collision-window gate. The clean-room resolves each asteroid's current
 // wander frame mask before the pass and falls back to the circle envelope only
 // when a mask is unavailable.
-// TODO(decomp(0x00436f70)): the original always uses the pixel-mask test;
-// the clean-room circle-envelope fallback for missing masks is a rendering
-// approximation to confirm/retain.
+// DIVERGENCE(original): the original always uses Sprite_TestPixelMaskOverlap;
+// the clean-room collapses the sprite-layer pair into a direct contact pass and
+// falls back to a bounding circle when either side lacks a resolved mask. We
+// keep the fallback rather than reproduce the sprite-layer mask lifetime.
 void ResolveDirectAsteroidContact(GameState &state,
                                   ActiveShot &shot,
                                   const Weapon &weapon) {
