@@ -911,6 +911,7 @@ void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x00401000 80% gameplay,cadence,divergence
 // ---- Ghidra 0x00401000 Ship_UpdateShipAI : the top-level dispatcher. ----
 // Recomputes the effective movement stats cached on the ship when its class is
 // the 0x2ff sentinel (player-side; not relevant to NPCs), selects the

@@ -9,6 +9,7 @@
 
 namespace game {
 
+// @port 0x004CD230 100%
 // Ghidra 0x004cd230 NameString_StripSubtitleSuffix. Finds the last ';' (0x3b),
 // then scans left. A space lowers the cut point; a further ';' is skipped
 // without moving it; the first other character ends the cut just after it. If
