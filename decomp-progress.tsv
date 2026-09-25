@@ -319,10 +319,10 @@ address	name	impl_file	reimpl_pct	comment
 0x0045D600	NovaUi_DrawStellarRadarPanel	src/game/hud_renderer.cpp	85%	rng,rendering,divergence
 0x0045E400	NovaUi_DrawTravelStatusPanel	src/game/hud_renderer.cpp	95%	ui
 0x0045E9C0	NovaUi_DrawPlayerShieldArmorPanels	src/game/hud_renderer.cpp	80%	rendering,divergence
-0x0045EA66	NovaUi_DrawPlayerShieldBar	src/game/hud_renderer.cpp	95%	rendering
-0x0045EBE8	NovaUi_DrawPlayerArmorBar	src/game/hud_renderer.cpp	95%	rendering
+0x0045EA66	NovaUi_DrawPlayerShieldBar	src/game/hud_renderer.cpp	100%	
+0x0045EBE8	NovaUi_DrawPlayerArmorBar	src/game/hud_renderer.cpp	100%	
 0x0045EFE0	NovaUi_DrawPlayerFuelPanel	src/game/hud_renderer.cpp	95%	rendering
-0x0045F086	NovaUi_DrawPlayerFuelLevelBar	src/game/hud_renderer.cpp	95%	rendering
+0x0045F086	NovaUi_DrawPlayerFuelLevelBar	src/game/hud_renderer.cpp	100%	
 0x0045F530	NovaUi_DrawTargetStatusPanel	src/game/hud_renderer.cpp	95%	ui,divergence
 0x00460EC0	NovaUi_DrawActiveWeaponAmmoPanel	src/game/hud_renderer.cpp	100%	
 0x004612C0	NovaUi_DrawCargoMissionStatusPanel	src/game/hud_renderer.cpp	90%	ui
