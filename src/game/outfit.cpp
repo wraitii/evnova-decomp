@@ -1537,7 +1537,7 @@ std::int16_t Player_ComputeRemainingCargoSpace(const GameState &state) {
   return static_cast<std::int16_t>(ship_capacity - carried);
 }
 
-// @port 0x0041f330 95% gameplay,verify
+// @port 0x0041f330 95% gameplay
 // Ghidra 0x0041f330 Player_RedistributeFleetCargoOverflow. See the header.
 void Player_RedistributeFleetCargoOverflow(GameState &state,
                                            bool jettison_all,

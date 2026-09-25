@@ -76,7 +76,7 @@ constexpr double kStandoffDisabledScale = 0.5;
 
 } // namespace
 
-// @port 0x00405590 70% gameplay,ui,license,verify
+// @port 0x00405590 70% gameplay,ui,license
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame state machine. This
 // is a substantial function; the reconstruction below covers the core
 // movement/control-mode decision for the states the reimplementation drives
@@ -84,6 +84,8 @@ constexpr double kStandoffDisabledScale = 0.5;
 // Ship.ai_control_mode accordingly. The high-level attack states now enter
 // pursuit/engagement control modes using the reconstructed target slots;
 // weapon selection, cloak engagement, and HUD/mission flavor remain deferred.
+// TODO(decomp(0x00405590)): weapon selection, cloak engagement rules, and the
+// HUD/mission flavor arms of the per-frame state machine are unported.
 void NovaAi_UpdateShipState(GameState &state,
                             Ship &ship,
                             std::uint32_t now_ms,

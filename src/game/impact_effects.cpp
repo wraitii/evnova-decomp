@@ -54,7 +54,7 @@ void NovaEffects_SpawnImpactEffect(GameState &state,
   }
 }
 
-// @port 0x00428090 95% verify
+// @port 0x00428090 100%
 // Ghidra 0x00428090 Shot_SpawnShipDestructionDebrisPuff.
 void NovaEffects_SpawnShipDestructionDebrisPuff(GameState &state,
                                                 const Ship &ship) {
@@ -178,11 +178,11 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
   }
 }
 
-// @port 0x004274d0 85% verify
-// Ghidra Weapon_SpawnWeaponImpactParticleBurst (0x004274d0).
 // @port 0x0047b960 80% rendering
-// TODO(decomp): the original free-head recycling into a 100000-slot pool is not
-// modelled;
+// TODO(decomp(0x0047b960)): the original free-head recycling into a
+// 100000-slot pool is not modelled; the port appends to a growable vector.
+// @port 0x004274d0 100%
+// Ghidra Weapon_SpawnWeaponImpactParticleBurst (0x004274d0).
 void NovaEffects_SpawnWeaponImpactParticleBurst(GameState &state,
                                                 float x,
                                                 float y,

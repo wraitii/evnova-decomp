@@ -2,16 +2,16 @@ address	name	impl_file	reimpl_pct	comment
 0x00401000	Ship_UpdateShipAI	src/game/ship_ai.cpp	80%	gameplay,cadence,divergence
 0x00401800	Ship_ScanPlayerForContraband	src/game/government.cpp	100%	
 0x00402810	Ship_ResetShipAiBehaviorRuntimeFields	src/game/ship_ai.cpp	100%	
-0x00402860	Ship_UpdateShipAiBehavior0x01_WimpyTrader	src/game/ship_ai_behaviors.cpp	90%	verify
+0x00402860	Ship_UpdateShipAiBehavior0x01_WimpyTrader	src/game/ship_ai_behaviors.cpp	100%	
 0x00402980	Ship_UpdateShipAiAsteroidMinerBehavior	src/game/ship_ai_behaviors.cpp	92%	gameplay
 0x00402BD0	Ship_UpdateShipAiBehavior0x02_BraveTrader	src/game/ship_ai_behaviors.cpp	75%	gameplay,audio
-0x00402E50	Ship_UpdateShipAiBehavior0x03_Warship	src/game/ship_ai_behaviors.cpp	90%	verify
-0x004038B0	Ship_UpdateShipAiBehavior0x03_WarshipCapture	src/game/ship_ai_behaviors.cpp	90%	verify
+0x00402E50	Ship_UpdateShipAiBehavior0x03_Warship	src/game/ship_ai_behaviors.cpp	100%	
+0x004038B0	Ship_UpdateShipAiBehavior0x03_WarshipCapture	src/game/ship_ai_behaviors.cpp	100%	
 0x00403DE0	Ship_UpdateShipAiBehavior0x04_Interceptor	src/game/ship_ai_behaviors.cpp	100%	license
 0x004048A0	Ship_UpdateEscortAI	src/game/ship_ai.cpp	70%	audio
 0x00405120	Ship_DefenseFleetPrioritizePlayerThreat	src/game/ship_ai_behaviors.cpp	100%	moddata
 0x004053C0	Mission_UpdateShipMissionStellarAttackDirective	src/game/ship_ai.cpp	100%	
-0x00405590	Ship_UpdateShipAiState	src/game/ship_ai_state.cpp	70%	gameplay,ui,license,verify
+0x00405590	Ship_UpdateShipAiState	src/game/ship_ai_state.cpp	70%	gameplay,ui,license
 0x00408150	Ship_ApplyShipAiControls	src/game/ship_ai_controls.cpp	93%	gameplay
 0x0040C790	Stellar_SelectRandomAdjacentTravelStellar	src/game/ship_ai_behaviors.cpp	100%	moddata
 0x0040CC10	Stellar_FindNearestAdjacentTravelStellar	src/game/ship_ai_behaviors.cpp	100%	
@@ -42,13 +42,13 @@ address	name	impl_file	reimpl_pct	comment
 0x004106B0	Ship_EnterShipAiState0x0B_ClearTargetsSeedHold	src/game/ship_ai.cpp	100%	
 0x00410700	Ship_SetShipHostileToPlayer	src/game/ship_ai.cpp	100%	correctness,bugfix
 0x004107E0	Ship_EnterShipAiState0x04_TargetRandomCombatCandidate	src/game/ship_ai.cpp	100%	
-0x00410900	Ship_EnterShipAiState0x04_TargetRandomRelativeToSquadLeader	src/game/ship_ai.cpp	100%	verify
+0x00410900	Ship_EnterShipAiState0x04_TargetRandomRelativeToSquadLeader	src/game/ship_ai.cpp	100%	
 0x00410B00	Ship_EnterShipAiState0x04_TargetRandomUnengagedShip	src/game/ship_ai.cpp	100%	
 0x00410C30	Ship_EnterShipAiState0x09_TargetPlayerForAssist	src/game/ship_ai.cpp	100%	
 0x00410C70	Ship_EnterShipAiState0x0F_TargetPlayerForAssist	src/game/ship_ai.cpp	100%	
 0x00410CB0	Ship_EnterShipAiState0x05_ReturnToSquadLeader	src/game/ship_ai.cpp	100%	
 0x00410CE0	Ship_IsShipInAiBehavior5State0x05	src/game/ship_ai.cpp	100%	
-0x00410D10	Ship_EnterSquadReturnState	src/game/ship_ai.cpp	95%	verify
+0x00410D10	Ship_EnterSquadReturnState	src/game/ship_ai.cpp	100%	
 0x00410DD0	Ship_ResetShipPrimaryAndSecondaryTargets	src/game/ship_ai.cpp	100%	
 0x00410E20	Ship_EnterShipAiState0x08_Slowdown	src/game/ship_ai.cpp	100%	
 0x00410E80	Ship_IsShipInHoldStateWithControlMode4Or0x0D	src/game/ship_ai.cpp	100%	
@@ -58,7 +58,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00410F20	Ship_CanTargetOutrunShooter	src/game/ship_ai_weapons.cpp	100%	moddata
 0x00411270	Ship_IsShipInNonIdleAiState	src/game/ship_ai.cpp	100%	
 0x004112A0	Ship_IsShipInAiState0x02	src/game/ship_ai.cpp	100%	
-0x004112C0	Ship_ShowPlayerInterceptTauntIfEligible	src/game/ship_ai_behaviors.cpp	95%	verify
+0x004112C0	Ship_ShowPlayerInterceptTauntIfEligible	src/game/ship_ai_behaviors.cpp	95%	ui
 0x00411540	Ship_EscortFireAtUnprovokedTarget	src/game/ship_ai_weapons.cpp	100%	moddata
 0x004115A0	Ship_IsShipInAiState0x0D	src/game/weapon_shots.cpp	100%	
 0x004115C0	Ship_ClearShipState0x09Or0x0FToIdle	src/game/collision.cpp	100%	
@@ -80,14 +80,14 @@ address	name	impl_file	reimpl_pct	comment
 0x004138A0	Weapon_ClassifyShipWeaponAmmoReadiness	src/game/weapon_banks.cpp	100%	
 0x00413990	Ship_UpdateEscortFormations	src/game/escort_formation.cpp	100%	
 0x00413B60	Ship_SetEscortLaunchOffsetVelocity	src/game/escort_formation.cpp	100%	
-0x00414390	Ship_MoveShipTowardFormationOffset	src/game/escort_formation.cpp	85%	verify
+0x00414390	Ship_MoveShipTowardFormationOffset	src/game/escort_formation.cpp	100%	
 0x00414530	Ship_IsShipInAiState0x11	src/game/collision.cpp	100%	
 0x00414550	Weapon_FireShipWeapons	src/game/weapon.cpp	68%	gameplay,moddata
 0x004152E0	Ship_IssueEscortOrders	src/game/ship_ai.cpp	100%	moddata
 0x004156A0	Ship_ReacquireSquadLeader	src/game/escort_formation.cpp	100%	moddata
 0x004159A0	Ship_IsShipInAiControlMode0x17		0%	
 0x004159C0	Ship_IsShipInAiState0x15	src/game/ship_ai.cpp	100%	
-0x004159E0	Ship_EnterShipAiState0x15_EmergeFromHypergate	src/game/ship_ai.cpp	80%	verify
+0x004159E0	Ship_EnterShipAiState0x15_EmergeFromHypergate	src/game/ship_ai.cpp	80%	gameplay
 0x00415AD0	Stellar_IsShipHeadingToStellarInAiState0x01Or0x14		0%	
 0x00415B00	Ship_IsShipDockedWithTargetInControlMode0x0F	src/game/spaceflight.cpp	100%	
 0x00415B80	Stellar_CanShipInitiateJumpSequence	src/game/travel.cpp	100%	
@@ -110,7 +110,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00419210	Frame_RefreshTransitionFrameAuxVisuals		0%	
 0x004192D0	Ship_ApplyDamageToShip	src/game/collision.cpp	100%	license
 0x0041AD50	Ship_DeactivateVacantShipsAndTally	src/game/ship_spawn.cpp	90%	gameplay
-0x0041AF90	System_RebuildInitialNpcAndMissionPopulation	src/game/ship_spawn.cpp	80%	gameplay,verify
+0x0041AF90	System_RebuildInitialNpcAndMissionPopulation	src/game/ship_spawn.cpp	80%	gameplay
 0x0041BA80	EncounterFleet_SpawnRandomSystemDudeShip	src/game/ship_spawn.cpp	93%	gameplay
 0x0041C710	Dude_SpawnRandomDudeShipInSystem	src/game/ship_spawn.cpp	100%	moddata
 0x0041C9F0	Dude_SpawnShipFromDudeDefInSystem	src/game/ship_spawn.cpp	100%	divergence
@@ -118,7 +118,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0041D6E0	System_TickNpcSpawnMaintenance	src/game/ship_spawn.cpp	80%	gameplay
 0x0041E240	Ship_ResetShipToDefaultCombatState	src/game/escort_formation.cpp	100%	rendering,divergence
 0x0041E640	Weapon_SpawnShipFromCarrierBayWeapon	src/game/ship_spawn.cpp	95%	gameplay
-0x0041F330	Player_RedistributeFleetCargoOverflow	src/game/outfit.cpp	95%	gameplay,verify
+0x0041F330	Player_RedistributeFleetCargoOverflow	src/game/outfit.cpp	95%	gameplay
 0x0041F800	Ship_SpawnFreeflightObjectForShip	src/game/freeflight_objects.cpp	100%	
 0x0041FB50	Ship_SpawnFreeflightObjectAtPosition	src/game/freeflight_objects.cpp	90%	gameplay
 0x0041FD30	Shot_SpawnShotFromWeapon	src/game/weapon_shots.cpp	93%	gameplay
@@ -126,7 +126,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004211D0	Shot_SpawnAreaImpactEffects	src/game/impact_effects.cpp	100%	
 0x00421500	Shot_SpawnImpactEffectSprite	src/game/impact_effects.cpp	55%	rendering
 0x004215D0	Shot_SpawnWeaponSmokePuff	src/game/weapon_shots.cpp	100%	
-0x004216B0	Asteroid_InitSystem	src/game/asteroid.cpp	85%	verify
+0x004216B0	Asteroid_InitSystem	src/game/asteroid.cpp	100%	
 0x00421830	Asteroid_Spawn	src/game/asteroid.cpp	75%	license,gameplay
 0x00421E60	Asteroid_SpawnRecord	src/game/asteroid.cpp	40%	gameplay
 0x00421FD0	Stellar_SpawnDefenseFleetShip	src/game/ship_spawn.cpp	100%	divergence
@@ -146,14 +146,14 @@ address	name	impl_file	reimpl_pct	comment
 0x004259B0	EncounterFleet_SpawnRandomEncounterFleet	src/game/ship_spawn.cpp	90%	audio
 0x00426CE0	Frame_QueueCombatChatter	src/game/spaceflight.cpp	100%	
 0x00426D10	Mission_ShowMissionShipAnnouncement	src/game/mission.cpp	100%	
-0x00426DD0	Mission_TrySpawnMissionShipAmbush	src/game/mission.cpp	95%	gameplay,verify
+0x00426DD0	Mission_TrySpawnMissionShipAmbush	src/game/mission.cpp	95%	gameplay
 0x00426EF0	Weapon_CanWeaponHitTarget	src/game/collision.cpp	90%	gameplay
-0x004274D0	Weapon_SpawnWeaponImpactParticleBurst	src/game/impact_effects.cpp	85%	verify
+0x004274D0	Weapon_SpawnWeaponImpactParticleBurst	src/game/impact_effects.cpp	100%	
 0x00427770	Outfit_GrantOutfitToPlayer	src/game/outfit.cpp	85%	ui
 0x00427A90	Shot_QueueBeamHit	src/game/weapon_shots.cpp	60%	gameplay,rendering
 0x00427DF0	Rank_Activate	src/game/rank.cpp	100%	
 0x00427F40	Rank_Deactivate	src/game/rank.cpp	100%	
-0x00428090	Shot_SpawnShipDestructionDebrisPuff	src/game/impact_effects.cpp	95%	verify
+0x00428090	Shot_SpawnShipDestructionDebrisPuff	src/game/impact_effects.cpp	100%	
 0x00428260	License_ValidateAgainstKeyTable		0%	
 0x00428340	Ship_UpdateVisualState	src/game/ship_visual.cpp	85%	rendering
 0x0042C1B0	Frame_UpdateFreeflightObjectSprites	src/game/freeflight_objects.cpp	85%	rendering,divergence
@@ -172,17 +172,17 @@ address	name	impl_file	reimpl_pct	comment
 0x004313C0	Frame_CancelCombatChatter	src/game/spaceflight.cpp	100%	
 0x00431420	Stellar_TriggerHyperspaceAudioOnce	src/game/spaceflight.cpp	40%	audio
 0x00431480	Frame_JitterPlayerStatModifiers	src/game/spaceflight_player_state.cpp	100%	
-0x00431500	Frame_RerollPlayerStatModifiers	src/game/spaceflight_player_state.cpp	100%	verify
+0x00431500	Frame_RerollPlayerStatModifiers	src/game/spaceflight_player_state.cpp	100%	
 0x00431530	Shot_UpdateShotGuidance	src/game/weapon_shots.cpp	95%	rng,cadence
 0x00432470	System_UpdateSystemAndStellarDisplayState	src/game/targeting.cpp	67%	gameplay,rendering
 0x00432EA0	Frame_MeasureFrameTiming	src/game/frame_timing.hpp	40%	cadence,divergence
 0x00433050	Ship_HandleShip	src/game/spaceflight.cpp	100%	divergence,cadence
 0x00435830	Shot_HandleShot	src/game/weapon_shots.cpp	100%	rendering,divergence,cadence
 0x00436910	Asteroid_UpdateSprites	src/game/asteroid.cpp	80%	divergence,gameplay
-0x00436F70	Asteroid_HandleSpritePairCollision	src/game/collision.cpp	85%	verify,synthetic
-0x00436FF0	NovaUi_ResolveWeaponSplashImpact	src/game/collision.cpp	75%	gameplay,verify
+0x00436F70	Asteroid_HandleSpritePairCollision	src/game/collision.cpp	85%	rendering,synthetic
+0x00436FF0	NovaUi_ResolveWeaponSplashImpact	src/game/collision.cpp	75%	gameplay
 0x004374F0	Ship_HandleSpritePairCollision	src/game/collision.cpp	90%	gameplay
-0x00437780	Shot_ResolveShotCollisionHit	src/game/collision.cpp	90%	verify
+0x00437780	Shot_ResolveShotCollisionHit	src/game/collision.cpp	90%	gameplay
 0x00437E20	Shot_ResolveCollisions	src/game/collision.cpp	80%	gameplay
 0x004386F0	Shot_DrawBeamQueue		0%	Restore-phase beam replot entry: called only from Frame_RestoreViewportRectsAndParticles (0x00439d20). Loops the 0x40-slot g_beam_hit_queue and replays each live beam into the saved-backdrop surface via SWBeams_DrawKinkedBeam (field_0x76 < 1, 1-segment) or SWBeams_DrawBeamWithFlare (field_0x76 >= 1, 2-segment arc). The port keeps no saved-backdrop buffer, so this entry point is not reproduced, but the two plotters it calls are also reachable from the visible 0x00438810 twin-surface path and are tracked separately. 0%, not ported.
 0x00438810	Shot_DrawBeamHitQueueForSurface	src/game/spaceflight_view.cpp	50%	rendering
@@ -275,7 +275,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0044B120	PlayerTick_HyperspaceExitVelocity	src/game/travel.cpp	100%	synthetic
 0x0044B240	PlayerTick_StatusAndOutfitEvents	src/game/spaceflight_player_state.cpp	78%	gameplay,ui,synthetic
 0x0044B7C4	PlayerTick_TravelSelectionCommands	src/game/spaceflight.cpp	55%	gameplay,ui,synthetic
-0x0044BEB0	PlayerTick_WeaponCommands	src/game/weapon_banks.cpp	75%	gameplay,verify,synthetic
+0x0044BEB0	PlayerTick_WeaponCommands	src/game/weapon_banks.cpp	75%	gameplay,synthetic
 0x0044C0B1	PlayerTick_FaceTargetCommand	src/game/spaceflight_player_state.cpp	90%	correctness,synthetic
 0x0044C18A	PlayerTick_HyperspaceCommand	src/game/travel.cpp	60%	gameplay,synthetic
 0x0044C8D0	PlayerTick_ManualFlightAndRegeneration	src/game/spaceflight_player_state.cpp	85%	gameplay,synthetic
@@ -319,10 +319,10 @@ address	name	impl_file	reimpl_pct	comment
 0x0045D600	NovaUi_DrawStellarRadarPanel	src/game/hud_renderer.cpp	85%	rng,rendering,divergence
 0x0045E400	NovaUi_DrawTravelStatusPanel	src/game/hud_renderer.cpp	95%	ui
 0x0045E9C0	NovaUi_DrawPlayerShieldArmorPanels	src/game/hud_renderer.cpp	80%	rendering,divergence
-0x0045EA66	NovaUi_DrawPlayerShieldBar	src/game/hud_renderer.cpp	95%	rendering,verify
-0x0045EBE8	NovaUi_DrawPlayerArmorBar	src/game/hud_renderer.cpp	95%	rendering,verify
-0x0045EFE0	NovaUi_DrawPlayerFuelPanel	src/game/hud_renderer.cpp	95%	rendering,verify
-0x0045F086	NovaUi_DrawPlayerFuelLevelBar	src/game/hud_renderer.cpp	95%	rendering,verify
+0x0045EA66	NovaUi_DrawPlayerShieldBar	src/game/hud_renderer.cpp	95%	rendering
+0x0045EBE8	NovaUi_DrawPlayerArmorBar	src/game/hud_renderer.cpp	95%	rendering
+0x0045EFE0	NovaUi_DrawPlayerFuelPanel	src/game/hud_renderer.cpp	95%	rendering
+0x0045F086	NovaUi_DrawPlayerFuelLevelBar	src/game/hud_renderer.cpp	95%	rendering
 0x0045F530	NovaUi_DrawTargetStatusPanel	src/game/hud_renderer.cpp	95%	ui,divergence
 0x00460EC0	NovaUi_DrawActiveWeaponAmmoPanel	src/game/hud_renderer.cpp	100%	
 0x004612C0	NovaUi_DrawCargoMissionStatusPanel	src/game/hud_renderer.cpp	90%	ui
@@ -331,7 +331,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00461970	Math_LookupAngleCosine		0%	
 0x004619B0	Math_AngleFromVector2D		0%	
 0x00461BC0	Stub_ElidedHook		0%	
-0x00461BD0	Ship_FindNextPlayerCycleTarget	src/game/targeting.cpp	100%	gameplay,verify
+0x00461BD0	Ship_FindNextPlayerCycleTarget	src/game/targeting.cpp	95%	gameplay
 0x00461F60	Ship_FindPreviousPlayerCycleTarget	src/game/targeting.cpp	100%	gameplay
 0x004622F0	DrawContext_DrawCenteredPascalStringInBounds	src/game/nova_font.cpp	100%	divergence
 0x00462340	Rect_FilledSideDim		0%	
@@ -882,14 +882,14 @@ address	name	impl_file	reimpl_pct	comment
 0x004CD230	NameString_StripSubtitleSuffix	src/game/nova_name_text.hpp	100%	
 0x004CD290	PilotData_FindActivePilotName	src/game/pilot_file.cpp	80%	gameplay
 0x004CD350	PilotData_ResolveStartType	src/game/new_pilot_flow.cpp	70%	gameplay
-0x004CD3B0	IntroCinematic_SetupFrames	src/game/intro_cinematic.cpp	95%	ui,verify
+0x004CD3B0	IntroCinematic_SetupFrames	src/game/intro_cinematic.cpp	95%	ui
 0x004CD4B0	PilotData_InitializePlayerState	src/game/pilot_file.cpp	75%	gameplay
 0x004CD7E0	ResourceData_VerifyCatalogChecksum		0%	Full-catalog resource integrity check: sums FUN_004fe285 over 0x17 resource types and compares to the stored checksum in resource type 0x63739f6d, showing STR# 0x8c entry 7 on mismatch. Called between the startup splash and the progress-bar reveal. Deliberately not ported (licence/tamper checks out of scope); the loading bar therefore appears immediately on the startup splash instead of after this pass.
 0x004CDA50	Ui_InstallGameplayInterfaceLayout	src/game/gameplay_interface.cpp	30%	ui,rendering
-0x004CDFA0	ResourceDb_FindRecord	src/brgr_archive.cpp	95%	correctness,verify
-0x004CE030	ResourceData_GetSlotByIndex	src/brgr_archive.cpp	90%	correctness,verify
+0x004CDFA0	ResourceDb_FindRecord	src/brgr_archive.cpp	100%	
+0x004CE030	ResourceData_GetSlotByIndex	src/brgr_archive.cpp	100%	
 0x004CE0B0	FUN_004ce0b0		0%	
-0x004CE110	ResourceData_FindByKey	src/brgr_archive.cpp	90%	correctness,verify
+0x004CE110	ResourceData_FindByKey	src/brgr_archive.cpp	100%	
 0x004CE1A0	ResourceData_ResolveSlotByHandle		0%	
 0x004CE250	FUN_004ce250		0%	snd/pict resource acquisition helper
 0x004CE2A0	ResourceData_AccessByIndex		0%	
@@ -898,7 +898,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004CE400	FUN_004ce400		0%	
 0x004CE470	ResourceData_CountEntries		0%	
 0x004CE480	ResourceData_ReadEntryMetadata		0%	
-0x004CE4D0	ResourceArchive_OpenRez	src/brgr_archive.cpp	80%	correctness,verify
+0x004CE4D0	ResourceArchive_OpenRez	src/brgr_archive.cpp	80%	correctness
 0x004CE640	FUN_004ce640		0%	
 0x004CE660	FUN_004ce660		0%	
 0x004CE700	FUN_004ce700		0%	
@@ -1474,7 +1474,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004FF850	FUN_004ff850		0%	
 0x004FF870	FUN_004ff870		0%	
 0x004FF8A0	FUN_004ff8a0		0%	
-0x004FF900	ResourceDb_RegisterArchive	src/brgr_archive.cpp	90%	correctness,verify
+0x004FF900	ResourceDb_RegisterArchive	src/brgr_archive.cpp	100%	
 0x004FF950	MWRuntime_FUN_004ff950		0%	
 0x004FFA00	IniConfig_ParseText		0%	
 0x004FFC50	IniConfig_LoadFromFile		0%	

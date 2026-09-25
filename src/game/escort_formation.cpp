@@ -166,7 +166,7 @@ void SetEscortLaunchOffsetVelocity(GameState &state,
 
 } // namespace
 
-// @port 0x00414390 85% verify
+// @port 0x00414390 100%
 // Ghidra 0x00414390 Ship_MoveShipTowardFormationOffset.
 void Ship_MoveShipTowardFormationOffset(GameState &state,
                                         Ship &ship,

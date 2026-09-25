@@ -886,11 +886,14 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state, Ship &ship) {
   }
 }
 
-// @port 0x004112c0 95% verify
+// @port 0x004112c0 95% ui
 // Ghidra 0x004112C0 Ship_ShowPlayerInterceptTauntIfEligible. Generic
 // (non-personality) ships entering intercept state may challenge the player
 // when no HUD message is already visible. The stock challenges are the 20
 // entries in STR# 0x138b; transition-table cue 4 accompanies the message.
+// TODO(decomp(0x004112c0)): confirm the overlay tint (the original passes
+// g_hud_overlay_text_color; the port renders with the shared default tint) and
+// the cue-4 queue position relative to the overlay arm.
 void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship) {
   if (ship.pers_def_slot != -1 || state.hud_overlay.active) {
     return;
@@ -932,7 +935,7 @@ void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship) {
   state.pending_ui_sounds.push_back({4, 1});
 }
 
-// @port 0x00402860 90% verify
+// @port 0x00402860 100%
 // Ghidra 0x00402860 Ship_UpdateShipAiBehavior0x01_WimpyTrader. The "normal
 // travel / wander" supervisor. Reacquires a travel stellar when idle (state 0)
 // -- picking a random adjacent travel stellar and entering state 1 (travel to
@@ -1195,7 +1198,8 @@ void NovaAi_DefenseFleetPrioritizePlayerThreat(GameState &state, Ship &ship) {
   // revalidation -- an out-of-bounds read with no defined value. The port
   // instead revalidates the ship's existing primary target, the evident
   // intent (clear a primary that can no longer be engaged under cloak rules).
-  // TODO(decomp(0x00405120)) DIVERGENCE(original): original reads ships[0x40] here.
+  // TODO(decomp(0x00405120)) DIVERGENCE(original): original reads ships[0x40]
+  // here.
   if (ship.primary_target_ship_slot != -1) {
     const std::size_t primary =
         static_cast<std::size_t>(ship.primary_target_ship_slot);
@@ -1283,14 +1287,15 @@ void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship) {
   }
 }
 
-// @port 0x00402e50 90% verify
+// @port 0x00402e50 100%
 // Ghidra 0x00402e50 Ship_UpdateShipAiBehavior0x03_Warship. Hostile warship
 // supervisor: government hold/aggression policy, idle target acquisition,
 // target retention/loss, the state-1/0x14/2 travel re-acquire arm, the state-6
 // attached-fighter wait, and the low-shield / cowardice / ammo-out disengage
 // arms. The capture/plunder government variant (flags_primary 0x1000) is the
 // separate 0x004038b0 port. The random_ai_render_cadence aggression thresholds
-// remain provisional.
+// are 0.30 (cadence 1) and 0.15 (cadence 2), confirmed from the double
+// constants at 0x00575048/0x00575050.
 void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     return;
@@ -1836,7 +1841,7 @@ void NovaAi_UpdateBehavior0x04(GameState &state, Ship &ship) {
   }
 }
 
-// @port 0x004038b0 90% verify
+// @port 0x004038b0 100%
 // Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03_WarshipCapture. The
 // plunder-flavored variant of hostile behavior 0x03, selected by the
 // dispatcher when the ship's faction has government flags_primary 0x1000

@@ -113,8 +113,13 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
       ship.ai_station_hold_timer);
 }
 
-// @port 0x004159e0 80% verify
+// @port 0x004159e0 80% gameplay
 // Ghidra 0x004159e0 Ship_EnterShipAiState0x15_EmergeFromHypergate.
+// TODO(decomp(0x004159e0)): the original reads StellarDef +0x28 (cust_snd_id)
+// as the emergence heading for ANY stellar; the port only uses it when scenario
+// loading tagged it as emergence_angle_deg (hypergate/wormhole flags 0x3000)
+// and randomizes otherwise. Confirm no ordinary entry stellar reaches this path
+// with a cust_snd_id in [0, 359].
 void NovaAi_EnterState15EmergeFromHypergate(GameState &state,
                                             Ship &ship,
                                             std::int16_t stellar_id) {
@@ -2225,7 +2230,7 @@ void NovaAi_EnterState5ReturnToSquadLeader(Ship &ship) {
   ship.ai_control_mode = 0;
 }
 
-// @port 0x00410900 100% verify
+// @port 0x00410900 100%
 // Ghidra 0x00410900
 // Ship_EnterShipAiState0x04_TargetRandomRelativeToSquadLeader.
 void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
@@ -2248,8 +2253,9 @@ void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
   // it asks whether the pick is already engaged with the leader's squad, not
   // whether the leader currently targets the pick). The original dereferences
   // g_ship_states + squad_leader_ship_slot without a bounds check; a
-  // negative/unset leader (-1) fails the gate here.
-  // TODO(decomp(0x00410900)): confirm no caller reaches this without a leader.
+  // negative/unset leader (-1) fails the gate here; the sole caller
+  // Ship_UpdateEscortAI (0x004048a0) returns before this point when
+  // squad_leader_ship_slot == -1, so the guard is unreachable in normal play.
   auto candidate_gate = [&](const Ship &candidate, std::int16_t slot) {
     if (slot == 0) {
       return leader != nullptr &&
@@ -2420,7 +2426,7 @@ void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
   ship.resolved_squad_leader_ship_slot = -1;
 }
 
-// @port 0x00410d10 95% verify
+// @port 0x00410d10 100%
 // Ghidra 0x00410d10 Ship_EnterSquadReturnState; the behavior-5
 // follower sweep at the tail is 0x00410cb0
 // Ship_EnterShipAiState0x05_ReturnToSquadLeader run inline.

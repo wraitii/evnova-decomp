@@ -207,9 +207,9 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
   return it->second->texture ? it->second.get() : nullptr;
 }
 
-// @port 0x0045EA66 95% rendering,verify
-// @port 0x0045EBE8 95% rendering,verify
-// @port 0x0045F086 95% rendering,verify
+// @port 0x0045EA66 95% rendering
+// @port 0x0045EBE8 95% rendering
+// @port 0x0045F086 95% rendering
 // Draws one life-support bar from its real layout panel rect, faithfully
 // reproducing the game's fill geometry (HudBar_FillRect mirrors
 // NovaUi_DrawPlayerShieldBar 0x0045ea66 / _ArmorBar 0x0045ebe8 /
@@ -218,6 +218,9 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
 // filled portion is drawn
 // (opaque on the panel); the surrounding bar trough art lives in the cockpit
 // PICT, which is composited separately.
+// TODO(decomp(0x0045ea66)): the port draws only the fill and relies on the
+// cockpit PICT for the trough; verify the fill geometry (axis/rounding) against
+// the original blitter path for all three bars.
 void DrawBarFill(SDL_Renderer *renderer,
                  const HudBarFill &fill,
                  SDL_Color color) {
@@ -518,7 +521,9 @@ void HudRenderer::Draw(SdlPlatform &platform,
   // (the wide slot moves its left edge), so it marks the fraction above the
   // last full hundred tons.
   if (!NovaAiShip_IsDisabled(state, state.player)) {
-    // @port 0x0045EFE0 95% rendering,verify
+    // @port 0x0045EFE0 95% rendering
+    // TODO(decomp(0x0045EFE0)): confirm the reserve-segment band geometry
+    // (floor(fuel/100)*100 mark to the usable fill edge) against the original.
     const float fuel = state.player.fuel_points;
     const HudPanelRect fuel_panel = anchor_panel(layout_.fuel_panel);
     DrawLifeBar(

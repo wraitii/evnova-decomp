@@ -1577,7 +1577,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
   }
 }
 
-// @port 0x0041af90 80% gameplay,verify
+// @port 0x0041af90 80% gameplay
 // Ghidra 0x0041af90 System_RebuildInitialNpcAndMissionPopulation, initial
 // ambient-population slice. The larger function first restores mission fleets
 // and player escorts,
@@ -1585,6 +1585,9 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
 // its ordinary-dude branch deliberately calls the low-level spawner directly,
 // so those ships keep their inner-system [-750,750) scatter instead of being
 // moved to the polar state-8 / restricted-stellar state-15 arrival paths.
+// TODO(decomp(0x0041af90)): the mission-fleet restore arm and the exact
+// mission/encounter 1-in-7 dispatch ordering remain to be confirmed against
+// the original.
 void NovaSystem_PopulateInitialNpcShips(GameState &state,
                                         std::int16_t system_id) {
   const System *sys =
