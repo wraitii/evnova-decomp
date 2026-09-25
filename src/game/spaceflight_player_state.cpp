@@ -474,6 +474,7 @@ constexpr std::uint16_t kStrAbandonShipFor = 0x34;
 // 100-int16 stride.
 constexpr std::size_t kPlayerBankStride = 100;
 
+// @port 0x00464700 100%
 // Ghidra Outfit_HasAutoEjectOutfit (0x00464700): any owned outfit with
 // ModType 0x14 (Bible "auto-eject", which requires an escape pod to work).
 bool Outfit_HasAutoEjectOutfit(const GameState &state) {
@@ -496,6 +497,7 @@ bool Weapon_HasPlayerLaunchBayWeapon(const GameState &state) {
   return NovaWeapon_HasLaunchBayWeapon(state, state.player);
 }
 
+// @port 0x00464590 100%
 // Ghidra ShipClass_FindLaunchBayShipClassId (0x00464590): the zero-based class
 // index of the first ejectable bay fighter, -1 when none.
 std::int16_t Weapon_FindLaunchBayShipClassIndex(const GameState &state) {
@@ -520,6 +522,7 @@ std::int16_t Weapon_FindLaunchBayShipClassIndex(const GameState &state) {
   return -1;
 }
 
+// @port 0x004644a0 100%
 // Ghidra Outfit_HasSpecialMovementOutfitOrLaunchBay (0x004644a0, renamed
 // Outfit_HasEscapePodOrLaunchBay): an owned escape-pod outfit (ModType 0xb)
 // or an ejectable launch bay.
@@ -667,6 +670,7 @@ void RespawnResetPlayerShipState(GameState &state) {
   }
 }
 
+// @port 0x00467710,0x004677a0 100%
 // Ghidra 0x00467710/0x004677a0 Stellar_FindValidRespawnStellar{,Recursive}:
 // the escape-pod respawn destination lookup. Depth-first flood over visible,
 // discovered neighbour systems for an available, travel-usable, ship-selling

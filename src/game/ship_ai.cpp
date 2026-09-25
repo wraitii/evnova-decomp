@@ -309,6 +309,7 @@ double NovaAi_ComputeMaxShieldPoints(const GameState &state, const Ship &ship) {
   return max_shield;
 }
 
+// @port 0x004637a0 100%
 // Ghidra 0x004637a0 Ship_ComputeShipMaxArmor. Player outfit aggregation runs
 // in Outfit_ComputePlayerEffectiveStats.
 float NovaAi_ComputeMaxArmorPoints(const GameState &state, const Ship &ship) {
@@ -333,6 +334,7 @@ float NovaAi_ComputeMaxArmorPoints(const GameState &state, const Ship &ship) {
   return static_cast<float>(max_armor);
 }
 
+// @port 0x00463a20 100%
 // Ghidra 0x00463a20 Ship_ComputeShipFuelCapacity. The player's capacity folds
 // in opcode-12 outfit bonuses through the effective-stats pass; NPC ships use
 // the raw class value because the original skips the outfit loop for
@@ -387,6 +389,7 @@ constexpr float kBehavior5DifficultyMult = 1.333F;
 
 } // namespace
 
+// @port 0x00463680 95% correctness
 // Ghidra 0x00463680 Ship_ComputeShipShieldRegenRate.
 // NPC branch (the player's runs inside Outfit_ComputePlayerEffectiveStats).
 float NovaAi_ComputeShipShieldRegenRate(const GameState &state,
@@ -409,6 +412,7 @@ float NovaAi_ComputeShipShieldRegenRate(const GameState &state,
   return rate;
 }
 
+// @port 0x004638e0 95% correctness
 // Ghidra 0x004638e0 Ship_ComputeShipArmorRegenRate.
 // NPC branch (the player's runs inside Outfit_ComputePlayerEffectiveStats).
 float NovaAi_ComputeShipArmorRegenRate(const GameState &state,
@@ -430,6 +434,7 @@ float NovaAi_ComputeShipArmorRegenRate(const GameState &state,
   return rate;
 }
 
+// @port 0x00463b30 95% correctness
 // Ghidra 0x00463b30 Ship_ComputeShipFuelRechargeRate.
 // NPC branch (the player's runs inside Outfit_ComputePlayerEffectiveStats).
 bool NovaAi_ComputeShipFuelRechargeRate(const GameState &state,
@@ -1546,6 +1551,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
   }
 }
 
+// @port 0x00464a90 90% gameplay
 // Ghidra 0x00464a90 Ship_CanShipEngageTargetUnderCloakRules.
 bool NovaAiShip_CanEngageTargetUnderCloakRules(const GameState &state,
                                                const Ship &subject_ship,

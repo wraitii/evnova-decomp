@@ -146,6 +146,7 @@ std::int16_t FindBestSystemMatch(const GameState &state,
 
 namespace {
 
+// @port 0x00466260 85% rendering
 // Ghidra 0x00466260 Stellar_ComputeStellarDisplayColor: the starmap marker
 // ring colour for a system, graded from its destinations: unvisited -> grey
 // 0xc000-header? no -- grey 0x4000; no usable destination -> grey 0xc000; any

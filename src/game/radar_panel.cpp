@@ -66,6 +66,7 @@ constexpr SDL_Color kIffPlayerColor = Rgb(0x0000, 0xffff, 0xffff);
 
 } // namespace
 
+// @port 0x00465f00 100%
 SDL_Color Ship_RadarDisplayColor(const GameState &state, const Ship &ship) {
   if (ship.ship_instance_id == 0) {
     return kIffPlayerColor;
@@ -91,6 +92,7 @@ SDL_Color Ship_RadarDisplayColor(const GameState &state, const Ship &ship) {
   return kIffShipNeutral;
 }
 
+// @port 0x00466030 100%
 SDL_Color Stellar_RadarDisplayColor(const GameState &state, const Stellar &st) {
   // Inactive bodies and uninhabited bodies (Flags bit 0x20) stay grey.
   if (!NovaTargeting_StellarTargetsSpriteSetActive(st) ||
@@ -122,6 +124,7 @@ SDL_Color Stellar_RadarDisplayColor(const GameState &state, const Stellar &st) {
   return StellarReputationColor(state, st);
 }
 
+// @port 0x004651a0 100%
 bool Outfit_HasCloakRadarVisibility(const GameState &state, const Ship &ship) {
   constexpr std::uint16_t kRadarVisibleFlag = 0x0002;
   const auto visible = [](const Outfit &outfit,
@@ -201,12 +204,18 @@ void Frame_RollProximityScanDetection(GameState &state) {
   state.proximity_scan_detected = roll(state.rng) + 1 <= odds;
 }
 
-// Ghidra 0x004654b0 Outfit_HasPlayerOwnedOutfitType0x0E_Cached.
+// @port 0x004654b0 100% divergence
+// Ghidra 0x004654b0 Outfit_HasPlayerOwnedOutfitType0x0E_Cached. The original
+// memoizes into a -1 sentinel global; DIVERGENCE(original): this pure on-demand
+// scan is kept instead.
 bool Outfit_PlayerHasIffOutfit(const GameState &state) {
   return Outfit_HasOwnedEffect(state, OutfitEffect::kIff);
 }
 
+// @port 0x00465410 100% divergence
 // Ghidra 0x00465410 Outfit_HasPlayerOwnedOutfitType0x0D_Cached.
+// DIVERGENCE(original): the original memoizes into a -1 sentinel global; this
+// pure on-demand scan is kept instead, matching the IFF-outfit helper above.
 bool Outfit_PlayerHasDensityScanner(const GameState &state) {
   return Outfit_HasOwnedEffect(state, OutfitEffect::kDensityScanner);
 }

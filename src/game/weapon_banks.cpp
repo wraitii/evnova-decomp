@@ -421,6 +421,7 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
   }
 }
 
+// @port 0x00464670 100%
 // Ghidra 0x00464670 Weapon_HasLoadedLaunchBayAmmo (disasm
 // 0x00464670..0x004646f6): true when the ship's class has a KeyCarried
 // fighter and one of its banks holds a mode-99 bay weapon with mounted
@@ -493,6 +494,7 @@ constexpr std::uint16_t kEscapeShipClassFlag = 0x8000;
 
 } // namespace
 
+// @port 0x00464520 100%
 // Ghidra 0x00464520 Weapon_HasLaunchBayWeapon (disasm 0x00464520..0x0046458e):
 // true when any of the ship's 0x100 banks is a loaded launch bay
 // (IsLoadedLaunchBayBank). Reads the bank's MOUNTED counter, not the loaded
@@ -507,6 +509,7 @@ bool NovaWeapon_HasLaunchBayWeapon(const GameState &state, const Ship &ship) {
   return false;
 }
 
+// @port 0x00464600 100%
 // Ghidra 0x00464600 Weapon_FindLaunchBayWeaponBank (disasm
 // 0x00464600..0x0046466e): the first loaded launch-bay bank, or -1.
 // Called from Ship_HandleShip for carrier-bay launches.

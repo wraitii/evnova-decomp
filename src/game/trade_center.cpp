@@ -229,6 +229,9 @@ std::int16_t NovaTradeCenter_HeldCount(const GameState &state,
   return state.inventory.junk_counts[static_cast<std::size_t>(slot->junk_id)];
 }
 
+// @port 0x00465e50 100%
+// Ghidra 0x00465e50 TradeCenter_CanBuySelectedRow: credits >= the row price
+// (session.Row price) and fleet cargo capacity > cargo+junk total.
 bool NovaTradeCenter_CanBuyRow(const GameState &state,
                                const TradeCenterSession &session,
                                int row) {
@@ -244,6 +247,9 @@ bool NovaTradeCenter_CanBuyRow(const GameState &state,
   return capacity > used;
 }
 
+// @port 0x00465ea0 100%
+// Ghidra 0x00465ea0 TradeCenter_HasSelectedRowStock: the selected row holds
+// at least one unit (cargo bin for rows 0..5, junk count otherwise).
 bool NovaTradeCenter_HasRowStock(const GameState &state,
                                  const TradeCenterSession &session,
                                  int row) {
