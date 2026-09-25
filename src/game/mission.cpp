@@ -137,6 +137,7 @@ FindSystemContainingStellar(const GameState &state, std::int16_t stellar_id) {
 
 } // namespace
 
+// @port 0x00448090 100%
 // Ghidra 0x00448090 NovaResources_EvaluateAvailability, stellar/system
 // membership prologue: every stellar's runtime owning-system slot is reset,
 // each SystemDef.is_visible is recomputed from the Visibility NCB (the
@@ -1808,6 +1809,7 @@ static void RearmMissionTimers(GameState &state, ActiveMission &mission) {
   mission.mission_fleet_metric_c = 0;
 }
 
+// @port 0x00448910 100%
 // Ghidra 0x00448910 Mission_RefreshActiveMissionSpawnState.
 void Mission_RefreshActiveMissionSpawnState(GameState &state) {
   for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
@@ -1851,6 +1853,9 @@ void Mission_RearmActiveMissionTimers(GameState &state) {
   }
 }
 
+// @port 0x00447F20 100%
+// Ghidra 0x00447f20 Mission_CheckReactionConditionSatisfied. See the header
+// comment for the wrapper semantics.
 bool Mission_CheckReactionConditionSatisfied(const GameState &state,
                                              std::string_view condition) {
   if (condition.empty()) {
@@ -2196,6 +2201,7 @@ void Mission_FailMissionSlotQuick(GameState &state,
   // Ambient-roll latch invalidation is not modelled (TODO(decomp)).
 }
 
+// @port 0x00447D90 100% divergence
 // Ghidra 0x00447d90 Mission_ResolveMisnSlot. Completes an auto-abort/goal
 // mission: on-abort payload (Bible OnAbort, +0x5e8), optional daily rerolls,
 // the auto-abort fuel penalty, auto-abort pay, and slot teardown.
@@ -2299,6 +2305,7 @@ void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
   state.mission_interaction_context = -1;
 }
 
+// @port 0x00448670 100% divergence
 // Ghidra 0x00448670 Mission_RunAvailLocOffers. See the header
 // comment. The original walks the persistent lane-1 list
 // (g_return_mission_list = g_mission_slot_list[1], rebuilt by
@@ -2844,6 +2851,7 @@ void Mission_TrySpawnMissionShipAmbush(GameState &state) {
   state.mission_speaker_ship_slot = -1;
 }
 
+// @port 0x00448660 100%
 // Ghidra 0x00448660 Mission_ClearActiveReactionMission.
 void Mission_ClearActiveReactionMission(GameState &state) {
   state.mission_interaction_context = -1;
