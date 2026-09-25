@@ -425,6 +425,7 @@ void Ship_TickLeaderFlags(GameState &state) {
   }
 }
 
+// @port 0x0041e240 100% rendering,divergence
 // Ghidra 0x0041e240 Ship_ResetShipToDefaultCombatState.
 void NovaShip_ResetToDefaultCombatState(GameState &state,
                                         Ship &ship,

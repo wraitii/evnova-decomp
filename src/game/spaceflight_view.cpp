@@ -1155,6 +1155,7 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 // BkgndColor, pure black when unset) and then the active ambient star
 // particles. Ghidra [0x00497df0]: Frame_RenderViewportBackground clears + fills
 // with the NovaRender_SetSystemSpaceBackgroundColor [0x0046bbf0] tint, then
+// @port 0x0042e590 85% rendering,divergence
 // Frame_UpdateViewportWrapBackgroundSprites [0x0042e590]
 // (+ the sprite-world draw in Frame_SpaceflightLoop scope 2) renders the stars.
 // Each star draws its randomly-chosen frame of the 16-frame star-field sprite
@@ -1515,6 +1516,7 @@ void SpaceflightView::WrapAsteroids(SdlPlatform &platform, GameState &state) {
   }
 }
 
+// @port 0x0042cd10 85% rendering,gameplay
 // Ghidra Stellar_UpdateStellarSprites (0x0042cd10), ambient-animation part.
 // Advances each animate stellar of the current system one animation step each
 // real frame. Stellar bodies with only a single frame (sprite_frame_count<2)
@@ -1950,6 +1952,7 @@ void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
+// @port 0x00438c40 85% rendering
 // Ghidra 0x00438c40 (unnamed under-ships beam pass): draw proc of the second
 // gameplay sprite-world layer, below shots and ships. Draws only beams whose
 // weapon sets flags_secondary 0x2000 (Bible "display the beam underneath
@@ -1969,6 +1972,7 @@ void SpaceflightView::DrawBeamsUnderShips(SdlPlatform &platform,
   }
 }
 
+// @port 0x00438810 50% rendering
 // Ghidra Shot_DrawBeamHitQueueForSurface (0x00438810), visible path: the
 // topmost gameplay layer draws every beam that does NOT set flags_secondary
 // 0x2000 (those render underneath ships via DrawBeamsUnderShips). The
@@ -2099,6 +2103,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawSwParticles(platform, state);
 }
 
+// @port 0x0042ede0 92% rendering,correctness
 // Ghidra NovaUi_UpdateShipTargetReticle (0x0042ede0). The original positions
 // four corner-bracket sprites around the player's primary target ship. Each
 // bracket is a cloned sprite from the 16-frame cicn set 10008-10023; the frame
@@ -2274,6 +2279,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   corner(right - kArm, bottom - kArm, kArm, kArm); // bottom-right
 }
 
+// @port 0x0042eac0 78% ui
 // Ghidra NovaUi_UpdateTravelTargetReticle (0x0042eac0). While a travel
 // destination stellar is selected (state.travel.selected_stellar_id, the
 // original's ai_secondary_target_slot >= 0) the four corner brackets are drawn

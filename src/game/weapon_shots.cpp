@@ -46,6 +46,7 @@ inline constexpr float kBombNoseTurnRate = 1.0F;       // 0x00575318
 inline constexpr float kOriginalRawCallTicks = 21.0F * 0.03F;
 } // namespace
 
+// @port 0x00422210 100%
 // Ghidra 0x00422210 Ship_TallyInboundWeaponThreat.
 void NovaWeapon_TallyInboundWeaponThreat(GameState &state) {
   for (std::size_t ship_slot = 0; ship_slot < GameState::kMaxShips;
@@ -196,6 +197,7 @@ void NovaWeapon_ClearTransientCombatState(GameState &state) {
   state.pending_impact_sounds.clear();
 }
 
+// @port 0x0041fd30 93% gameplay
 int NovaWeapon_SpawnProjectile(GameState &state,
                                std::int16_t owner_ship_slot,
                                std::int16_t target_ship_slot,
@@ -624,6 +626,7 @@ FindNearestHittableWeaponTarget(const GameState &state,
   return best_slot;
 }
 
+// @port 0x00420d30 100%
 // Ghidra 0x00420D30 Shot_SpawnLinkedShotsOnImpact. Spawns the impacting
 // weapon's submunitions (Bible SubCount/SubType/SubTheta/SubLimit) at the
 // impact position, inheriting owner/target context and incrementing the
@@ -737,6 +740,7 @@ void NovaWeapon_SpawnLinkedShotsOnImpact(
   }
 }
 
+// @port 0x00431530 95% rng,cadence
 // Ghidra 0x00431530 Shot_UpdateShotGuidance. Normal homing consumes normalized
 // 30 Hz time; asteroid-decoy tracking, interference weaving, random
 // opportunities, rocket acceleration, and bomb weathervaning consume raw
@@ -1075,6 +1079,7 @@ namespace {
 }
 } // namespace
 
+// @port 0x00427a90 60% gameplay,rendering
 // Ghidra 0x00427a90 Shot_QueueBeamHit.
 bool NovaWeapon_QueueBeamHit(GameState &state,
                              std::int16_t owner_ship_slot,
@@ -1216,6 +1221,7 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
   return false;
 }
 
+// @port 0x0042f270 72% gameplay,rng
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
   const float ticks = std::max(0.0F, elapsed_ticks);
   for (BeamHit &beam : state.beam_hit_queue) {
@@ -1488,6 +1494,7 @@ void NovaWeapon_StepShotAnimation(GameState &state,
 
 namespace {
 
+// @port 0x004215d0 100%
 // Ghidra 0x004215d0 Shot_SpawnWeaponSmokePuff. Takes the first dead slot
 // (life < 0) of the 64-entry pool; a full pool drops the puff, as the original
 // returns without spawning. `variant` is the Flags1-selected animation (0/2 =
@@ -1515,6 +1522,7 @@ void SpawnWeaponSmokePuff(GameState &state,
   }
 }
 
+// @port 0x0042c660 100%
 // Ghidra 0x0042c660 Shot_UpdateWeaponSmokePuffs. Life advances by
 // g_death_puff_offset_scale_f64 (0.25) * the normalized tick scale; variants
 // 0/2 run an 8-frame animation and 1/3 ping-pong over 3 frames, with variants
@@ -1565,6 +1573,7 @@ int NovaWeapon_SmokePuffFrame(const WeaponSmokePuff &puff) {
   return frame < 8 ? frame : -1;
 }
 
+// @port 0x00435830 100% rendering,divergence
 // Ghidra 0x00435830 Shot_HandleShot.
 void NovaWeapon_TickShots(GameState &state,
                           float elapsed_ticks,

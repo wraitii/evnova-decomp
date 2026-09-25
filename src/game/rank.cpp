@@ -4,6 +4,7 @@
 
 namespace game {
 
+// @port 0x00427df0 100%
 // Ghidra 0x00427df0 Rank_Activate.
 void Rank_Activate(GameState &state, std::int16_t rank_slot) {
   auto &table = state.scenario.ranks;
@@ -47,6 +48,7 @@ void Rank_Activate(GameState &state, std::int16_t rank_slot) {
   state.recently_activated_rank_id = rank.id;
 }
 
+// @port 0x00427f40 100%
 // Ghidra 0x00427f40 Rank_Deactivate.
 void Rank_Deactivate(GameState &state, std::int16_t rank_slot) {
   auto &table = state.scenario.ranks;

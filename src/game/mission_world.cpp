@@ -199,6 +199,7 @@ namespace {
   return true;
 }
 
+// @port 0x00439750 95% divergence
 // Ghidra 0x00439750 Mission_ActivateCronEvent. Fires the event's OnStart
 // set-string through the reaction-script executor. With flags 0x0001 the
 // original re-runs it while the Require mask and EnableOn expression hold,
@@ -224,6 +225,7 @@ void Mission_ActivateCronEvent(GameState &state, std::int16_t cron_index) {
   }
 }
 
+// @port 0x004398b0 95% divergence
 // Ghidra 0x004398b0 Mission_TerminateCronEvent. Fires OnEnd; flags 0x0002
 // selects the same iterative arm as activation.
 void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
@@ -249,6 +251,7 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
 
 } // namespace
 
+// @port 0x00439500 95% divergence
 // Ghidra 0x00439500 Mission_TickDailyCronEvents. Once-per-game-day driver
 // over the 0x200 crön slots (called from Mission_TickDailyWorldUpdate right
 // after the calendar advance):
@@ -365,6 +368,7 @@ void Mission_TickDailyCronEvents(GameState &state) {
   }
 }
 
+// @port 0x00423540 90% gameplay
 // Ghidra 0x00423540 Player_CollectStellarTribute. Daily tribute pass: every
 // available stellar carrying the +0x46 marker (its system visible + the 0x20
 // availability bit, set by the display-state refresh) pays its Tribute value
@@ -392,6 +396,7 @@ void Player_CollectStellarTribute(GameState &state) {
   }
 }
 
+// @port 0x00424f90 100% divergence
 // Ghidra 0x00424f90 System_UpdateDisasterStates (per-game-day sweep of the
 // 0x100 öops slots; runs from the daily world-update driver).
 void System_UpdateDisasterStates(GameState &state) {

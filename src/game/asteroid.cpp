@@ -50,6 +50,7 @@ constexpr std::int32_t RingSpread(std::int32_t radius) {
 
 } // namespace
 
+// @port 0x00421e60 40% gameplay,divergence
 // Ghidra 0x00421e60 Asteroid_SpawnRecord.
 int NovaAsteroid_SpawnRecord(GameState &state,
                              float pos_x,
@@ -103,6 +104,7 @@ int NovaAsteroid_SpawnRecord(GameState &state,
   return static_cast<int>(slot);
 }
 
+// @port 0x00421830 75% license,gameplay
 // Ghidra 0x00421830 Asteroid_Spawn: allocates
 // one asteroid / drift debris record into a free pool slot. `place_in_ring ==
 // 0` scatters the target around the player (a [-radius*0.5, +radius*0.5) band
@@ -237,6 +239,7 @@ int NovaAsteroid_Spawn(GameState &state, bool place_in_ring) {
   return static_cast<int>(slot);
 }
 
+// @port 0x00436910 80% divergence,gameplay
 // Ghidra 0x00436910 Asteroid_UpdateSprites (simulation half). The original is
 // one function that both integrates the drift and re-binds/positions the
 // SDL Sprite; the clean-room splits the pure drift advance here from the
@@ -261,6 +264,7 @@ void NovaAsteroid_UpdateSprites(GameState &state, float elapsed_ticks) {
   }
 }
 
+// @port 0x004216b0 85% verify
 // Ghidra 0x004216B0 Asteroid_InitSystem:
 // restores the current system's asteroid / drift-debris population on
 // spaceflight entry / cross-system travel. When the system declares no

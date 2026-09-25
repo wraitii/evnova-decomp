@@ -2730,6 +2730,7 @@ void Mission_TickReactionSlotsForTravelInteraction(
   state.travel_destination_window_open = false;
 }
 
+// @port 0x00426d10 100%
 // Ghidra 0x00426d10 Mission_ShowMissionShipAnnouncement.
 void Mission_ShowMissionShipAnnouncement(GameState &state,
                                          std::int16_t hail_quote_id) {
@@ -2769,6 +2770,7 @@ void Mission_ShowMissionShipAnnouncement(GameState &state,
                              /*duration_frames=*/std::uint64_t{0x1a4});
 }
 
+// @port 0x00426dd0 95% gameplay,verify
 // Ghidra 0x00426dd0 Mission_TrySpawnMissionShipAmbush.
 void Mission_TrySpawnMissionShipAmbush(GameState &state) {
   // Gate: the ambush personality (pers slot 0x3fe) must be defined by the

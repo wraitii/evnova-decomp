@@ -129,6 +129,7 @@ void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
 
 } // namespace
 
+// @port 0x004254b0 75% gameplay
 // Ghidra 0x004254b0 Ship_AllocateShipSlotInSystem.
 //
 // Slot scan: iterate slots 1..(0x40 - count)-1 and return the first inactive
@@ -239,6 +240,7 @@ int NovaShip_AllocateShipSlot(GameState &state,
   return slot;
 }
 
+// @port 0x00422400 85% divergence
 // Ghidra 0x00422400 ShipClass_SpawnEscortShipFromClass.
 int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
                                            std::int16_t ship_class_id,
@@ -307,6 +309,7 @@ int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
   return slot;
 }
 
+// @port 0x004259b0 90% audio
 // Ghidra 0x004259b0 EncounterFleet_SpawnRandomEncounterFleet. The original
 // shapes the lead, then rolls and spawns four escort classes. The class cache
 // is checked after the count roll, so an unavailable escort slot consumes its
@@ -648,6 +651,7 @@ int NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
   return -1;
 }
 
+// @port 0x00425280 90% gameplay,ui
 // Ghidra 0x00425280 EncounterFleet_TrySpawnRandomEncounterFleet. See the
 // header for the full filter decode and the selection semantics. The original
 // scans all 0x100 FleetDef slots (g_random_encounter_fleet_defs); our
@@ -763,6 +767,7 @@ int NovaDude_SelectShipTypeIndex(const DudeDef &dude,
   return -1; // unreachable for consistent weights
 }
 
+// @port 0x0041ba80 93% gameplay
 // Ghidra 0x0041ba80 EncounterFleet_SpawnRandomSystemDudeShip. See the header.
 // The original scans the first inactive ship slot and, within it, picks a
 // random system-bound dude class (NovaDude_SelectRandomSystemDudeClassIndex)
@@ -889,6 +894,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
   return -1;
 }
 
+// @port 0x004235c0 100%
 // Ghidra 0x004235c0 Pers_SpawnShipFromPersDef.
 int NovaPers_SpawnShipFromPersDef(GameState &state,
                                   std::int16_t system_id,
@@ -1125,6 +1131,7 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
   return alloc;
 }
 
+// @port 0x0041c710 100% moddata
 // Ghidra 0x0041c710 Dude_SpawnRandomDudeShipInSystem. See the header.
 // Rolls 1-in-7 for a përs personality/linked-mission ship, else 1-in-7 for a
 // random- encounter fleet (existing NovaEncounter_TrySpawnRandomFleet), else
@@ -1211,6 +1218,7 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
   return slot;
 }
 
+// @port 0x0041c9f0 85% divergence
 // Ghidra 0x0041c9f0 Dude_SpawnShipFromDudeDefInSystem. See the header. The
 // original also copies the class's per-weapon 0x100-entry ammo/secondary
 // tables into the ship state here; the clean-room builds them lazily on the
@@ -1253,6 +1261,7 @@ int NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
   return slot;
 }
 
+// @port 0x00421fd0 95% divergence
 // Ghidra 0x00421fd0 Stellar_SpawnDefenseFleetShip. Spawns one ship for a
 // stellar's Bible defense fleet (spöb DefenseDude): allocate via
 // Dude_SpawnShipFromDudeDefInSystem (slot pool 2, retried with ship
@@ -1327,6 +1336,7 @@ int NovaStellar_SpawnDefenseFleetShip(GameState &state,
   return slot;
 }
 
+// @port 0x0041cf40 95% divergence
 // Ghidra 0x0041cf40 Mission_SpawnMissionShipFromDudeDef. See the header. The
 // original bounds the ship-type index with `< 0x11`, which would read one
 // entry past the 16-slot ship_types table; that is unreachable in practice
@@ -1553,6 +1563,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
   }
 }
 
+// @port 0x0041af90 80% gameplay,verify
 // Ghidra 0x0041af90 System_RebuildInitialNpcAndMissionPopulation, initial
 // ambient-population slice. The larger function first restores mission fleets
 // and player escorts,
@@ -1688,6 +1699,7 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
   }
 }
 
+// @port 0x0041d6e0 80% gameplay
 // Ghidra 0x0041d6e0 System_TickNpcSpawnMaintenance (ambience slice). See the
 // header. Scope 0xb replays this at the original 21 ms raw-call cadence. The
 // original counts the ambient active ships in the system whose
@@ -1860,11 +1872,11 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
   }
 
   // Stellar defense-fleet trickle (Ghidra 0x0041d6e0 tail): scan the system's
-  // 16 nav stellars; for the first one whose defense_fleet_mounted latch is set and whose
-  // present_ship_count budget is positive but whose live defenders number below
-  // one wave (max_ship_count % 10), spawn one defender and decrement the
-  // budget. The original stops at the first satisfying stellar (at most one
-  // defense spawn per tick), then runs the ambient-mission tail.
+  // 16 nav stellars; for the first one whose defense_fleet_mounted latch is set
+  // and whose present_ship_count budget is positive but whose live defenders
+  // number below one wave (max_ship_count % 10), spawn one defender and
+  // decrement the budget. The original stops at the first satisfying stellar
+  // (at most one defense spawn per tick), then runs the ambient-mission tail.
   for (const auto nav : sys->nav_defs) {
     if (nav < 0x80 || static_cast<std::size_t>(nav - 0x80) >=
                           state.scenario.stellars.size()) {
@@ -1894,6 +1906,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
   // ships -> fleet 0xff, >0x31 -> fleet 0xfe at mode 4).
 }
 
+// @port 0x0041ad50 90% gameplay
 // Ghidra 0x0041ad50 Ship_DeactivateVacantShipsAndTally. Scans every NPC ship
 // slot (1..kMaxShips-1) and deactivates the "vacant" ones, tallying them into
 // their spawn-quota bucket before the cleanup:
@@ -2006,6 +2019,7 @@ void NovaGame_ReseedRandom(GameState &state) {
                  "vary across sessions");
 }
 
+// @port 0x0041e640 95% gameplay
 int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
                                              const Ship &launcher,
                                              std::int16_t weapon_bank) {

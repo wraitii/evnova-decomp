@@ -346,6 +346,7 @@ SpriteAnchorTransform Sprite_AnchorToScreen(float world_x,
   return out;
 }
 
+// @port 0x00438db0 95% rendering,divergence
 // Ghidra 0x00438db0 Frame_UpdateSpriteDistanceIntensity. See the header for the
 // decoded formula. The original's ROUND() markers are the x87 FIST +
 // residual/sign truncation idiom (truncation toward zero), so a non-negative

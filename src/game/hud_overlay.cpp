@@ -66,6 +66,7 @@ void NovaHud_ClearOverlayMessage(GameState &state) {
   state.hud_overlay.expiry_ms = 0;
 }
 
+// @port 0x0042f1b0 85% ui,cadence
 void NovaHud_TickOverlay(GameState &state) {
   if (state.hud_overlay.active && state.hud_overlay.expiry_ms != 0 &&
       state.gameplay_now_ms >= state.hud_overlay.expiry_ms) {
