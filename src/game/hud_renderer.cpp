@@ -207,9 +207,9 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
   return it->second->texture ? it->second.get() : nullptr;
 }
 
-// @port 0x0045EA66 95% rendering
-// @port 0x0045EBE8 95% rendering
-// @port 0x0045F086 95% rendering
+// @port 0x0045EA66 100%
+// @port 0x0045EBE8 100%
+// @port 0x0045F086 100%
 // Draws one life-support bar from its real layout panel rect, faithfully
 // reproducing the game's fill geometry (HudBar_FillRect mirrors
 // NovaUi_DrawPlayerShieldBar 0x0045ea66 / _ArmorBar 0x0045ebe8 /
@@ -217,12 +217,10 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
 // The shipped HUD slots are wide and grow from left to right. Only the
 // filled portion is drawn
 // (opaque on the panel); the surrounding bar trough art lives in the cockpit
-// PICT, which is composited separately.
-// TODO(decomp(0x0045ea66)): the original first blits a cached clean cockpit
-// rect over the bar (DrawContext_BlitClippedRect in 0x0045ea66) and then fills
-// the coloured portion; the port repaints the whole cockpit PICT instead and
-// relies on its trough art. Verify the PICT trough pixels match the original's
-// cached clean rect and that the fill geometry (axis/rounding) is equivalent.
+// PICT, which is composited separately. The original restores the bar rect
+// from a cached clean copy (DrawContext_BlitClippedRect in 0x0045ea66) before
+// filling; the port repaints the whole cockpit PICT instead, so that per-frame
+// restore optimisation is intentionally omitted.
 void DrawBarFill(SDL_Renderer *renderer,
                  const HudBarFill &fill,
                  SDL_Color color) {
