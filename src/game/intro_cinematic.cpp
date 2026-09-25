@@ -129,7 +129,14 @@ IntroInput PollIntroInput(SdlPlatform &platform, std::uint16_t skip_key) {
 
 } // namespace
 
-// Ghidra 0x004cd3b0 IntroCinematic_SetupFrames.
+// @port 0x004CD3B0 95% ui,verify
+// Ghidra 0x004cd3b0 IntroCinematic_SetupFrames: keyed block lookup by
+// character-template name (ResourceData_AccessByKey); fills source_pict_ids
+// block+0x20, duration_60h_ticks block+0x28 (clamped [0,300]), and
+// intro_text_desc_id block+0x30 (Bible char IntroTextID). Absent block -> PICT
+// 0x2008 / 10 ticks / desc 0x7ffd. See docs/char_resource_format.md.
+// Remaining: verify the frame/duration decode against Ghidra; no known
+// behavioral gap.
 void NovaIntroCinematic_SetupFrames(GameState &state,
                                     std::string_view block_key) {
   auto &cinematic = state.intro_cinematic;
@@ -189,6 +196,7 @@ void NovaIntroCinematic_SetupFrames(GameState &state,
                 cinematic.intro_text_desc_id);
 }
 
+// @port 0x0048adc0 98% ui
 // Ghidra 0x0048adc0 IntroCinematic_Run.
 bool NovaIntroCinematic_Run(SdlPlatform &platform,
                             SdlAudio &audio,

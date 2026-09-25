@@ -1630,6 +1630,13 @@ void FoldShipDefaultLoadoutMass(ScenarioData &data) {
   }
 }
 
+// @port 0x004BD3C0 68% gameplay,bugfix
+// @port 0x004AEDA0 100%
+// Ghidra 0x004bd3c0 NovaData_LoadScenarioResourceTables and 0x004aeda0
+// NovaData_LoadAllShipClassVisualAndLaunchData: both scenario table loaders
+// run inline in LoadFromArchives (ship and ship-visual passes below).
+// Note: the DIVERGENCE(original)/BUGFIX(original)/TODO(decomp) markers later
+// in this large function belong to other tracker rows, not to these loaders.
 bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
                                     bool ship_animations) {
   // The original loader consumes eight NovaRandom draws for each present
@@ -2373,12 +2380,10 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
 // ---------------------------------------------------------------------------
 // Purchase-time derived cost/mass
 // ---------------------------------------------------------------------------
-// Ghidra Outfit_ComputeOutfitPurchasePrice (0x0046e910) and
-// Outfit_ComputeOutfitPurchaseMass (0x0046e950): the outfit store computes
-// these from the outfit's cost/mass with optional mass-proportional scaling.
-// Flag 0x0200 (price) and 0x0400 (mass) make the value proportional to the ship
-// class's hull mass; the scaled value never drops below the base positive
-// value. Base cost > 0 is required for a price; base mass <= 0 yields no mass.
+// @port 0x0046e910 100%
+// Ghidra 0x0046e910 Outfit_ComputeOutfitPurchasePrice: cost, or cost * hull
+// mass when Flags 0x0200 is set, never below the base cost; base cost <= 0
+// returns 0.
 std::int32_t Outfit::PurchasePrice(std::int16_t ship_hull_mass) const {
   if (cost <= 0) {
     return 0;
@@ -2393,6 +2398,10 @@ std::int32_t Outfit::PurchasePrice(std::int16_t ship_hull_mass) const {
   return scaled;
 }
 
+// @port 0x0046e950 100%
+// Ghidra 0x0046e950 Outfit_ComputeOutfitPurchaseMass: mass, or mass * hull /
+// 100 when Flags 0x0400 is set (x87 0.01 scale, FIST truncation toward zero),
+// never below the base mass; base mass <= 0 returns it unchanged.
 std::int32_t Outfit::PurchaseMass(std::int16_t ship_hull_mass) const {
   if (mass_tons <= 0) {
     return mass_tons;

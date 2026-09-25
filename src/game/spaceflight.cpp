@@ -2883,6 +2883,7 @@ void NovaShip_TickNpcAi(GameState &state, float elapsed_ticks) {
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x00489210 12% gameplay
 // Ghidra 0x00489210 Ship_RunSpaceflightMode.
 void NovaSpaceflight_Run(SdlPlatform &platform,
                          SdlAudio &audio,

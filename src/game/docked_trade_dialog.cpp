@@ -32,10 +32,6 @@ using evnova::util::ToSdlColor;
 namespace {
 
 // ---------------------------------------------------------------------------
-// Ghidra 0x0048c730 NovaUi_RunTradeCenterWindow modal (DLOG/DITL 0x3e9, frame
-// PICT 0x213e). The SDL-free price/transaction model is in trade_center.cpp;
-// the input handler 0x0048d190 and redraw 0x0048d6f0 run inline here.
-// ---------------------------------------------------------------------------
 
 // Window furniture palette from Settings_InitColors (0x004ad7c0):
 // DAT_00733b50 grey 0xc000 is the header text, DAT_00733b5c grey 0x4000 is the
@@ -132,6 +128,7 @@ struct TradeCenterLayout {
   return layout;
 }
 
+// @port 0x004A06A0 80% ui
 // Three-state button body + label. Ghidra 0x004a06a0
 // NovaUi_TradeCenterDrawButtons runs inline here; the original only ever calls
 // it with the "no button highlighted" index from the redraw, so no hover art.
@@ -148,6 +145,9 @@ void DrawTradeButton(SdlPlatform &platform,
   DrawThreeStateButtonLabel(platform, font_cache, rect, label, color);
 }
 
+// @port 0x0048d6f0 85% ui
+// TODO(decomp): the mission-cargo Other cargo clause; the summary's
+// filled-rect+InvertRect composition and the exact word-wrap are simplified.
 // Ghidra 0x0048d6f0 NovaUi_RedrawTradeCenterWindow. Draws the 8-row price
 // list, cargo summary and disaster banner over the docked backdrop.
 void DrawTradeCenterScreen(SdlPlatform &platform,
@@ -402,6 +402,18 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
 } // namespace
 
 // Ghidra 0x0048c730 NovaUi_RunTradeCenterWindow modal loop.
+// @port 0x0048c730 85% ui
+// TODO(decomp): nested starmap/player-info/mission-computer actions;
+// Ghidra 0x0048c730 NovaUi_RunTradeCenterWindow modal (DLOG/DITL 0x3e9, frame
+// PICT 0x213e). The SDL-free price/transaction model is in trade_center.cpp;
+// the input handler 0x0048d190 and redraw 0x0048d6f0 run inline here.
+// @port 0x0048d190 75% ui
+// TODO(decomp): starmap/player-info/mission-computer actions.
+// @port 0x004A04D0 65% ui
+// Ghidra 0x004a04d0 NovaUi_TradeCenterHitTestButtons: the three-button strip
+// hit-test runs inline in the mouse arm below; the original's nested
+// press/hover redraw loop is folded into the frame loop.
+// ---------------------------------------------------------------------------
 LandedExit
 RunTradeCenterDialog(SdlPlatform &platform,
                      SdlAudio &audio,
@@ -577,7 +589,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
           continue;
         }
       }
-      // Ghidra 0x004a04d0 NovaUi_TradeCenterHitTestButtons runs inline here.
+      // The three-button strip hit-test (0x004a04d0) runs inline here.
       if (in->key == TextKey::primary) {
         const SDL_FPoint mouse = platform.mouse_position();
         if (Contains(layout->leave, mouse)) {

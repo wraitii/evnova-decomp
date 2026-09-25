@@ -187,6 +187,7 @@ std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
   return sys->nav_defs[static_cast<std::size_t>(picked)];
 }
 
+// @port 0x0046e9e0 100%
 // Ghidra 0x0046e9e0 Stellar_SelectRandomAdjacentDestination. Picks a random
 // adjacent travel stellar for an NPC spawn, but returns the id only when
 // availability_flags & 0x3000 marks it a hypergate/wormhole; otherwise -1.

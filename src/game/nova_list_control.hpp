@@ -39,7 +39,10 @@ class NovaListControl {
 public:
   NovaListControl() = default;
 
-  // Ghidra 0x004d1a60 NovaList_Create.
+  // @port 0x004D1A60 35% ui
+  // Ghidra 0x004d1a60 NovaList_Create: the original's text buffer, per-row
+  // offset table and draw-callback fields (+0x28/+0x2c/+0x1c) are not
+  // reproduced; the dialogs own row text and paint it via NovaUi_DrawListRow.
   NovaListControl(const SDL_FRect &content,
                   float row_pitch,
                   std::size_t row_count)

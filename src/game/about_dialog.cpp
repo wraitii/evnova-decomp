@@ -41,6 +41,7 @@ namespace {
 
 } // namespace
 
+// @port 0x00486120 85% license
 // Ghidra 0x00486120 Menu_RunAboutNovaDialog.
 void NovaMenu_RunAboutDialog(SdlPlatform &platform,
                              GameState &state,

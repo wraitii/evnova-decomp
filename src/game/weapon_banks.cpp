@@ -900,6 +900,9 @@ void NovaWeapon_TickNpcWeaponBanks(GameState &state,
   }
 }
 
+// @port 0x0046f2c0 90% gameplay
+// TODO(decomp): NPC path fuel capping is deferred (inline copy in
+// NovaWeapon_FireNpcWeaponBank).
 // Ghidra 0x0046f2c0 Weapon_GetWeaponBurstAttempts: how many shots one trigger
 // pull fires. Non-burst weapons (flags_primary 0x40 clear) get exactly one; a
 // burst bank starts from the mounted ammo count, capped by the loaded

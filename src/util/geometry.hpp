@@ -47,6 +47,11 @@ ContainsInclusive(const SDL_FRect &rect, float x, float y) {
   return rect;
 }
 
+// @port 0x004B8DC0 100%
+// Ports as evnova::util::InsetRect (SDL_Rect, by-reference return instead of
+// in-place mutation): dy shrinks top/bottom, dx left/right, exactly the
+// original byte writes. Consumed by the goal-4 (observe) cloaked-target on-
+// screen test in Mission_HandleMissionOrSurrenderShipReaction (0x00443c60).
 // Ghidra 0x004b8dc0 Rect_Inset. QuickDraw insets a rect symmetrically: `dy`
 // shrinks top/bottom and `dx` shrinks left/right (the original mutates in
 // place; this returns the result).
@@ -58,6 +63,7 @@ ContainsInclusive(const SDL_FRect &rect, float x, float y) {
   return rect;
 }
 
+// @port 0x004B8DF0 100%
 // Ghidra 0x004b8df0 Rect_Intersect. QuickDraw SectRect: the overlap of two
 // rects -- max of lefts/tops, min of rights/bottoms. Edges that merely touch
 // give an empty intersection, reported as nullopt.

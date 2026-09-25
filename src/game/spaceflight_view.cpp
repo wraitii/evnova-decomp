@@ -145,6 +145,8 @@ SplitRgb(std::uint32_t packed) {
           static_cast<std::uint8_t>(packed & 0xffU)};
 }
 
+// @port 0x00479590,0x004797b0 60% rendering
+// TODO(decomp): SWBeams_SetupAndClipSegment scope not reproduced.
 // Ghidra Beam_DrawBlendedSegment (0x00479590) + Beam_BlendLineSegment
 // (0x004797b0) alpha profile, re-expressed for SDL. The original rasterizes a
 // 15-bit Bresenham line, blending the beam colour over the saved backdrop at a
@@ -232,6 +234,9 @@ void DrawBeamBlendedLine(SDL_Renderer *renderer,
   }
 }
 
+// @port 0x00479fe0 85% rendering
+// Divergence: 15-bit blending -> SDL.
+// TODO(decomp): bounds pre-cull is skipped.
 // Ghidra SWBeams_DrawShortBeam (0x00479fe0): core + corona of a straight beam
 // between (xa,ya) = muzzle and (xb,yb) = target. Parallel lines are offset
 // along the axis perpendicular to the beam, exactly like the original.
@@ -319,14 +324,17 @@ void DrawBeamCoreAndCorona(SDL_Renderer *renderer,
   }
 }
 
-// Ghidra SWBeams_DrawThickFadingBeam (0x0047a410): lightning-beam plotter.
-// Splits the muzzle->target span into round(max(|dx|,|dy|) * density * 0.01)
-// jittered segments (the original multiplies by the double DAT_00575888 = 0.01,
-// disasm 0x0047a587). Jitter is uniform on [-amplitude, amplitude] applied to
-// every segment except the single final one, which lands on the exact target.
-// Each segment draws parallel lines at perpendicular offsets 0..width-1
-// (mirrored past offset 0) at alpha base - j*0x20/(width+1); only the final
-// segment fades, over 0x20 px.
+// @port 0x0047a410 95% rendering,rng
+// TODO(decomp): the twin-surface DrawBeamWithFlare variant (0x0047AFD0) and the
+// erase pass remain separate/0%. RNG stream divergence documented at the call
+// site. Ghidra SWBeams_DrawThickFadingBeam (0x0047a410): lightning-beam
+// plotter. Splits the muzzle->target span into round(max(|dx|,|dy|) * density *
+// 0.01) jittered segments (the original multiplies by the double DAT_00575888 =
+// 0.01, disasm 0x0047a587). Jitter is uniform on [-amplitude, amplitude]
+// applied to every segment except the single final one, which lands on the
+// exact target. Each segment draws parallel lines at perpendicular offsets
+// 0..width-1 (mirrored past offset 0) at alpha base - j*0x20/(width+1); only
+// the final segment fades, over 0x20 px.
 void DrawLightningBeam(SDL_Renderer *renderer,
                        std::mt19937 &rng,
                        int xa,
@@ -1072,6 +1080,7 @@ const SpriteAsset *SpaceflightView::StarFieldSheet(SdlPlatform &platform) {
   return sprite_store_.Spin(platform.renderer(), kStarFieldSpinId);
 }
 
+// @port 0x0046ebf0 90% rendering
 // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0). See the header.
 // Decoded from the binary: spawn count = round(viewportHeight / 600.0 * 20.0)
 // (divisor g_background_star_spawn_height_divisor = 600.0). Each of the first
@@ -1084,6 +1093,7 @@ const SpriteAsset *SpaceflightView::StarFieldSheet(SdlPlatform &platform) {
 // (starfield motion disabled) the speed is forced to zero so the field is
 // static. The star-field sprite sheet (sp\x9an 700) is ensured loaded here so
 // the per-star frame index bound (frame count) is known.
+// @port 0x0046ede0 70% rendering
 void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
                                         GameState &state) {
   // Load the star artwork (if not already) so the frame-count bound is known;
@@ -1141,6 +1151,7 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
   }
 }
 
+// @port 0x0046ee50 85% rendering
 // Ghidra NovaEffects_UpdateAmbientStarParticles (0x0046ee50). Each active
 // particle's world position grows by (dx, dy) * per-particle speed, where the
 // passed delta is the ship's movement this frame. Only particles whose speed
@@ -1172,6 +1183,10 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 // Ghidra 0x0046bbf0 NovaRender_SetSystemSpaceBackgroundColor. The port applies
 // the per-system BkgndColor tint in DrawBackground; the original DrawContext
 // sprite-effect surface plumbing is not reconstructed.
+// @port 0x00497df0 50% rendering
+// Ghidra 0x00497df0 Frame_RenderViewportBackground: the per-system backdrop
+// clear + fill is ported here; the original's surface/rect-copy plumbing is
+// not reconstructed (the starfield draw is the 0x0042e590 note above).
 void SpaceflightView::DrawBackground(SdlPlatform &platform,
                                      const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
@@ -1249,12 +1264,16 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   }
 }
 
+// @port 0x004AC380 90% gameplay
 // Ghidra 0x004ac380 Ship_InitializeMainInterface (viewport half-size half). The
 // original sets g_viewport_center_x/y to half the play area:
 // round((RenderOwner.right - RenderOwner.left - DAT_0088c020) * 0.5) and
 // round((RenderOwner.bottom - RenderOwner.top) * 0.5). CurrentViewport already
 // excludes the DAT_0088c020 cockpit strip, so the plain halves match (integer
 // truncation vs the original's round differs by at most 1px on odd widths).
+// TODO(decomp): DAT_0088c020 is the ui_scale-scaled HUD strip width (0xc2 at
+// scale 1.0); the port pins 194 because ui_scale plumbing is not modelled yet
+// (docs/display_scaling.md WP3).
 void SpaceflightView::SyncGameplayViewport(SdlPlatform &platform,
                                            GameState &state) {
   const Viewport vp = CurrentViewport(platform);
@@ -1900,6 +1919,10 @@ void SpaceflightView::DrawImpactEffects(SdlPlatform &platform,
   }
 }
 
+// @port 0x0047bdd0 80% rendering,bugfix
+// SDL alpha deliberately follows the original 16-bit soft-particle path,
+// clamping life/32 to full opacity.
+// TODO(decomp): dirty-pixel save/restore is not reproduced.
 // Ghidra SWParticles_DrawParticles (0x0047bdd0): the post-render single-pixel
 // particle pass. The original projects each particle from its 8.8 fixed world
 // position onto the gameplay surface and writes one pixel per particle. This

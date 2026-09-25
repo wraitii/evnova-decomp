@@ -374,6 +374,12 @@ float MeasureTextHeight(NovaFontCache &fonts,
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x004A1C40 80% ui
+// DrawTabStrip: 6 strip buttons from STR# 0x96 0-based indices
+// {4,0x23,0x24,0x25,0x26,0x3c}, pressed = index or page, jettison gate page==2
+// + Ship_HasAnyCargoLootOrActiveMission. Divergence: original labels are
+// vector-glyph pstrings via 0x004a3340; port draws text labels on
+// ServicesButtonArt.
 // Tab strip painter — Ghidra 0x004a1c40
 // NovaUi_DrawPlayerSpecialInteractionTabs(page, pressed).
 // ---------------------------------------------------------------------------
@@ -410,6 +416,7 @@ void DrawTabStrip(SdlPlatform &platform,
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x004A1AE0 85% ui
 // Tab strip press tracker — Ghidra 0x004a1ae0
 // NovaUi_HandlePlayerSpecialInteractionTabs(page, packed_point).
 //
@@ -467,7 +474,10 @@ int HandleTabStrip(SdlPlatform &platform,
 }
 
 // ---------------------------------------------------------------------------
-// Page 1 (General) — the stat-grid arm of 0x0049a540.
+// @port 0x0049a540 50% ui
+// TODO(decomp): key-settings hint glyph row, fleet-value/tribute tail
+// (DAT_00575948 0.01 sum), row labels provisional (DAT_0072d*cc pools). Page 1
+// (General) — the stat-grid arm of 0x0049a540.
 // ---------------------------------------------------------------------------
 
 // Ghidra NovaUi_DrawCombatRankLabel 0x00469030: rank index 0..10 from the
@@ -765,6 +775,8 @@ bool RunJettisonConfirmDialog(SdlPlatform &platform,
 } // namespace
 
 // ---------------------------------------------------------------------------
+// @port 0x0049c050 55% ui
+// TODO(decomp): cargo text (commodity/junk defs unmodelled).
 // Ghidra 0x0049c050 NovaUi_BuildPlayerSpecialInteractionStrings.
 // ---------------------------------------------------------------------------
 
@@ -866,6 +878,8 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x00499c10 75% ui
+// TODO(decomp): mission-cargo arm of the any-cargo gates.
 // Ghidra 0x00499c10 NovaUi_RunPlayerSpecialInteractionWindow (+ draw
 // 0x0049a540 + dispatch 0x0049a3a0).
 // ---------------------------------------------------------------------------

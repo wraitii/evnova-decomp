@@ -324,6 +324,7 @@ struct PaymentFrame {
 }
 
 // ---- STR# helpers ---------------------------------------------------------
+// @port 0x00482910 80% ui
 // Loads one flavour variant of a status (STR# 0xbba) message. `random_index`
 // is the per-launch flavour pick; mirrors NovaUi_LoadTravelDestinationStatus-
 // String (0x00482910) loading `message*5 + random + 1` (a 1-based entry
@@ -377,6 +378,7 @@ void DrawDialogButton(SdlPlatform &platform,
                         label);
 }
 
+// @port 0x004812c0 90% ui
 // Ghidra 0x004812c0 NovaUi_DrawTravelDestinationInteractionWindow.
 // Draws the interaction-window frame over the live flight view: the 540x295
 // backdrop PICT (DLOG 0x3f1) centred on the playfield, the three comm
@@ -385,6 +387,13 @@ void DrawDialogButton(SdlPlatform &platform,
 // wrapped text), the ambient stellar sprite thumbnail (item 4) and the
 // header block (item 5: name, description, Status: word, left-aligned
 // baselines at +12/+26/+42).
+// @port 0x004A0F90 60% ui
+// label selection ported inline in negotiation_dialog.cpp NegotiationFrame
+// assembly + DrawNegotiationDialog: per-slot STR# 0x96 pool indices {0x14
+// Close Channel, 0x15 Greetings|0x17 Offer Bribe, 0x2c Demand Tribute|0x1f
+// Release} via NovaHud_LoadStringEntry + three-state art with hover-as-
+// pressed; the shared UiPanel rect-fetch approximated by the runtime DITL
+// layout, disabled-slot grey art by ServicesButtonArt ButtonState::kDisabled
 void DrawNegotiationDialog(SdlPlatform &platform,
                            const GameState &state,
                            SpaceflightView &view,
@@ -576,6 +585,8 @@ void DrawNegotiationDialog(SdlPlatform &platform,
   }
 }
 
+// @port 0x004826a0 75% ui
+// TODO(decomp): debt-mode prompt variant not reconstructed.
 // Ghidra 0x004826a0 NovaUi_DrawTravelDestinationPaymentWindow: the DLOG 0x3f0
 // payment modal over the still-rendered interaction window. Prompt band
 // (DITL item 2): "<I'll pay you> <grouped amount> <credit(s)>." in white;
@@ -633,10 +644,6 @@ void DrawPaymentWindow(SdlPlatform &platform,
                    hovered_slot == 1);
 }
 
-// Outcome of the payment modal (NovaUi_RunTravelDestinationPaymentWindow
-// 0x00482280): kPaid (Accept Price, or a granted Lower Price discount),
-// kRefused (a declined Lower Price roll) or kClosed (Esc; the caller treats
-// it like a refusal).
 enum class PaymentResult { kPaid, kRefused, kClosed };
 
 // Runs the DLOG 0x3f0 payment modal for the bribe path. `draw_underneath`
@@ -645,6 +652,12 @@ enum class PaymentResult { kPaid, kRefused, kClosed };
 // made once when the window opens; a granted "Lower Price" discounts the
 // payment amount by the bribe-mode factor (0.75x, DAT_005758f0) rounded to
 // /100 (DAT_00575898) and leaves the window open on the new figure.
+// @port 0x00482280 80% ui
+// TODO(decomp): debt mode (1.33x, mission payoff) not reconstructed.
+// Outcome of the payment modal (NovaUi_RunTravelDestinationPaymentWindow
+// 0x00482280): kPaid (Accept Price, or a granted Lower Price discount),
+// kRefused (a declined Lower Price roll) or kClosed (Esc; the caller treats
+// it like a refusal).
 [[nodiscard]] PaymentResult
 RunBribePaymentWindow(SdlPlatform &platform,
                       GameState &state,
@@ -762,6 +775,7 @@ std::int32_t NovaNegotiation_ComputeBribeCost(std::mt19937 &rng,
 // ---------------------------------------------------------------------------
 // SDL modal
 // ---------------------------------------------------------------------------
+// @port 0x00480030 92% ui
 // Ghidra 0x00480030 NovaUi_RunTravelDestinationInteractionWindow.
 NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                                                      GameState &state,

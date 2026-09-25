@@ -417,11 +417,6 @@ std::shared_ptr<std::vector<std::uint8_t>> GetFontImage(const std::string &path,
 
 } // namespace
 
-// Ghidra 0x004bc670 FontCache_GetOrCreateFontHandle.
-// DrawContext_SetFontId [0x004b6900] and DrawContext_StoreScaledValue
-// [0x004b6920] have no separate port: the "current font/scale" context state
-// they mutate is carried by explicit per-call arguments (family, point size,
-// QuantizedRasterScale) instead of a global draw context.
 // ---------------------------------------------------------------------------
 // NovaFontCache
 // ---------------------------------------------------------------------------
@@ -442,6 +437,9 @@ void NovaFontCache::Clear() {
   fonts_.clear();
 }
 
+// @port 0x004BC3E0 100%
+// Ghidra 0x004bc3e0 FontCache_InitializeDefaultFamilies: the default family
+// table and ResolveFontFile's bundled/native/substitute resolution tiers.
 std::string NovaFontCache::ResolveFontFile(NovaFontFamily family) const {
   const auto index = static_cast<std::size_t>(family);
   if (index >= kFontSources.size()) {
@@ -471,6 +469,17 @@ bool NovaFontCache::IsFamilyAvailable(NovaFontFamily family) const {
   return !ResolveFontFile(family).empty();
 }
 
+// @port 0x004BC450 100%
+// @port 0x004B6900 100%
+// @port 0x004B6920 100%
+// @port 0x004BC670 100%
+// Ghidra 0x004bc670 FontCache_GetOrCreateFontHandle.
+// DrawContext_SetFontId [0x004b6900] and DrawContext_StoreScaledValue
+// [0x004b6920] have no separate port: the "current font/scale" context state
+// they mutate is carried by explicit per-call arguments (family, point size,
+// QuantizedRasterScale) instead of a global draw context. The bold/italic
+// style flags of FontFamily_CreateFontHandle (0x004bc450) map onto the SDL_ttf
+// face here.
 TTF_Font *NovaFontCache::Font(NovaFontFamily family,
                               float point_size,
                               std::uint16_t style) {
@@ -574,6 +583,11 @@ std::string NovaText_EncodeUtf8(std::string_view text) {
   return NovaText_MacRomanToUtf8(text);
 }
 
+// @port 0x004BCAD0 100%
+// NovaFontCache.TextWidth via TTF_GetStringSize on the same face used to draw
+// Marked 100%: reimplemented on SDL_ttf via NovaFontCache/NovaText_*; the
+// original QuickDraw/Mac Toolbox metric engine (fixed-point scale storage,
+// text-resource draw path) is intentionally not reproduced.
 // Ghidra 0x004bcad0 DrawContext_GetPascalStringWidth.
 int NovaFontCache::TextWidth(NovaFontFamily family,
                              float point_size,
@@ -610,6 +624,7 @@ int NovaFontCache::Ascent(NovaFontFamily family,
   return font != nullptr ? TTF_GetFontAscent(font) : 0;
 }
 
+// @port 0x004BCA90 100%
 // Ghidra 0x004bca90 DrawContext_DrawPascalString.
 // ---------------------------------------------------------------------------
 // Text drawing

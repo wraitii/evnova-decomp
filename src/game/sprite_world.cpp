@@ -103,6 +103,7 @@ Sprite_InitFrameImage(float anchor_x, float anchor_y, int width, int height) {
   return image;
 }
 
+// @port 0x00475740 80% rendering
 // Ghidra 0x00475740 Sprite_AddFrame.
 int Sprite::AddFrame(std::shared_ptr<SpriteFrameImage> frame) {
   if (!frame) {
@@ -112,6 +113,7 @@ int Sprite::AddFrame(std::shared_ptr<SpriteFrameImage> frame) {
   return static_cast<int>(frames_.size()) - 1;
 }
 
+// @port 0x00476bd0 80% rendering
 // Ghidra 0x00476bd0 Sprite_Release.
 void Sprite::Release() {
   // Releasing the sprite drops each frame's image refcount; an image reaching
@@ -120,6 +122,7 @@ void Sprite::Release() {
   current_frame_ = 0;
 }
 
+// @port 0x00475830 70% rendering
 void Sprite::SetCurrentFrame(int index) {
   if (frames_.empty()) {
     current_frame_ = 0;
@@ -139,6 +142,7 @@ void Sprite::SetCurrentFrame(int index) {
   current_frame_ = index % FrameCount();
 }
 
+// @port 0x00475af0 70% rendering
 void Sprite::SetPositionFromCurrentFrameAnchor(std::int16_t world_x,
                                                std::int16_t world_y) {
   // Ghidra Sprite_SetPositionFromCurrentFrameAnchor (0x00475af0): aligns the
@@ -161,7 +165,9 @@ const SpriteFrameImage *Sprite::TheFrame(int index) const {
   return frames_[static_cast<std::size_t>(index % FrameCount())].get();
 }
 
-// Ghidra 0x00475f70 Sprite_AssignSpriteSet.
+// @port 0x00475f70 55% rendering
+// TODO(decomp): per-sprite world placement/sprite-set table still not
+// reconstructed Ghidra 0x00475f70 Sprite_AssignSpriteSet.
 int Sprite_AssignAsset(Sprite &sprite,
                        std::shared_ptr<const SpriteAsset> asset) {
   if (!asset || asset->frames.empty()) {
@@ -189,7 +195,9 @@ int Sprite_AssignAsset(Sprite &sprite,
   return asset->frame_count;
 }
 
-// Ghidra 0x00474ab0 Sprite_CreateFromSpriteSheetResources.
+// @port 0x00474ab0 25% rendering
+// TODO(decomp): DrawContext creation and render/present plumbing not
+// reconstructed Ghidra 0x00474ab0 Sprite_CreateFromSpriteSheetResources.
 std::unique_ptr<SpriteAsset> SpriteAsset::LoadSpin(SDL_Renderer *renderer,
                                                    std::uint16_t spin_id) {
   // The sp\x9an descriptor supplies the tile dimensions and names the rl\x91D

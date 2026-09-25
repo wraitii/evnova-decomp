@@ -1305,6 +1305,7 @@ bool Player_HasAnyCargoMissionOrJunk(const GameState &state) {
                      [](std::int16_t quantity) { return quantity > 0; });
 }
 
+// @port 0x0046ea40 100%
 // Ghidra 0x0046ea40 Outfit_CountCarriedShipsForOutfit.
 std::int16_t
 Outfit_CountCarriedShipsForOutfit(const GameState &state,

@@ -119,6 +119,7 @@ struct NovaPreferences {
 // run_in_window: it defaults ON and the Settings checkbox applies it live.
 void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs);
 
+// @port 0x00872384 100%
 // Ghidra 0x00872384 DrawContext_SetHyperspaceFlashColor.
 // Resolves the hyperspace flash colour the CE build applies at the jump and
 // hypergate arrival flashes: the raw g_hyperspace_effects byte non-zero forces

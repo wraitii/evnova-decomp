@@ -90,6 +90,9 @@ const NovaDialogItem *UiDialogWindow::Item(std::size_t row_1based) const {
   return &items[row_1based - 1];
 }
 
+// @port 0x004CF760 60% ui
+// Ghidra 0x004cf760 UiWindow_CreateFromDialogResource: original window-surface
+// allocation is replaced by SDL compositing.
 std::optional<UiDialogWindow>
 UiWindow_CreateFromDialogResource(SdlPlatform &platform,
                                   std::uint16_t dialog_id) {
@@ -205,6 +208,9 @@ void UiPanel_SetEntryListItems(UiDialogWindow &window,
       entry->value, static_cast<std::int32_t>(entry->popup_entries.size()));
 }
 
+// @port 0x004D0D00 65% ui
+// Ghidra 0x004d0d00 UiWindow_Draw. Remaining: type 0x20 gauges and 0x40 image
+// blits.
 void UiWindow_Draw(SdlPlatform &platform,
                    NovaFontCache &font_cache,
                    UiDialogWindow &window) {
@@ -559,6 +565,10 @@ void UiWindow_Draw(SdlPlatform &platform,
   }
 }
 
+// @port 0x004CFDD0 55% ui
+// Ghidra 0x004cfdd0 UiWindow_RunInteractionLoop: original window-stack
+// compositing is replaced by SDL. Remaining: keyboard/default-control and
+// callback gaps, and the original's exact DIK-driven activation set.
 void UiWindow_RunInteractionLoop(
     SdlPlatform &platform,
     NovaFontCache &font_cache,
@@ -768,6 +778,7 @@ void UiWindow_RunInteractionLoop(
   platform.PaceFrame();
 }
 
+// @port 0x004977d0 90% ui
 // Ghidra 0x004977d0 Ui_ShowConfirmDialog. Shared by the new-game
 // discard/overwrite prompts and the jettison prompt; the original takes the
 // message as a Pascal string and writes DITL entry 3 (1-based ordinal 3).
@@ -796,6 +807,7 @@ bool NovaUi_ShowConfirmDialog(SdlPlatform &platform,
 }
 
 std::optional<std::string>
+// @port 0x00497900 85% ui
 NovaUi_ShowTextEntryDialog(SdlPlatform &platform,
                            NovaFontCache &font_cache,
                            std::string_view prompt,

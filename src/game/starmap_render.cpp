@@ -375,6 +375,12 @@ void DrawReticle(SDL_Renderer *renderer,
 } // namespace
 
 // ---- Political overlay -----------------------------------------------------
+// @port 0x004A9D50 90% rendering,bugfix
+// @port 0x004AA070 75% rendering,bugfix
+// @port 0x004AA2F3 70% rendering,bugfix
+// @port 0x004A9BF0 60% rendering,bugfix
+// @port 0x004AA25E 60% rendering,bugfix
+// @port 0x004AA2DA 60% rendering,bugfix
 // Ghidra NovaUi_BuildStarmapPoliticalOverlay 0x004a9d50 /
 // NovaUi_PaintStarmapGovDisc 0x004aa070 / NovaUi_BlendStarmapOverlayCell
 // 0x004aa2f3 / NovaUi_DrawStarmapPoliticalOverlay 0x004aa620.
@@ -440,7 +446,10 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
     if (r_px < 0.5) {
       continue;
     }
-    // Ghidra 0x004A9BF0 NovaUi_ProjectSystemToOverlayGrid runs inline here.
+    // System position -> overlay grid projection inlined in
+    // BuildPoliticalOverlay: gx/gy = round((screen - panel origin)/2)
+    // half-pixel cells, centred exactly on the marker. Ghidra 0x004A9BF0
+    // NovaUi_ProjectSystemToOverlayGrid runs inline here.
     const SDL_FPoint centre = view.Project(panel.w,
                                            panel.h,
                                            static_cast<float>(sys.pos_x),
@@ -457,7 +466,12 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
         std::min(out.width, static_cast<int>(std::ceil(cx + r_px)) + 1);
     const int by1 =
         std::min(out.height, static_cast<int>(std::ceil(cy + r_px)) + 1);
-    // Ghidra 0x004AA25E NovaUi_PaintStarmapDiscRowLoop and 0x004AA2DA
+    // Disc block iteration in BuildPoliticalOverlay: 0-aligned cell_size-stride
+    // rows/cols over the disc bounding box clamped to the grid.
+    // Disc block iteration (column step) in BuildPoliticalOverlay; the
+    // original's coarse-compute + cell_size-expand pass is replaced by direct
+    // 0-aligned block painting (same blocky field, no sub-block shift). Ghidra
+    // 0x004AA25E NovaUi_PaintStarmapDiscRowLoop and 0x004AA2DA
     // NovaUi_PaintStarmapDiscCellStep run inline in these two loops.
     for (int py = by0; py < by1; ++py) {
       for (int px = bx0; px < bx1; ++px) {
@@ -515,6 +529,9 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
 
 namespace {
 
+// @port 0x004AA620 90% rendering
+// Ghidra 0x004aa620 NovaUi_DrawStarmapPoliticalOverlay: uploads the built
+// overlay as a texture and blits it over the panel.
 void DrawPoliticalOverlay(SdlPlatform &platform,
                           const PoliticalOverlay &overlay,
                           const SDL_FRect &panel) {
@@ -555,6 +572,8 @@ std::vector<MappedSystem> BuildMappedSystems(const GameState &state,
   return out;
 }
 
+// @port 0x004A51F0 80% rendering,ui
+// @port 0x004A8100 85% rendering,gameplay
 // Ghidra 0x004a8100 NovaUi_DrawStarmapRoutesAndMarkers (+ the nebula and
 // overlay passes of 0x004a51f0 that precede it). Draw order: political
 // overlay, plotted-route chain (green), adjacency links from visited systems

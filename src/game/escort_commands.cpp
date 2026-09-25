@@ -62,6 +62,9 @@ enum class AttachFilter {
   return CountAttached(state, AttachFilter::kAny, category) > 0;
 }
 
+// @port 0x0049e8d0 80% ui
+// SDL defers rendering to HudRenderer::DrawEscortCommandsPanel during the HUD
+// refresh.
 // Ghidra 0x0049E8D0 Ui_ShowTargetCategoryPanel.
 // SDL defers the original's immediate draw to the next HUD refresh.
 void ShowEscortPanel(EscortCommandState &escort) {

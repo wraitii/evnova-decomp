@@ -182,13 +182,15 @@ void DrawStoreBase(SdlPlatform &platform,
   }
 }
 
-// Ghidra 0x00497b70 NovaUi_BlitPictThumbnailCached: per-modal thumbnail cache.
-// The original's shared 128-entry atlas LRU and three-load-per-redraw cadence
-// are not reproduced.
 struct StoreTextureCache {
   std::unordered_map<std::int16_t, std::unique_ptr<SdlTexture>> pictures;
   std::unordered_map<std::int16_t, std::unique_ptr<SpriteAsset>> ship_sprites;
 };
+
+// @port 0x00497b70 100%
+// Ghidra 0x00497b70 NovaUi_BlitPictThumbnailCached: per-modal thumbnail cache.
+// The original's shared 128-entry atlas LRU and three-load-per-redraw cadence
+// are not reproduced.
 
 [[nodiscard]] SDL_Texture *StorePreviewTexture(SdlPlatform &platform,
                                                const GameState &state,
@@ -261,6 +263,12 @@ struct StoreTextureCache {
   return result;
 }
 
+// @port 0x004948b0 100%
+// @port 0x00490c70 100%
+// Ghidra 0x004948b0 NovaUi_DrawShipyardShipList. Exact cache cadence and
+// scripted colour variants are rendering mechanics intentionally not
+// reproduced; the SDL texture cache (StoreTextureCache/StorePreviewTexture,
+// 0x00497b70) owns the replacement.
 void DrawStoreContents(SdlPlatform &platform,
                        NovaFontCache &font_cache,
                        const ServicesButtonArt &button_art,
@@ -628,15 +636,6 @@ void DrawStoreContents(SdlPlatform &platform,
 }
 
 // ---------------------------------------------------------------------------
-// Ghidra 0x004956a0 NovaUi_RunShipyardDetailWindow + 0x00495c80
-// NovaUi_DrawShipyardDetailPanel: the Shipyard's Info sub-modal.
-//
-// The window is DLOG 0x3ed (DITL 0x3ed, backdrop PICT 0x213a "Ship
-// Description", 250x285) unless the selected ship's desc resource (ship class
-// id + 13000) carries a Graphic PICT that actually loads, in which case it is
-// DLOG 0x3fb (backdrop PICT 0x213b "Ship description + pict", 614x537) and the
-// Graphic is blitted into DITL entry 7 (the shipped descs point at the 600x400
-// PICT 20128+ set, matching the entry rect exactly).
 struct ShipyardInfoLayout {
   SDL_FRect window{};
   SDL_FRect button{};  // entry 1: "Done" (STR# 0x96 entry 5)
@@ -844,6 +843,7 @@ struct ShipyardInfoLayout {
   return std::max(0, free_mass);
 }
 
+// @port 0x00495c80 100% bugfix
 void DrawShipyardInfoPanel(SdlPlatform &platform,
                            NovaFontCache &font_cache,
                            const ServicesButtonArt &button_art,
@@ -1137,6 +1137,16 @@ void RenderStoreScreen(SdlPlatform &platform,
 // the starmap (action 4), player special interaction (action 2) and mission
 // computer (action 6) windows from inside this loop; the store modal does not
 // host those nested interactions yet, so the Info window only offers Done.
+// @port 0x004956a0 90% ui
+// Ghidra 0x004956a0 NovaUi_RunShipyardDetailWindow + 0x00495c80
+// NovaUi_DrawShipyardDetailPanel: the Shipyard's Info sub-modal.
+//
+// The window is DLOG 0x3ed (DITL 0x3ed, backdrop PICT 0x213a "Ship
+// Description", 250x285) unless the selected ship's desc resource (ship class
+// id + 13000) carries a Graphic PICT that actually loads, in which case it is
+// DLOG 0x3fb (backdrop PICT 0x213b "Ship description + pict", 614x537) and the
+// Graphic is blitted into DITL entry 7 (the shipped descs point at the 600x400
+// PICT 20128+ set, matching the entry rect exactly).
 void RunShipyardInfoDialog(SdlPlatform &platform,
                            GameState &state,
                            const LandedStoreSession &session,
@@ -1281,6 +1291,7 @@ void ShowStoreSaleBlock(SdlPlatform &platform,
 
 } // namespace
 
+// @port 0x0049e8e0 100%
 // Ghidra 0x0049e8e0 FUN_0049e8e0: the landed-store quantity prompt (DLOG
 // 0x3eb). Entry 2 carries the "Enter quantity:" label (STR# 0x7d2 0x173) and
 // entry 3 the editable amount, pre-filled with the maximum. Returns the
@@ -1340,6 +1351,7 @@ RunStoreQuantityPrompt(SdlPlatform &platform,
 
 namespace {
 
+// @port 0x00492f30 92% gameplay
 // Ghidra 0x00492f30 -> 0x00497900: replacement purchases propose the new
 // class short name plus a random three-digit suffix. The accepted edit is the
 // christening/name-entry buffer copied onto the player ship.
@@ -1395,16 +1407,18 @@ RunShipPurchaseConfirmation(SdlPlatform &platform,
 
 } // namespace
 
-// Ghidra 0x0048ea70 NovaUi_RunOutfitterInteractionLoop and
-// 0x00492f30 NovaUi_RunShipyardPurchaseLoop: one generic store loop replaces
-// both (service is a parameter). The 0x00493fc0 NovaUi_ShipyardHandleSelection
-// Input / 0x0049f3f0 HitTestAndTrackShipyardActionButtons /
-// 0x0049f6f0 DrawShipyardActionButtons / 0x0049f8f0
-// HitTestAndTrackOutfitterActionButtons / 0x0049fbb0
-// DrawOutfitterActionButtons and the 0x00497b70 BlitPictThumbnailCached
-// cache all run inline within this function and the DrawStore* helpers below;
-// the 0x004956a0/0x00495c80 detail window runs in RunShipyardInfoDialog above
-// (opened by the Info action button).
+// @port 0x0048ea70 65% gameplay
+// TODO(decomp): in-loop starmap/mission-computer re-entry
+// actions, exact STR label resources, pressed-button tracking. Ghidra
+// 0x0048ea70 NovaUi_RunOutfitterInteractionLoop and 0x00492f30
+// NovaUi_RunShipyardPurchaseLoop: one generic store loop replaces both (service
+// is a parameter). The 0x00493fc0 NovaUi_ShipyardHandleSelection Input /
+// 0x0049f3f0 HitTestAndTrackShipyardActionButtons / 0x0049f6f0
+// DrawShipyardActionButtons / 0x0049f8f0 HitTestAndTrackOutfitterActionButtons
+// / 0x0049fbb0 DrawOutfitterActionButtons and the 0x00497b70
+// BlitPictThumbnailCached cache all run inline within this function and the
+// DrawStore* helpers below; the 0x004956a0/0x00495c80 detail window runs in
+// RunShipyardInfoDialog above (opened by the Info action button).
 LandedExit RunStoreDialog(SdlPlatform &platform,
                           SdlAudio &audio,
                           GameState &state,

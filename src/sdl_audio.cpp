@@ -73,9 +73,18 @@ NovaAudio_SelectVoiceInsertion(std::span<const NovaAudioVoicePriority> active,
   return index;
 }
 
+// @port 0x004D64F0 90% audio
+// @port 0x004D6550 90% audio
 // @port 0x0046aad0 95% audio
 // Ghidra 0x0046aad0 NovaAudio_QueueCenteredSound; 0x004d64f0
 // NovaAudio_FillVoiceSlotDescriptor; 0x004d6550 Audio_AllocateVoiceSlot.
+// 0x004d64f0 runs inline in SdlAudio::Play: one voice, fixed 1.0 playback
+// rate, centered mono gain, priority_width preserved; SDL stream setup replaces
+// the original backend descriptors and owner-link allocation. 0x004d6550's
+// 16-slot ordered insertion policy is preserved by
+// NovaAudio_SelectVoiceInsertion (scan until width and effective level both
+// meet/exceed an entry, insert there, evict the last entry when full, reject
+// when none qualifies).
 void SdlAudio::Play(const NovaSoundData &sound,
                     float gain,
                     float playback_rate,
@@ -173,7 +182,10 @@ void SdlAudio::Play(const NovaSoundData &sound,
   SDL_FlushAudioStream(voice->stream.get());
 }
 
-// Ghidra 0x004d6770 NovaAudio_CountActiveByHandle.
+// @port 0x004D6770 90% audio
+// Ghidra 0x004d6770 NovaAudio_CountActiveByHandle: counts draining voices
+// with a matching resource key. The original also accepts owner-link ids and
+// handle 0 as count-all; neither form is needed by reconstructed callsites.
 int SdlAudio::CountActiveByKey(int sound_key) const {
   if (sound_key < 0) {
     return 0;
@@ -187,7 +199,10 @@ int SdlAudio::CountActiveByKey(int sound_key) const {
   return active;
 }
 
-// Ghidra 0x004d67d0 NovaAudio_UnregisterCallbacks.
+// @port 0x004D67D0 85% audio
+// Ghidra 0x004d67d0 NovaAudio_UnregisterCallbacks: clears all active streams
+// matching a resource key, matching gameplay cancellation behavior. Original
+// callback invocation and owner-link matching are not modelled.
 void SdlAudio::StopByKey(int sound_key) {
   if (sound_key < 0) {
     return;

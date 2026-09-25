@@ -440,6 +440,12 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
 // tests system visibility and the ship-to-system-centre distance.
 // TODO(decomp): re-derive the exact table/endpoint once SystemDef adjacency
 // typing is settled.
+// @port 0x004AF020 85% rendering
+// Ghidra 0x004af020 SpriteWorld_RebuildSessionSpritePools (sprite-pool rebuild
+// replaced structurally); its HUD overlay-message-band tail runs inline in the
+// overlay-message block below.
+// Note: the DIVERGENCE(original) at the 0x0045E9C0 panel-restore slice belongs
+// to that row, not to this message-band slice.
 void HudRenderer::Draw(SdlPlatform &platform,
                        const GameState &state,
                        bool force_empty_radar) {
@@ -1247,6 +1253,7 @@ void DrawRadarPoint(SDL_Renderer *renderer,
   SDL_RenderPoint(renderer, static_cast<float>(x), static_cast<float>(y));
 }
 
+// @port 0x004BA350 100%
 // Ghidra 0x004ba350 DrawContext_DrawCircleInRect with the draw context's 1x1
 // pixel scale: a midpoint-circle outline (8-way symmetric, single-pixel plot)
 // inscribed in the rect, radius (bottom-top)/2, centre ((left+right+1)/2,
@@ -1325,6 +1332,7 @@ void RadarPolarOffset(float bearing_deg, float distance, float &x, float &y) {
 
 } // namespace
 
+// @port 0x0049e430 100%
 // Ghidra 0x0049E430 Ui_DrawTargetCategoryPanel.
 // The in-flight "Escort Commands" overlay (header STR# 0x7d2 0x85). Five rows
 // numbered 1..5: All
@@ -1458,6 +1466,9 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
 // @port 0x0045D600 85% rng,rendering,divergence
 // DIVERGENCE(original): the radar direct-composite pass differs from the
 // original's surface-space compositing; see the timing note below.
+// @port 0x004BBDC0 80% rendering
+// Ghidra 0x004bbdc0 DrawContext_TileImageInRect: the radar
+// interference-static tiling runs inline in the static pass below.
 void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
                                  const GameState &state,
                                  bool force_empty) {

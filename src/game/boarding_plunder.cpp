@@ -156,6 +156,9 @@ bool NovaShip_CanPlayerHaveMoreEscorts(const GameState &state) {
   return escorts < static_cast<std::int16_t>(kEscortCap);
 }
 
+// @port 0x00484230 85% gameplay
+// TODO(decomp): personality booty arm (PersDef +0x618 unmodeled),
+// is_licensed_runtime gate.
 // Ghidra 0x00484230 Boarding_BuildOptions. Rolls the plunder
 // offers and the capture odds for the player's primary target. Call with a
 // valid, boardable target (the board command and the window open path both
@@ -1027,20 +1030,6 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
 
 namespace {
 
-// Ghidra 0x00482940 NovaUi_RunBoardingPlunderWindow — clean-room port
-// (iteration 3). DLOG 0x3f3 (309x198), backdrop PICT 0x2143, DITL 0x3f3 items:
-//   [0] Abort (STR# 0x96 0x22, 91..217 x 166..191)
-//   [1] Cargo (0x27, 110..199 x 110..135)
-//   [2] Credits (0x28, 35..124 x 138..163)
-//   [3] Ammo (0x29, 204..293 x 110..135)
-//   [4] text panel (UserItem, 11..298 x 7..103)
-//   [5] Energy (0x2a, 16..105 x 110..135)
-//   [6] Capture Ship (0x2b, 129..275 x 138..163)
-// Items 0..3 then 5..6 are the six option buttons (entry 4, the text panel, is
-// skipped); UiPanel entry indices are 1-based, so the action codes read back
-// by NovaUi_PollTravelScriptAction are 1,2,3,4,6,7 (no code 5). The window is
-// Authored locally in the 309x198 DLOG composition; the active placement
-// centres this composition in the window.
 constexpr float kBoardWindowX = 0.0F;
 constexpr float kBoardWindowY = 0.0F;
 constexpr float kBoardWindowW = 309.0F;
@@ -1288,6 +1277,7 @@ WeaponOfferName(const GameState &state, int ammo_bank, int quantity) {
              : (outfit.lc_plural.empty() ? outfit.name : outfit.lc_plural);
 }
 
+// @port 0x004A24E0 70% ui
 // Ghidra 0x004a24e0 NovaUi_DrawBoardingPlunderOptionButtons. Draws the six
 // option strips from the shared three-state button art. Enabled buttons use
 // the normal art (or the pressed/hover art when `hovered`); disabled buttons
@@ -1327,6 +1317,7 @@ void DrawBoardOptionButtons(SdlPlatform &platform,
   }
 }
 
+// @port 0x00484d30 80% ui
 // Ghidra 0x00484d30 NovaUi_DrawBoardingPlunderWindow. Draws the window
 // backdrop (PICT 0x2143) and the offers into the DITL item-4 text panel.
 // Layout per the shipped window (docs/reference/boarding.jpg):
@@ -1554,13 +1545,16 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
   return lines;
 }
 
-// Ghidra 0x00497eb0 NovaUi_ShowCaptureDecisionDialog (clean-room). Runs the
-// capture-decision modal (DLOG 0x3fa, PICT 0x2144) after a successful capture
-// roll and returns true for "Use As My Ship" (the swap arm), false for "Use
-// As Escort". The boarding window stays visible beneath, as in the original's
-// composited modal stack. Loop shape mirrors NovaUi_RunBoardingPlunderWindow:
-// input flush on open, ~60 Hz redraw, click answer (the DITL defines no
-// cancel item, so Esc/Enter are inert here).
+// @port 0x00497eb0 75% gameplay
+// TODO(decomp(0x00497eb0)) skipped: the swap arm (rename-confirm +
+// Player_ReplaceShipWithCapturedHull) falls back to the escort conversion
+// (logged). Ghidra 0x00497eb0 NovaUi_ShowCaptureDecisionDialog (clean-room).
+// Runs the capture-decision modal (DLOG 0x3fa, PICT 0x2144) after a successful
+// capture roll and returns true for "Use As My Ship" (the swap arm), false for
+// "Use As Escort". The boarding window stays visible beneath, as in the
+// original's composited modal stack. Loop shape mirrors
+// NovaUi_RunBoardingPlunderWindow: input flush on open, ~60 Hz redraw, click
+// answer (the DITL defines no cancel item, so Esc/Enter are inert here).
 [[nodiscard]] bool
 RunCaptureDecisionDialog(SdlPlatform &platform,
                          SdlAudio &audio,
@@ -1749,6 +1743,26 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
 // NovaUi_ShowCaptureDecisionDialog 0x00497eb0, is TODO(decomp)). The window
 // plays its one-shot cues directly through `audio` (the flight loop owns the
 // device).
+// @port 0x00482940 82% gameplay
+// @port 0x004A22E0 50% gameplay
+// Ghidra 0x004a22e0 NovaUi_HandleBoardingPlunderOptionButtons: the six option
+// button hit-test (items 0..3,5..6 -> action codes 1,2,3,4,6,7) and
+// disabled-slot hover filtering run inline in the modal poll below.
+// TODO(decomp): mission-ship free-outfit arm and mass accounting in the ammo
+// loop. Ghidra 0x00482940 NovaUi_RunBoardingPlunderWindow — clean-room port
+// (iteration 3). DLOG 0x3f3 (309x198), backdrop PICT 0x2143, DITL 0x3f3 items:
+//   [0] Abort (STR# 0x96 0x22, 91..217 x 166..191)
+//   [1] Cargo (0x27, 110..199 x 110..135)
+//   [2] Credits (0x28, 35..124 x 138..163)
+//   [3] Ammo (0x29, 204..293 x 110..135)
+//   [4] text panel (UserItem, 11..298 x 7..103)
+//   [5] Energy (0x2a, 16..105 x 110..135)
+//   [6] Capture Ship (0x2b, 129..275 x 138..163)
+// Items 0..3 then 5..6 are the six option buttons (entry 4, the text panel, is
+// skipped); UiPanel entry indices are 1-based, so the action codes read back
+// by NovaUi_PollTravelScriptAction are 1,2,3,4,6,7 (no code 5). The window is
+// Authored locally in the 309x198 DLOG composition; the active placement
+// centres this composition in the window.
 [[nodiscard]] BoardingWindowResult
 NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
                                 SdlAudio &audio,
@@ -1826,8 +1840,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
   const char *close_reason = "target lost";
 
   while (!platform.quit_requested() && !close) {
-    // Mouse-hover (mirrors NovaUi_HandleBoardingPlunderOptionButtons 0x004a22e0
-    // filter: disabled slots are excluded from the hovered index).
+    // Disabled slots are excluded from the hovered index (0x004a22e0).
     int hovered = -1;
     const SDL_FPoint mouse = platform.mouse_position();
     for (std::size_t i = 0; i < buttons.size(); ++i) {

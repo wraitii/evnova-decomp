@@ -27,6 +27,7 @@ constexpr std::size_t kMaskDataOffset = 0x52; // start of the 1-bit mask bitmap
 
 } // namespace
 
+// @port 0x004BBB80 80% rendering
 // Ghidra 0x004bbb80 Resource_LoadCicn (resource lookup wrapper; the actual
 // decode is FUN_004d2bd0, whose extended color-icon branch runs inline here).
 // The caller does the 'cicn' resource lookup via NovaResource_Load, so this

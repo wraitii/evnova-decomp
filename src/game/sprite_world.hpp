@@ -161,6 +161,11 @@ Sprite_InitFrameImage(float anchor_x, float anchor_y, int width, int height);
 // Sprite_Create / Sprite_AssignSpriteSet build into in the original; the
 // clean-room asset store keeps the read-only SpriteAsset cache and builders can
 // assemble a live Sprite from one.
+// @port 0x004744a0 60% rendering
+// Ghidra 0x004744a0 Sprite_Create: allocates a Sprite, installs an empty frame
+// array and zeroes runtime state. `game::Sprite` mirrors that instance model.
+// TODO(decomp): the original's error slots and update/draw callback slots are
+// not populated.
 class Sprite {
 public:
   Sprite() = default;

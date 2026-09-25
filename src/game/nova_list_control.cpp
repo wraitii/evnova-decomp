@@ -39,6 +39,7 @@ void NovaListControl::clamp_scroll() {
   scroll_ = std::clamp(scroll_, 0, max_scroll());
 }
 
+// @port 0x004D1FB0 100%
 // Ghidra 0x004d1fb0 NovaList_ScrollByRows.
 void NovaListControl::ScrollRows(int delta) {
   scroll_ += delta;
@@ -47,6 +48,7 @@ void NovaListControl::ScrollRows(int delta) {
 
 void NovaListControl::ScrollTo(int row) { scroll_ = row, clamp_scroll(); }
 
+// @port 0x004D1D40 100%
 // Ghidra 0x004d1d40 NovaList_ScrollSelectionIntoView.
 void NovaListControl::EnsureVisible(std::size_t index) {
   const int row = static_cast<int>(index);
@@ -58,6 +60,7 @@ void NovaListControl::EnsureVisible(std::size_t index) {
   clamp_scroll();
 }
 
+// @port 0x004D1F50 100%
 // Ghidra 0x004d1f50 NovaList_GetRowRect.
 SDL_FRect NovaListControl::RowRect(std::size_t index) const {
   return SDL_FRect{
@@ -68,7 +71,10 @@ SDL_FRect NovaListControl::RowRect(std::size_t index) const {
       row_pitch_};
 }
 
-// Ghidra 0x004d1db0 NovaList_HitTestPoint (content arm).
+// @port 0x004D1DB0 60% ui,cadence
+// Ghidra 0x004d1db0 NovaList_HitTestPoint (content arm; scrollbar arm is
+// NovaListScrollbarHitTest below). Remaining: the +0x38 last-click 60 Hz tick
+// stamp.
 std::optional<std::size_t> NovaListControl::RowAt(SDL_FPoint point) const {
   if (point.x < content_.x || point.x >= content_.x + content_.w ||
       point.y < content_.y || point.y >= content_.y + content_.h ||
@@ -148,7 +154,9 @@ void NovaUi_DrawListRow(SdlPlatform &platform,
                 text);
 }
 
-// Ghidra 0x004d2010 NovaList_Draw.
+// @port 0x004D2010 50% ui,rendering
+// Ghidra 0x004d2010 NovaList_Draw. Remaining: the native grip/hash lines and
+// exact thumb rounding.
 void NovaUi_DrawListScrollbar(SdlPlatform &platform,
                               const NovaListControl &list,
                               const SDL_FRect &strip) {

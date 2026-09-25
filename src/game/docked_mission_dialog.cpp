@@ -139,7 +139,9 @@ constexpr std::size_t kMissionComputerCommand = 0x28;
 }
 
 // @port 0x00441620 65% ui,rendering
-// Ghidra 0x00441620 NovaUi_DrawMissionBbsWindow.
+// @port 0x004A1290 80% ui
+// Ghidra 0x004a1290 NovaUi_DrawMissionBbsActionButtons: DITL entries 1/7 are
+// drawn inline below with the shared three-state art and STR# 0x96 labels.
 void DrawMissionBbsContents(SdlPlatform &platform,
                             NovaFontCache &font_cache,
                             const ServicesButtonArt &button_art,
@@ -252,11 +254,8 @@ void DrawMissionBbsContents(SdlPlatform &platform,
                   title);
   }
 
-  // DITL items 1 and 7 are the small action buttons. DITL item 3 is the list
-  // scrollbar, not a button; painting it as ACCEPT caused the giant overlay.
-  // Ghidra 0x004a1290 NovaUi_DrawMissionBbsActionButtons runs inline here;
-  // captions are the STR# 0x96 entries its label table indexes
-  // (DAT_007d82fa = {0x19, 0} -> "Accept", "Leave").
+  // DITL items 1 and 7 are the small action buttons (0x004a1290); item 3 is
+  // the list scrollbar, not a button.
   const std::array<std::pair<SDL_FRect, std::string>, 2> bbs_buttons{
       {{layout.take, NovaHud_LoadStringEntry(0x96, 26).value_or("Accept")},
        {layout.decline, NovaHud_LoadStringEntry(0x96, 1).value_or("Leave")}}};
@@ -485,6 +484,9 @@ MissionDestinationPreselect(const GameState &state,
 } // namespace
 
 // @port 0x0043C470 78% ui,gameplay
+// @port 0x004A1130 70% ui
+// Ghidra 0x004a1130 NovaUi_HitTestMissionBbsActionButtons: the Accept (DITL
+// entry 1) / Leave (entry 7) hit-test runs inline in the mouse arm below.
 // Ghidra 0x0043c470 NovaUi_RunMissionBbsWindow (partial port of the landed
 // Mission BBS: layout, list/description rendering, selection, accept). The
 // 0x00440c90 NovaUi_PollMissionBbsWindow selection/navigation slice runs
@@ -686,8 +688,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
             handled = true;
           }
         }
-        // Ghidra 0x004a1130 NovaUi_HitTestMissionBbsActionButtons runs inline
-        // here (Accept = window entry 1, Leave = entry 7).
+        // Accept = window entry 1, Leave = entry 7 (0x004a1130).
         if (!handled && contains(layout->take, point)) {
           if (accept()) {
             return LandedExit::kServiceComplete;
@@ -893,6 +894,10 @@ void NovaMission_RunAcceptanceDialogs(
 
 } // namespace
 
+// @port 0x004A1670 70% ui
+// Ghidra 0x004a1670 NovaUi_HitTestMissionOfferButtons: the accept/decline and
+// up/down scroll slots are hit-tested inline in the mouse arm below; Flags
+// 0x0004 maps the accept slot to DITL entry 6 with decline unhittable.
 MissionOfferResult
 NovaMission_RunOfferWindow(SdlPlatform &platform,
                            SdlAudio &audio,

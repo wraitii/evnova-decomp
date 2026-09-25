@@ -521,8 +521,12 @@ struct ServiceColumns {
 // straight from Nova.rez (no hardcoded layout). Type definitions live here.
 // When the dialog resources are unavailable it falls back to a minimal
 // layout with just the buttons from the hardcoded two-column grid.
+// @port 0x008730A1 100% divergence
 // Ghidra 0x008730a1 Dialog_CreateFromDlog (partial port: window bounds +
 // linked DITL via NovaResource_LoadDialogDefinition, playfield centering).
+// DIVERGENCE(original): the original global ui-scale canvas path is
+// intentionally replaced; native dialog placement uses each authored
+// composition and SDL placement owns containment and inverse input mapping.
 bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
   constexpr ServiceColumns kFallback;
   constexpr std::size_t kRows = 4;
@@ -1098,9 +1102,26 @@ LandedExit DispatchService(SdlPlatform &platform,
 // ---------------------------------------------------------------------------
 // Landed window modal run loop.
 // ---------------------------------------------------------------------------
-// Ghidra 0x00491f30 NovaUi_RunTravelDestinationInteractionLoop (partial port).
-// NovaUi_RunTravelDestinationServicesWindow 0x0047c8e0 runs inline here: the
-// landed services modal uses the Spaceport backdrop PICT 0x2134.
+// @port 0x00491f30 60% ui
+// TODO(decomp): partial clean-room equivalent in NovaLanded_RunWindow:
+// Spaceport presentation, landing mission reaction/offer ordering, service
+// input and dispatch, and return to flight. The stellar CustSndID ambient slice
+// is ported (0x4928a0 per-frame callback, Ghidra-folded into the parent):
+// NovaLanded_RunWindow decodes snd cust_snd_id at dock open when >=0x80 and
+// g_pref_ambient_sounds, and the run loop plays it via SdlAudio on the original
+// 0x1e0+NovaRandom_Range(0x1e0) 60Hz retrigger (8..16s), or gaplessly while
+// availability_flags (Bible Flags2) 0x10 is set, stopping the voice on window
+// close. The secondary click-inside-DITL-item-5 replay of the same cue is not
+// wired. The surrounding background is the flat per-system space tint
+// (SystemDef BkgndColor): during the transition the original fills with
+// NovaRender_SetSystemSpaceBackgroundColor but skips SpriteWorld_RenderLayers
+// (NovaUi_RedrawGameplayViewportAndRadar 0x0046a870,
+// g_is_system_transition_active != 0), so no starfield/ship sprites belong
+// behind the dock. HUD remains window-space and probe bounds map through
+// placement. Ghidra 0x00491f30 NovaUi_RunTravelDestinationInteractionLoop
+// (partial port). NovaUi_RunTravelDestinationServicesWindow 0x0047c8e0 runs
+// inline here: the landed services modal uses the Spaceport backdrop PICT
+// 0x2134.
 LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                 SdlAudio &audio,
                                 GameState &state,

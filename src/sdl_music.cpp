@@ -52,6 +52,9 @@ bool SdlMusic::Initialize() {
   return true;
 }
 
+// @port 0x00534380 100%
+// Ghidra 0x00534380 NovaMusic_SwitchBackgroundTrack: ported as Load/Play; see
+// sdl_music.hpp for the dr_mp3 + SDL stream backend substitution.
 bool SdlMusic::Load(const std::string &path) {
   if (!initialized_) {
     NovaLog::Error("music Load called before Initialize()");
