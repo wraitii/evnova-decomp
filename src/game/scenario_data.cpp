@@ -35,8 +35,9 @@ using evnova::util::ReadCString;
 }
 
 // @port 0x0043BBB0 100% divergence
-// Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs. The loader projects each
-// m\xefsn resource into a 1000-entry table; the runtime half lives in mission.cpp.
+// Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs. The loader projects
+// each m\xefsn resource into a 1000-entry table; the runtime half lives in
+// mission.cpp.
 [[nodiscard]] MissionDef DecodeMission(std::span<const std::byte> bytes) {
   MissionDef mission;
   const auto copy_size = std::min(bytes.size(), mission.raw_payload.size());
@@ -2435,6 +2436,9 @@ public:
   [[nodiscard]] bool Eval() { return ParseChain(); }
 
 private:
+  // @port 0x00448BA0 100%
+  // Ghidra 0x00448ba0 NovaExpression_SkipWhitespace. Advances past spaces only
+  // (no tabs; matches the original).
   void SkipWhitespace() {
     while (pos_ < text_.size() && text_[pos_] == ' ') {
       ++pos_;
@@ -2584,6 +2588,11 @@ private:
     return ones != 0;
   }
 
+  // @port 0x00448BE0 100% divergence
+  // Ghidra 0x00448be0 NovaExpression_EvaluateToken. Case-insensitive B/P/G/O/E
+  // terms, parentheses/brackets/comparison operators, and the original's '#'
+  // compare-value token for a digit run. For the digit-run divergence see the
+  // comment below.
   // Evaluates a single NCB term and returns 1 (true) or 0 (false). The token
   // letter is case-insensitive; numbers may be multi-digit.
   [[nodiscard]] int ParseTokenTerm() {
@@ -2672,6 +2681,10 @@ private:
 
 } // namespace
 
+// @port 0x00449020 100% divergence
+// Ghidra 0x00449020 NovaExpression_EvaluateBoolean. ExprParser ports the
+// original's flat operator chain, not precedence; the remaining documented
+// divergences live on the ParseChain comment above.
 bool NovaControlExpression_Evaluate(std::string_view expression,
                                     const ControlExpressionState &state) {
   if (expression.empty()) {

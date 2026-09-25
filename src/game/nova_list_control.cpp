@@ -119,6 +119,11 @@ NovaListScrollbarPart NovaListScrollbarHitTest(const NovaListControl &list,
                              : NovaListScrollbarPart::kPageDown;
 }
 
+// @port 0x00448A30 90% ui
+// Ghidra 0x00448a30 NovaUi_DrawListRowCallback. Shared list-row draw used by
+// the Mission BBS and mission computer; fills the row from the c.lr list
+// palette and draws the label. The original's per-column item-renderer plumbing
+// (FUN_0087420e/FUN_0087428d) is not modelled.
 void NovaUi_DrawListRow(SdlPlatform &platform,
                         NovaFontCache &font_cache,
                         const SDL_FRect &row,

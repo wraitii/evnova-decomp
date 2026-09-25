@@ -220,6 +220,11 @@ std::string FormatArrivalCountWord(int count, bool translate_first) {
 // original never resets the latch on arrival; it only re-arms/clears while a
 // jump is armed, so the port mirrors the stale-latch behavior.
 void TickJumpRangeCue(GameState &state) {
+  // @port 0x0044D0C3 80% gameplay,synthetic
+  // Ghidra 0x0044d0c3 PlayerTick_PositionAndJumpRangeCue (synthetic region of
+  // 0x0044aa70): position integration is owned by the movement path; this is
+  // the jump-range rising-edge cue. Exact parent ordering and the overlay-
+  // clearing comparisons remain partially reconstructed.
   TravelState &t = state.travel;
   if (state.player.travel_transfer_mode != 3 || t.travel_slot < 0) {
     return;
@@ -239,6 +244,11 @@ void TickJumpRangeCue(GameState &state) {
   t.jump_range_cue_latch = true;
 }
 
+// @port 0x0044F3D0 75% gameplay,synthetic
+// Ghidra 0x0044f3d0 PlayerTick_HyperspaceSequenceAnchor (synthetic region of
+// 0x0044aa70): the fire/arrival instant. Remaining TODO(decomp): escort
+// warp-sync/loss count, multi-jump depth (0x0046cdd0), the event-message
+// arrival variant, and the disabled exit.
 // Completes an engaged jump: the fire/arrival moment. Mirrors the fire +
 // arrival block at PlayerTick_HyperspaceSequenceAnchor (0x0044f3d0) and
 // PlayerTick_SystemTransitionAndArrival (0x0044f660) in
@@ -419,6 +429,11 @@ void FireJump(GameState &state) {
   // fire; the spaceflight loop re-spawns the starfield/asteroids for the new
   // system when it observes just_completed.
   t.travel_slot = -1;
+  // @port 0x0044F660 50% gameplay,ui,synthetic
+  // Ghidra 0x0044f660 PlayerTick_SystemTransitionAndArrival (synthetic region
+  // of 0x0044aa70): destination transfer, arrival state, discovery, the arrival
+  // overlay and route maintenance. Remaining TODO(decomp): the arrival reset
+  // pass and route wipe-on-mismatch details.
   // Arrival clears the travel/landing stellar selection (g_travel_selected_
   // stellar_id = 0xffff at 0x0044f7fa) and the approach timer
   // (g_travel_engage_timer = 0xffff at 0x0044f803).
@@ -855,6 +870,7 @@ bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
   return true;
 }
 
+// @port 0x00447F00 100%
 // Ghidra 0x00447f00 System_IsSystemVisible.
 bool NovaSystem_IsSystemVisible(const GameState &state,
                                 std::int16_t system_id) {
@@ -1347,6 +1363,11 @@ void NovaTravel_Tick(GameState &state,
     // time_ms, 0x0044c4e9), read by both the tunnel ramp and the collapse.
     t.tunnel_elapsed_60hz += frame_time_ms * (kHyperspaceTickHz / 1000.0F);
 
+    // @port 0x0044B037 85% rendering,synthetic
+    // Ghidra 0x0044b037 PlayerTick_HyperspaceExitGate (synthetic region of
+    // 0x0044aa70): becoming disabled between engage and fire aborts the jump.
+    // The gate is ported; TODO(decomp): whether the Mac abort path reaches the
+    // hold-end _FadeWhiteOut.
     // Disabled-jump collapse (Ship_HandlePlayerShipCore 0x0044b037 gate).
     // Becoming disabled any time between the engage and the fire aborts the
     // jump on that frame: hold timer = -1, the 'Warp up' cue is cancelled,
@@ -1365,6 +1386,10 @@ void NovaTravel_Tick(GameState &state,
                                  (NovaTravel_JumpSequenceDuration60Hz(state) *
                                   kJumpDurationScale) -
                              kJumpProgressOffset / jump_multiplier;
+      // @port 0x0044B120 100% synthetic
+      // Ghidra 0x0044b120 PlayerTick_HyperspaceExitVelocity (synthetic region
+      // of 0x0044aa70): once the tunnel ramp has begun, the collapse zeroes
+      // velocity and sets it to min(progress, max speed) along the heading.
       if (progress > kJumpProgressOnsetThreshold) {
         const float speed = std::min(progress, PlayerMaxSpeed(state));
         player.vel_x = std::sin(player.heading) * speed;
@@ -1430,6 +1455,12 @@ void NovaTravel_Tick(GameState &state,
     };
 
     switch (t.jump_phase) {
+    // @port 0x0044F127 80% gameplay,rendering,synthetic
+    // Ghidra 0x0044f127 PlayerTick_JumpTurnaroundContinuation (synthetic region
+    // of 0x0044aa70): ordinary hyperspace-engage turnaround/braking. Partial
+    // coverage: the downstream 0x0044cffe manual tails (speed-cap clamp, 0.985
+    // fire-restricted decay, glow ramp) are unported here and the brake frame
+    // does not stamp ai_station_hold_timer = 1.0.
     case TravelState::JumpPhase::kBrake: {
       // Pre-fire turn-around, mirroring the jump dispatch in
       // Ship_HandlePlayerShipCore (0x0044c195 engage / 0x0044fff0 continuation
@@ -1611,6 +1642,10 @@ void NovaTravel_Tick(GameState &state,
       player.pos_y += player.vel_y * ticks;
 
       player.ai_station_hold_timer += ticks;
+      // @port 0x0044D371 45% gameplay,synthetic
+      // Ghidra 0x0044d371 PlayerTick_HyperspaceProgressBranch (synthetic region
+      // of 0x0044aa70): hold/fire audio cadence. Escape-pod/disabled cases
+      // remain TODO(decomp).
       if (player.ai_station_hold_timer > kEngageHoldTicks &&
           !warp_up_sound_active) {
         t.hold_audio_latch = true;
@@ -1628,6 +1663,10 @@ void NovaTravel_Tick(GameState &state,
         // skipped on the fire frame.
         break;
       }
+      // @port 0x0044CCAF 90% rendering,synthetic
+      // Ghidra 0x0044ccaf PlayerTick_HyperspaceTunnelAcceleration (synthetic
+      // region of 0x0044aa70). TODO(decomp): the starfield streak pass and its
+      // scalar/cadence.
       // In-tunnel acceleration (the tunnel block of Ship_HandlePlayerShipCore,
       // after the hold/fire branch): once the stopped hull faces the jump
       // bearing within max(class turn, 30 deg), the position advances along
@@ -1670,6 +1709,11 @@ void NovaTravel_Tick(GameState &state,
     return;
   }
 
+  // @port 0x0044C18A 60% gameplay,synthetic
+  // Ghidra 0x0044c18a PlayerTick_HyperspaceCommand (synthetic region of
+  // 0x0044aa70): engage gates. Remaining TODO(decomp): escort fleet
+  // constraints, the velocity-match gate, and port-equivalence timing of the
+  // mode-3 re-aim.
   // (a) Idle: wait for the travel key. The original's jump dispatch
   // (Ship_HandlePlayerShipCore 0x0044c195, binding 14) requires a plotted
   // destination (travel_transfer_mode == 3 with ai_secondary_target_slot !=

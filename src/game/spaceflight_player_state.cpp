@@ -959,6 +959,7 @@ bool TryRunPlayerEjectTransform(GameState &state,
 
 } // namespace
 
+// @port 0x0044B240 78% gameplay,ui,synthetic
 // Ghidra 0x0044B240 PlayerTick_StatusAndOutfitEvents, internal label of
 // Ship_HandlePlayerShipCore. Synthetic CFG: 0x0044B240 ->
 // [0x0044B7C4, 0x0044D490]; includes the reordered carried-bomb tails. Runs
@@ -1140,6 +1141,7 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
   return false;
 }
 
+// @port 0x0044D490 60% gameplay,ui,rendering,synthetic
 // Ghidra 0x0044D490 PlayerTick_TimedActionTransition, internal label of
 // Ship_HandlePlayerShipCore. Synthetic CFG: 0x0044D490 -> 0x0044D560,
 // including the reordered zero-count respawn branch at 0x0044D570..0x0044DA74;
@@ -1329,6 +1331,7 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
   return true;
 }
 
+// @port 0x0044CA6B 90% correctness,synthetic
 // Ghidra 0x0044CA6B PlayerTick_TurnBankAnimation, internal label of
 // Ship_HandlePlayerShipCore. Synthetic CFG: 0x0044CA6B -> 0x0044CB99.
 static void TickPlayerTurnBankAnimation(GameState &state,
@@ -1388,6 +1391,7 @@ static void TickPlayerTurnBankAnimation(GameState &state,
   }
 }
 
+// @port 0x0044C0B1 90% correctness,synthetic
 // Ghidra 0x0044aa70 face-target command (0x0044c0b1 -> 0x0044c18a, with the
 // out-of-line bearing tails at 0x0044ec90/0x0044ecb7), part of the
 // PlayerTick_WeaponCommands region. While held with the station-hold timer
@@ -1448,6 +1452,7 @@ bool PlayerTick_FaceTargetCommand(GameState &state,
   return true;
 }
 
+// @port 0x0044C8D0 85% gameplay,synthetic
 // Ghidra 0x0044C8D0 PlayerTick_ManualFlightAndRegeneration, internal umbrella
 // of Ship_HandlePlayerShipCore. Relevant synthetic CFGs: turn input
 // 0x0044C92E -> 0x0044C980; joined afterburner/thrust/glow
@@ -1482,6 +1487,10 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
     effective_input.afterburner = false;
   }
 
+  // @port 0x0044C9AB 85% correctness,synthetic
+  // Ghidra 0x0044c9ab PlayerTick_AfterburnerCommand (synthetic region of
+  // 0x0044aa70): capability/fuel activation and burn. Exact station-hold /
+  // maneuver gates remain approximate.
   const float fuel_burn = Outfit_GetPlayerAfterburnerFuelBurnRate(state);
   const bool afterburner_active =
       effective_input.afterburner && !effective_input.reverse &&
@@ -1517,6 +1526,10 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   if (afterburner_active && !gravity_present) {
     effective_class.speed *= 1.8F;
   }
+  // @port 0x0044D05B 90% correctness,synthetic
+  // Ghidra 0x0044d05b PlayerTick_ClampVelocityToSpeedCaps (synthetic region of
+  // 0x0044aa70). TODO(decomp): the exact same-frame parent ordering (the
+  // original updates the caps at the frame tail).
   // Per-axis velocity caps (Ghidra LAB_00451630 afterburner speed-cap tail,
   // 0x00451630 -> 0x004518ef; g_player_speed_cap_x/y maintained on GameState):
   // while afterburning outside a stellar gravity pull both caps jump to 1.8x
@@ -1567,6 +1580,9 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   TickPlayerTurnBankAnimation(state, movement_stats.turn_dir, elapsed_ticks);
   const ShipClass *player_cls =
       state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+  // @port 0x0044CA3D 85% gameplay,synthetic
+  // Ghidra 0x0044ca3d PlayerTick_ThrustAndEngineGlow (synthetic region of
+  // 0x0044aa70). Inertialess scalar-speed branch remains incomplete.
   // TODO(decomp(0x0044aa70)) skipped: the player engine-glow state machine is
   // still a clean-room target interpolation. Reconstruct its distinct normal
   // thrust, inertialess, afterburner, banking, turnaround, and hyperspace
@@ -1599,6 +1615,7 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
       std::clamp(static_cast<float>(p.engine_glow_level) / 24.0F, 0.0F, 1.0F);
 }
 
+// @port 0x0044CB99 100% synthetic
 // Ghidra Ship_HandlePlayerShipCore 0x0044AA70 synthetic CFG:
 // PlayerTick_ShieldAndArmorRegeneration 0x0044CB99 -> 0x0044CCAF.
 void PlayerTick_ShieldAndArmorRegeneration(GameState &state,

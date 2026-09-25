@@ -162,6 +162,13 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 
   ship.engine_thrust = input_enabled && input.thrust;
 
+  // @port 0x0044C92E 100% synthetic
+  // @port 0x0044C980 100% synthetic
+  // Ghidra 0x0044c92e PlayerTick_TurnInput / 0x0044c980 PlayerTick_Normalize
+  // Heading (synthetic region of 0x0044aa70). The keyboard turn supplies
+  // stats.turn_dir directly and the reverse/face-target auto-turns supply it
+  // via the shared auto-turn arm; the original's degree wrap is the equivalent
+  // radians wrap below.
   // Reverse uses the original's automatic turn-toward-velocity path instead
   // of also applying manual steering in the same tick. The face-target arm
   // likewise suppresses keyboard steering (the parent's local_265 latch gates
@@ -184,6 +191,10 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   }
 
   if (input_enabled && input.reverse) {
+    // @port 0x0044FFF0 100% synthetic
+    // Ghidra 0x0044fff0 PlayerTick_ReverseCommand (synthetic region of
+    // 0x0044aa70): reverse-orientation command, with the non-inertialess
+    // auto-turn and the inertialess scalar retro-decay arm.
     // Ghidra 0x0044fff0 PlayerTick_ReverseCommand (binding slot 0x16 / Down):
     // the reverse command has two arms, split by Outfit_ShipIsInertialess
     // (0x0044ffa8). It never applies forward thrust and never brakes via the
@@ -271,6 +282,7 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   }
 
   if (opts.inertialess) {
+    // @port 0x0044CFFE 90% rendering,synthetic
     // Ghidra 0x0044cffe inertialess steering block
     // (PlayerTick_InertialessSteering). The scalar speed is clamped to the
     // cap global, decays by the g_inertialess_fire_restricted_speed_damp

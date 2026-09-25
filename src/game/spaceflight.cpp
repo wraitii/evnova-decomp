@@ -583,6 +583,12 @@ void NovaFrame_TickSystems(GameState &state,
   Stub_BeamHitQueue(state, elapsed_ticks);
 }
 
+// @port 0x0044AA70 47% gameplay,ui,rendering
+// Ghidra 0x0044aa70 Ship_HandlePlayerShipCore. One Metrowerks-collapsed
+// routine; the per-frame dispatch and its named regions live across
+// spaceflight.cpp, travel.cpp, spaceflight_player_state.cpp,
+// spaceflight_movement.cpp and weapon_banks.cpp. See the region inventory
+// below and docs/player_hyperspace.md.
 // ---------------------------------------------------------------------------
 // Explicit splits of Ship_HandlePlayerShipCore (0x0044aa70). The core is one
 // Metrowerks-collapsed routine; the loop below is its per-frame dispatch and
@@ -648,6 +654,7 @@ void NovaFrame_TickSystems(GameState &state,
 // 0x00451954 and must be decomposed from valid internal entries.
 // ---------------------------------------------------------------------------
 
+// @port 0x0044B7C4 55% gameplay,ui,synthetic
 // Ghidra Ship_HandlePlayerShipCore synthetic CFG: travel-selection commands
 // 0x0044B7C4 -> 0x0044BAFE. The wider 0x0044B7C4 -> 0x0044BC1E umbrella
 // absorbs reordered mouse/route-map blocks and is not used. Handles the Tab
@@ -845,6 +852,7 @@ void NovaUi_MarkTravelAndStatusPanelsDirty(GameState &state) {
 
 namespace {
 
+// @port 0x0044E019 27% gameplay,ui,synthetic
 // Ghidra Ship_HandlePlayerShipCore navigation region
 // PlayerTick_MouseTargetAndControlCommands 0x0044E019. Route-map clicks first
 // enter the clean multi-exit subregion 0x0044E035 ->

@@ -12,9 +12,10 @@ Also cross-checks the in-source `@port` markers against the tracker:
   // @port 0xADDR[,0xADDR...] NN% [tag[,tag...]]
 The marker is the authoritative port-site annotation: `NN%` is the remaining
 work and the tags classify what remains or mark a decision (see PORT_TAGS).
-Domain tags name unported work; status tags (`divergence`, `moddata`, `verify`)
-are orthogonal to `pct`, so a row whose only open item is a permanent decision
-is 100% and a `pct<100` row must carry a domain tag. The audit fails on markers
+Domain tags name unported work; status tags (`divergence`, `moddata`,
+`verify`) are orthogonal to `pct`, as is the structural `synthetic` tag, so a row
+whose only open item is one of those is 100% and a `pct<100` row must carry a
+domain tag. The audit fails on markers
 with no tracker row, marker file or pct mismatches, unrecognized tags, and
 permanent decisions at `pct<100`; it reports pct<100 rows with no tags and
 ported rows without a marker (migration coverage, not a failure).
@@ -72,6 +73,12 @@ FUNC_DEF_RE = re.compile(
 #   moddata     - divergences we make for mod-hardening, clarity, or avoiding
 #                 quirky data-related behaviour where constants feel more
 #                 intentional. A specialized permanent divergence.
+# Structural tags describe the row, not the work:
+#   synthetic   - the marker address is an interior label of a larger collapsed
+#                 function (parent named in the adjacent `// Ghidra ...`
+#                 comment), not a Ghidra function entry. The tracker row still
+#                 records the synthesized region, but the Ghidra name and
+#                 citation cross-checks do not apply.
 PORT_DOMAIN_TAGS = {
     "gameplay",
     "rng",
@@ -87,7 +94,14 @@ PORT_STATUS_TAGS = {
     "divergence",
     "moddata",
 }
-PORT_TAGS = PORT_DOMAIN_TAGS | PORT_STATUS_TAGS
+PORT_STRUCTURAL_TAGS = {
+    "synthetic",
+}
+PORT_TAGS = PORT_DOMAIN_TAGS | PORT_STATUS_TAGS | PORT_STRUCTURAL_TAGS
+# Tags that mark a decided difference rather than unported work. A row whose
+# only open item is one of these is 100%, so one at pct<100 without a domain
+# tag is an audit failure.
+PORT_DECISION_TAGS = {"divergence", "moddata"}
 # In-source port-site marker. One comment line, one or more addresses, an
 # optional percentage, and an optional comma-separated tag CSV.
 PORT_RE = re.compile(
@@ -228,10 +242,12 @@ def main() -> None:
             file_cache[str(path)] = (txt, file_symbols(txt))
         txt, syms = file_cache[str(path)]
 
+        row_tags = {t.strip() for t in r["comment"].split(",")}
+        is_synthetic = "INTERNAL LABEL" in r["comment"] or "synthetic" in row_tags
         gname = ghidra_name(r["address"])
         if gname.startswith("<ERR"):
             not_in_ghidra.append(f"{r['address']} {r['name']} -> {gname}")
-        elif "INTERNAL LABEL" not in r["comment"]:
+        elif not is_synthetic:
             csv_name = r["name"]
             # ignore case/underscore-only differences
             if normalize(gname) != normalize(csv_name):
@@ -240,7 +256,7 @@ def main() -> None:
                 )
 
         addr = r["address"]
-        if "INTERNAL LABEL" in r["comment"]:
+        if is_synthetic:
             continue  # interior-address slice of a parent function, not citable
         haystack = txt
         header = path.with_suffix(".hpp")
@@ -317,7 +333,7 @@ def main() -> None:
             if (
                 eff_pct
                 and eff_pct != "100%"
-                and set(m["tags"]) & (PORT_STATUS_TAGS - {"verify"})
+                and set(m["tags"]) & PORT_DECISION_TAGS
                 and not set(m["tags"]) & PORT_DOMAIN_TAGS
             ):
                 permanent_gap.append(f"{addr} {eff_pct} {loc}")

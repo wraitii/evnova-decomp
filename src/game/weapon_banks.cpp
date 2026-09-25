@@ -719,6 +719,7 @@ namespace {
 
 } // namespace
 
+// @port 0x0044BEB0 75% gameplay,verify,synthetic
 // Ghidra PlayerTick_WeaponCommands, internal region of
 // Ship_HandlePlayerShipCore 0x0044AA70. Synthetic CFG: 0x0044BEB7 ->
 // 0x0044C0B1. Starting at the 0x0044BEB0 label is invalid because 0x0044BEB7
@@ -776,6 +777,10 @@ void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
     }
   }
 
+  // @port 0x0044EAB4 90% gameplay,synthetic
+  // Ghidra 0x0044eab4 PlayerTick_WeaponCycleContinuation (synthetic region of
+  // 0x0044aa70): the reordered secondary-bank cycle. g_shipAvailability-
+  // CachesDirty is deferred (availability caches TODO(decomp)).
   // Secondary-bank cycle (edge-resolved by the caller against
   // g_playerSecondaryCycleCommandLatch). Counts eligible banks; with none the
   // denial cue plays, otherwise the accept cue plays and the selection walks

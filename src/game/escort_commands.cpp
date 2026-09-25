@@ -134,6 +134,7 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
 
 } // namespace
 
+// @port 0x00450710 45% gameplay,ui,license,synthetic
 // Ghidra Ship_HandlePlayerShipCore 0x0044AA70 auxiliary escort-command CFGs:
 // panel entry 0x00450B4E, selection/order arms 0x00450C24..0x00450F67, with
 // reordered continuations at 0x00452820..0x004529A8.
