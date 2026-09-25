@@ -576,6 +576,7 @@ inline constexpr float kRocketMaxRangeScale = 0.5F;
 
 } // namespace
 
+// @port 0x0046CEC0 100%
 // Ghidra 0x0046CEC0 Weapon_GetShipMaxWeaponRange (disasm
 // 0x0046cec0..0x0046d081): the furthest effective reach over the ship's
 // armed (bank ammo > 0), fireable (Weapon_CanFireWeaponBank) banks, used by

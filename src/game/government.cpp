@@ -49,6 +49,7 @@ namespace {
 
 } // namespace
 
+// @port 0x0046BC90 100%
 // Ghidra 0x0046bc90 Government_AreGovtsAllied.
 bool NovaGovernment_AreGovtsAllied(const ScenarioData &scenario,
                                    std::int16_t govt_a,
@@ -82,6 +83,7 @@ bool NovaGovernment_AreGovtsAllied(const ScenarioData &scenario,
   return false;
 }
 
+// @port 0x0046BDF0 100%
 // Ghidra 0x0046bdf0 Government_AreGovtsHostileOrXenophobic.
 bool NovaGovernment_AreGovtsHostileOrXenophobic(const ScenarioData &scenario,
                                                 std::int16_t govt_a,
@@ -138,6 +140,7 @@ bool NovaGovernment_AreGovtsHostileOrXenophobic(const ScenarioData &scenario,
   return xenophobic(govt_a) || xenophobic(govt_b);
 }
 
+// @port 0x0046BFF0 100%
 // Ghidra 0x0046bff0 Government_DoGovtsShareClass.
 bool NovaGovernment_DoGovtsShareClass(const ScenarioData &scenario,
                                       std::int16_t govt_a,

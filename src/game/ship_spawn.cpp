@@ -23,6 +23,7 @@ namespace {
 
 constexpr std::int16_t kResourceIdBase = 0x80;
 
+// @port 0x0046B870 100%
 // Ghidra 0x0046b870 ShipClass_ComputeShipClassSkillVarianceScale. The class
 // percentage p produces one integer in [0, 2p], then maps it to
 // (draw + 100 - p) * 0.01, so p=0 remains the neutral 1.0 scale.
@@ -553,6 +554,7 @@ void NovaSystem_UpdateReinforcementCountdown(GameState &state,
       std::max<std::int16_t>(system->reinf_interval, 1);
 }
 
+// @port 0x0046B6D0 100%
 // Ghidra 0x0046b6d0 EncounterFleet_SelectRandomEncounterFleetDefWeighted.
 // Weighted-random pick among the system's bound encounter-fleet defs (see the
 // header). The original reads SystemDef +0x8a (count), +0x6a ids, +0x7a weights
@@ -612,6 +614,7 @@ int NovaEncounter_SelectFleetDefWeighted(const System &system,
   return -1;
 }
 
+// @port 0x0046B600 100%
 // Ghidra 0x0046b600 Dude_SelectRandomSystemDudeClassIndex. See the header.
 // The original unrolls the eight slots (SystemDef +0x4a class ids / +0x5a
 // weights), accumulates a cumulative bucket over valid class ids (>= 0 and
@@ -724,6 +727,7 @@ int NovaEncounter_TrySpawnRandomFleet(GameState &state,
   return -1;
 }
 
+// @port 0x0046B4B0 100%
 // Ghidra 0x0046b4b0 Dude_SelectShipTypeIndexFromDudeDef. See the header.
 // The original unrolls the 16 ship slots, building cumulative buckets over
 // the entries whose class is present and (unless `ignore_ship_availability`)

@@ -241,6 +241,7 @@ void NovaOutfit_RefreshContrabandScanLatches(GameState &state) {
   }
 }
 
+// @port 0x0046D4B0 62% gameplay,license
 // Ghidra 0x0046d4b0 Outfit_RecomputeOutfitDerivedState. See
 // docs/outfit_derived_state.md for the two-mechanism model (eager
 // side-effecting recompute vs. the lazy Ship_Compute* sentinel caches) and the
@@ -412,6 +413,7 @@ bool NovaOutfit_HasAreaCloakingDevice(const GameState &state,
   return ShipClassHasCloakingDevice(state, ship, true);
 }
 
+// @port 0x0046D080 100%
 // Ghidra 0x0046d080 Ship_CheckSpecialLoadoutCapability. The class Flags2
 // 0x0020 test comes first for every ship; the loadout scan then branches on
 // ship_instance_id (player owned inventory vs NPC class default loadout). Any
@@ -462,6 +464,7 @@ bool NovaOutfit_HasFastJumpCapability(const GameState &state,
   return false;
 }
 
+// @port 0x0046DF70 70% gameplay
 // Ghidra 0x0046df70 Outfit_ShipIsInertialess (player branch): class Flags2
 // 0x40 or an owned inertial dampener outfit (ModType 38, kInertialDampener).
 // The NPC fragment is NovaShip_IsInertialess (spaceflight.hpp, used by
@@ -615,6 +618,7 @@ bool NovaOutfit_HasCloakScannerRevealForSurface(const GameState &state,
   return false;
 }
 
+// @port 0x0046E060 75% gameplay
 // Ghidra 0x0046e060 Ship_GetShipFuelBurnRate.
 float Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state) {
   // _DAT_00575858 is 1/30. The original stops at the first opcode-15 slot in
@@ -774,8 +778,11 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   return s;
 }
 
+// @port 0x0046C080 100% divergence
 // Ghidra 0x0046c080 Ship_ComputeIonizationDecayRate. The ModType-39 scan runs
 // inline in PlayerIonizationDecayFromOutfits above.
+// DIVERGENCE(original): the scan keeps the original's x87 extended
+// intermediates as double (53-bit); see docs/x87_precision.md.
 float NovaOutfit_ComputeIonizationDecayRate(GameState &state,
                                             const Ship &ship) {
   const ShipClass *cls =
@@ -820,11 +827,12 @@ float NovaOutfit_ComputeIonizationCapacity(GameState &state, const Ship &ship) {
   return capacity;
 }
 
+// @port 0x0046C160 100% divergence
 // Ghidra 0x0046c160 Ship_GetIonizationIntensity. Returns the raw (possibly
 // negative) charge fraction; callers cap it at 0.7. The player ModType-40
 // capacity scan runs inline in NovaOutfit_ComputeIonizationCapacity below.
 //
-// PRECISION (accepted divergence, docs/x87_precision.md): on
+// PRECISION DIVERGENCE(original) (docs/x87_precision.md): on
 // the original's first (uncached) player call the x87 accumulator's unrounded
 // total is used for the division while the rounded float is stored to
 // DAT_007356a8; later calls divide by the rounded cache. This port returns the
@@ -1660,6 +1668,7 @@ void Player_RedistributeFleetCargoOverflow(GameState &state,
   state.InvalidateDerivedStatCaches();
 }
 
+// @port 0x0046CB90 100%
 // Ghidra 0x0046cb90 Outfit_HasMiningScoopOutfit. ModType 0x1F in any of the
 // four mod slots of an owned (player) or class-default (NPC) outfit.
 bool NovaOutfit_HasMiningScoopOutfit(const GameState &state, const Ship &ship) {
@@ -1716,6 +1725,8 @@ void NovaOutfit_RefreshPlayerMiningScoopActive(GameState &state) {
   state.player.mining_scoop_active = active;
 }
 
+// @port 0x0046CCA0 100%
+// Ghidra 0x0046cca0 Mission_AccumulatePlayerContributeMask.
 void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,
                                                std::uint32_t &contribute_lo,
                                                std::uint32_t &contribute_hi) {

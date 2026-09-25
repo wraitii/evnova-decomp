@@ -834,6 +834,7 @@ void NovaShip_RefreshCloakAbilityCaches(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x0046E470 100%
 // Ghidra 0x0046e470 Ship_ResolveShipTintColor.
 NovaShipTintColor NovaShip_ResolveTintColor(const GameState &state,
                                             const Ship &ship) {

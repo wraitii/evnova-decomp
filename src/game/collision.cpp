@@ -154,6 +154,7 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
       static_cast<std::int16_t>(ship.dude_class_id + 0x80));
 }
 
+// @port 0x0046E210 95% correctness
 // Ghidra Stellar_ShipImmuneToStellarCrash (0x0046e210). A ship survives flying
 // into a fatal stellar (availability_flags 0x100) when its class carries ship
 // Flags3 0x20, or -- for the player only -- when the player owns
@@ -194,6 +195,7 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
   return false;
 }
 
+// @port 0x0046D190 80% gameplay
 // Ghidra 0x0046d190 Ship_ShipsShareSquadRoot. Walks each ship's
 // squad_leader_ship_slot to a root and returns true when the roots match. The
 // walk is bounded to tolerate malformed cycles (the original is not; see the

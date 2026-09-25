@@ -622,6 +622,7 @@ bool NovaAi_OutfitHasCloakScannerCapability(const GameState &state,
 
 } // namespace
 
+// @port 0x0046B360 100%
 // Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot: whether the
 // bearing lies in one of the weapon's turret blind-spot sectors. Front (<46
 // deg), side (<136 deg), rear; a sector is BLIND when the weapon's

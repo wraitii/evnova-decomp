@@ -886,6 +886,7 @@ bool NovaSystem_IsSystemVisible(const GameState &state,
   return state.scenario.systems[static_cast<std::size_t>(system_id)].is_visible;
 }
 
+// @port 0x0046B9B0 100%
 // Ghidra 0x0046b9b0 System_ResolveSystemDiscoverySlot.
 // ---------------------------------------------------------------------------
 // Galaxy discovery (fog of war). See travel.hpp for the model: the original's
@@ -960,6 +961,7 @@ bool NovaSystem_HasUsableTravelDestination(const GameState &state,
   return false;
 }
 
+// @port 0x0046C250 100%
 // Ghidra 0x0046c250 System_GetEffectiveMurkPercent. See the header for the
 // decoded formula. The original's loop walks all 0x200 outfit slots, tests the
 // signed owned count > 0 and then each of the four (ModType, ModVal) pairs for

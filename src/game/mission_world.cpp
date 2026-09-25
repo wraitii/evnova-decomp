@@ -144,6 +144,7 @@ namespace {
   return date.month <= def.last_month;
 }
 
+// @port 0x0046C800 20% gameplay,bugfix
 // Ghidra 0x0046c800 Frame_IsRectVisibleInViewport (the crön-event arm; the
 // same helper also culls rects elsewhere). Called with a g_cron_event_states
 // block pointer it reads FirstYear/FirstMonth/FirstDay (+2/+4/+6) and

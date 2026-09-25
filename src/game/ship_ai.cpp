@@ -1842,6 +1842,7 @@ bool NovaAiShip_IsShipInAiState4(const Ship &ship) {
   return ship.ai_state_code == 4;
 }
 
+// @port 0x0046B8D0 100%
 // Ghidra Ship_IsInPlayerSquad (0x0046b8d0). Returns true when ship is the
 // player (ship_instance_id 0), is attached directly to the player
 // (squad_leader_ship_slot 0), or is attached to a ship that is itself attached
@@ -2349,6 +2350,7 @@ void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
   ship.primary_target_ship_slot = 0;
 }
 
+// @port 0x0046B260 95% rng
 // Ghidra 0x0046b260 Ship_CanShipUseAfterburner. Returns the low byte the
 // original stores into ShipState +0xBD.
 bool NovaShip_CanShipUseAfterburner(GameState &state, const Ship &ship) {

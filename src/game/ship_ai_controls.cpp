@@ -171,6 +171,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
   // mode for disabled ships (they fall through with thrust 0).
   const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
 
+  // @port 0x0046B330 100%
   // Ghidra 0x0046b330 NovaAi_PlayerCombatRatingGate. Rolls
   // NovaRandom_Range(0x540) and succeeds when the player's combat-rating
   // points reach roll + 0x100: the pass chance rises from 0 at <= 0x100

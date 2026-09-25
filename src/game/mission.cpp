@@ -1675,6 +1675,8 @@ bool Mission_ActivateAtSlot(GameState &state,
   return true;
 }
 
+// @port 0x0046B920 90% gameplay
+// Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel.
 std::int16_t Misn_ResolveVisibleSystemForTravel(const GameState &state,
                                                 std::int16_t system_id) {
   const auto count = static_cast<std::int16_t>(state.scenario.systems.size());
