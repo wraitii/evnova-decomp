@@ -591,6 +591,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // class-0x2ff sentinel arm is handled by the caller's acceptance guard), so
   // a yielding (0x16) ship keeps steering even with an active timer.
   const bool coasting = ship.ai_maneuver_timer_ms > 0.0F;
+  // @port 0x00416070 100%
   // Ghidra 0x00416070 Ship_IsShipInAiState0x16 runs inline here.
   // The same gate also opens for the class-0x2ff sentinel (the escape pod),
   // which Ship_HandleShip admits even with an active maneuver timer.

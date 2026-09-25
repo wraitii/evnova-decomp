@@ -32,6 +32,7 @@ namespace game {
 
 using namespace ship_ai_detail;
 
+// @port 0x0040c790 100% moddata
 // Ghidra 0x0040c790 Stellar_SelectRandomAdjacentTravelStellar. Selects a
 // random adjacent travel stellar in the ship's current system and returns the
 // stellar *resource id* (>= 0x80) or -1. One pass builds five 16-slot per-nav
@@ -204,6 +205,7 @@ std::int16_t NovaAi_SelectRandomAdjacentDestination(GameState &state,
   return stellar_id;
 }
 
+// @port 0x0040cc10 100%
 // Ghidra 0x0040cc10 Stellar_FindNearestAdjacentTravelStellar. Returns the
 // nearest adjacent travel stellar to `ship` in its current system, or -1.
 // Scans the 16 nav slots and skips empty slots, restricted travel points
@@ -272,6 +274,7 @@ RoundedAxisDistanceSquared(float x1, float y1, float x2, float y2) {
 
 } // namespace
 
+// @port 0x00411800 100%
 // Ghidra 0x00411800 Ship_ComputePerceivedCombatStrengthAgainstShip.
 int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
                                               const Ship &ship) {
@@ -354,6 +357,7 @@ int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
   return total;
 }
 
+// @port 0x0040e020 95% license
 // Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. Full NPC primary-target
 // acquisition. In order: the retention gate for an active engagement; the
 // 0x3fe forced-hostility / pers grudge arms; the mission-fleet ShipBehav 0/1
@@ -878,6 +882,7 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x004112c0 95% verify
 // Ghidra 0x004112C0 Ship_ShowPlayerInterceptTauntIfEligible. Generic
 // (non-personality) ships entering intercept state may challenge the player
 // when no HUD message is already visible. The stock challenges are the 20
@@ -923,6 +928,7 @@ void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship) {
   state.pending_ui_sounds.push_back({4, 1});
 }
 
+// @port 0x00402860 90% verify
 // Ghidra 0x00402860 Ship_UpdateShipAiBehavior0x01_WimpyTrader. The "normal
 // travel / wander" supervisor. Reacquires a travel stellar when idle (state 0)
 // -- picking a random adjacent travel stellar and entering state 1 (travel to
@@ -1012,6 +1018,7 @@ namespace {
 
 } // namespace
 
+// @port 0x00402980 92% gameplay
 // Ghidra 0x00402980 Ship_UpdateShipAiAsteroidMinerBehavior. Supervisor for
 // ships whose class Flags3 has bit 0x1 (Bible "ship destroys asteroids") or
 // 0x2 ("ship scoops asteroid debris"). The dispatcher runs it in preference
@@ -1111,6 +1118,7 @@ void NovaAi_UpdateAsteroidMinerBehavior(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x00405120 90% moddata
 // Ghidra 0x00405120 Ship_DefenseFleetPrioritizePlayerThreat. Per-frame
 // supervisor run by Ship_UpdateShipAI (0x00401000) INSTEAD of a behavior
 // supervisor when the ship holds a stellar assignment
@@ -1219,6 +1227,7 @@ void NovaAi_DefenseFleetPrioritizePlayerThreat(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x00402bd0 75% gameplay,audio
 // Ghidra 0x00402bd0 Ship_UpdateShipAiBehavior0x02_BraveTrader. Local/dude
 // behavior shares the travel fallback with behavior 0x01, but promotes an
 // established hostile contact once it is within the original 0x4e3-pixel
@@ -1270,6 +1279,7 @@ void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x00402e50 90% verify
 // Ghidra 0x00402e50 Ship_UpdateShipAiBehavior0x03_Warship. Hostile warship
 // supervisor: government hold/aggression policy, idle target acquisition,
 // target retention/loss, the state-1/0x14/2 travel re-acquire arm, the state-6
@@ -1574,6 +1584,7 @@ void NovaAi_ShowInterceptorChallengeIfEligible(GameState &state, Ship &ship) {
   state.pending_ui_sounds.push_back({4, 1});
 }
 
+// @port 0x00403de0 100% license
 // Ghidra 0x00403de0 Ship_UpdateShipAiBehavior0x04_Interceptor. Interceptor
 // supervisor: government hold/aggression window, cached-target maintenance,
 // the state-0/1/0x14 idle acquisition and same-system random scan that enters
@@ -1821,6 +1832,7 @@ void NovaAi_UpdateBehavior0x04(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x004038b0 90% verify
 // Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03_WarshipCapture. The
 // plunder-flavored variant of hostile behavior 0x03, selected by the
 // dispatcher when the ship's faction has government flags_primary 0x1000

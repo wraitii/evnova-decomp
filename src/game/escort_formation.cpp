@@ -136,6 +136,7 @@ std::pair<float, float> EscortWedgeSlot(int slot, float v, bool even_count) {
   }
 }
 
+// @port 0x00413b60 100%
 // Ship_SetEscortLaunchOffsetVelocity (0x00413b60): writes the follower's
 // formation offset position (leader position + polar wedge offset).
 void SetEscortLaunchOffsetVelocity(GameState &state,
@@ -164,6 +165,7 @@ void SetEscortLaunchOffsetVelocity(GameState &state,
 
 } // namespace
 
+// @port 0x00414390 85% verify
 // Ghidra 0x00414390 Ship_MoveShipTowardFormationOffset.
 void Ship_MoveShipTowardFormationOffset(GameState &state,
                                         Ship &ship,
@@ -213,6 +215,7 @@ void Ship_MoveShipTowardFormationOffset(GameState &state,
   }
 }
 
+// @port 0x00413990 100%
 // Ghidra 0x00413990 Ship_UpdateEscortFormations.
 void Ship_UpdateEscortFormations(GameState &state, Ship &leader, bool snap) {
   // Spacing radius: max participant sprite span * 0.7, clamped to 24..60 px.
@@ -267,6 +270,7 @@ void Ship_UpdateEscortFormations(GameState &state, Ship &leader, bool snap) {
   }
 }
 
+// @port 0x004156a0 100% moddata
 // Ghidra 0x004156a0 Ship_ReacquireSquadLeader.
 void Ship_ReacquireSquadLeader(GameState &state, Ship &ship) {
   const std::int16_t stale = ship.squad_leader_ship_slot;

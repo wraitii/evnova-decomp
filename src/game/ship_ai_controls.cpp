@@ -90,6 +90,7 @@ constexpr float kEscortHalfSpanPx = 75.0F;
 
 } // namespace
 
+// @port 0x00408150 93% gameplay
 // ---- Ghidra 0x00408150 Ship_ApplyShipAiControls : the movement bridge. ----
 // Converts ship.ai_control_mode (written by the state machine each frame) into
 // the concrete fields the integrator consumes: ai_desired_heading_deg (the

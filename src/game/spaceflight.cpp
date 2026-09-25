@@ -1444,6 +1444,7 @@ void PlayerTick_SelfDestructCommand(GameState &state,
     p.primary_target_ship_slot = -1;
     // g_shipAvailabilityCachesDirty = 1: the port recomputes availability
     // per query (no cache), so only the docked-fighter sweep matters.
+    // @port 0x00415b00 100%
     // Ghidra 0x00415b00 Ship_IsShipDockedWithTargetInControlMode0x0F runs
     // inline here: control mode 0xf, target-is-player (primary or secondary),
     // and |dx|/|dy| within DAT_00575090 = 16.0.

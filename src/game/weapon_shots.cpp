@@ -410,6 +410,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   // one armor point for that variant.
   shot.impact_variant =
       (w->flags_secondary & 0x1000U) != 0U ? static_cast<std::int8_t>(1) : 0;
+  // @port 0x004115a0 100%
   // Shot_SpawnShotFromWeapon (0x0041fd30) marks two non-lethal (leave-one-
   // armor) cases: the owner is locked on a live target (Ship_IsShipLockedOn
   // Target 0x004124f0, target not disabled), or the owner itself is in AI

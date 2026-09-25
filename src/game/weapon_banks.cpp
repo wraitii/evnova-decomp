@@ -28,6 +28,7 @@ using weapon_detail::kBankStride;
 using weapon_detail::RoundRangeEnvelope;
 using weapon_detail::WeaponAt;
 
+// @port 0x00413810 100%
 // Ghidra 0x00413810 Weapon_InitShipWeaponBursts. For every mounted bank whose
 // weapon has both a burst cycle and a reset cooldown, zeroes the burst counter
 // and preloads the bank cooldown to the reset cooldown. The original tests the
@@ -92,6 +93,7 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
   ship.npc_weapon_banks_ship_class = ship.ship_class_id;
 }
 
+// @port 0x004138a0 100%
 // Ghidra 0x004138a0 Weapon_ClassifyShipWeaponAmmoReadiness.
 int NovaWeapon_ClassifyAmmoReadiness(const GameState &state, const Ship &ship) {
   int armed = 0;
@@ -148,6 +150,7 @@ namespace {
 
 } // namespace
 
+// @port 0x00411600 100%
 // Ghidra 0x00411600 Weapon_IsShipWithinWeaponRangeOfTarget (disasm
 // 0x00411773..0x00411800): the reach envelope is
 //   floor(|dx|)^2 + floor(|dy|)^2 <= reach^2
@@ -515,6 +518,7 @@ std::int16_t NovaWeapon_FindLaunchBayWeaponBank(const GameState &state,
   return -1;
 }
 
+// @port 0x00415c10 100%
 // Ghidra 0x00415C10 Weapon_HasAnyFireableNonSecondaryWeapon (disasm
 // 0x00415c10..0x00415cb2): true when some bank with mounted ammo > 0 holds a
 // damaging (MassDmg > 0), non-secondary (Flags2 0x1000 clear) weapon in a
