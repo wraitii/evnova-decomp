@@ -161,7 +161,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0042CBB0	Frame_AnchorAuxHUDSpriteToOrigin		0%	
 0x0042CC30	Stellar_TickTravelCountdownSprite		0%	
 0x0042CD10	Stellar_UpdateStellarSprites	src/game/spaceflight_view.cpp	85%	rendering,gameplay
-0x0042D890	Stellar_TickStellarDefenseBatteries	src/game/collision.cpp	90%	gameplay,cadence,audio
+0x0042D890	Stellar_TickStellarDefenseBatteries	src/game/collision.cpp	100%	
 0x0042E160	Shot_UpdateImpactEffectSprites	src/game/impact_effects.cpp	55%	rendering
 0x0042E590	Frame_UpdateViewportWrapBackgroundSprites	src/game/spaceflight_view.cpp	85%	rendering,divergence
 0x0042EAC0	NovaUi_UpdateTravelTargetReticle	src/game/spaceflight_view.cpp	78%	ui
@@ -180,10 +180,10 @@ address	name	impl_file	reimpl_pct	comment
 0x00435830	Shot_HandleShot	src/game/weapon_shots.cpp	100%	rendering,divergence,cadence
 0x00436910	Asteroid_UpdateSprites	src/game/asteroid.cpp	80%	divergence,gameplay
 0x00436F70	Asteroid_HandleSpritePairCollision	src/game/collision.cpp	100%	divergence,synthetic
-0x00436FF0	NovaUi_ResolveWeaponSplashImpact	src/game/collision.cpp	75%	gameplay
-0x004374F0	Ship_HandleSpritePairCollision	src/game/collision.cpp	90%	gameplay
-0x00437780	Shot_ResolveShotCollisionHit	src/game/collision.cpp	90%	gameplay
-0x00437E20	Shot_ResolveCollisions	src/game/collision.cpp	80%	gameplay
+0x00436FF0	NovaUi_ResolveWeaponSplashImpact	src/game/collision.cpp	100%	
+0x004374F0	Ship_HandleSpritePairCollision	src/game/collision.cpp	100%	divergence
+0x00437780	Shot_ResolveShotCollisionHit	src/game/collision.cpp	100%	
+0x00437E20	Shot_ResolveCollisions	src/game/collision.cpp	100%	divergence
 0x004386F0	Shot_DrawBeamQueue		0%	Restore-phase beam replot entry: called only from Frame_RestoreViewportRectsAndParticles (0x00439d20). Loops the 0x40-slot g_beam_hit_queue and replays each live beam into the saved-backdrop surface via SWBeams_DrawKinkedBeam (field_0x76 < 1, 1-segment) or SWBeams_DrawBeamWithFlare (field_0x76 >= 1, 2-segment arc). The port keeps no saved-backdrop buffer, so this entry point is not reproduced, but the two plotters it calls are also reachable from the visible 0x00438810 twin-surface path and are tracked separately. 0%, not ported.
 0x00438810	Shot_DrawBeamHitQueueForSurface	src/game/spaceflight_view.cpp	50%	rendering
 0x00438C40	Shot_DrawUnderShipsBeamQueue	src/game/spaceflight_view.cpp	85%	rendering,synthetic
@@ -486,7 +486,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046CDD0	Stellar_ComputeShipJumpDepth		0%	
 0x0046CEC0	Weapon_GetShipMaxWeaponRange	src/game/weapon_banks.cpp	100%	
 0x0046D080	Ship_CheckSpecialLoadoutCapability	src/game/outfit.cpp	100%	
-0x0046D190	Ship_ShipsShareSquadRoot	src/game/collision.cpp	80%	gameplay
+0x0046D190	Ship_ShipsShareSquadRoot	src/game/collision.cpp	100%	divergence
 0x0046D250	PascalString_ToCStringInPlace		0%	
 0x0046D380	CString_ToPascalStringInPlace		0%	
 0x0046D4B0	Outfit_RecomputeOutfitDerivedState	src/game/outfit.cpp	62%	gameplay,license

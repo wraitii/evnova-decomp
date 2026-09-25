@@ -1664,4 +1664,121 @@ TEST_CASE("expiry impact runs one tick after lifetime crosses zero",
   CHECK(state.ShipAt(1).armor_points == Catch::Approx(70.0F));
 }
 
+TEST_CASE("owner-side booty gate keys off the target, not the owner chain",
+          "[collision][booty]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.dudes.resize(1);
+  state.scenario.dudes[0].booty_flags = 0x0100;
+
+  // NPC owner slot 2, booty-flagged and not attached to the player, so the
+  // owner-chain-to-player block is skipped.
+  Ship &owner = state.ShipAt(2);
+  owner.is_active = true;
+  owner.ship_instance_id = 2;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.shield_points = 100.0F;
+  owner.ai_behavior_code = 5;
+  owner.faction_or_government_id = -1;
+  owner.squad_leader_ship_slot = -1;
+  owner.dude_class_id = 0; // booty-flagged dude (Ghidra +0x44 bit 0x100)
+
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.owner_ship_slot = 2;
+  shot.target_ship_slot = 1;
+  shot.system_id = 0;
+  shot.life_ticks_remaining = 10.0F;
+
+  // Target slot 1 is an ordinary NPC: the target-conditioned owner booty gate
+  // does not apply even though the owner chain never reaches the player.
+  CHECK(NovaWeapon_CanProjectileHitShip(state, shot, 1));
+
+  // Target slot 0 is the player: Ghidra 0x00427160 rejects the booty-flagged
+  // owner, independent of the owner chain.
+  CHECK(!NovaWeapon_CanProjectileHitShip(state, shot, 0));
+}
+
+TEST_CASE("squad-root walk stops at an inactive node", "[collision][squad]") {
+  GameState state;
+  SeedCollisionScenario(state);
+
+  Ship &inactive = state.ShipAt(1);
+  inactive.is_active = false;
+  inactive.squad_leader_ship_slot = 3; // stale leader that must be ignored
+  Ship &through = state.ShipAt(2);
+  through.is_active = true;
+  through.ship_instance_id = 2;
+  through.squad_leader_ship_slot = 1;
+  Ship &root = state.ShipAt(3);
+  root.is_active = true;
+  root.ship_instance_id = 3;
+  root.squad_leader_ship_slot = -1;
+
+  // Ghidra 0x0046d190 returns the inactive node 1 as its own root; following
+  // its stale leader into 3 would wrongly report 2 and 3 as sharing a root.
+  CHECK(!NovaShip_ShipsShareSquadRoot(state, 2, 3));
+}
+
+TEST_CASE("proximity blast radius uses the ship full sprite width",
+          "[collision][proximity]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.blast_radius = 50;
+  weapon.splash_radius = 0;
+
+  // No resolved mask: Sprite_GetFrameFullWidth defaults to 0x20. The radius is
+  // trunc(50 + 32 * 0.333) = 60, so a 58 px separation connects (the old
+  // half-span radius of 55 would miss).
+  Ship &target = state.ShipAt(1);
+  target.pos_x = 58.0F;
+  target.pos_y = 0.0F;
+
+  REQUIRE(SpawnTestShot(state) == 0);
+  NovaWeapon_ResolveProjectileCollisions(state);
+
+  CHECK(target.shield_points < 20.0F);
+}
+
+TEST_CASE("asteroid impact nudge uses the shot heading, not its velocity",
+          "[collision][asteroid]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.blast_radius = 50;
+  weapon.splash_radius = 0;
+  weapon.energy_damage = 0; // keep the asteroid alive for the nudge
+  weapon.impact_impulse = 100;
+
+  state.scenario.asteroid_defs.resize(1);
+  state.scenario.asteroid_defs[0].strength = 100;
+  state.scenario.asteroid_defs[0].mass = 10;
+  state.ShipAt(1).is_active = false; // keep the ship pass out of the way
+
+  AsteroidState &asteroid = state.asteroid_pool[0];
+  asteroid.active = true;
+  asteroid.wander_type = 0;
+  asteroid.integrity = 100;
+  asteroid.target_pos_x = 0.0F;
+  asteroid.target_pos_y = 0.0F;
+  asteroid.target_vel_x = 0.0F;
+  asteroid.target_vel_y = 0.0F;
+
+  REQUIRE(SpawnTestShot(state) == 0);
+  // The velocity points along +x (a 90-degree atan2 bearing); the stored
+  // heading is 0, which the original reads from ShotState +0x20.
+  state.active_shots[0].vel_x = 1.0F;
+  state.active_shots[0].vel_y = 0.0F;
+  state.active_shots[0].heading_deg = 0.0F;
+
+  NovaWeapon_ResolveProjectileCollisions(state);
+
+  CHECK(asteroid.active);
+  CHECK(asteroid.target_vel_x == Catch::Approx(0.0F));
+  CHECK(asteroid.target_vel_y == Catch::Approx(-2.0F));
+}
+
 } // namespace game
