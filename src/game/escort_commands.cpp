@@ -293,6 +293,7 @@ void PlayerTick_EscortCommands(GameState &state,
   return GroupPresent(state, category);
 }
 
+// @port 0x0045C880 85% audio
 // Ghidra 0x0045c880 Ship_CommandPlayerEscortGroup.
 bool Ship_CommandPlayerEscortGroup(GameState &state,
                                    std::int16_t category,

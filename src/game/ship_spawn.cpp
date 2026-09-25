@@ -1133,6 +1133,7 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
 }
 
 // @port 0x0041c710 100% moddata
+// DIVERGENCE(original): lookup-table vs std::sin heading math (see below).
 // Ghidra 0x0041c710 Dude_SpawnRandomDudeShipInSystem. See the header.
 // Rolls 1-in-7 for a përs personality/linked-mission ship, else 1-in-7 for a
 // random- encounter fleet (existing NovaEncounter_TrySpawnRandomFleet), else

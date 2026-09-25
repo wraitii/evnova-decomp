@@ -329,7 +329,7 @@ void ReplacePerGovernmentRankTokens(const GameState &state,
 
 } // namespace
 
-// @port 0x004444F0 80% gameplay,ui
+// @port 0x004444F0 80% gameplay,ui,bugfix
 // Ghidra 0x004444f0 Stellar_BuildTravelDestinationDescription (wildcard pass)
 // + 0x00445d70 Mission_ReplaceSubstringInMissionText. Expands the Bible
 // mission-text wildcards in `text` and returns the result. `offering_list`

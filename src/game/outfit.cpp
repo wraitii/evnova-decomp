@@ -1411,6 +1411,7 @@ std::int16_t Player_ComputeFleetCargoCapacity(const GameState &state) {
   return static_cast<std::int16_t>(std::min<std::int32_t>(capacity, 32000));
 }
 
+// @port 0x00463470 100%
 // Ghidra 0x00463470 Ship_ComputeShipFreeMass.
 std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state) {
   if (state.player.ship_class_id < 0) {

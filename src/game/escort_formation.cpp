@@ -49,6 +49,7 @@ int RoundHeadingDeg(const Ship &ship) {
   return ((deg % 360) + 360) % 360;
 }
 
+// @port 0x004624C0 90% gameplay,correctness
 // Sprite_GetShipClassEscortFrameWidth (0x004624c0): the ship-class sprite
 // span used to size wedge spacing. The original resolves the class's sprite
 // owner (ShipClassDef.base_sprite_clone_source_ship_class, +0xa08 -- the class

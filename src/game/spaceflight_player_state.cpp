@@ -1652,6 +1652,7 @@ void PlayerTick_ShieldAndArmorRegeneration(GameState &state,
   }
 }
 
+// @port 0x00450717 100% divergence
 // Ghidra Ship_HandlePlayerShipCore 0x0044AA70 synthetic CFG:
 // PlayerTick_IonizationAndFuelRegeneration 0x00450717 -> 0x004507B4.
 void PlayerTick_IonizationAndFuelRegeneration(GameState &state,

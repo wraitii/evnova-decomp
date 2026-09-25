@@ -179,6 +179,7 @@ bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
              .policy_flags[static_cast<std::size_t>(flag_index)] != 0;
 }
 
+// @port 0x004629E0 100%
 // Ghidra 0x004629E0 Government_IsCandidateHostileToTargeter. See the header for
 // the branch description; this is the single caller's (the stellar defense
 // battery tick) target filter. The original reaches the ship class's

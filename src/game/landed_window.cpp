@@ -38,6 +38,7 @@
 
 namespace game {
 
+// @port 0x00457580 50% gameplay,cadence,rendering
 // ---------------------------------------------------------------------------
 // Stellar_HandleStellarEntryAndExit (0x00457580) normal-arrival gate.
 // ---------------------------------------------------------------------------
@@ -122,6 +123,7 @@ void Player_RefuelShipWithCredits(GameState &state) {
   }
 }
 
+// @port 0x00455E10 70% rendering
 // ---------------------------------------------------------------------------
 // Ghidra 0x00455e10 Stellar_RunDockAndLaunchSequence: arrival half.
 // The launch half is Stellar_Launch. The fee gate/deduction below is

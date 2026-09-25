@@ -13,12 +13,24 @@ Also cross-checks the in-source `@port` markers against the tracker:
 The marker is the authoritative port-site annotation: `NN%` is the remaining
 work and the tags classify what remains or mark a decision (see PORT_TAGS).
 Domain tags name unported work; status tags (`divergence`, `moddata`,
-`verify`) are orthogonal to `pct`, as is the structural `synthetic` tag, so a row
+`bugfix`, `verify`) are orthogonal to `pct`, as is the structural `synthetic` tag, so a row
 whose only open item is one of those is 100% and a `pct<100` row must carry a
 domain tag. The audit fails on markers
 with no tracker row, marker file or pct mismatches, unrecognized tags, and
 permanent decisions at `pct<100`; it reports pct<100 rows with no tags and
 ported rows without a marker (migration coverage, not a failure).
+
+It also reports agreement between a marker's tag CSV and the explicit inline
+markers in the port function body (up to its closing brace). Matching is
+token-based; prose is never scanned, so an explanation must use one of these
+exact tokens:
+  * a `TODO(decomp...)` or `NovaLog::Todo(...)` deferral needs at least one tag;
+  * a `divergence`/`moddata` tag needs a `DIVERGENCE(original):` or
+    `BUGFIX(original)` explanation, and such an explanation needs a decision tag;
+  * a `bugfix` tag needs a `BUGFIX(original)` marker, and vice-versa.
+`verify` never requires an inline marker. These are migration reports, not
+fatal; `synthetic` markers are skipped (their address is an interior slice, so
+the next body is not necessarily the port).
 
 Writes a report to analysis/ref_audit.txt. Read-only; no writes to the DB.
 
@@ -73,6 +85,10 @@ FUNC_DEF_RE = re.compile(
 #   moddata     - divergences we make for mod-hardening, clarity, or avoiding
 #                 quirky data-related behaviour where constants feel more
 #                 intentional. A specialized permanent divergence.
+#   bugfix      - a deliberate correction to a confirmed bug in the original
+#                 executable or shipped scenario data, gated through the shared
+#                 compatibility policy. Permanent; must carry an inline
+#                 `BUGFIX(original)` marker.
 # Structural tags describe the row, not the work:
 #   synthetic   - the marker address is an interior label of a larger collapsed
 #                 function (parent named in the adjacent `// Ghidra ...`
@@ -93,6 +109,7 @@ PORT_STATUS_TAGS = {
     "verify",
     "divergence",
     "moddata",
+    "bugfix",
 }
 PORT_STRUCTURAL_TAGS = {
     "synthetic",
@@ -101,7 +118,7 @@ PORT_TAGS = PORT_DOMAIN_TAGS | PORT_STATUS_TAGS | PORT_STRUCTURAL_TAGS
 # Tags that mark a decided difference rather than unported work. A row whose
 # only open item is one of these is 100%, so one at pct<100 without a domain
 # tag is an audit failure.
-PORT_DECISION_TAGS = {"divergence", "moddata"}
+PORT_DECISION_TAGS = {"divergence", "moddata", "bugfix"}
 # In-source port-site marker. One comment line, one or more addresses, an
 # optional percentage, and an optional comma-separated tag CSV.
 PORT_RE = re.compile(
@@ -113,6 +130,81 @@ PORT_RE = re.compile(
     re.M,
 )
 SRC_SUFFIXES = {".cpp", ".cc", ".hpp", ".hh", ".h"}
+# Explicit inline markers checked against the `@port` tag CSV. Matching is
+# token-based; prose is never scanned, so an explanation must be written with
+# one of these exact tokens. A deferral (`TODO(decomp...)`/`NovaLog::Todo`) or
+# an explanation needs at least one tag, a `divergence`/`moddata` tag needs an
+# explanation, and a `bugfix` tag needs `BUGFIX(original)` and vice-versa.
+TODO_MARKER_RE = re.compile(
+    r"(?:TODO\s*\(\s*decomp|NovaLog\s*::\s*Todo)", re.I
+)
+BUGFIX_RE = re.compile(r"BUGFIX\s*\(\s*original\s*\)", re.I)
+DIVERGENCE_EXPL_RE = re.compile(r"DIVERGENCE\s*\(\s*original\s*\)", re.I)
+
+
+def function_body_after(text: str, start: int) -> str:
+    """Return the annotated port region after an `@port` marker.
+
+    The `@port` marker sits just above its port function, usually followed by a
+    `// Ghidra ...` note that carries the divergence/TODO narrative. The scope
+    therefore runs from `start` (just after the marker line) through the first
+    function's closing brace, so those leading comments are included. Comments,
+    chars and strings are skipped so braces in prose do not confuse the match.
+    Returns "" when no body is found.
+    """
+    i = start
+    n = len(text)
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if c == "/" and nxt == "/":
+            j = text.find("\n", i)
+            i = n if j < 0 else j + 1
+            continue
+        if c == "/" and nxt == "*":
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c in "\"'":
+            quote = c
+            i += 1
+            while i < n and text[i] != quote:
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        if c == "{":
+            break
+        i += 1
+    if i >= n:
+        return ""
+    depth = 0
+    j = i
+    while j < n:
+        c = text[j]
+        nxt = text[j + 1] if j + 1 < n else ""
+        if c == "/" and nxt == "/":
+            k = text.find("\n", j)
+            j = n if k < 0 else k + 1
+            continue
+        if c == "/" and nxt == "*":
+            k = text.find("*/", j + 2)
+            j = n if k < 0 else k + 2
+            continue
+        if c in "\"'":
+            quote = c
+            j += 1
+            while j < n and text[j] != quote:
+                j += 2 if text[j] == "\\" else 1
+            j += 1
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : j + 1]
+        j += 1
+    return ""
 
 
 def ghidra_get(path: str):
@@ -164,19 +256,25 @@ def collect_port_markers() -> tuple[dict[str, list[dict]], list[str]]:
             continue
         text = path.read_text()
         rel = path.relative_to(ROOT).as_posix()
-        for lineno, raw in enumerate(text.splitlines(), start=1):
+        offset = 0
+        for lineno, raw in enumerate(text.splitlines(keepends=True), start=1):
+            line_end = offset + len(raw)
             if "@port" not in raw:
+                offset = line_end
                 continue
-            m = PORT_RE.match(raw)
+            m = PORT_RE.match(raw.rstrip("\r\n"))
             if m is None:
                 malformed.append(f"{rel}:{lineno} {raw.strip()}")
+                offset = line_end
                 continue
             pct = f"{m.group('pct')}%" if m.group("pct") else ""
             tags = [t.strip().lower() for t in (m.group("tags") or "").split(",") if t.strip()]
+            body = function_body_after(text, line_end)
             for addr in m.group("addrs").split(","):
                 markers.setdefault(addr.strip().lower(), []).append(
-                    {"file": rel, "line": lineno, "pct": pct, "tags": tags}
+                    {"file": rel, "line": lineno, "pct": pct, "tags": tags, "body": body}
                 )
+            offset = line_end
     return markers, malformed
 
 
@@ -305,6 +403,13 @@ def main() -> None:
     uncharacterized = []       # pct<100 but no tags
     permanent_gap = []         # pct<100 with divergence/moddata but no domain tag
     unmarked = []              # ported row with no @port marker
+    divergence_missing_marker = []  # divergence/moddata tag but no inline explanation
+    bugfix_missing_marker = []      # bugfix tag but no BUGFIX(original)
+    explanation_untagged = []       # inline explanation but no decision tag
+    bugfix_untagged = []            # BUGFIX(original) but no bugfix tag
+    divergence_untagged = []        # DIVERGENCE(original) but no divergence/moddata tag
+    marker_missing_tag = []         # inline deferral marker but no tag
+    no_body = []                    # marker with no scannable function body
     tag_census: Counter = Counter()
     seen = set()
     for addr, ms in sorted(markers.items()):
@@ -337,6 +442,47 @@ def main() -> None:
                 and not set(m["tags"]) & PORT_DOMAIN_TAGS
             ):
                 permanent_gap.append(f"{addr} {eff_pct} {loc}")
+            # Inline-marker agreement. Synthetic markers name an interior slice
+            # of a collapsed parent, so the first body after the marker is not
+            # necessarily the port: skip them. Migration is not complete, so
+            # these are reported, not fatal.
+            tags = set(m["tags"])
+            if "synthetic" in tags:
+                continue
+            body = m["body"]
+            if not body:
+                no_body.append(f"{addr} {loc}")
+                continue
+            has_deferral = bool(TODO_MARKER_RE.search(body))
+            has_bugfix = bool(BUGFIX_RE.search(body))
+            has_divergence_expl = bool(DIVERGENCE_EXPL_RE.search(body))
+            has_explanation = has_bugfix or has_divergence_expl
+            # tag -> inline
+            if tags & {"divergence", "moddata"} and not has_explanation:
+                divergence_missing_marker.append(
+                    f"{addr} tags={','.join(m['tags'])} {loc}"
+                )
+            if "bugfix" in tags and not has_bugfix:
+                bugfix_missing_marker.append(
+                    f"{addr} tags={','.join(m['tags'])} {loc}"
+                )
+            # inline -> tag
+            if has_explanation and not tags & PORT_DECISION_TAGS:
+                explanation_untagged.append(
+                    f"{addr} tags={','.join(m['tags']) or '-'} {loc}"
+                )
+            if has_bugfix and "bugfix" not in tags:
+                bugfix_untagged.append(
+                    f"{addr} tags={','.join(m['tags']) or '-'} {loc}"
+                )
+            if has_divergence_expl and not tags & {"divergence", "moddata"}:
+                divergence_untagged.append(
+                    f"{addr} tags={','.join(m['tags']) or '-'} {loc}"
+                )
+            # A deferral marker (`TODO(decomp...)`/`NovaLog::Todo`) always needs
+            # at least one tag; explanations are handled above.
+            if has_deferral and not tags:
+                marker_missing_tag.append(f"{addr} {loc}")
     for r in rows:
         if r["impl_file"] and r["address"].lower() not in markers:
             unmarked.append(f"{r['address']} {r['name']} -> {r['impl_file']}")
@@ -370,6 +516,39 @@ def main() -> None:
     out += permanent_gap
     out.append(f"\n== ported rows without @port marker ({len(unmarked)}) ==")
     out += unmarked
+    out.append(
+        f"\n== @port divergence/moddata tag without an inline explanation "
+        f"({len(divergence_missing_marker)}) =="
+    )
+    out += divergence_missing_marker
+    out.append(
+        f"\n== @port bugfix tag without a BUGFIX(original) marker "
+        f"({len(bugfix_missing_marker)}) =="
+    )
+    out += bugfix_missing_marker
+    out.append(
+        f"\n== inline explanation without a decision tag "
+        f"({len(explanation_untagged)}) =="
+    )
+    out += explanation_untagged
+    out.append(
+        f"\n== BUGFIX(original) without a bugfix tag ({len(bugfix_untagged)}) =="
+    )
+    out += bugfix_untagged
+    out.append(
+        f"\n== DIVERGENCE(original) without a divergence/moddata tag "
+        f"({len(divergence_untagged)}) =="
+    )
+    out += divergence_untagged
+    out.append(
+        f"\n== inline deferral marker without any @port tag "
+        f"({len(marker_missing_tag)}) =="
+    )
+    out += marker_missing_tag
+    out.append(
+        f"\n== @port marker with no scannable function body ({len(no_body)}) =="
+    )
+    out += no_body
     out.append(f"\n== Ghidra name != csv name ({len(ghidra_mismatch)}) ==")
     out += sorted(ghidra_mismatch)
     out.append(f"\n== address not cited in impl file or sibling header ({len(no_citation)}) ==")

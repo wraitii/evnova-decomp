@@ -862,6 +862,8 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
 }
 
 // @port 0x0040d470 100% moddata
+// DIVERGENCE(original): unguarded def-table reads are bounds-checked; the
+// original's discarded Math_SquaredDistance call is omitted (see below).
 // Ghidra 0x0040d470 Weapon_SelectDirectFireWeaponBankForPrimaryTarget. Arms
 // the best in-range direct-fire bank (modes -1/0/6, or mode 1 when
 // allow_guided_mode) scored by mass/energy damage; mode 6 applies a

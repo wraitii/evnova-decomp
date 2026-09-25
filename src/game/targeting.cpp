@@ -199,6 +199,8 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
   return false;
 }
 
+// @port 0x00461BD0 100% gameplay,verify
+// @port 0x00461F60 100% gameplay
 // ---------------------------------------------------------------------------
 // Player target cycling (0x00461bd0 / 0x00461f60).
 // ---------------------------------------------------------------------------
@@ -331,6 +333,8 @@ NovaTargeting_FindPreviousPlayerCycleTarget(const GameState &state,
   return current_slot;
 }
 
+// @port 0x00462850 100%
+// @port 0x00462BD0 100%
 // ---------------------------------------------------------------------------
 // Ship_SelectNearestEngagedTarget (0x00462850) / _HostileCombatTarget
 // (0x00462bd0).

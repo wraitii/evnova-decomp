@@ -452,6 +452,7 @@ namespace {
 }
 
 // @port 0x0043D510 100% divergence
+// DIVERGENCE(original): no-eligible-slot fallback (see below).
 // Ghidra 0x0043d510 Mission_SelectMissionStellarByLocator. The original first
 // proves at least one of the fixed 0x800 slots is eligible (RNG-free), then
 // rejection-samples NovaRandom_Range(0x800) until one passes. Deliberate
@@ -1551,7 +1552,7 @@ std::int16_t Mission_OriginalAiSecondaryTargetSlot(const GameState &state) {
   return state.player.ai_secondary_target_slot;
 }
 
-// @port 0x0043F100 92% gameplay,ui,divergence
+// @port 0x0043F100 92% gameplay,ui,bugfix
 // Ghidra 0x0043f100 Mission_ActivateMissionAtSlot.
 bool Mission_ActivateAtSlot(GameState &state,
                             std::int16_t mission_id,
@@ -2201,7 +2202,7 @@ void Mission_FailMissionSlotQuick(GameState &state,
   // Ambient-roll latch invalidation is not modelled (TODO(decomp)).
 }
 
-// @port 0x00447D90 100% divergence
+// @port 0x00447D90 100% bugfix
 // Ghidra 0x00447d90 Mission_ResolveMisnSlot. Completes an auto-abort/goal
 // mission: on-abort payload (Bible OnAbort, +0x5e8), optional daily rerolls,
 // the auto-abort fuel penalty, auto-abort pay, and slot teardown.

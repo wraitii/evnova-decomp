@@ -185,6 +185,8 @@ int Ship_ComputeScannerStrength(const GameState &state) {
   return std::clamp(strength, -100, 100);
 }
 
+// @port 0x0045D030 100%
+// Ghidra 0x0045d030 Frame_RollProximityScanDetection.
 void Frame_RollProximityScanDetection(GameState &state) {
   const int odds = std::clamp(
       [&] {

@@ -105,6 +105,7 @@ std::int16_t NovaWeapon_SelectTurretQuadrant(GameState &state,
   return static_cast<std::int16_t>(quadrant);
 }
 
+// @port 0x00455150 88% gameplay,audio
 // Ghidra 0x00455150 Weapon_FirePlayerWeaponBank.
 void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      std::int16_t weapon_bank) {

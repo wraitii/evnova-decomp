@@ -308,6 +308,8 @@ void BindEntityMask(CollisionMaskBinding &binding,
   binding.frame = frame;
 }
 
+// @port 0x00462390 45% rendering
+// @port 0x004623D0 40% rendering
 // k_pixel_collision_frame_scale_threshold_f64 (0x005754c8) and the
 // Sprite_GetFrameFullWidth (0x00462390) boundary.
 // Ship_HandleSpritePairCollision (0x004374f0) uses the opaque mask only when
@@ -1610,6 +1612,7 @@ void ResolveShotCollisionHit(GameState &state,
   state.active_shots[shot_index].consumed = true;
 }
 
+// @port 0x00462550 90% rng,bugfix
 // Ghidra Asteroid_SpawnDestructionPackage (0x00462550): a broken asteroid
 // spawns YieldQty resource-box freeflight objects, a part_count debris burst,
 // its explode_type area effect, and splits into child asteroids from its def

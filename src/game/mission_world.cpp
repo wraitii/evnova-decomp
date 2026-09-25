@@ -252,7 +252,7 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
 
 } // namespace
 
-// @port 0x00439500 100% divergence
+// @port 0x00439500 100% bugfix
 // Ghidra 0x00439500 Mission_TickDailyCronEvents. Once-per-game-day driver
 // over the 0x200 crön slots (called from Mission_TickDailyWorldUpdate right
 // after the calendar advance):
