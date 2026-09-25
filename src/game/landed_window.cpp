@@ -70,6 +70,9 @@ float Stellar_MaxLandingDistance(std::int16_t target_sprite_full_width) {
 }
 
 // @port 0x004250f0 100% divergence
+// DIVERGENCE(original): the fuel-panel/inventory dirty flags are implied by
+// the per-frame HUD, and the travel_flags-0x20 centered-sound arm is
+// unreachable through the port's dock gate (logged).
 // Ghidra 0x004250f0 Player_RefuelShipWithCredits. Arrival auto-refuel for the
 // auto-refueller outfit (ModType 19). Runs once per landing at a landable
 // stellar (travel_flags 0x20 clear) from the Stellar_RunDockAndLaunchSequence

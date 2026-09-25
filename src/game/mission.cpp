@@ -1104,6 +1104,9 @@ SampleAdjacentMissionSystem(GameState &state, std::int16_t base_system) {
 }
 
 // @port 0x0043E6F0 100% divergence
+// DIVERGENCE(original): -5 samples the port's remapped System.links (not the
+// raw adjacency), pre-checks existence instead of hanging on a linkless
+// system, and shares the sampling predicate in the existence scan.
 // Ghidra 0x0043e6f0 Mission_SelectMissionSystemByLocator with param_2 fixed to
 // the player's current system (the only caller, Mission_PopulateMissionSlot-
 // FromDef).
@@ -1223,6 +1226,8 @@ bool Mission_IsStellarValidRandomDestination(const GameState &state,
 }
 
 // @port 0x0043D240 100% divergence
+// DIVERGENCE(original): the no-candidate locator fallback returns -1 / the
+// TravelStel instead of the original anchor.
 // Ghidra 0x0043d240 Mission_ResolveMissionStellarTargets.
 void Mission_ResolveMissionStellarTargets(GameState &state,
                                           std::int16_t mission_id) {
@@ -1302,6 +1307,8 @@ void Mission_ResolveMissionStellarTargets(GameState &state,
 }
 
 // @port 0x0043C3E0 100% divergence
+// DIVERGENCE(original): the discarded RNG warm-up is not run; the port
+// resolves all present mission targets eagerly instead.
 // Ghidra 0x0043c3e0 Misn_ResolveMissionStellarLocators.
 void Mission_ResolveMissionStellarLocators(GameState &state) {
   for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
@@ -1312,7 +1319,10 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
   }
 }
 
-// @port 0x0043CF00 85% gameplay,divergence
+// @port 0x0043CF00 85% gameplay
+// TODO(decomp(0x0043cf00)): target resolution runs for all present defs (the
+// original resolves per eligible def), and the return-list finalize arm is
+// approximated by lane-1 emptiness.
 // Ghidra 0x0043cf00 Mission_EvaluateMissionLists.
 MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
   // The original opens with NovaResources_EvaluateAvailability (0x00448090):
@@ -2147,6 +2157,8 @@ bool NovaStellar_AreStellarsEquivalent(const GameState &state,
 }
 
 // @port 0x00440370 100% divergence
+// DIVERGENCE(original): InvalidateDerivedStatCaches replaces the inline
+// Outfit_RecomputeOutfitDerivedState (equivalent under lazy recompute).
 // Ghidra 0x00440370 Mission_TryConsumeMissionInteractionResources.
 bool Mission_TryConsumeMissionInteractionResources(
     GameState &state, std::int16_t count, const MissionDebriefSink &debrief) {
@@ -2307,6 +2319,8 @@ void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
 }
 
 // @port 0x00448670 100% divergence
+// DIVERGENCE(original): the lane-1 list is rebuilt fresh here rather than
+// walked from the persistent g_return_mission_list.
 // Ghidra 0x00448670 Mission_RunAvailLocOffers. See the header
 // comment. The original walks the persistent lane-1 list
 // (g_return_mission_list = g_mission_slot_list[1], rebuilt by
@@ -2879,6 +2893,8 @@ bool Ship_HasAnyCargoLootOrActiveMission(const GameState &state) {
 }
 
 // @port 0x00441B40 85% gameplay,divergence
+// DIVERGENCE(original): the locator-candidate sanity gate does not consume the
+// selection RNG (outcome identical; the port RNG is mt19937 anyway).
 // Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility.
 bool Mission_CheckMissionShipInteractionEligibility(GameState &state,
                                                     std::int16_t mission_id,

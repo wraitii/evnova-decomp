@@ -1156,6 +1156,8 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 // particles. Ghidra [0x00497df0]: Frame_RenderViewportBackground clears + fills
 // with the NovaRender_SetSystemSpaceBackgroundColor [0x0046bbf0] tint, then
 // @port 0x0042e590 85% rendering,divergence
+// DIVERGENCE(original): the 8-bit-depth star path (brightness=t, tint=0) is
+// not modelled; the port always uses the 16bpp additive-tint path.
 // Frame_UpdateViewportWrapBackgroundSprites [0x0042e590]
 // (+ the sprite-world draw in Frame_SpaceflightLoop scope 2) renders the stars.
 // Each star draws its randomly-chosen frame of the 16-frame star-field sprite
@@ -1952,7 +1954,7 @@ void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
-// @port 0x00438c40 85% rendering
+// @port 0x00438c40 85% rendering,synthetic
 // Ghidra 0x00438c40 (unnamed under-ships beam pass): draw proc of the second
 // gameplay sprite-world layer, below shots and ships. Draws only beams whose
 // weapon sets flags_secondary 0x2000 (Bible "display the beam underneath

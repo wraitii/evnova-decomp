@@ -667,6 +667,8 @@ void NovaText_Draw(SdlPlatform &platform,
 }
 
 // @port 0x004622F0 100% divergence
+// DIVERGENCE(original): SDL_ttf measure/position/draw replaces the QuickDraw
+// Mac Toolbox text metric engine.
 // Ghidra 0x004622f0 DrawContext_DrawCenteredPascalStringInBounds.
 void NovaText_DrawCentered(SdlPlatform &platform,
                            NovaFontCache &cache,

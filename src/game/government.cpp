@@ -377,6 +377,9 @@ bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
 }
 
 // @port 0x00413610 90% gameplay,moddata
+// DIVERGENCE(original): the ModType-44 inhibitor is re-evaluated from owned
+// outfits instead of the original's cached per-government bytes; the stale-
+// cache quirk after outfit removal is not preserved.
 // Ghidra 0x00413610 Government_TryTriggerGovtAssistanceEncounter.
 bool NovaGovernment_TryTriggerAssistanceEncounter(GameState &state,
                                                   const Ship &ship,

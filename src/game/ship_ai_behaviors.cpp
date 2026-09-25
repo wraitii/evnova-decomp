@@ -33,6 +33,9 @@ namespace game {
 using namespace ship_ai_detail;
 
 // @port 0x0040c790 100% moddata
+// DIVERGENCE(original): the rejection-sampling loops are bounded (256 draws)
+// with a deterministic fallback, where the original could spin forever on
+// contradictory availability data; reachable data preserves RNG cadence.
 // Ghidra 0x0040c790 Stellar_SelectRandomAdjacentTravelStellar. Selects a
 // random adjacent travel stellar in the ship's current system and returns the
 // stellar *resource id* (>= 0x80) or -1. One pass builds five 16-slot per-nav

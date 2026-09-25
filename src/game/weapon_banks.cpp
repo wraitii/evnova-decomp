@@ -774,15 +774,15 @@ void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
         !NovaWeapon_CanFireWeaponBank(
             state, player, player.active_weapon_bank_slot)) {
       player.active_weapon_bank_slot = -1;
-      // g_shipAvailabilityCachesDirty = 1: the port's availability caches are
-      // deferred (TODO(decomp)).
+      // g_shipAvailabilityCachesDirty = 1: the port has no availability
+      // cache; availability is recomputed per query.
     }
   }
 
   // @port 0x0044EAB4 90% gameplay,synthetic
   // Ghidra 0x0044eab4 PlayerTick_WeaponCycleContinuation (synthetic region of
   // 0x0044aa70): the reordered secondary-bank cycle. g_shipAvailability-
-  // CachesDirty is deferred (availability caches TODO(decomp)).
+  // CachesDirty has no port counterpart (no cache; recomputed per query).
   // Secondary-bank cycle (edge-resolved by the caller against
   // g_playerSecondaryCycleCommandLatch). Counts eligible banks; with none the
   // denial cue plays, otherwise the accept cue plays and the selection walks

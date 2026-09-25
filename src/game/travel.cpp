@@ -792,6 +792,8 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
 }
 
 // @port 0x00462DB0 90% gameplay,divergence
+// DIVERGENCE(original): per-stellar is_available is treated as present, and
+// the port no longer auto-seeds this on a per-frame cadence.
 // ---------------------------------------------------------------------------
 // Ghidra 0x00462db0 Stellar_FindNearestAvailableTravelStellar.
 // ---------------------------------------------------------------------------

@@ -297,6 +297,9 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
 // also wired here; beams, turrets, carrier-bay, disable, and mission effects
 // remain deferred.
 // @port 0x00433050 100% divergence,cadence
+// DIVERGENCE(original): g_playerShipPresentationDirty is replaced by the
+// immediate-mode HUD redraw, and the 21 ms raw-call cadence is replayed via
+// the shared elapsed/0.63 tick scale.
 void Stub_HandleShips(GameState &state, float elapsed_ticks) {
   const std::int16_t current_system = state.player.current_system_id;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
@@ -809,6 +812,9 @@ void PlayerTick_ShipTargetCommands(GameState &state, const FlightInput &input) {
 } // namespace
 
 // @port 0x0045C7A0 100% divergence
+// DIVERGENCE(original): the cancel latch edge-resolves binding slot 0x17
+// instead of reading raw held state (fixes the dock-launch bounce), and the
+// unmodelled FPS/presentation latches have no port consumer.
 // Ghidra 0x0045c7a0 NovaUi_MarkTravelAndStatusPanelsDirty. The name is a
 // misnomer: it does not mark panels dirty, it sets every player-command edge
 // latch (the 0x007cab35..0x007cab53 swath) so a key held across a modal or mode

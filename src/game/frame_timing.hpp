@@ -15,6 +15,9 @@ inline constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
 // Normalized-tick delta -> whole raw spaceflight calls at the original
 // maximum rate.
 // @port 0x00432ea0 40% cadence,divergence
+// DIVERGENCE(original): the 21 ms wall-clock floor and smoothed
+// g_avg_frame_tick_scale EMA are replaced by the port's outer-step scheduler;
+// only the derived conversion factor is reproduced.
 [[nodiscard]] constexpr float RawSpaceflightCallTicks(float elapsed_ticks) {
   return elapsed_ticks / kOriginalMaxRateFrameTicks;
 }

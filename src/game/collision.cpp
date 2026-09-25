@@ -2172,7 +2172,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   return true;
 }
 
-// @port 0x00436f70 85% verify
+// @port 0x00436f70 85% verify,synthetic
 // Ghidra Asteroid_HandleSpritePairCollision (0x00436f70): the sprite-layer
 // callback installed on the 16 asteroid sprites. Ship_TestSpriteLayerOverlaps
 // invokes it for every (asteroid sprite, shot sprite) overlap. It resolves the

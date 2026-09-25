@@ -351,6 +351,8 @@ int NovaAi_GetShipJammingScore(const GameState &state,
 }
 
 // @port 0x00410f20 100% moddata
+// DIVERGENCE(original): the target slot is range-checked before indexing
+// (safe-fail; the original only checks for -1).
 // Ghidra 0x00410f20 Ship_CanTargetOutrunShooter. The final base-speed
 // comparison is the live decision: true means the target is not slower than
 // the shooter (strict ship < target with a tracking bank, non-strict
@@ -521,6 +523,8 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
 }
 
 // @port 0x00411540 100% moddata
+// DIVERGENCE(original): an out-of-range (not just -1) primary-target slot is
+// cleared instead of indexed; safe-fail only.
 // Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget (Carbon symbol
 // AIEscortFireUnprovoked). Escort/mission automatic-weapon refresh, called at
 // the tail of the Ship_ApplyShipAiControls mode bodies 0/1/9/0xb/0xc (see
@@ -781,6 +785,9 @@ bool NovaAi_IsInboundThreatExceedingDefenses(const Ship &ship) {
 }
 
 // @port 0x0040d220 100% moddata
+// DIVERGENCE(original): a missing target class is rejected with a TODO log
+// (the original indexes the table unchecked), and the original's player-outfit
+// capability memoization is not reproduced (no gameplay effect).
 // Ghidra 0x0040d220 Weapon_SelectGuidedWeaponBankForPrimaryTarget. Arms the
 // first fireable guided (mode-1) bank that can track the primary target
 // within the (0.95-scaled) intercept range; applies the scanner-untargetable

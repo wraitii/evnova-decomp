@@ -1106,6 +1106,8 @@ int NovaApp_Run(NovaRuntime &runtime) {
 }
 
 // @port 0x00416100 45% gameplay,divergence
+// DIVERGENCE(original): clean-room session wrapper; resource/QuickTime
+// startup, original teardown, and ancillary session init are not reproduced.
 // Ghidra: 0x00416100 NovaGameSession_Run
 void NovaGameSession_Run(NovaRuntime &runtime) {
   // Resource and QuickTime startup are not reconstructed yet. Licence checks

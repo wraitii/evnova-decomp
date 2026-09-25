@@ -1117,6 +1117,9 @@ void ReconcileCapturedHullLoadout(GameState &state, const Ship &captured) {
 }
 
 // @port 0x00423fa0 100% divergence
+// DIVERGENCE(original): the three global dirty flags are represented by
+// GameState::InvalidateDerivedStatCaches, not separate inventory/presentation/
+// availability flags.
 // Ghidra 0x00423fa0 Player_ReplaceShipWithCapturedHull (renamed from the
 // former clean-room Player_SwapShipWithEscort): promotes a captured hull into
 // player slot 0 and moves the outgoing player hull into a newly allocated
@@ -1546,6 +1549,8 @@ void ReseedWeaponSecondary(Ship &ship, const ShipClass *cls) {
 } // namespace
 
 // @port 0x004229d0 100% divergence
+// DIVERGENCE(original): gates on the landed stellar's travel_flags & 8 rather
+// than the player's ai_secondary_target_slot, and omits the debug date trace.
 // Ghidra 0x004229d0 Player_ProcessEscortFleetAtStellar.
 void Player_ProcessEscortFleetAtStellar(
     GameState &state,

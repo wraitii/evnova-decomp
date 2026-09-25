@@ -479,6 +479,8 @@ void HudRenderer::Draw(SdlPlatform &platform,
   DrawRadarPanel(platform, state, force_empty_radar);
 
   // @port 0x0045E9C0 80% rendering,divergence
+  // DIVERGENCE(original): the per-panel saved-backdrop restore is replaced by
+  // redrawing the cockpit PICT, and the 1x1-run fill becomes an SDL rect.
   // Life-support bars (Ghidra 0x0045e9c0 NovaUi_DrawPlayerShieldArmorPanels),
   // drawn inside their genuine top-right-strip rects. The
   // Federation shield/armor/fuel slots are x=35..184 at y=200/216/234, and
@@ -757,6 +759,9 @@ void HudRenderer::DrawWeaponPanel(SdlPlatform &platform,
 // config byte, never set in normal play).
 // ---------------------------------------------------------------------------
 // @port 0x0045F530 95% ui,divergence
+// DIVERGENCE(original): shield/armor percentages use the outfit/personality-
+// inclusive maxima, the Waiting gate uses runtime objective/board latches, and
+// the never-set AI/debug overlay rows are skipped.
 void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                                   const GameState &state,
                                   const SDL_Color &value_color,

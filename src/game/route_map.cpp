@@ -44,7 +44,7 @@ constexpr float kRouteMapViewScale = 0.25F;
 } // namespace
 
 void RouteMap_Open(GameState &state) {
-  // @port 0x004A9B30 100% correctness,divergence
+  // @port 0x004A9B30 95% correctness
   // Ghidra 0x004a9b30: zoom reset gate, flag set, interaction stamp. The
   // original reset threshold is a separate global, DAT_005759e8 = 0.0 (not the
   // 0.5 zoom-out clamp kZoomMin), so it is effectively dead; the port resets at

@@ -541,6 +541,9 @@ void NovaAi_OnShipCloakStateCleared(GameState &state, Ship &ship) {
 }
 
 // @port 0x00411d00 100% moddata
+// DIVERGENCE(original): added safe-fail guards (null ShipClass, SlotInRange on
+// target/leader slots) and the 0x1000 visibility predicate is evaluated once
+// instead of twice (pure).
 // Ghidra 0x00411d00 Ship_UpdateShipCloakStateFromTraits.
 void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   constexpr float kCloakTargetDistance = 165.0F; // DAT_005750b0
@@ -698,6 +701,9 @@ void NovaAi_SelectNearestDisabledShipForBoarding(GameState &state, Ship &ship) {
 }
 
 // @port 0x004133f0 95% correctness,moddata
+// DIVERGENCE(original): the combat-rating divisor is pinned to
+// GameState::kCombatRatingBaseStrength instead of reading class 0's Strength,
+// so a mod editing class 0 cannot rescale the rating system.
 // Ghidra 0x004133F0 Ship_UpdateShipCombatOddsScore.
 void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
   const ShipClass *ship_class = ShipClassFor(state, ship);

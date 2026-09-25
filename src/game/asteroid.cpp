@@ -50,7 +50,9 @@ constexpr std::int32_t RingSpread(std::int32_t radius) {
 
 } // namespace
 
-// @port 0x00421e60 40% gameplay,divergence
+// @port 0x00421e60 40% gameplay
+// TODO(decomp(0x00421e60)): the wander frame seed uses AsteroidDef.mass as a
+// stand-in; the original reads the sprite set's num_frames (+0x54).
 // Ghidra 0x00421e60 Asteroid_SpawnRecord.
 int NovaAsteroid_SpawnRecord(GameState &state,
                              float pos_x,
@@ -240,6 +242,9 @@ int NovaAsteroid_Spawn(GameState &state, bool place_in_ring) {
 }
 
 // @port 0x00436910 80% divergence,gameplay
+// DIVERGENCE(original): WrapAsteroids teleports off-window records in world
+// space instead of culling/deactivating them and letting the ring refill;
+// masks the original's "small asteroids vanish at high resolution" defect.
 // Ghidra 0x00436910 Asteroid_UpdateSprites (simulation half). The original is
 // one function that both integrates the drift and re-binds/positions the
 // SDL Sprite; the clean-room splits the pure drift advance here from the

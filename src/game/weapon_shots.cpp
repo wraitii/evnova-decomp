@@ -99,6 +99,8 @@ namespace {
 // NovaWeapon_TurnShotToward for the direction-recovery use).
 
 // @port 0x0043B6A0 100% divergence
+// DIVERGENCE(original): std::clamp preserves a NaN component, where the
+// original's comparison sequence replaces it with -max_speed.
 // Ghidra 0x0043b6a0 Math_ClampVelocityComponents: componentwise box clamp to
 // +/- max_speed.
 void ClampVelocityComponents(float &vel_x, float &vel_y, float max_speed) {
@@ -1575,7 +1577,10 @@ int NovaWeapon_SmokePuffFrame(const WeaponSmokePuff &puff) {
   return frame < 8 ? frame : -1;
 }
 
-// @port 0x00435830 100% rendering,divergence
+// @port 0x00435830 100% rendering,divergence,cadence
+// DIVERGENCE(original): the sub-pixel short-position snap is not reproduced,
+// and the original 21 ms raw-call trail cadence is replayed via a fractional
+// accumulator instead of the outer loop.
 // Ghidra 0x00435830 Shot_HandleShot.
 void NovaWeapon_TickShots(GameState &state,
                           float elapsed_ticks,

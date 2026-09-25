@@ -1652,7 +1652,10 @@ void PlayerTick_ShieldAndArmorRegeneration(GameState &state,
   }
 }
 
-// @port 0x00450717 100% divergence
+// @port 0x00450717 100% divergence,synthetic
+// DIVERGENCE(original): the rate is scaled by a float tick scale (not the
+// original double g_avg_frame_tick_scale) and the 0.7/0.025 constants are
+// float literals.
 // Ghidra Ship_HandlePlayerShipCore 0x0044AA70 synthetic CFG:
 // PlayerTick_IonizationAndFuelRegeneration 0x00450717 -> 0x004507B4.
 void PlayerTick_IonizationAndFuelRegeneration(GameState &state,
