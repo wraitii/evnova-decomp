@@ -241,6 +241,8 @@ int NovaShip_AllocateShipSlot(GameState &state,
 }
 
 // @port 0x00422400 100% divergence
+// DIVERGENCE(original): std::sin/std::cos replaces the 0x168-entry angle
+// lookup tables; the spawn scatter may differ at float precision.
 // Ghidra 0x00422400 ShipClass_SpawnEscortShipFromClass.
 int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
                                            std::int16_t ship_class_id,
@@ -1221,6 +1223,8 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
 }
 
 // @port 0x0041c9f0 100% divergence
+// DIVERGENCE(original): the eager per-weapon 0x100-entry ammo/secondary stock
+// copy is replaced by lazy NovaWeapon_EnsureNpcWeaponBanks (same loadout).
 // Ghidra 0x0041c9f0 Dude_SpawnShipFromDudeDefInSystem. See the header. The
 // original also copies the class's per-weapon 0x100-entry ammo/secondary
 // tables into the ship state here; the clean-room builds them lazily on the
@@ -1264,6 +1268,8 @@ int NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
 }
 
 // @port 0x00421fd0 100% divergence
+// DIVERGENCE(original): sin/cos polar heading instead of the angle tables,
+// and a bounds guard on the stellar id (the original indexes unchecked).
 // Ghidra 0x00421fd0 Stellar_SpawnDefenseFleetShip. Spawns one ship for a
 // stellar's Bible defense fleet (spöb DefenseDude): allocate via
 // Dude_SpawnShipFromDudeDefInSystem (slot pool 2, retried with ship
@@ -1339,6 +1345,8 @@ int NovaStellar_SpawnDefenseFleetShip(GameState &state,
 }
 
 // @port 0x0041cf40 100% divergence
+// DIVERGENCE(original): the shared lazy NPC weapon-bank loadout replaces the
+// original's eager 0x100-entry stock copy (equivalent).
 // Ghidra 0x0041cf40 Mission_SpawnMissionShipFromDudeDef. See the header. The
 // original bounds the ship-type index with `< 0x11`, which would read one
 // entry past the 16-slot ship_types table; that is unreachable in practice
@@ -2319,8 +2327,10 @@ bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher) {
 }
 
 // @port 0x00415ea0 100% ui,moddata
+// DIVERGENCE(original): the port has no availability cache and recomputes per
+// query, so the g_shipAvailabilityCachesDirty write has no counterpart.
 // Ghidra 0x00415ea0 Ship_RecoverCarriedShipToBay (bay-RECOVERY arm). The
-// g_shipAvailabilityCachesDirty write is UI-only and deferred.
+// g_shipAvailabilityCachesDirty write is UI-only and has no port counterpart.
 void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
   const std::int16_t carrier_slot = fighter.squad_leader_ship_slot;
   if (carrier_slot < 0 ||
@@ -2389,7 +2399,8 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
     bank_cooldown(bay_bank) = static_cast<float>(def->reload_ticks);
   }
   ++bank_loaded(bay_bank);
-  // g_shipAvailabilityCachesDirty = 1 on a player carrier (TODO(decomp)).
+  // g_shipAvailabilityCachesDirty = 1 on a player carrier (no port cache;
+  // availability is recomputed per query).
 
   fighter.is_active = false;
   fighter.squad_leader_ship_slot = -1;

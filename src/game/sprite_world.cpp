@@ -347,6 +347,8 @@ SpriteAnchorTransform Sprite_AnchorToScreen(float world_x,
 }
 
 // @port 0x00438db0 95% rendering,divergence
+// DIVERGENCE(original): the 8-bit-depth 0x18 clamp is not reproduced; the
+// port always renders 32-bit.
 // Ghidra 0x00438db0 Frame_UpdateSpriteDistanceIntensity. See the header for the
 // decoded formula. The original's ROUND() markers are the x87 FIST +
 // residual/sign truncation idiom (truncation toward zero), so a non-negative

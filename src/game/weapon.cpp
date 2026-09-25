@@ -661,6 +661,9 @@ void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
 }
 
 // @port 0x00414550 68% gameplay,moddata
+// DIVERGENCE(original): the combat-rating base unit is pinned to
+// GameState::kCombatRatingBaseStrength instead of class 0's Strength, and
+// fire-restricted/dead ships are defensively cleared at the port boundary.
 // Ghidra Weapon_FireShipWeapons (0x00414550), ported for NPCs as
 // NovaWeapon_FireNpcWeaponBank (the player path is separate).
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {

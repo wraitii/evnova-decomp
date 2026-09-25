@@ -272,6 +272,8 @@ void Ship_UpdateEscortFormations(GameState &state, Ship &leader, bool snap) {
 }
 
 // @port 0x004156a0 100% moddata
+// DIVERGENCE(original): the replacement mass rank starts at 0 (the original's
+// local is uninitialized), and the default-AI fallback null-checks the class.
 // Ghidra 0x004156a0 Ship_ReacquireSquadLeader.
 void Ship_ReacquireSquadLeader(GameState &state, Ship &ship) {
   const std::int16_t stale = ship.squad_leader_ship_slot;
@@ -427,6 +429,8 @@ void Ship_TickLeaderFlags(GameState &state) {
 }
 
 // @port 0x0041e240 100% rendering,divergence
+// DIVERGENCE(original): engine_glow_intensity is a port-only derived render
+// alpha; the original writes only the +0xc8d4 glow level.
 // Ghidra 0x0041e240 Ship_ResetShipToDefaultCombatState.
 void NovaShip_ResetToDefaultCombatState(GameState &state,
                                         Ship &ship,

@@ -343,8 +343,8 @@ bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher);
 // the class's base-sprite clone-source id), tops the bay back up (+1 loaded
 // secondary, priming the bank cooldown to reload when it was empty), and
 // deactivates the fighter with its squad/AI linkage cleared. The original's
-// g_shipAvailabilityCachesDirty set on a player carrier stays deferred
-// (TODO(decomp)).
+// g_shipAvailabilityCachesDirty on a player carrier has no port counterpart
+// (no availability cache; availability is recomputed per query).
 void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter);
 
 // Ghidra 0x004694a0 ShipClass_HasPlayerBayCapacityFor: whether the player

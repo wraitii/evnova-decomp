@@ -137,6 +137,8 @@ void NovaFreeflight_SpawnAtPosition(GameState &state,
 }
 
 // @port 0x0042c1b0 85% rendering,divergence
+// DIVERGENCE(original): the one-shot DAT_00596d2a clear latch is modelled
+// synchronously by NovaWeapon_ClearTransientCombatState at transition points.
 // Ghidra 0x0042c1b0 Frame_UpdateFreeflightObjectSprites (simulation half).
 // The original also cancels every object when the DAT_00596d2a "clear
 // transient sprites" latch is set. The port instead wipes the pool

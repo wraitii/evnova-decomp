@@ -26,6 +26,8 @@ using mission_detail::kResourceIdBase;
 using mission_detail::ResolveContainingSystem;
 
 // @port 0x0044A4D0 100% divergence
+// DIVERGENCE(original): the trailing <PSRK>/<SSRK> scan is not ported; the
+// government id is parsed directly in the substitution pass.
 // Ghidra 0x0044a4d0 Ship_ExpandStringPlaceholders. See the header comment for
 // the grammar. Character-state machine over the text (the original walks the
 // shared DAT_007c8a10 buffer in place):

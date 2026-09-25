@@ -128,7 +128,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004215D0	Shot_SpawnWeaponSmokePuff	src/game/weapon_shots.cpp	100%	
 0x004216B0	Asteroid_InitSystem	src/game/asteroid.cpp	85%	verify
 0x00421830	Asteroid_Spawn	src/game/asteroid.cpp	75%	license,gameplay
-0x00421E60	Asteroid_SpawnRecord	src/game/asteroid.cpp	40%	gameplay,divergence
+0x00421E60	Asteroid_SpawnRecord	src/game/asteroid.cpp	40%	gameplay
 0x00421FD0	Stellar_SpawnDefenseFleetShip	src/game/ship_spawn.cpp	100%	divergence
 0x004221D0	Ship_IsInboundThreatExceedingDefenses	src/game/ship_ai_weapons.cpp	100%	
 0x00422210	Ship_TallyInboundWeaponThreat	src/game/weapon_shots.cpp	100%	
@@ -177,16 +177,16 @@ address	name	impl_file	reimpl_pct	comment
 0x00432470	System_UpdateSystemAndStellarDisplayState	src/game/targeting.cpp	67%	gameplay,rendering
 0x00432EA0	Frame_MeasureFrameTiming	src/game/frame_timing.hpp	40%	cadence,divergence
 0x00433050	Ship_HandleShip	src/game/spaceflight.cpp	100%	divergence,cadence
-0x00435830	Shot_HandleShot	src/game/weapon_shots.cpp	100%	rendering,divergence
+0x00435830	Shot_HandleShot	src/game/weapon_shots.cpp	100%	rendering,divergence,cadence
 0x00436910	Asteroid_UpdateSprites	src/game/asteroid.cpp	80%	divergence,gameplay
-0x00436F70	Asteroid_HandleSpritePairCollision	src/game/collision.cpp	85%	verify
+0x00436F70	Asteroid_HandleSpritePairCollision	src/game/collision.cpp	85%	verify,synthetic
 0x00436FF0	NovaUi_ResolveWeaponSplashImpact	src/game/collision.cpp	75%	gameplay,verify
 0x004374F0	Ship_HandleSpritePairCollision	src/game/collision.cpp	90%	gameplay
 0x00437780	Shot_ResolveShotCollisionHit	src/game/collision.cpp	90%	verify
 0x00437E20	Shot_ResolveCollisions	src/game/collision.cpp	80%	gameplay
 0x004386F0	Shot_DrawBeamQueue		0%	Restore-phase beam replot entry: called only from Frame_RestoreViewportRectsAndParticles (0x00439d20). Loops the 0x40-slot g_beam_hit_queue and replays each live beam into the saved-backdrop surface via SWBeams_DrawKinkedBeam (field_0x76 < 1, 1-segment) or SWBeams_DrawBeamWithFlare (field_0x76 >= 1, 2-segment arc). The port keeps no saved-backdrop buffer, so this entry point is not reproduced, but the two plotters it calls are also reachable from the visible 0x00438810 twin-surface path and are tracked separately. 0%, not ported.
 0x00438810	Shot_DrawBeamHitQueueForSurface	src/game/spaceflight_view.cpp	50%	rendering
-0x00438C40	Shot_DrawUnderShipsBeamQueue	src/game/spaceflight_view.cpp	85%	rendering
+0x00438C40	Shot_DrawUnderShipsBeamQueue	src/game/spaceflight_view.cpp	85%	rendering,synthetic
 0x00438DB0	Frame_UpdateSpriteDistanceIntensity	src/game/sprite_world.cpp	95%	rendering,divergence
 0x00438F40	NovaUi_UpdateCursorOverGameplayRect		0%	
 0x00438FC7	NovaUi_UpdateTravelSelectionSprite		0%	
@@ -217,7 +217,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0043C470	NovaUi_RunMissionBbsWindow	src/game/docked_mission_dialog.cpp	78%	ui,gameplay
 0x00441620	NovaUi_DrawMissionBbsWindow	src/game/docked_mission_dialog.cpp	65%	ui,rendering
 0x0043CC20	Stellar_RebuildTravelDestinationList		0%	
-0x0043CF00	Mission_EvaluateMissionLists	src/game/mission.cpp	85%	gameplay,divergence
+0x0043CF00	Mission_EvaluateMissionLists	src/game/mission.cpp	85%	gameplay
 0x0043D240	Mission_ResolveMissionStellarTargets	src/game/mission.cpp	100%	divergence
 0x0043D490	Mission_ResolveMissionSpecialShipSystem	src/game/mission.cpp	65%	gameplay
 0x0043D4C0	Mission_ResolveMissionSpecialShipCount	src/game/mission.cpp	65%	gameplay
@@ -298,7 +298,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0044F660	PlayerTick_SystemTransitionAndArrival	src/game/travel.cpp	50%	gameplay,ui,synthetic
 0x0044FFF0	PlayerTick_ReverseCommand	src/game/spaceflight_movement.cpp	100%	synthetic
 0x00450710	PlayerTick_AuxiliaryCommands	src/game/escort_commands.cpp	45%	gameplay,ui,license,synthetic
-0x00450717	PlayerTick_IonizationAndFuelRegeneration	src/game/spaceflight_player_state.cpp	100%	divergence
+0x00450717	PlayerTick_IonizationAndFuelRegeneration	src/game/spaceflight_player_state.cpp	100%	divergence,synthetic
 0x00451940	PlayerTick_InteractionCloakAndStatus	src/game/spaceflight.cpp	45%	gameplay,license,synthetic
 0x00454910	Ship_HandlePlayerTargetActionCommand	src/game/spaceflight.cpp	65%	gameplay,audio
 0x00455150	Weapon_FirePlayerWeaponBank	src/game/weapon.cpp	88%	gameplay,audio
@@ -723,7 +723,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004A8080	NovaUi_SyncTravelSelectionFromStarmapRoute	src/game/travel.cpp	90%	NovaStarmap_SyncTravelSelectionFromRoute: arms the travel slot + starmap destination from the first plotted hop when directly linked and latches travel_transfer_mode=3 (0x004a8080); called on starmap close and after jump arrival (Ship_HandlePlayerShipCore calls it in both places).
 0x004A8100	NovaUi_DrawStarmapRoutesAndMarkers	src/game/starmap_render.cpp	85%	DrawGalaxy: plotted-route green chain (2px), adjacency links from visited systems (is_visible && has_explored_flag && discovery>0) deduplicated with the highlight-flag rule, every link resolved through NovaSystem_ResolveVisibleForTravel (0x0046b920) so invisible twin groups end the line while visitation does not gate the target, committed-jump slot accent dark green 0x9900 gated on travel_transfer_mode==3 (line-225 gate), plotted-jump accent line pass (line-290: thick dark green current->resolve(links[slot]) while mode==3), markers as background discs + 1-2px StellarDisplayColor ring gated on the outer is_visible gate + marker latch (current / visited / discovered_this_rebuild, plus mission-target & selection overrides; mission targets compared via System_ResolveSystemDiscoverySlot 0x0046b9b0 discovery slots), zoom tier: radius 4 + 1px ring normally, 6 + 2px ring at zoom<0.5 (DAT_00575a00), current system cyan dot (radius 2/3), selection reticle 6/8 green corner ticks as 8 DISJOINT 4px segments. Mission-target CICN 0x3a98 arrow (down-right, up-left of the marker, box corner at the inset marker-rect corner, suppressed on the selected system per 0x004a8e5c); the green CICN 0x3a99 selected arrow (DAT_007dc3b4, 0x004a9040) draws up-right of ANY selected system in the flight map too - selecting a mission target swaps the red arrow for the green one (0x3a99/0x3a98 both load together at 0x004aea40; DAT_007dc745 only gates the selection clearing the mission override).
 0x004A99F0	Ui_DrawSystemRouteMap	src/game/starmap.cpp	90%	Draw pass ported as NovaStarmap_DrawRouteMapChart (starmap.cpp): reuses the shared routes/markers/labels pass with pan on the current system + g_route_map_zoom_scale, per-element alpha (blit tint), per-system space-background fill (PTR_DAT_00575acc) and the c\x9alr Colors floating_map border (DAT_00735658, 12,12,12 shipped) drawn before the markers per the non-8-bit path; remaining gap: the alpha is per-element rather than a surface blit tint, so the fill does not fade at the overlay tail
-0x004A9B30	NovaUi_UpdateTravelSelectionOverlay	src/game/route_map.cpp	100%	correctness,divergence
+0x004A9B30	NovaUi_UpdateTravelSelectionOverlay	src/game/route_map.cpp	95%	correctness
 0x004A9BF0	NovaUi_ProjectSystemToOverlayGrid	src/game/starmap_render.cpp	60%	System position -> overlay grid projection inlined in BuildPoliticalOverlay: gx/gy = round((screen - panel origin)/2) half-pixel cells, centred exactly on the marker.
 0x004A9D10	NovaUi_EnableStarmapPoliticalOverlay	src/game/starmap.cpp	50%	NovaStarmap_RunWindow wires the Show/Hide Borders toggle to the political-overlay rebuild: the overlay grid is marked dirty on toggle-on, zoom and pan and rebuilt against the actual panel before the next draw (the original recomputes on the same events via NovaUi_EnableStarmapPoliticalOverlay). Hover highlighting not modelled.
 0x004A9D50	NovaUi_BuildStarmapPoliticalOverlay	src/game/starmap_render.cpp	90%	BuildPoliticalOverlay uses the original's exact field: radius round(22/zoom)+12 / round(11/zoom)+9 grid UNITS (1 unit = 2 screen px, ~102px at default zoom), strength clamp((r^2-d^2)*fade*zoom, 1, 255) with fade 0.2/0.4, eligibility visited+latched+gov scan_mask bit2 clear+usable destination.

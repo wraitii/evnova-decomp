@@ -201,6 +201,7 @@ namespace {
 }
 
 // @port 0x00439750 100% divergence
+// DIVERGENCE(original): debug-log chrome around the cron event is skipped.
 // Ghidra 0x00439750 Mission_ActivateCronEvent. Fires the event's OnStart
 // set-string through the reaction-script executor. With flags 0x0001 the
 // original re-runs it while the Require mask and EnableOn expression hold,
@@ -227,6 +228,7 @@ void Mission_ActivateCronEvent(GameState &state, std::int16_t cron_index) {
 }
 
 // @port 0x004398b0 100% divergence
+// DIVERGENCE(original): debug-log chrome around the cron event is skipped.
 // Ghidra 0x004398b0 Mission_TerminateCronEvent. Fires OnEnd; flags 0x0002
 // selects the same iterative arm as activation.
 void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
@@ -398,6 +400,8 @@ void Player_CollectStellarTribute(GameState &state) {
 }
 
 // @port 0x00424f90 100% divergence
+// DIVERGENCE(original): the "any" arm builds the eligible stellar set
+// explicitly instead of rejection-sampling the full 0x800 g_stellar_defs.
 // Ghidra 0x00424f90 System_UpdateDisasterStates (per-game-day sweep of the
 // 0x100 öops slots; runs from the daily world-update driver).
 void System_UpdateDisasterStates(GameState &state) {

@@ -640,6 +640,8 @@ void Mission_ExecuteScript(GameState &state,
 // kApplyOriginalBugFixes gate for the broken path yet; reproducing it would
 // need both.
 // @port 0x00448020 100% divergence
+// DIVERGENCE(original): the engine receives an explicit std::string_view rather
+// than the shared g_reaction_script_buffer; the aliasing bug cannot occur.
 // Ghidra 0x00448020 Mission_ExecuteReactionScript. See the header comment.
 void Mission_ExecuteReactionScript(GameState &state,
                                    std::string_view script,
@@ -656,6 +658,8 @@ void Mission_ExecuteReactionScript(GameState &state,
 }
 
 // @port 0x00448050 100% divergence
+// DIVERGENCE(original): the payload is an explicit std::string_view, so the
+// original's shared-buffer aliasing ("second briefing twice") does not occur.
 // Ghidra 0x00448050 Mission_RunMisnScriptPayload.
 void Mission_RunMisnScriptPayload(GameState &state,
                                   std::string_view script,
@@ -682,6 +686,9 @@ void Mission_RunMisnScriptPayload(GameState &state,
 }
 
 // @port 0x00449370 100% divergence
+// DIVERGENCE(original): negative control-bit operands are clamp-dropped
+// instead of written out of bounds, the opcode fold is ASCII toupper, and the
+// lazily rebuilt lists need no explicit table clear.
 // Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine.
 void Mission_ExecuteMisnScriptEngine(GameState &state,
                                      std::string_view script,

@@ -35,6 +35,9 @@ using evnova::util::ReadCString;
 }
 
 // @port 0x0043BBB0 100% divergence
+// DIVERGENCE(original): the debug-option gate (FUN_004cd0b0, all-zero in
+// shipped data) is not reproduced, and several loader fields carry clean-room
+// names/projections.
 // Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs. The loader projects
 // each m\xefsn resource into a 1000-entry table; the runtime half lives in
 // mission.cpp.
