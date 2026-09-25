@@ -2820,7 +2820,7 @@ void Mission_ShowMissionShipAnnouncement(GameState &state,
                              /*duration_frames=*/std::uint64_t{0x1a4});
 }
 
-// @port 0x00426dd0 95% gameplay,verify
+// @port 0x00426dd0 95% gameplay
 // Ghidra 0x00426dd0 Mission_TrySpawnMissionShipAmbush.
 void Mission_TrySpawnMissionShipAmbush(GameState &state) {
   // Gate: the ambush personality (pers slot 0x3fe) must be defined by the

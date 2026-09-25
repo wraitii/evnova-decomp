@@ -433,8 +433,9 @@ void NovaFrame_JitterPlayerStatModifiers(GameState &state) {
   }
 }
 
-// @port 0x00431500 100% verify
-// Ghidra 0x00431500 Frame_RerollPlayerStatModifiers: [90,114] percent.
+// @port 0x00431500 100%
+// Ghidra 0x00431500 Frame_RerollPlayerStatModifiers: rand(0x15) + 0x5a, i.e.
+// [90, 110] percent.
 void NovaFrame_RerollPlayerStatModifiers(GameState &state) {
   for (std::size_t i = 2; i < 4; ++i) {
     state.player_stat_modifier_pct[i] =

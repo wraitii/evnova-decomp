@@ -729,7 +729,7 @@ namespace {
 
 } // namespace
 
-// @port 0x0044BEB0 75% gameplay,verify,synthetic
+// @port 0x0044BEB0 75% gameplay,synthetic
 // Ghidra PlayerTick_WeaponCommands, internal region of
 // Ship_HandlePlayerShipCore 0x0044AA70. Synthetic CFG: 0x0044BEB7 ->
 // 0x0044C0B1. Starting at the 0x0044BEB0 label is invalid because 0x0044BEB7
@@ -740,6 +740,8 @@ namespace {
 // primary fire, selected-secondary fire, unfirable-bank auto-clear, the
 // secondary-bank cycle, and the clear-selection arm. The cooldown-decay tail
 // runs unconditionally in NovaWeapon_TickPlayerWeaponBankCooldowns.
+// TODO(decomp(0x0044BEB0)): confirm the remaining command arms and the
+// availability-cache dirty signalling against Ghidra.
 void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
                                          const PlayerWeaponCommandInput &input,
                                          float /*elapsed_ticks*/) {

@@ -85,10 +85,13 @@ struct LoadedArchive {
   std::vector<ResourceRecord> records;
 };
 
-// @port 0x004CE4D0 80% correctness,verify
+// @port 0x004CE4D0 80% correctness
 // Ghidra 0x004ce4d0 ResourceArchive_OpenRez: ParseArchive reconstructs the
 // BRGR descriptor-table and big-endian resource.map parse into entries/records.
-// Remaining: verify the map-variant coverage against Ghidra.
+// TODO(decomp(0x004ce4d0)): the original locates resource.map by name via
+// FUN_00501710("resource.map"); the port scans entries for a plausible map
+// header. Verify the scan accepts every shipped map variant and cannot select a
+// wrong region.
 [[nodiscard]] std::optional<LoadedArchive>
 ParseArchive(const std::filesystem::path &path) {
   std::ifstream input{path, std::ios::binary | std::ios::ate};
@@ -303,10 +306,9 @@ public:
     return db;
   }
 
-  // @port 0x004CDFA0 95% correctness,verify
+  // @port 0x004CDFA0 100%
   // Ghidra 0x004cdfa0 ResourceDb_FindRecord: walks the prepended DB list
   // newest-first (reverse of load order); the first matching (type,id) wins.
-  // Remaining: verify archive-order selection against Ghidra.
   [[nodiscard]] std::optional<std::vector<std::byte>>
   Load(std::uint32_t type_code, std::uint16_t resource_id) {
     EnsureLoaded();
@@ -347,10 +349,9 @@ public:
   // ResourceData_FindByKey (0x004ce110): newest-first match on the registry
   // record name. Unlike the (type,id) accessors this compares names directly,
   // so an older archive can still satisfy a key the newest archive lacks.
-  // @port 0x004CE110 90% correctness,verify
+  // @port 0x004CE110 100%
   // Ghidra 0x004ce110 ResourceData_FindByKey: newest-first match on the
   // registry record name (backs ResourceData_AccessByKey).
-  // Remaining: verify archive-order selection against Ghidra.
   [[nodiscard]] std::optional<NovaResource> LoadByKey(std::uint32_t type_code,
                                                       std::string_view key) {
     EnsureLoaded();
@@ -371,11 +372,10 @@ public:
   // FUN_004ce2a0/FUN_004ce030 walk. ResourceData_GetSlotByIndex
   // (0x004ce030) deducts each archive's count from the head of the DB, so the
   // newest archive supplies slot 1.
-  // @port 0x004CE030 90% correctness,verify
+  // @port 0x004CE030 100%
   // Ghidra 0x004ce030 ResourceData_GetSlotByIndex: newest-first walk,
   // deducting each archive's matching-record count; within an archive records
   // stay in map order.
-  // Remaining: verify archive-order selection against Ghidra.
   [[nodiscard]] std::optional<std::vector<std::byte>>
   LoadNthOfType(std::uint32_t type_code, std::size_t ordinal) {
     EnsureLoaded();
@@ -488,11 +488,10 @@ private:
                   install_root->string());
   }
 
-  // @port 0x004FF900 90% correctness,verify
+  // @port 0x004FF900 100%
   // Ghidra 0x004ff900 ResourceDb_RegisterArchive: prepend semantics are
   // modelled by loading archives oldest-first and walking archives_ in reverse
   // for every lookup, so later archives shadow earlier ones.
-  // Remaining: verify prepend/shadowing semantics against Ghidra.
   void OpenArchive(const std::filesystem::path &path) {
     std::error_code ec;
     if (!std::filesystem::exists(path, ec) || ec) {

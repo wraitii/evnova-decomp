@@ -269,15 +269,14 @@ void NovaAsteroid_UpdateSprites(GameState &state, float elapsed_ticks) {
   }
 }
 
-// @port 0x004216b0 85% verify
+// @port 0x004216b0 100%
 // Ghidra 0x004216B0 Asteroid_InitSystem:
 // restores the current system's asteroid / drift-debris population on
 // spaceflight entry / cross-system travel. When the system declares no
 // asteroids (asteroid_count < 1) it sets the NoAsteroids latch
-// (GameState.no_asteroids_latch): the original writes a 1 byte into
-// g_random_encounter_fleet_defs[0x4d].availability_expression[0x94] (a scratch
-// area); the clean-room stores it in the explicit game-state flag instead
-// since that scratch buffer is not modelled. Otherwise it spawns
+// (GameState.no_asteroids_latch; the original views the same byte as
+// g_no_asteroids_latch DAT_00596d2c through an overlapping scratch symbol).
+// Otherwise it spawns
 // `asteroid_count` asteroid records (scatter placement) and pre-warms all 16
 // pool slots with a random wander target around the player.
 //

@@ -202,7 +202,7 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
   return false;
 }
 
-// @port 0x00461BD0 100% gameplay,verify
+// @port 0x00461BD0 95% gameplay
 // @port 0x00461F60 100% gameplay
 // ---------------------------------------------------------------------------
 // Player target cycling (0x00461bd0 / 0x00461f60).
