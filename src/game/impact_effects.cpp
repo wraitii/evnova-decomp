@@ -85,6 +85,7 @@ void NovaEffects_SpawnShipDestructionDebrisPuff(GameState &state,
   }
 }
 
+// @port 0x0043B170 65% rendering
 // Ghidra 0x0043b170 Frame_UpdateFadingEffectSprites. The original also cancels
 // every live fragment when the DAT_00596d29 "clear transient sprites" latch is
 // set; the port wipes the pool synchronously at the transition boundaries via

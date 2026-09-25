@@ -7,6 +7,7 @@
 
 namespace evnova::util {
 
+// @port 0x0043B4A0 100% divergence
 // Ghidra 0x0043b4a0 Math_AddPolarVelocity: add a polar vector to an XY pair
 // using the game's screen convention (bearing 0 = up, increasing clockwise:
 // x += sin*speed, y -= cos*speed). The pair is either a velocity or a

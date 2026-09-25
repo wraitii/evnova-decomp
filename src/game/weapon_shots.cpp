@@ -98,6 +98,7 @@ namespace {
 // Math_ShortestAngleDeltaDeg is shared from nova_math.hpp (see
 // NovaWeapon_TurnShotToward for the direction-recovery use).
 
+// @port 0x0043B6A0 100% divergence
 // Ghidra 0x0043b6a0 Math_ClampVelocityComponents: componentwise box clamp to
 // +/- max_speed.
 void ClampVelocityComponents(float &vel_x, float &vel_y, float max_speed) {
@@ -452,6 +453,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   return static_cast<int>(state.active_shots.size() - 1);
 }
 
+// @port 0x0043BA30 90% correctness
 // Ghidra 0x0043BA30 Shot_AimStellarBatteryShot. The battery's muzzle is its
 // map_x/map_y; the intercept uses the target's absolute velocity (the battery
 // does not move). Mode 6 freeflight rockets reuse the same two-regime spool-up

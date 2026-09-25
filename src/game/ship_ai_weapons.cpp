@@ -203,6 +203,7 @@ std::int16_t AimWeaponInterceptBearing(const GameState &state,
 
 } // namespace
 
+// @port 0x0043B740 100%
 // Ghidra 0x0043b740 Ship_AimWeaponPredictive. See ship_ai.hpp for the
 // algorithm. Returns the leading intercept bearing when the given weapon is a
 // lead-capable mode, else the straight bearing to the target.
@@ -235,6 +236,7 @@ std::int16_t NovaAi_AimWeaponPredictiveFrom(const GameState &state,
                                    /*include_mode6=*/true);
 }
 
+// @port 0x0043B8C0 100%
 // Ghidra 0x0043b8c0 Ship_AimWeaponLeadVelocity. Same intercept math as
 // Ship_AimWeaponPredictive, but the target arrives as explicit
 // position/velocity pointers so it can lead a non-Ship object (the scripted

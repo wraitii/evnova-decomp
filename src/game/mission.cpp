@@ -450,6 +450,7 @@ namespace {
   return false;
 }
 
+// @port 0x0043D510 100% divergence
 // Ghidra 0x0043d510 Mission_SelectMissionStellarByLocator. The original first
 // proves at least one of the fixed 0x800 slots is eligible (RNG-free), then
 // rejection-samples NovaRandom_Range(0x800) until one passes. Deliberate
@@ -874,6 +875,7 @@ EvaluateMissionPage(GameState &state, std::int16_t page_group) {
   return result;
 }
 
+// @port 0x0043D4C0 65% gameplay
 // Ghidra 0x0043d4c0 Mission_ResolveMissionSpecialShipCount.
 [[nodiscard]] std::int16_t ResolveSpecialShipCount(GameState &state,
                                                    std::int16_t encoded) {
@@ -892,6 +894,7 @@ EvaluateMissionPage(GameState &state, std::int16_t page_group) {
                                    (static_cast<int>(magnitude) + 1) / 2);
 }
 
+// @port 0x0043D490 65% gameplay
 // Ghidra 0x0043d490 Mission_ResolveMissionSpecialShipSystem.
 [[nodiscard]] std::int16_t ResolveSpecialShipSystem(GameState &state,
                                                     std::int16_t encoded) {
@@ -1098,6 +1101,7 @@ SampleAdjacentMissionSystem(GameState &state, std::int16_t base_system) {
   }
 }
 
+// @port 0x0043E6F0 100% divergence
 // Ghidra 0x0043e6f0 Mission_SelectMissionSystemByLocator with param_2 fixed to
 // the player's current system (the only caller, Mission_PopulateMissionSlot-
 // FromDef).
@@ -1216,6 +1220,7 @@ bool Mission_IsStellarValidRandomDestination(const GameState &state,
   return chain_is_persistent(candidate_system);
 }
 
+// @port 0x0043D240 100% divergence
 // Ghidra 0x0043d240 Mission_ResolveMissionStellarTargets.
 void Mission_ResolveMissionStellarTargets(GameState &state,
                                           std::int16_t mission_id) {
@@ -1294,6 +1299,7 @@ void Mission_ResolveMissionStellarTargets(GameState &state,
   }
 }
 
+// @port 0x0043C3E0 100% divergence
 // Ghidra 0x0043c3e0 Misn_ResolveMissionStellarLocators.
 void Mission_ResolveMissionStellarLocators(GameState &state) {
   for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
@@ -1304,6 +1310,7 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
   }
 }
 
+// @port 0x0043CF00 85% gameplay,divergence
 // Ghidra 0x0043cf00 Mission_EvaluateMissionLists.
 MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
   // The original opens with NovaResources_EvaluateAvailability (0x00448090):
@@ -1331,6 +1338,8 @@ MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
   return result;
 }
 
+// @port 0x0043F8C0 72% gameplay
+// Ghidra 0x0043f8c0 Mission_PopulateMissionSlotFromDef.
 bool Mission_PopulateActiveSlot(GameState &state,
                                 std::int16_t mission_id,
                                 std::size_t active_slot) {
@@ -1541,6 +1550,8 @@ std::int16_t Mission_OriginalAiSecondaryTargetSlot(const GameState &state) {
   return state.player.ai_secondary_target_slot;
 }
 
+// @port 0x0043F100 92% gameplay,ui,divergence
+// Ghidra 0x0043f100 Mission_ActivateMissionAtSlot.
 bool Mission_ActivateAtSlot(GameState &state,
                             std::int16_t mission_id,
                             const MissionAcceptanceSink &acceptance) {
@@ -1676,6 +1687,7 @@ std::int16_t Misn_ResolveVisibleSystemForTravel(const GameState &state,
   return -1;
 }
 
+// @port 0x00447A30 95% gameplay
 // Ghidra 0x00447a30 Mission_DoesSystemMatchMissionLocator. Tests a system
 // against an active mission's spawn locator (MisnActive +0x65, the m\xefsn
 // mission-fleet locator copied from payload +0x4a):
@@ -1878,6 +1890,7 @@ bool Mission_CheckReactionConditionSatisfied(const GameState &state,
                                         MissionControlExpressionState(state));
 }
 
+// @port 0x00440AA0 95% gameplay
 // Ghidra 0x00440aa0 Mission_ClearMisnSlotAssignments. Releases every ship
 // assigned to the mission-fleet slot: clears its fleet link, restores the
 // class-default AI behavior when it held a target, and re-enters AI state 2.
@@ -1969,6 +1982,7 @@ void ApplyCompetingGovernmentReputation(GameState &state,
   }
 }
 
+// @port 0x00440410 92% gameplay,ui
 // Ghidra 0x00440410 Mission_ResolveMissionSuccess.
 void Mission_ResolveMissionSuccess(GameState &state,
                                    std::int16_t mission_slot,
@@ -2034,6 +2048,7 @@ void Mission_ResolveMissionSuccess(GameState &state,
   // Ambient-roll latch invalidation is not modelled (TODO(decomp)).
 }
 
+// @port 0x00440930 93% ui
 // Ghidra 0x00440930 Mission_ResolveMissionFailure.
 void Mission_ResolveMissionFailure(GameState &state,
                                    std::int16_t mission_slot,
@@ -2125,6 +2140,8 @@ bool NovaStellar_AreStellarsEquivalent(const GameState &state,
   return a->pos_x == b->pos_x && a->pos_y == b->pos_y && a->name == b->name;
 }
 
+// @port 0x00440370 100% divergence
+// Ghidra 0x00440370 Mission_TryConsumeMissionInteractionResources.
 bool Mission_TryConsumeMissionInteractionResources(
     GameState &state, std::int16_t count, const MissionDebriefSink &debrief) {
   const auto show_denial = [&](std::uint16_t entry) {
@@ -2158,6 +2175,7 @@ bool Mission_TryConsumeMissionInteractionResources(
   return true;
 }
 
+// @port 0x00440BF0 95% gameplay
 // Ghidra 0x00440bf0 Mission_FailMissionSlotQuick. Immediate failure path:
 // runs the failure payload, latches the failed flag, and releases assigned
 // ships when the misn CanAbort latch is set (the original reuses that flag
@@ -2347,6 +2365,7 @@ bool Mission_RunAvailLocOffers(
   return true;
 }
 
+// @port 0x00443C60 97% correctness
 // Ghidra 0x00443c60 Mission_HandleMissionOrSurrenderShipReaction. Per-tick
 // objective evaluation for one active mission slot: drives the
 // objective-complete/failed runtime latches from the mission goal's counters
@@ -2562,6 +2581,7 @@ void Mission_HandleMissionOrSurrenderShipReaction(
   }
 }
 
+// @port 0x00443760 100%
 // Ghidra 0x00443760 Mission_TickShipInteractionReactions. Per-tick driver
 // over the 16 active-mission slots (TickSystems scope 0xb).
 void Mission_TickShipInteractionReactions(GameState &state,
@@ -2573,6 +2593,7 @@ void Mission_TickShipInteractionReactions(GameState &state,
   }
 }
 
+// @port 0x004438D0 92% ui
 // Ghidra 0x004438d0 Mission_ProcessInteractionReactionSlotResources. Landing
 // interaction pass for one slot: handles mission-cargo pickup/drop-off at the
 // TravelStel and final delivery at the ReturnStel. The pickup/drop-off desc
@@ -2659,6 +2680,7 @@ void Mission_ProcessInteractionReactionSlotResources(
   }
 }
 
+// @port 0x00443780 95% gameplay
 // Ghidra 0x00443780 Mission_TickReactionSlotsForTravelInteraction. The
 // landing gate, run from the travel-destination interaction loop with the
 // current stellar: evaluates objectives, processes cargo interactions, and
@@ -2847,6 +2869,7 @@ bool Ship_HasAnyCargoLootOrActiveMission(const GameState &state) {
   return false;
 }
 
+// @port 0x00441B40 85% gameplay,divergence
 // Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility.
 bool Mission_CheckMissionShipInteractionEligibility(GameState &state,
                                                     std::int16_t mission_id,

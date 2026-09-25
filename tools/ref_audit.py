@@ -10,11 +10,14 @@ For each row with an impl_file:
 
 Also cross-checks the in-source `@port` markers against the tracker:
   // @port 0xADDR[,0xADDR...] NN% [tag[,tag...]]
-The marker is the authoritative port-site annotation: the percentage is the
-gap magnitude and the tags classify the kind of remaining work (see PORT_TAGS).
-The audit reports markers with no tracker row, marker file or pct mismatches,
-unrecognized tags, pct<100 rows with no tags, and ported rows without a marker
-(migration coverage, not a failure).
+The marker is the authoritative port-site annotation: `NN%` is the remaining
+work and the tags classify what remains or mark a decision (see PORT_TAGS).
+Domain tags name unported work; status tags (`divergence`, `moddata`, `verify`)
+are orthogonal to `pct`, so a row whose only open item is a permanent decision
+is 100% and a `pct<100` row must carry a domain tag. The audit fails on markers
+with no tracker row, marker file or pct mismatches, unrecognized tags, and
+permanent decisions at `pct<100`; it reports pct<100 rows with no tags and
+ported rows without a marker (migration coverage, not a failure).
 
 Writes a report to analysis/ref_audit.txt. Read-only; no writes to the DB.
 
@@ -38,11 +41,11 @@ ADDR_RE = re.compile(r"0x[0-9A-Fa-f]{6,8}")
 FUNC_DEF_RE = re.compile(
     r"^(?:[A-Za-z_][\w:<>,*&\s\[\]]*?\s+)?([A-Za-z_]\w*)\s*\(", re.M
 )
-# Controlled vocabulary for `@port` tags: what remains in a ported function.
-# Tags let a resumer distinguish a 95% row whose gap is `license` from one
-# whose gap is `gameplay`. Keep the set small; the audit rejects unknown tags.
+# Controlled vocabulary for `@port` tags. A tag names what remains in a ported
+# function, so a resumer can tell a `license` gap from a `gameplay` one.
+# Keep the set small; the audit rejects unknown tags.
 #
-# Domain tags (where the gap lives):
+# Domain tags say where unported work remains:
 #   gameplay    - simulation or player-outcome behavior is missing or altered.
 #                 A temporary divergence from the original is `gameplay` or
 #                 `correctness`, not `divergence`.
@@ -56,10 +59,11 @@ FUNC_DEF_RE = re.compile(
 #   rendering   - sprite/world/effect drawing and its resolved frames; visual
 #                 fidelity only, no simulation outcome.
 #   audio       - sound or voice cue gaps.
-#   license     - shareware/registration/nag paths; out of scope by design
-#                 and permanent, so it does not also need `divergence`.
+#   license     - shareware/registration/nag paths; out of scope by design.
 #
-# Status tags:
+# Status tags are decisions, not work. `pct` counts remaining work, so a row
+# whose only open item is a status tag is 100%; a status tag may sit beside a
+# domain tag, but never replace it (a `pct<100` row needs a domain tag).
 #   verify      - our value/behavior is unconfirmed and must be checked against
 #                 Ghidra before it can be trusted.
 #   divergence  - a deliberate difference from the original that we expect to
@@ -67,9 +71,8 @@ FUNC_DEF_RE = re.compile(
 #                 `correctness`, never `divergence`.
 #   moddata     - divergences we make for mod-hardening, clarity, or avoiding
 #                 quirky data-related behaviour where constants feel more
-#                 intentional. A specialized permanent divergence, so it does
-#                 not also need `divergence`.
-PORT_TAGS = {
+#                 intentional. A specialized permanent divergence.
+PORT_DOMAIN_TAGS = {
     "gameplay",
     "rng",
     "license",
@@ -78,10 +81,13 @@ PORT_TAGS = {
     "ui",
     "rendering",
     "audio",
+}
+PORT_STATUS_TAGS = {
     "verify",
     "divergence",
     "moddata",
 }
+PORT_TAGS = PORT_DOMAIN_TAGS | PORT_STATUS_TAGS
 # In-source port-site marker. One comment line, one or more addresses, an
 # optional percentage, and an optional comma-separated tag CSV.
 PORT_RE = re.compile(
@@ -281,6 +287,7 @@ def main() -> None:
     pct_mismatch = []          # marker pct != row pct
     unknown_tag = []           # tag not in PORT_TAGS
     uncharacterized = []       # pct<100 but no tags
+    permanent_gap = []         # pct<100 with divergence/moddata but no domain tag
     unmarked = []              # ported row with no @port marker
     tag_census: Counter = Counter()
     seen = set()
@@ -304,8 +311,16 @@ def main() -> None:
                 tag_census[tag] += 1
                 if tag not in PORT_TAGS:
                     unknown_tag.append(f"{addr} tag='{tag}' {loc}")
-            if m["pct"] and m["pct"] != "100%" and not m["tags"]:
-                uncharacterized.append(f"{addr} {m['pct']} {loc}")
+            eff_pct = m["pct"] or row["reimpl_pct"]
+            if eff_pct and eff_pct != "100%" and not m["tags"]:
+                uncharacterized.append(f"{addr} {eff_pct} {loc}")
+            if (
+                eff_pct
+                and eff_pct != "100%"
+                and set(m["tags"]) & (PORT_STATUS_TAGS - {"verify"})
+                and not set(m["tags"]) & PORT_DOMAIN_TAGS
+            ):
+                permanent_gap.append(f"{addr} {eff_pct} {loc}")
     for r in rows:
         if r["impl_file"] and r["address"].lower() not in markers:
             unmarked.append(f"{r['address']} {r['name']} -> {r['impl_file']}")
@@ -332,6 +347,11 @@ def main() -> None:
     out += unknown_tag
     out.append(f"\n== @port pct<100 without tags ({len(uncharacterized)}) ==")
     out += uncharacterized
+    out.append(
+        f"\n== @port permanent decision without a domain tag at pct<100 "
+        f"({len(permanent_gap)}) =="
+    )
+    out += permanent_gap
     out.append(f"\n== ported rows without @port marker ({len(unmarked)}) ==")
     out += unmarked
     out.append(f"\n== Ghidra name != csv name ({len(ghidra_mismatch)}) ==")
@@ -345,7 +365,14 @@ def main() -> None:
     print(report[:4000])
 
     # Hard marker inconsistencies fail the audit; the unmarked backlog does not.
-    if unknown_marker or marker_file_mismatch or pct_mismatch or unknown_tag or malformed:
+    if (
+        unknown_marker
+        or marker_file_mismatch
+        or pct_mismatch
+        or unknown_tag
+        or malformed
+        or permanent_gap
+    ):
         sys.exit(1)
 
     if "--gen" in sys.argv:

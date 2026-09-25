@@ -78,6 +78,7 @@ namespace game {
 // Pure tick-scaled movement integration (unit-tested in
 // tests/movement_test.cpp).
 
+// @port 0x0043B4E0 100% divergence
 // One per-axis step of Ghidra Math_AddPolarVelocityWithClamp (0x0043b4e0), the
 // original's single forward-thrust pathway (Ship_HandleShip calls it with
 // `ai_forward_thrust_cmd * frame_time` as the base speed). For each velocity
@@ -1248,6 +1249,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   }
 }
 
+// @port 0x0043B020 100% divergence
 // Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020). Takes the
 // inertialess ship's scalar `speed` + `heading`, builds the commanded
 // velocity as heading*speed (Math_AddPolarVelocity), then moves the PREVIOUS

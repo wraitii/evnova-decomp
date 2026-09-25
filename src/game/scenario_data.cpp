@@ -34,6 +34,9 @@ using evnova::util::ReadCString;
                      offset);
 }
 
+// @port 0x0043BBB0 100% divergence
+// Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs. The loader projects each
+// m\xefsn resource into a 1000-entry table; the runtime half lives in mission.cpp.
 [[nodiscard]] MissionDef DecodeMission(std::span<const std::byte> bytes) {
   MissionDef mission;
   const auto copy_size = std::min(bytes.size(), mission.raw_payload.size());
