@@ -40,6 +40,7 @@ std::uint16_t NovaInput_CommandKey(std::size_t command) {
   return (key == 0xff || key == 0xffff) ? 0xffff : key;
 }
 
+// @port 0x00469ca0 40% gameplay
 // Ghidra 0x00469ca0 NovaInput_IsCommandActiveWithGameplayGuards (partial: the
 // command-id -> bound-key -> held-key path; the DAT_00596d3c modal guard and
 // the g_panel_suppressed_commands list are unmodeled).

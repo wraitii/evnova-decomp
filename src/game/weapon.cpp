@@ -1086,6 +1086,7 @@ void NovaWeapon_PreloadGameplaySounds(GameState &state) {
                     GameState::kGameplaySoundCount - 1);
 }
 
+// @port 0x004692e0 90% audio
 // Ghidra NovaAudio_PlaySpatialByDistance (0x004692e0): the original computes
 // left/right channel gains from the rounded source/listener displacement,
 // clamps each channel to the [extent/8, extent] band, then averages the

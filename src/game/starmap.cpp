@@ -516,6 +516,7 @@ void DrawLiveChrome(SdlPlatform &platform,
 
 // ---- Info panes ------------------------------------------------------------
 
+// @port 0x00468d90 100%
 // Ghidra 0x00468d90 NovaUi_DrawSystemFactionConflictStatus: the selected
 // system's Legal Status text, graded from the system's reputation against the
 // owning government's flee threshold (t). The ladder (levels 1..15) is the
@@ -620,6 +621,7 @@ void DrawLiveChrome(SdlPlatform &platform,
   return level;
 }
 
+// @port 0x00469d30 100%
 // Ghidra 0x00469d30 Stellar_ExtractTravelFlagConnectiveValue: the six
 // trade-class lanes packed into the stellar flags word, class i at bits
 // (28 - 4*i) .. (30 - 4*i); any nonzero lane means the class is traded.
@@ -628,6 +630,7 @@ void DrawLiveChrome(SdlPlatform &platform,
   return (flags & lane) != 0U;
 }
 
+// @port 0x00468210 70% gameplay
 // Ghidra 0x00468210 Stellar_HasAdjacentAccessibleStellarMatchingTravelFlags:
 // any usable nav stellar that trades `class_index` (flags bit 1 set + lane).
 [[nodiscard]] bool
@@ -649,6 +652,7 @@ SystemTradesClass(const GameState &state, const System &sys, int class_index) {
   return false;
 }
 
+// @port 0x004682d0 70% gameplay
 // Ghidra 0x004682d0 Stellar_HasAdjacentAccessibleStellarForTravelMode:
 // any usable nav stellar with the mode's service bit (2 Trading, 4
 // Outfitting, 8 Shipyard).

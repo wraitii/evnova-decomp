@@ -165,6 +165,11 @@ bool Outfit_HasCloakRadarVisibility(const GameState &state, const Ship &ship) {
   return false;
 }
 
+// @port 0x0046abb0 100% divergence
+// DIVERGENCE(original): the original memoizes into the DAT_007356ba -1 sentinel
+// global; this pure on-demand scan is kept instead, matching the density/IFF
+// scanner helpers above.
+// Ghidra 0x0046abb0 Ship_GetScannerStrength.
 int Ship_ComputeScannerStrength(const GameState &state) {
   constexpr std::int16_t kInterferenceModType = 0x18; // ModType 24
   int strength = 0;

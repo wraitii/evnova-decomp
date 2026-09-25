@@ -583,6 +583,7 @@ void UpdateMenuCenterPreview(NovaRuntime &runtime, std::uint64_t now_ms) {
   }
 }
 
+// @port 0x00469030 100%
 // Ghidra 0x00469030 NovaUi_DrawCombatRankLabel. Maps the raw combat-rating
 // points to a rank index (thresholds 100/200/400/800/1600/3200/6400/12800/
 // 25600) and returns the STR# 0x8a label (1-based entry rank+1).

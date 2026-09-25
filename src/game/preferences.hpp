@@ -131,6 +131,7 @@ NovaPrefs_HyperspaceFlashIsBlack(const NovaPreferences &prefs) {
   return prefs.hyperspace_effects;
 }
 
+// @port 0x0046ab60 100%
 // Ghidra 0x0046ab60 NovaAudio_UpdateCenteredGainFromPreference.
 // The original first maps the stored preference to an integer mixer level
 // (sound_volume * 8, clamped to 0x100). Audio_AllocateVoiceSlot then clamps

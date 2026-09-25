@@ -1132,6 +1132,9 @@ SampleAdjacentMissionSystem(GameState &state, std::int16_t base_system) {
 
 } // namespace
 
+// @port 0x00468b50 100% rng
+// TODO(decomp(0x00468b50)): the 0x00441b40 sanity selector does not consume the
+// selection RNG in the port (replay-parity gap only).
 // Ghidra 0x00468b50 Mission_IsStellarValidRandomDestination.
 bool Mission_IsStellarValidRandomDestination(const GameState &state,
                                              std::int16_t candidate,

@@ -1251,6 +1251,8 @@ std::int32_t SumActiveMissionCargoTons(const GameState &state) {
 
 } // namespace
 
+// @port 0x0046a5d0 100%
+// Ghidra 0x0046a5d0 Player_ComputeCargoAndJunkTotal.
 // The player ship's total cargo + junk. Mirrors
 // Player_ComputeCargoAndJunkTotal (0x0046a5d0): the 6 cargo bins plus
 // every active mission's carried cargo (carrying_resources and
@@ -1272,6 +1274,7 @@ std::int16_t Player_ComputeCargoAndJunkTotal(const GameState &state) {
   return static_cast<std::int16_t>(total);
 }
 
+// @port 0x0046a680 100%
 // Ghidra 0x0046a680 Player_HasAnyCargoMissionOrJunk.
 bool Player_HasAnyCargoMissionOrJunk(const GameState &state) {
   if (std::any_of(state.inventory.cargo_bins.begin(),
@@ -1358,6 +1361,7 @@ bool Outfit_PlayerHasOutfitForControlExpression(
          Outfit_CountCarriedShipsForOutfit(state, outfit_resource_id) > 0;
 }
 
+// @port 0x0046a730 100%
 // Ghidra 0x0046a730 Ship_ComputeShipTotalCargoCapacity. The player's total
 // cargo capacity: class Holds plus ModType-2 (cargo space) outfit mods
 // weighted by owned count. The original multiplies each (owned * ModVal) in
@@ -1391,6 +1395,7 @@ std::int32_t Ship_ComputeShipTotalCargoCapacity(const GameState &state) {
   return capacity;
 }
 
+// @port 0x00469760 100%
 // Ghidra 0x00469760 Player_ComputeFleetCargoCapacity. Player fleet cargo
 // capacity starts from the player ship's total cargo capacity (truncated to a
 // signed 16-bit value, matching the original's `(int)(short)` cast) and adds
@@ -1448,6 +1453,7 @@ std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state) {
   return std::max<std::int32_t>(0, free_mass);
 }
 
+// @port 0x00469100 100%
 // Ghidra 0x00469100 Ship_ComputeTradeInValue. The original seeds with 25% of
 // the current ship class's base cost, then adds 50% of each owned
 // non-persistent outfit's purchase price (mass-scaled against the current
@@ -1490,6 +1496,7 @@ std::int32_t Ship_ComputeTradeInValue(const GameState &state) {
   return std::max<std::int32_t>(0, total);
 }
 
+// @port 0x0046a7c0 100%
 // Ghidra 0x0046a7c0 Player_ComputeRemainingCargoSpace. "Remaining" is the
 // player ship's own free holds after mission cargo and the bins/junk overflow
 // beyond the escort freighters' extra capacity. When the fleet has no extra

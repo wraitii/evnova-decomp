@@ -575,6 +575,10 @@ MissionDialogText Mission_LoadSelectionDialogText(const GameState &state,
 
 namespace {
 
+// @port 0x00468600 70% gameplay
+// Ghidra 0x00468600 Stellar_FormatElapsedTravelTime. TODO(decomp): the
+// offer-row <DL> arm reads the mission target-resolution table (dates not
+// tracked); elapsed-days params 3/4 are ignored by the original body too.
 // Shared body of NovaText_FormatDateString (0x00468450) and
 // Stellar_FormatElapsedTravelTime (0x00468600): "MONTH DAYst, YEAR" with the
 // STR# 0x89 month table and day suffixes (st/nd/rd by last digit, th
@@ -612,6 +616,8 @@ namespace {
 
 } // namespace
 
+// @port 0x00468450 100%
+// Ghidra 0x00468450 NovaText_FormatDateString.
 std::string NovaText_FormatDateString(const GameDate &date,
                                       bool abbreviated_month,
                                       std::string_view prefix,
