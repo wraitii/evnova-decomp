@@ -45,8 +45,12 @@ constexpr float kStellarRedirectDistanceDivisor = 2.0F;
 constexpr std::int16_t kStellarRedirectHostilityScale = 0x1e; // x30
 constexpr float kCloakFadeFull =
     32.0F; // DAT_00575228 (also shield-bubble flash)
-constexpr float kProximitySpanFraction =
-    0.333005F; // DAT_00575338: blast + ship half-span * ~1/3
+// DAT_00575338 is a double 0.333, consumed by the x87 blast-proximity radius
+// (FILD width / FILD blast / FMUL double / FADDP / FIST).
+constexpr double kProximitySpanFraction = 0.333;
+// Sprite_GetFrameFullWidth (0x00462390) returns 0x20 for an unresolved frame;
+// the proximity blast radius uses the ship sprite's full width, not a radius.
+constexpr int kDefaultShipFrameFullWidthPx = 0x20;
 constexpr std::int16_t kShipClassInvalidSentinel = 0x2ff;
 // Clean-room circle radius for a freeflight resource-box when no sprite mask
 // is available (the original scoop arm always uses the opaque-pixel test).
@@ -195,11 +199,15 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
   return false;
 }
 
-// @port 0x0046D190 80% gameplay
+// @port 0x0046D190 100% divergence
 // Ghidra 0x0046d190 Ship_ShipsShareSquadRoot. Walks each ship's
 // squad_leader_ship_slot to a root and returns true when the roots match. The
-// walk is bounded to tolerate malformed cycles (the original is not; see the
-// function's plate comment). NovaShip_ShipsShareSquadRoot exposes it.
+// walk stops at the first inactive slot and returns that node, matching the
+// original (Ghidra 0x0046d190 checks `is_active` before following a leader).
+// DIVERGENCE(original): the port bounds the walk by GameState::kMaxShips and
+// validates every slot before indexing; the original trusts the array and would
+// loop without bound on a malformed leader cycle. NovaShip_ShipsShareSquadRoot
+// exposes it.
 [[nodiscard]] bool SharesSquadRoot(const GameState &state,
                                    std::int16_t first_slot,
                                    std::int16_t second_slot) {
@@ -209,8 +217,11 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
       if (!ValidShipSlot(current)) {
         return current;
       }
-      const std::int16_t next = state.ShipAt(static_cast<std::size_t>(current))
-                                    .squad_leader_ship_slot;
+      const Ship &ship = state.ShipAt(static_cast<std::size_t>(current));
+      if (!ship.is_active) {
+        return current;
+      }
+      const std::int16_t next = ship.squad_leader_ship_slot;
       if (!ValidShipSlot(next) || next == current) {
         return current;
       }
@@ -1464,13 +1475,13 @@ void Ship_ApplyDamageToShip(GameState &state,
   }
 }
 
-// @port 0x00437780 90% gameplay
+// @port 0x00437780 100%
 // Ghidra Shot_ResolveShotCollisionHit (0x00437780). Applies the primary area
 // impact effect, the direct damage/impulse/ionization package, and the axis-
-// aligned splash to every other eligible ship.
-// TODO(decomp(0x00437780)): verify the remaining detail against Ghidra - the
-// exact splash damage terms, the suppress-retarget condition (shot +0x28 vs
-// the direct target slot), and the linked-shot gate/RNG order.
+// aligned splash to every other eligible ship. The impact-particle burst runs
+// before the direct on-hit effects rather than after; neither helper reads the
+// other's state and the burst still precedes Ship_ApplyDamageToShip, so the RNG
+// stream and the visible frame are unchanged.
 //
 // `shot_index` is used instead of a reference because the linked-shot spawner
 // appends to GameState::active_shots and may reallocate it; the shot is only
@@ -1715,16 +1726,12 @@ void ResolveAsteroidDestructionPackage(GameState &state,
   asteroid.active = false;
 }
 
-// @port 0x00436ff0 75% gameplay
+// @port 0x00436ff0 100%
 // Ghidra NovaUi_ResolveWeaponSplashImpact (0x00436ff0): a blast weapon that
 // reaches an asteroid (flags_quaternary bit 0 clear) spawns the area impact,
 // splashes nearby ships (player-owned shots only), decrements the asteroid's
 // integrity counter by the weapon's shield damage, and either runs the
-// destruction package or nudges the asteroid along the impact.
-// TODO(decomp(0x00436ff0)): the surviving-asteroid nudge derives the impact
-// bearing from the shot's velocity; the original reads ShotState +0x20 (a
-// range/heading scalar whose semantics are unconfirmed). Verify the field and
-// the resulting impulse direction.
+// destruction package or nudges the asteroid along the shot's stored heading.
 void ResolveAsteroidSplashImpact(GameState &state,
                                  ActiveShot &shot,
                                  AsteroidState &asteroid) {
@@ -1803,21 +1810,25 @@ void ResolveAsteroidSplashImpact(GameState &state,
   if (asteroid.integrity < 0) {
     ResolveAsteroidDestructionPackage(state, asteroid);
   } else if (weapon->impact_impulse != 0) {
-    // Surviving asteroids are nudged along the impact direction. The original
-    // reads the bearing from ShotState +0x20 (provisional range_scalar_runtime
-    // in the DB); the clean-room derives it from the shot's velocity. The
-    // impulse is divided by the def's size-scaled mass and the result clamped
-    // to +-2.0 px/frame per axis (DAT_0057531c).
+    // Surviving asteroids are nudged along the shot's stored heading: Ghidra
+    // 0x00437305 loads ShotState.heading_deg (+0x20) as a float and truncates
+    // it to the short Math_AddPolarVelocityWithClamp bearing. The impulse is
+    // divided by the def's size-scaled mass and each axis box-clamped to +-2.0
+    // px/frame (g_destroyed_finale_threshold_f32 = 0x40000000).
     const AsteroidDef *def = state.scenario.AsteroidType(
         static_cast<std::int16_t>(asteroid.wander_type + 0x80));
     if (def != nullptr && def->mass > 0) {
+      constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
       const float speed = static_cast<float>(weapon->impact_impulse) /
                           static_cast<float>(def->mass);
-      const float bearing_deg = std::atan2(shot.vel_x, -shot.vel_y) *
-                                (180.0F / 3.14159265358979323846F);
-      const float rad = bearing_deg * (3.14159265358979323846F / 180.0F);
-      asteroid.target_vel_x += std::sin(rad) * speed;
-      asteroid.target_vel_y += -std::cos(rad) * speed;
+      const float bearing_rad =
+          static_cast<float>(static_cast<std::int16_t>(shot.heading_deg)) *
+          kDegToRad;
+      Math_AddPolarVelocityWithClamp(bearing_rad,
+                                     speed,
+                                     2.0F,
+                                     asteroid.target_vel_x,
+                                     asteroid.target_vel_y);
       asteroid.target_vel_x = std::clamp(asteroid.target_vel_x, -2.0F, 2.0F);
       asteroid.target_vel_y = std::clamp(asteroid.target_vel_y, -2.0F, 2.0F);
     }
@@ -1842,7 +1853,7 @@ void NovaCollision_RefreshCollisionMasks(GameState &state) {
   RefreshCollisionMasks(state);
 }
 
-// @port 0x0042d890 90% gameplay,cadence,audio
+// @port 0x0042d890 100%
 // Ghidra Stellar_TickStellarDefenseBatteries (0x0042d890).
 //
 // Runs in Frame_TickSystems scope 8 before Stellar_TickStellarGravityPull /
@@ -2098,9 +2109,21 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
             owner.defense_fleet_home_stellar_id) {
       return false;
     }
-    // TODO(decomp) skipped: the disabled range gate comparing
-    // ShipClassDef +0xa10 against ShotState +0x42 (per-shot scatter range,
-    // 0xffff for non-turret modes) - the field semantics are still provisional.
+    // TODO(decomp) unported: turret tracking gate (Ghidra
+    // Weapon_CanWeaponHitTarget 0x00426ef0). Only Guidance 4 (turreted unguided
+    // projectile) and Guidance 9 (point-defense turret) shots carry a per-shot
+    // turret_tracking_roll, seeded at spawn as Random(shooter class
+    // turret_tracking_rating)+1; every other mode stores 0xffff/-1, so beams
+    // and quadrant turrets are exempt. This predicate rejects a non-disabled
+    // target whose own class rating is below that roll:
+    // target_class.turret_tracking_rating < shot.turret_tracking_roll. The
+    // rating is a hardcoded engine table derived from the hull's
+    // EscortType/class_category (Fighter 80, Medium 90, Warship/Freighter 100),
+    // not a ship resource field. Net effect: a larger hull's turret/PD
+    // projectiles probabilistically pass through an active smaller hull, but
+    // still hit it once disabled. The rating table is not loaded
+    // (ShipClass) and the roll is not seeded (NovaWeapon_SpawnProjectile,
+    // src/game/weapon_shots.cpp). See Ghidra plates on 0x0041fd30/0x00426ef0.
 
     const bool owner_chain_to_player =
         OwnerChainReachesPlayer(state, owner_slot);
@@ -2134,8 +2157,12 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
           (target_dude->booty_flags & 0x0100U) != 0U) {
         return false;
       }
-      // Owner-side booty gate: when the owner has no valid dude record, the
-      // owner's squad leader's dude record is consulted instead.
+    }
+    // Owner-side booty gate: Ghidra 0x00427160 guards this block with the
+    // TARGET being the player or player-squad (bVar5), independent of the owner
+    // chain (bVar4). When the owner has no valid dude record, the owner's squad
+    // leader's dude record is consulted instead.
+    if (NovaShip_IsInPlayerSquad(state, target)) {
       const DudeDef *owner_dude = DudeFor(state, owner);
       if (owner_dude == nullptr &&
           ValidShipSlot(owner.squad_leader_ship_slot)) {
@@ -2230,7 +2257,7 @@ void ResolveDirectAsteroidContact(GameState &state,
   }
 }
 
-// @port 0x004374f0 90% gameplay
+// @port 0x004374f0 100% divergence
 // Ghidra Ship_HandleSpritePairCollision (0x004374f0) with its sprite-layer
 // driver inlined: the original is invoked per overlapping (ship sprite, shot
 // sprite) pair by TestSpriteLayerOverlaps and picks the bounding-circle or
@@ -2240,6 +2267,9 @@ void ResolveDirectAsteroidContact(GameState &state,
 // reimplementation evaluates ships first, then asteroids for a shot that did
 // not already connect. Both contacts test the decoded per-frame pixel masks
 // (Sprite_TestPixelMaskOverlap 0x00475c80) with the bounding-circle fallback.
+// DIVERGENCE(original): the freeflight-object arm always runs
+// Sprite_TestPixelMaskOverlap; the port falls back to the bounding circle when
+// either frame's mask could not be decoded (archive-free tests).
 void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
   // Resolve the per-frame sprite masks the original's sprite layer would have
   // carried into the two pair-collision callbacks before testing contacts.
@@ -2369,10 +2399,14 @@ void NovaWeapon_ResolveFreeflightScoop(GameState &state) {
                   state.inventory
                       .cargo_bins[static_cast<std::size_t>(payload)] +
                   1);
+        } else {
+          // Ghidra 0x004374f0 always banks the payload into the collecting
+          // ship's own cargo bin (+0x7a); only the player also refreshes the
+          // inventory derived state below.
+          const std::size_t bin = static_cast<std::size_t>(payload);
+          ship.cargo_bins[bin] =
+              static_cast<std::int16_t>(ship.cargo_bins[bin] + 1);
         }
-        // TODO(decomp): NPC cargo bins live on the original ShipState
-        // (+0x7a) but the clean-room does not model NPC holds; the NPC arm is
-        // also gated by AI state 0x11, which is not reconstructed yet.
       } else if (player_ship && payload >= 1000 && payload < 0x468) {
         const std::size_t index = static_cast<std::size_t>(payload - 1000);
         if (index < state.inventory.junk_counts.size()) {
@@ -2484,9 +2518,13 @@ bool ResolveShotStellarContact(GameState &state,
   return false;
 }
 
-// @port 0x00437e20 80% gameplay
+// @port 0x00437e20 100% divergence
 // Ghidra Shot_ResolveCollisions (0x00437e20): the blast-proximity pass. It
 // runs after the direct-contact pass, so a shot that already connected skips.
+// DIVERGENCE(original): the original's fixed 0x80-slot pool can process a
+// submunition it spawned into a free slot ahead of the cursor during the same
+// pass; the port's compacted vector always appends, so new children first act
+// on the next frame.
 void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
   // The original reads the ambient sprites prepared by the sprite tick; the
   // clean-room resolves the same current-frame masks here so the stellar arm
@@ -2538,18 +2576,21 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
           continue;
         }
         const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
-        // Ghidra 0x00437e20: radius = trunc(blast_radius + ship half-span *
-        // 0.333) (DAT_00575338); positions and distances are compared in
-        // integer space. The clean-room's collision_radius_px stands in for
-        // the sprite half-span.
-        const auto radius = static_cast<float>(
-            static_cast<int>(static_cast<float>(weapon->blast_radius) +
-                             std::max(0.0F, target.collision_radius_px) *
-                                 kProximitySpanFraction));
-        const auto dx = static_cast<int>(target.pos_x - shot.pos_x);
-        const auto dy = static_cast<int>(target.pos_y - shot.pos_y);
-        if (dx * dx + dy * dy <=
-            static_cast<int>(radius) * static_cast<int>(radius)) {
+        // Ghidra 0x00437e20: radius = trunc(blast_radius +
+        // Sprite_GetFrameFullWidth(ship) * 0.333). The full frame width is the
+        // resolved mask width (0x20 when no mask is available), and each world
+        // coordinate is truncated toward zero before the subtraction.
+        const int target_full_width = target.collision_mask.HasMask()
+                                          ? target.collision_mask.mask->width
+                                          : kDefaultShipFrameFullWidthPx;
+        const auto radius = static_cast<int>(
+            static_cast<double>(weapon->blast_radius) +
+            static_cast<double>(target_full_width) * kProximitySpanFraction);
+        const auto dx =
+            static_cast<int>(target.pos_x) - static_cast<int>(shot.pos_x);
+        const auto dy =
+            static_cast<int>(target.pos_y) - static_cast<int>(shot.pos_y);
+        if (dx * dx + dy * dy <= radius * radius) {
           ResolveShotCollisionHit(state,
                                   shot_index,
                                   state.ShipAt(static_cast<std::size_t>(slot)),

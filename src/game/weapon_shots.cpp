@@ -509,9 +509,9 @@ std::int16_t NovaWeapon_AimStellarBatteryShot(const GameState &state,
 // consistent with the bank-indexed table. The port keeps the raw resource id on
 // Stellar.weapon_id and resolves it through ScenarioData::Weapon (which
 // re-applies the same -0x80), then stores the resulting bank slot on the shot,
-// matching the original shot's weapon_id. ShotState +0x24 visibility and +0x40
-// retarget_timer are not modelled on ActiveShot. The sound variant (5) is
-// likewise not carried by pending_fire_sounds.
+// matching the original shot's weapon_id. ShotState +0x24 visibility is not
+// modelled on ActiveShot (the renderer derives sprite state); +0x40 point
+// defense durability and the spatial fire sound (priority width 5) are carried.
 int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
                                        const Stellar &battery,
                                        std::int16_t target_ship_slot,
@@ -547,6 +547,8 @@ int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
       w->damage_decay_interval_ticks < 1 ? -1.0F : 0.0F;
   shot.damage_decay_points = 0;
   shot.guidance_state = 0;
+  shot.point_defense_durability =
+      std::max<std::int16_t>(0, w->point_defense_durability);
   shot.linked_shot_generation = 0;
   // Original frame_cycle_index seed: Random(0x24) unless flags_primary 0x4
   // (a fixed/heading sprite set) is set.

@@ -357,4 +357,38 @@ TEST_CASE("a full freeflight pool drops yield without overwriting", "[scoop]") {
         static_cast<int>(FreeflightObjectState::kPoolSize));
 }
 
+TEST_CASE("AI-state-0x11 NPC banks scooped cargo into its own hold",
+          "[scoop]") {
+  GameState state;
+  SeedPlayerForCollision(state);
+  // The player has no scoop, so only the NPC arm can collect.
+  state.player.mining_scoop_active = false;
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.current_system_id = 0;
+  npc.ai_state_code = 0x11; // mining AI state (Ship_IsShipInAiState0x11)
+  npc.pos_x = 0.0F;
+  npc.pos_y = 0.0F;
+  npc.collision_radius_px = 10.0F;
+
+  FreeflightObjectState &box = state.freeflight_objects[0];
+  box.lifetime_ticks = 100.0F;
+  box.persistent = true;
+  box.system_id = 0;
+  box.extra = 2;
+  box.pos_x = 0.0F;
+  box.pos_y = 0.0F;
+
+  NovaWeapon_ResolveFreeflightScoop(state);
+
+  CHECK(box.lifetime_ticks < 0.0F);
+  // Ghidra 0x004374f0 banks the payload into the collecting ship's own cargo
+  // bin (+0x7a), not the player inventory.
+  CHECK(npc.cargo_bins[2] == 1);
+  CHECK(state.inventory.cargo_bins[2] == 0);
+}
+
 } // namespace game

@@ -10,7 +10,7 @@
 //   - Shot_ResolveCollisions (0x00437e20) is the separate blast-proximity
 //     pass: stellar-damage contacts (weapons with flags_secondary 0x400),
 //     blast-radius proximity hits against ships (radius = blast_radius +
-//     ship sprite half-span / 3), and asteroid splash.
+//     ship sprite full frame width * 0.333), and asteroid splash.
 // Both passes funnel into Shot_ResolveShotCollisionHit -> Shot_ResolveShip-
 // HitFromWeapon (0x004192d0) for damage, impulse, and aggro.
 //
@@ -40,9 +40,10 @@ namespace game {
 
 // Ghidra Weapon_CanWeaponHitTarget (0x00426ef0). Engagement gates: valid
 // ownership/system, active and non-destroyed target, mode-1 target matching,
-// self/faction/leader/stellar-target exclusions, player-escort and booty-flag
-// exclusions for player-aligned owners, scripted-maneuver exclusion, and the
-// ship-class capability_flags 0x400 vs weapon flags_secondary 0x400 match.
+// self/faction/leader/stellar-target exclusions, player-aligned owner exclusion
+// gates plus a target-player-conditioned owner booty gate, scripted-maneuver
+// exclusion, and the ship-class capability_flags 0x400 vs weapon
+// flags_secondary 0x400 match.
 [[nodiscard]] bool NovaWeapon_CanProjectileHitShip(const GameState &state,
                                                    const ActiveShot &shot,
                                                    std::int16_t target_slot);
@@ -97,9 +98,10 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state);
 // Ghidra Ship_HandleSpritePairCollision (0x004374f0), freeflight-object arm:
 // the mining-scoop collection pass. Every ship pixel-mask-overlaps the
 // persistent freeflight resource-boxes; the player (mining_scoop_active) or an
-// NPC in AI state 0x11 collects one unit of the object's cargo (extra 0..5) or
-// junk (extra 1000..1127, player only) payload, retiring the object. The
-// player pickup re-derives the scoop latch through the cargo-capacity gate.
+// NPC in AI state 0x11 collects one unit of the object's cargo (extra 0..5)
+// into its own hold, or junk (extra 1000..1127, player only) payload, retiring
+// the object. The player pickup re-derives the scoop latch through the
+// cargo-capacity gate.
 void NovaWeapon_ResolveFreeflightScoop(GameState &state);
 
 // Public test seam the direct-contact pass uses: resolves each live entity's
