@@ -1168,6 +1168,10 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 // Each star draws its randomly-chosen frame of the 16-frame star-field sprite
 // sheet (sp\x9an 700, 4x4 grid of 5x5 tiles) at native 1:1 size; a small point
 // stands in only if the sheet cannot load.
+// @port 0x0046BBF0 60% rendering
+// Ghidra 0x0046bbf0 NovaRender_SetSystemSpaceBackgroundColor. The port applies
+// the per-system BkgndColor tint in DrawBackground; the original DrawContext
+// sprite-effect surface plumbing is not reconstructed.
 void SpaceflightView::DrawBackground(SdlPlatform &platform,
                                      const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();

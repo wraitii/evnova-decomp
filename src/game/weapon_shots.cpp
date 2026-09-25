@@ -410,6 +410,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
       std::max(1.0F, static_cast<float>(w->lifetime_ticks));
   shot.life_frames = static_cast<int>(std::ceil(shot.life_ticks_remaining));
   shot.collision_radius_px = 2.0F;
+  // @port 0x0046C2F0 10% gameplay
   // Weapon_GetShotImpactVariant (0x0046c2f0): Flags2 bit 0x1000 makes a
   // weapon disable but not destroy. Ship_ApplyDamageToShip preserves
   // one armor point for that variant.
@@ -591,6 +592,7 @@ int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
   return static_cast<int>(state.active_shots.size() - 1);
 }
 
+// @port 0x0046BA30 95% gameplay
 // Ghidra 0x0046BA30 Ship_FindNearestHittableWeaponTarget. Returns the slot of
 // the nearest active ship in the player's system that this shot's weapon can
 // hit (Weapon_CanWeaponHitTarget 0x00426ef0 ->

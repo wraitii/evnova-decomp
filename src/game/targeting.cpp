@@ -56,6 +56,8 @@ struct PlayerScannerCapabilities {
   bool can_target_cloaked = false;      // modVal & 0x08
 };
 
+// @port 0x0046C930 100%
+// @port 0x0046CA60 100%
 [[nodiscard]] PlayerScannerCapabilities
 ScannerCapabilities(const GameState &state) {
   PlayerScannerCapabilities caps;
@@ -87,6 +89,7 @@ ScannerCapabilities(const GameState &state) {
   return caps;
 }
 
+// @port 0x0046C7A0 100%
 // ---------------------------------------------------------------------------
 // Ship_IsShipCloakVisibilityThresholdActive (0x0046c7a0).
 // ---------------------------------------------------------------------------
@@ -440,6 +443,7 @@ NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state) {
   return best;
 }
 
+// @port 0x0046E3C0 100%
 // ---------------------------------------------------------------------------
 // Ghidra 0x0046E3C0 Stellar_IsStellarActive.
 // ---------------------------------------------------------------------------
@@ -461,6 +465,7 @@ std::int16_t NovaTargeting_StellarSpriteLinkId(const Stellar &st) {
   return st.link_a_id;
 }
 
+// @port 0x0046E3F0 100%
 // ---------------------------------------------------------------------------
 // Ghidra 0x0046E3F0 Stellar_StellarTargetsSpriteSetActive.
 // ---------------------------------------------------------------------------
@@ -476,6 +481,7 @@ bool NovaTargeting_StellarTargetsSpriteSetActive(const Stellar &st) {
   return active == engaged;
 }
 
+// @port 0x0046E440 100%
 // ---------------------------------------------------------------------------
 // Ghidra 0x0046E440 Stellar_IsStellarUsableForTravel.
 // ---------------------------------------------------------------------------

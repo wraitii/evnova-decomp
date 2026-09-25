@@ -52,6 +52,7 @@ constexpr double kNpcFireCooldownScale1p1 = 1.1;
 
 } // namespace
 
+// @port 0x0046C320 100%
 // Ghidra 0x0046c320 Weapon_SelectTurretQuadrant: pick and advance the firing
 // barrel quadrant for the weapon's turret group, offsetting muzzle_pos to the
 // barrel. The bearing is the DISPLAYED rotation frame scaled back to degrees

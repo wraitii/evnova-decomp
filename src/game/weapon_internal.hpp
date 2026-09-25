@@ -81,6 +81,7 @@ AddPolarVelocity(float bearing_deg, float speed, float &vel_x, float &vel_y) {
   return frame;
 }
 
+// @port 0x0046C5C0 100%
 // Ghidra 0x0046c5c0 Weapon_ApplyTurretSpreadVelocity: apply one turret
 // group's quadrant-barrel muzzle displacement to a position. Accumulates
 // polar(forward, ship_bearing) + polar(lateral, ship_bearing + 90 mod 360)
@@ -121,6 +122,7 @@ inline void ApplyTurretSpreadVelocity(const ShipClass &cls,
            static_cast<float>(cls.muzzle_drop[turret_group_id][quadrant_index]);
 }
 
+// @port 0x0046C4E0 100%
 // Ghidra 0x0046c4e0 Weapon_ChooseBestTurretQuadrantForTarget: apply each of
 // the four quadrant barrel offsets to the muzzle position and return the
 // quadrant minimizing the squared distance to the target point. Returns 0

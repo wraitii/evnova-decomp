@@ -113,6 +113,8 @@ constexpr int kAutoRepairFrameRerollRange = 500;
 namespace {
 
 // @port 0x0043ADB0 10% gameplay
+// @port 0x0046E120 25% gameplay
+// @port 0x0046E2F0 55% gameplay
 // Ghidra 0x0043adb0 Stellar_TickStellarGravityPull (player-side port; NPC
 // iteration/crash consequences not reconstructed). The protected_from_gravity
 // check below ports Stellar_ShipHasGravityShielding (0x0046e120) for the
@@ -349,6 +351,7 @@ void DetonateCarriedBomb(GameState &state) {
 
 } // namespace
 
+// @port 0x0046E540 95% cadence
 // Ghidra Frame_ShouldTriggerAutoRepairTick (0x0046e540): random gate (1-in-N,
 // N = 500 with the low-tick-scale reroll; 500 / frame tick scale otherwise),
 // a destroyed-ship veto, and the repair outfit's ModType 0x31 presence. The
