@@ -121,7 +121,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0041F330	Player_RedistributeFleetCargoOverflow	src/game/outfit.cpp	95%	gameplay
 0x0041F800	Ship_SpawnFreeflightObjectForShip	src/game/freeflight_objects.cpp	100%	
 0x0041FB50	Ship_SpawnFreeflightObjectAtPosition	src/game/freeflight_objects.cpp	90%	gameplay
-0x0041FD30	Shot_SpawnShotFromWeapon	src/game/weapon_shots.cpp	93%	gameplay
+0x0041FD30	Shot_SpawnShotFromWeapon	src/game/weapon_shots.cpp	95%	gameplay,rng
 0x00420D30	Shot_SpawnLinkedShotsOnImpact	src/game/weapon_shots.cpp	100%	
 0x004211D0	Shot_SpawnAreaImpactEffects	src/game/impact_effects.cpp	100%	
 0x00421500	Shot_SpawnImpactEffectSprite	src/game/impact_effects.cpp	55%	rendering
@@ -472,7 +472,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046C080	Ship_ComputeIonizationDecayRate	src/game/outfit.cpp	100%	divergence
 0x0046C160	Ship_GetIonizationIntensity	src/game/outfit.cpp	100%	divergence
 0x0046C250	System_GetEffectiveMurkPercent	src/game/travel.cpp	100%	
-0x0046C2F0	Weapon_GetShotImpactVariant	src/game/weapon_shots.cpp	10%	gameplay
+0x0046C2F0	Weapon_GetShotImpactVariant	src/game/weapon_shots.cpp	100%	
 0x0046C320	Weapon_SelectTurretQuadrant	src/game/weapon.cpp	100%	
 0x0046C4E0	Weapon_ChooseBestTurretQuadrantForTarget	src/game/weapon_internal.hpp	100%	
 0x0046C5C0	Weapon_ApplyTurretSpreadVelocity	src/game/weapon_internal.hpp	100%	
