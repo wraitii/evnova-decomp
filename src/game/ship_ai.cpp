@@ -57,6 +57,7 @@ using namespace ship_ai_detail;
 // point for its existing callers.
 bool NovaAiShip_IsDestroyed(const Ship &ship) { return IsShipDestroyed(ship); }
 
+// @port 0x00410670 100%
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget.
 void NovaAi_EnterState2ClearPrimaryTarget(GameState &state, Ship &ship) {
   ship.ai_state_code = 2;
@@ -67,6 +68,7 @@ void NovaAi_EnterState2ClearPrimaryTarget(GameState &state, Ship &ship) {
   ship.ai_mode_start_time_ms = state.tick_60hz;
 }
 
+// @port 0x00410dd0 100%
 // Ghidra 0x00410dd0 Ship_ResetShipPrimaryAndSecondaryTargets.
 void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship) {
   if (ship.ai_state_code != 9 && ship.ai_state_code != 0xf) {
@@ -79,6 +81,7 @@ void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship) {
   ship.ai_desired_speed = 0.0F;
 }
 
+// @port 0x00410e20 100%
 // Ghidra 0x00410e20. This is the ordinary new-NPC arrival/slowdown entry used
 // when no adjacent restricted stellar was selected. The spawn caller supplies
 // the position; the original helper owns these state and animation latches.
@@ -109,6 +112,7 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
       ship.ai_station_hold_timer);
 }
 
+// @port 0x004159e0 80% verify
 // Ghidra 0x004159e0 Ship_EnterShipAiState0x15_EmergeFromHypergate.
 void NovaAi_EnterState15EmergeFromHypergate(GameState &state,
                                             Ship &ship,
@@ -535,6 +539,7 @@ void NovaAi_OnShipCloakStateCleared(GameState &state, Ship &ship) {
   ClearCloakTransition(state, ship);
 }
 
+// @port 0x00411d00 100% moddata
 // Ghidra 0x00411d00 Ship_UpdateShipCloakStateFromTraits.
 void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   constexpr float kCloakTargetDistance = 165.0F; // DAT_005750b0
@@ -630,6 +635,7 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x00412330 100%
 // Ghidra 0x00412330 Ship_SelectNearestDisabledShipForBoarding: find the
 // nearest boardable ship and lock it in as the primary target with AI state
 // 0x0d. Candidate gates, in original order: not self, not one of this ship's
@@ -690,6 +696,7 @@ void NovaAi_SelectNearestDisabledShipForBoarding(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x004133f0 95% correctness,moddata
 // Ghidra 0x004133F0 Ship_UpdateShipCombatOddsScore.
 void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
   const ShipClass *ship_class = ShipClassFor(state, ship);
@@ -753,6 +760,7 @@ void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
                        static_cast<float>(allied_strength);
 }
 
+// @port 0x004152e0 100% moddata
 // Ghidra 0x004152E0 Ship_IssueEscortOrders.
 // Commands are Formation=0, Defend=1, Attack=2, and Return=3.
 void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
@@ -1139,6 +1147,7 @@ void NovaAi_UpdateShipAI(GameState &state,
 
 // ---------------------------------------------------------------------------
 
+// @port 0x004053c0 100%
 // Ghidra 0x004053c0 Mission_UpdateShipMissionStellarAttackDirective.
 void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
                                                      Ship &ship) {
@@ -1230,6 +1239,7 @@ namespace {
 
 } // namespace
 
+// @port 0x004048a0 70% audio
 // Ghidra 0x004048a0 Ship_UpdateEscortAI. Per-frame supervisor
 // for behavior > 4 ships (carried fighters = 5, escorts = 6): keeps the squad
 // attached to its leader, decodes the escort command (player group command /
@@ -1639,6 +1649,7 @@ bool NovaAiShip_CanMaintainCloakState(const GameState &state,
   return true;
 }
 
+// @port 0x0040f780 100%
 // Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget.
 bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
                                          const Ship &ship) {
@@ -1718,6 +1729,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
   return false;
 }
 
+// @port 0x0040fc00 100%
 // Ghidra 0x0040fc00 Ship_IsThreatened.
 bool NovaAiShip_IsThreatened(const GameState &state, const Ship &ship) {
   if (!ship.is_active || NovaAiShip_IsDisabled(state, ship)) {
@@ -1746,6 +1758,7 @@ bool NovaAiShip_IsThreatened(const GameState &state, const Ship &ship) {
   return false;
 }
 
+// @port 0x0040fca0,0x0040fce0 100%
 // Ghidra 0x0040fca0 / 0x0040fce0.
 bool NovaAiShip_IsShipAssistingPlayerState9(const GameState &state,
                                             const Ship &ship) {
@@ -1759,6 +1772,7 @@ bool NovaAiShip_IsShipAssistingPlayerState0xF(const GameState &state,
          ship.primary_target_ship_slot == 0 && ship.ai_state_code == 0x0F;
 }
 
+// @port 0x004102b0 100%
 // Ghidra 0x004102b0 Ship_IsShipLockedOnAttackerInAiState0x04.
 bool NovaAiShip_IsShipLockedOnAttackerInState4(const Ship &ship,
                                                const Ship &attacker) {
@@ -1766,6 +1780,7 @@ bool NovaAiShip_IsShipLockedOnAttackerInState4(const Ship &ship,
          ship.ai_state_code == 4;
 }
 
+// @port 0x004124f0 100%
 // Ghidra 0x004124f0 Ship_IsShipLockedOnTarget.
 bool NovaAiShip_IsShipLockedOnTarget(const Ship &ship, const Ship &target) {
   const std::int16_t state = ship.ai_state_code;
@@ -1773,11 +1788,13 @@ bool NovaAiShip_IsShipLockedOnTarget(const Ship &ship, const Ship &target) {
          ship.primary_target_ship_slot == target.ship_instance_id;
 }
 
+// @port 0x00410ce0 100%
 // Ghidra 0x00410ce0 Ship_IsShipInAiBehavior5State0x05.
 bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship) {
   return ship.ai_behavior_code == 5 && ship.ai_state_code == 5;
 }
 
+// @port 0x00410e80 100%
 // Ghidra 0x00410e80 Ship_IsShipInHoldStateWithControlMode4Or0x0D.
 bool NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship) {
   const std::int16_t s = ship.ai_state_code;
@@ -1785,16 +1802,19 @@ bool NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship) {
          (ship.ai_control_mode == 4 || ship.ai_control_mode == 0x0D);
 }
 
+// @port 0x00410ec0 100%
 // Ghidra 0x00410ec0 Ship_IsShipInAiState0x08.
 bool NovaAiShip_IsShipInAiState8(const Ship &ship) {
   return ship.ai_state_code == 8;
 }
 
+// @port 0x00410ee0 100%
 // Ghidra 0x00410ee0 Ship_IsShipInAiControlMode0x0C.
 bool NovaAiShip_IsShipInAiControlModeC(const Ship &ship) {
   return ship.ai_control_mode == 0x0C;
 }
 
+// @port 0x00410f00 100%
 // Ghidra 0x00410f00 Ship_IsShipInAiState0x04.
 bool NovaAiShip_IsShipInAiState4(const Ship &ship) {
   return ship.ai_state_code == 4;
@@ -1821,16 +1841,19 @@ bool NovaShip_IsInPlayerSquad(const GameState &state, const Ship &ship) {
                  .squad_leader_ship_slot == 0;
 }
 
+// @port 0x004112a0 100%
 // Ghidra 0x004112a0 Ship_IsShipInAiState0x02.
 bool NovaAiShip_IsShipInAiState2(const Ship &ship) {
   return ship.ai_state_code == 2;
 }
 
+// @port 0x004159c0 100%
 // Ghidra 0x004159c0 Ship_IsShipInAiState0x15.
 bool NovaAiShip_IsShipInAiState0x15(const Ship &ship) {
   return ship.ai_state_code == 0x15;
 }
 
+// @port 0x00411c20 100%
 // Ghidra 0x00411c20 Ship_FindSwarmMate. The original
 // indexes g_ship_states by slot and relies on instance id == slot; the low
 // bound (strictly lower slots) and the -1-faction/-1-leader guards are exact.
@@ -1860,6 +1883,7 @@ std::int16_t NovaAi_FindSwarmMate(const GameState &state, Ship &ship) {
   return -1;
 }
 
+// @port 0x00411b40 100%
 // Ghidra 0x00411b40 Ship_IsSwarmMateStillValid. A non-swarming hull
 // (or an unresolvable class) reports "valid" so the caller keeps the stale
 // cache untouched, exactly as the original's flags test short-circuits.
@@ -1885,6 +1909,7 @@ bool NovaAiShip_IsSwarmMateStillValid(const GameState &state,
            ship.squad_leader_ship_slot != -1));
 }
 
+// @port 0x00411ae0 100%
 // Ghidra 0x00411ae0 Ship_ShouldFollowSwarmMate. Defense-fleet
 // ships are excluded (they coordinate through their stellar instead), and a
 // cached swarm mate equal to the ship's own squad leader is left to the
@@ -1903,12 +1928,14 @@ bool NovaAiShip_ShouldFollowSwarmMate(const GameState &state, Ship &ship) {
   return false;
 }
 
+// @port 0x00411270 100%
 // Ghidra 0x00411270 Ship_IsShipInNonIdleAiState.
 bool NovaAiShip_IsShipInNonIdleAiState(const Ship &ship) {
   const std::int16_t s = ship.ai_state_code;
   return s != 0 && s != 2 && s != 1 && s != 0x14 && s != 7;
 }
 
+// @port 0x00410060 100%
 // Ghidra 0x00410060 Ship_IsAnyShipThreatToPlayerSquad.
 bool NovaAi_IsAnyShipThreatToPlayerSquad(const GameState &state) {
   for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
@@ -1920,6 +1947,7 @@ bool NovaAi_IsAnyShipThreatToPlayerSquad(const GameState &state) {
   return false;
 }
 
+// @port 0x004101d0 100%
 // Ghidra 0x004101d0 Ship_IsEnemyOfShip.
 bool NovaAiShip_IsEnemyOfShip(const GameState &state,
                               const Ship &ship,
@@ -1955,6 +1983,7 @@ bool NovaAiShip_IsEnemyOfShip(const GameState &state,
   return false;
 }
 
+// @port 0x004100a0 100%
 // Ghidra 0x004100a0 Ship_IsPlayerThreatenedByEnemyOfShip.
 bool NovaAiShip_IsPlayerThreatenedByEnemyOfShip(const GameState &state,
                                                 const Ship &ship) {
@@ -1972,6 +2001,7 @@ bool NovaAiShip_IsPlayerThreatenedByEnemyOfShip(const GameState &state,
   return false;
 }
 
+// @port 0x00410110 100%
 // Ghidra 0x00410110 Ship_IsThreatenedByEnemyOfShip.
 bool NovaAiShip_IsThreatenedByEnemyOfShip(const GameState &state,
                                           const Ship &ship,
@@ -1997,6 +2027,7 @@ bool NovaAiShip_IsThreatenedByEnemyOfShip(const GameState &state,
   return false;
 }
 
+// @port 0x00410c30 100%
 // Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerForAssist.
 void NovaAi_EnterState9TargetPlayerForAssist(Ship &ship) {
   ship.ai_hostility_accumulator = 0;
@@ -2007,6 +2038,7 @@ void NovaAi_EnterState9TargetPlayerForAssist(Ship &ship) {
   ship.ai_maneuver_timer_ms = -1.0F;
 }
 
+// @port 0x00410c70 100%
 // Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerForAssist.
 void NovaAi_EnterState0FTargetPlayerForAssist(Ship &ship) {
   ship.ai_hostility_accumulator = 0;
@@ -2046,6 +2078,7 @@ namespace {
 
 } // namespace
 
+// @port 0x00410b00 100%
 // Ghidra 0x00410b00 Ship_EnterShipAiState0x04_TargetRandomUnengagedShip.
 void NovaAi_EnterState4TargetRandomUnengagedShip(GameState &state, Ship &ship) {
   std::int16_t count = 0;
@@ -2082,6 +2115,7 @@ void NovaAi_EnterState4TargetRandomUnengagedShip(GameState &state, Ship &ship) {
   ship.ai_state_code = 4;
 }
 
+// @port 0x004107e0 100%
 // Ghidra 0x004107e0 Ship_EnterShipAiState0x04_TargetRandomCombatCandidate.
 void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
                                                    Ship &ship) {
@@ -2118,6 +2152,7 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
   ship.ai_state_code = 4;
 }
 
+// @port 0x004106b0 100%
 // Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_ClearTargetsSeedHold.
 void NovaAi_EnterStateBClearTargetsSeedHold(Ship &ship,
                                             std::uint32_t now_60hz) {
@@ -2157,6 +2192,7 @@ void NovaAi_SyncJumpStateToSquad(GameState &state,
   }
 }
 
+// @port 0x00410cb0 100%
 // Ghidra 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToSquadLeader.
 void NovaAi_EnterState5ReturnToSquadLeader(Ship &ship) {
   ship.primary_target_ship_slot = -1;
@@ -2165,6 +2201,7 @@ void NovaAi_EnterState5ReturnToSquadLeader(Ship &ship) {
   ship.ai_control_mode = 0;
 }
 
+// @port 0x00410900 100% verify
 // Ghidra 0x00410900
 // Ship_EnterShipAiState0x04_TargetRandomRelativeToSquadLeader.
 void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
@@ -2247,6 +2284,7 @@ void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
   }
 }
 
+// @port 0x00410700 100% correctness,divergence
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Ports the escort-mode/state
 // flip plus the pers announcement arm: a personality ship (no mission fleet)
 // whose pers Flags carry 0x10 announces once when made hostile, unless it is
@@ -2345,6 +2383,7 @@ void NovaShip_ApplyInherentGovernmentVoice(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x00402810 100%
 // Ghidra 0x00402810 Ship_ResetShipAiBehaviorRuntimeFields.
 void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
   ship.ai_state_code = 0;
@@ -2356,6 +2395,7 @@ void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
   ship.resolved_squad_leader_ship_slot = -1;
 }
 
+// @port 0x00410d10 95% verify
 // Ghidra 0x00410d10 Ship_EnterSquadReturnState; the behavior-5
 // follower sweep at the tail is 0x00410cb0
 // Ship_EnterShipAiState0x05_ReturnToSquadLeader run inline.

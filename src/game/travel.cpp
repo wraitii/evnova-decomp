@@ -818,6 +818,7 @@ bool NovaTravel_CanStartJump(const GameState &state) {
   return NovaTravel_CanShipInitiateJumpSequence(state, state.player);
 }
 
+// @port 0x00415b80 100%
 // Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence, for an arbitrary
 // (NPC) ship. Gates on the ship's OWN class fuel capacity being at least one
 // jump (kJumpFuelCost), NOT the player's. Blocks while the ship is locked to

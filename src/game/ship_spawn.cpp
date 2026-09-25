@@ -2193,6 +2193,9 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   return slot;
 }
 
+// @port 0x0040d9a0 100%
+// Ghidra 0x0040d9a0 Ship_LaunchShipFromCarrierBay: per-frame launch driver
+// (bank selection, cooldown, spawn + queued fire sound).
 bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher) {
   if (launcher.primary_target_ship_slot == -1) {
     return false;
@@ -2299,6 +2302,9 @@ bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher) {
   return true;
 }
 
+// @port 0x00415ea0 100% ui,moddata
+// Ghidra 0x00415ea0 Ship_RecoverCarriedShipToBay (bay-RECOVERY arm). The
+// g_shipAvailabilityCachesDirty write is UI-only and deferred.
 void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
   const std::int16_t carrier_slot = fighter.squad_leader_ship_slot;
   if (carrier_slot < 0 ||

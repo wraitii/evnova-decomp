@@ -348,6 +348,7 @@ int NovaAi_GetShipJammingScore(const GameState &state,
   return score;
 }
 
+// @port 0x00410f20 100% moddata
 // Ghidra 0x00410f20 Ship_CanTargetOutrunShooter. The final base-speed
 // comparison is the live decision: true means the target is not slower than
 // the shooter (strict ship < target with a tracking bank, non-strict
@@ -425,6 +426,7 @@ bool NovaAiShip_CanTargetOutrunShooter(const GameState &state,
                             : ship_class->speed <= target_class->speed;
 }
 
+// @port 0x00412090 100%
 // Ghidra 0x00412090 Ship_ScoreAssistTargetForShip. `candidate` is the target
 // being scored and `helper` the ship that would assist against it; the
 // original's source parameter names (`ship`, `target_ship`) are inverted
@@ -496,6 +498,7 @@ std::int32_t NovaAi_ScoreAssistTargetForShip(const GameState &state,
   return std::max(score, 1);
 }
 
+// @port 0x00412030 100%
 // Ghidra 0x00412030 Ship_FindBestAssistTargetForShip. The decompiler exposes
 // the second argument as a ShipState pointer, but the callsites pass the
 // literal short ranges 0x226 and -1; score_flags is the useful semantic type.
@@ -515,6 +518,7 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
   return best_slot;
 }
 
+// @port 0x00411540 100% moddata
 // Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget (Carbon symbol
 // AIEscortFireUnprovoked). Escort/mission automatic-weapon refresh, called at
 // the tail of the Ship_ApplyShipAiControls mode bodies 0/1/9/0xb/0xc (see
@@ -637,6 +641,7 @@ bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
   return blind;
 }
 
+// @port 0x0040ce00 100%
 // Ghidra 0x0040ce00 Weapon_FireTurretAtTarget (Carbon symbol AIFireTurret).
 // Turret-only bank selection for the current primary target: runs the
 // point-defense auto-fire prologue, then scans fireable mode-3/4/7/8 banks in
@@ -772,6 +777,7 @@ bool NovaAi_IsInboundThreatExceedingDefenses(const Ship &ship) {
   return std::fma(defenses, kDefenseBudgetScale, -budget) <= 0.0;
 }
 
+// @port 0x0040d220 100% moddata
 // Ghidra 0x0040d220 Weapon_SelectGuidedWeaponBankForPrimaryTarget. Arms the
 // first fireable guided (mode-1) bank that can track the primary target
 // within the (0.95-scaled) intercept range; applies the scanner-untargetable
@@ -852,6 +858,7 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
   }
 }
 
+// @port 0x0040d470 100% moddata
 // Ghidra 0x0040d470 Weapon_SelectDirectFireWeaponBankForPrimaryTarget. Arms
 // the best in-range direct-fire bank (modes -1/0/6, or mode 1 when
 // allow_guided_mode) scored by mass/energy damage; mode 6 applies a
@@ -965,6 +972,7 @@ void NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(GameState &state,
   }
 }
 
+// @port 0x0040d910 100%
 // Ghidra 0x0040d910 Weapon_SelectGeneralWeaponBank. Broad fallback: arms the
 // most recent fireable general weapon (non mode-0/3, mode < 8).
 void NovaAi_SelectGeneralWeaponBank(GameState &state, Ship &ship) {
@@ -994,6 +1002,7 @@ void NovaAi_SelectGeneralWeaponBank(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x0040d7e0 100%
 // Ghidra 0x0040d7e0 Weapon_SelectUnguidedWeaponBank. Fallback that arms the
 // highest-damage fireable unguided bank: modes -1/0/6, or mode 7 when there
 // is no primary target. Mode 0 additionally passes only when the weapon's

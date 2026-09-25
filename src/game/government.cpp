@@ -257,6 +257,7 @@ bool NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
          (ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0);
 }
 
+// @port 0x0040fd20 100%
 // Ghidra 0x0040fd20 Ship_DoesShipLikePlayer. See the header for the branch
 // description. The final GovtDef +0x83 gate is the per-government IFF-scrambler
 // latch `Government.iff_scrambler_active` (written by
@@ -374,6 +375,7 @@ bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
   return govt.iff_scrambler_active;
 }
 
+// @port 0x00413610 90% gameplay,moddata
 // Ghidra 0x00413610 Government_TryTriggerGovtAssistanceEncounter.
 bool NovaGovernment_TryTriggerAssistanceEncounter(GameState &state,
                                                   const Ship &ship,
@@ -897,6 +899,7 @@ void ShowScanMessage(GameState &state,
 
 } // namespace
 
+// @port 0x00401800 100%
 // Ghidra 0x00401800 Ship_ScanPlayerForContraband.
 void NovaShip_ScanPlayerForContraband(GameState &state,
                                       Ship &ship,

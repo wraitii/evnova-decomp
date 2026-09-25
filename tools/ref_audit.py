@@ -63,6 +63,10 @@ FUNC_DEF_RE = re.compile(
 #   divergence  - a deliberate difference from the original that we expect to
 #                 keep permanently. A temporary divergence is `gameplay` or
 #                 `correctness`, never `divergence`.
+#   moddata     - divergences we make for mod-hardening, clarity, or avoiding
+#                 quirky data-related behaviour where constants feel more
+#                 intentional. A specialized permanent divergence, so it does
+#                 not also need `divergence`.
 PORT_TAGS = {
     "gameplay",
     "rng",
@@ -73,6 +77,7 @@ PORT_TAGS = {
     "audio",
     "verify",
     "divergence",
+    "moddata",
 }
 # In-source port-site marker. One comment line, one or more addresses, an
 # optional percentage, and an optional comma-separated tag CSV.

@@ -524,6 +524,7 @@ std::string CargoName(const GameState &state, int cargo_type);
 
 } // namespace
 
+// @port 0x00415cb0 100%
 // Ghidra 0x00415cb0 Boarding_ResetShipAndAttackersAfterBoarding. Ships
 // targeting the captured hull drop their combat state; the captured hull itself
 // gets a combat/mission reset and a fresh voice type (random, then overridden
@@ -2275,6 +2276,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
   return result;
 }
 
+// @port 0x00412550 90% gameplay
 // Ghidra 0x00412550 Boarding_BoardShipAndTransferCargo. AI boarding
 // resolution (the capture-variant supervisor calls it when its board approach
 // completes; it is also reachable against the player). Stages:

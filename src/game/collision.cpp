@@ -73,6 +73,7 @@ constexpr std::int16_t kAsteroidDebrisLifeBase = 0xf0;
 constexpr std::int16_t kAsteroidDebrisLifeMax = 0x1e0;
 constexpr std::int16_t kAsteroidDebrisPositionScatter = 16;
 
+// @port 0x004115c0 100%
 // Ghidra 0x004115c0 Ship_ClearShipState0x09Or0x0FToIdle.
 // The sole hit-resolution callsite invokes this after Ship_SetShipHostileTo-
 // Player has changed the state to 4, making the check normally inert. Keep
@@ -554,6 +555,7 @@ void ApplyArmorDamage(Ship &target, int armor_damage, bool force_armor_only) {
   }
 }
 
+// @port 0x004102e0 100%
 // Ghidra Government_PropagateHostilityFromAttack (0x004102e0). A player hit
 // alerts eligible combat ships related to the victim; in particular, ships of
 // the victim's government join the response and target the player. This keeps
@@ -798,6 +800,7 @@ void Ship_ApplyDamageToShip(GameState &state,
        state.ShipAt(static_cast<std::size_t>(attacker_ship_slot))
                .squad_leader_ship_slot == 0);
 
+  // @port 0x00415e80 100%
   // Ghidra 0x00415e80 Ship_IsShipInAiState0x0D runs inline here.
   // Disable-mode attackers (AI state 0x0D) and their leaders force the
   // leave-one-armor variant so their fire disables rather than destroys the
@@ -1262,6 +1265,7 @@ void Ship_ApplyDamageToShip(GameState &state,
           should_retarget = false;
         }
       }
+      // @port 0x00412530 100%
       // Ghidra 0x00412530 Ship_IsShipInAiControlMode0x0F runs inline here.
       if (should_retarget && target.ship_instance_id > 0 &&
           attacker_ship_slot > 0 && attacker_valid &&
@@ -2122,6 +2126,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
         return false;
       }
     }
+    // @port 0x00415e60 100%
     // Ghidra 0x00415e60 Ship_IsShipInAiState0x10 runs inline here and in the
     // beam-impact guard below.
     if (owner_slot > 0 && owner.ai_state_code == 0x10) {
@@ -2309,6 +2314,7 @@ void NovaWeapon_ResolveFreeflightScoop(GameState &state) {
       }
       // Re-read the latch per object: the original re-runs the outfit
       // recompute after every pickup, so a full hold stops mid-pass.
+      // @port 0x00414530 100%
       // Ghidra 0x00414530 Ship_IsShipInAiState0x11 runs inline here.
       const bool eligible = player_ship ? state.player.mining_scoop_active
                                         : ship.ai_state_code == 0x11;

@@ -658,6 +658,9 @@ void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x00414550 68% gameplay,moddata
+// Ghidra Weapon_FireShipWeapons (0x00414550), ported for NPCs as
+// NovaWeapon_FireNpcWeaponBank (the player path is separate).
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   const std::int16_t bank = ship.active_weapon_bank_slot;
   auto consume_fire_request = [&]() {

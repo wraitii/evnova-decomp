@@ -107,6 +107,7 @@ bool NovaTargeting_ShipAtCloakVisibilityThreshold(const Ship &ship) {
   return progress > kBaselineThreshold;
 }
 
+// @port 0x0040f6d0 100%
 // ---------------------------------------------------------------------------
 // Ship_IsThreatToPlayerSquad (0x0040f6d0).
 // ---------------------------------------------------------------------------
@@ -145,6 +146,7 @@ bool NovaTargeting_IsThreatToPlayerSquad(const GameState &state,
   return false;
 }
 
+// @port 0x0040faa0 100%
 // ---------------------------------------------------------------------------
 // Ship_IsShipAcquirableAsTarget (0x0040faa0).
 // ---------------------------------------------------------------------------
@@ -521,6 +523,7 @@ float NovaTargeting_ComputeTravelRangeSq(const GameState &state) {
   return static_cast<float>(radius) * static_cast<float>(radius);
 }
 
+// @port 0x0040CD80 100%
 // ---------------------------------------------------------------------------
 // Ghidra 0x0040CD80 Stellar_IsStellarAdjacentToCurrentSystem.
 // ---------------------------------------------------------------------------
