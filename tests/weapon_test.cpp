@@ -1742,6 +1742,68 @@ TEST_CASE("point defense prioritizes and damages an inbound guided shot",
   CHECK(state.active_shots[0].consumed);
 }
 
+TEST_CASE("point defense only evaluates the first ready bank",
+          "[weapon][point-defense]") {
+  // Original behavior (Weapon_SelectTurretTargetWithinArc 0x0043a310): the
+  // selector picks the first ready mode-9/10 bank (lowest weapon id) and only
+  // then searches for a target using THAT weapon's reach/blind spot. If the
+  // first ready bank cannot see anything it returns before the remaining PD
+  // banks are ever considered, so a short-range PD weapon gates a longer-range
+  // one. The port reproduces this first-ready-then-target order.
+  GameState state;
+  state.scenario.weapons.resize(3);
+  Weapon &short_pd = state.scenario.weapons[0];
+  short_pd.weapon_mode_code = 10;
+  short_pd.beam_length_px = 10;
+  short_pd.ammo_type = -1;
+  short_pd.mass_damage = 2;
+  short_pd.energy_damage = 3;
+  short_pd.lifetime_ticks = 2;
+  short_pd.reload_ticks = 10;
+  Weapon &long_pd = state.scenario.weapons[1];
+  long_pd.weapon_mode_code = 10;
+  long_pd.beam_length_px = 200;
+  long_pd.ammo_type = -1;
+  long_pd.mass_damage = 2;
+  long_pd.energy_damage = 3;
+  long_pd.lifetime_ticks = 2;
+  long_pd.reload_ticks = 10;
+  state.scenario.weapons[2].weapon_mode_code = 1;
+
+  state.scenario.ships.resize(1);
+  Ship &defender = state.player;
+  defender.is_active = true;
+  defender.ship_instance_id = 0;
+  defender.ship_class_id = 0;
+  defender.armor_points = 100.0F;
+  state.weapon_count_by_class[0] = 1;
+  state.weapon_count_by_class[100] = 1; // bank 1, kBankStride = 100
+
+  ActiveShot incoming;
+  incoming.weapon_id = 2;
+  incoming.target_ship_slot = 0;
+  incoming.life_ticks_remaining = 20.0F;
+  incoming.pos_x = 0.0F;
+  incoming.pos_y = -100.0F;
+  incoming.point_defense_durability = 4;
+  state.active_shots.push_back(incoming);
+
+  // Bank 0 is ready first but out of reach: nothing fires, and bank 1 -- which
+  // could reach the shot -- is never tried.
+  NovaWeapon_SelectTurretTargetWithinArc(state, defender);
+  CHECK(state.weapon_bank_cooldown[0] == 0.0F);
+  CHECK(state.weapon_bank_cooldown[1] == 0.0F);
+  CHECK(state.beam_hit_queue[0].target_shot_slot == -1);
+
+  // Put the short-range bank on cooldown; now the long-range bank is the first
+  // ready one and fires.
+  state.weapon_bank_cooldown[0] = 5.0F;
+  NovaWeapon_SelectTurretTargetWithinArc(state, defender);
+  CHECK(state.beam_hit_queue[0].forced_targeting == 1);
+  CHECK(state.beam_hit_queue[0].target_shot_slot == 0);
+  CHECK(state.weapon_bank_cooldown[1] == Catch::Approx(10.0F));
+}
+
 TEST_CASE("mode-4 shots follow the owner class turreted-above container flag",
           "[weapon][render]") {
   // Bible Ship Flags3 0x0040: "ship's turreted shots appear above the ship".
