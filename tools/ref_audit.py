@@ -395,6 +395,16 @@ def main() -> None:
 
     # --- @port marker cross-check ---------------------------------------
     markers, malformed = collect_port_markers()
+    # With --gen, rewrite the marked tracker rows from source first, then audit
+    # the regenerated file. This lets --gen absorb ordinary pct/tag drift
+    # instead of hard-failing on it before the regeneration can run.
+    if "--gen" in sys.argv:
+        changed = apply_markers(rows, markers)
+        rows = load_tsv(ROOT / "decomp-progress.tsv", fields)
+        print(
+            f"@port --gen: regenerated {changed} marked row(s) in "
+            "decomp-progress.tsv"
+        )
     row_by_addr = {r["address"].lower(): r for r in rows}
     unknown_marker = []       # marker address has no tracker row
     marker_file_mismatch = []  # marker file != row impl_file
@@ -569,10 +579,6 @@ def main() -> None:
         or permanent_gap
     ):
         sys.exit(1)
-
-    if "--gen" in sys.argv:
-        changed = apply_markers(rows, markers)
-        print(f"\n--gen: regenerated {changed} marked row(s) in decomp-progress.tsv")
 
 
 if __name__ == "__main__":
