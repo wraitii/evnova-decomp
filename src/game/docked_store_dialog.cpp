@@ -726,7 +726,7 @@ struct ShipyardInfoLayout {
 
 // The "Standard Weapons" lines (loop inline in the detail panel, walking the
 // 0x100 weapon slots; the loader seeds slot i from each mounted stock bank as
-// default_weapon_ammo[i] = count and default_weapon_secondary[i] = ammo_load,
+// class bank mounted count and loaded ammo,
 // both indexed by the zero-based weapon id). Guns (ModType 1) print
 // "<count> <name>" with a plural "s" and a " + <ammo_load> ammo" tail when the
 // bank loads rounds; mode-99 banks (carried ships) print the bank's ammo_load
@@ -746,7 +746,7 @@ struct ShipyardInfoLayout {
     }
     return nullptr;
   };
-  for (std::size_t slot = 0; slot < 0x100; ++slot) {
+  for (std::size_t slot = 0; slot < kWeaponBankCount; ++slot) {
     const ShipDefaultWeaponBank *bank = nullptr;
     for (const ShipDefaultWeaponBank &candidate : ship.stock_weapons) {
       if (candidate.weapon_id >= 0x80 && candidate.weapon_id < 0x180 &&

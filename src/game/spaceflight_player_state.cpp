@@ -474,9 +474,6 @@ constexpr std::int16_t kRespawnDailyUpdateRange = 30;
 constexpr std::int16_t kRespawnDailyUpdateBase = 15;
 // STR# 0x7d2 entry 0x34: "You abandon your ship for" (fighter variant).
 constexpr std::uint16_t kStrAbandonShipFor = 0x34;
-// The 0x100 player weapon banks store their live counter at slot 0 of a
-// 100-int16 stride.
-constexpr std::size_t kPlayerBankStride = 100;
 
 // @port 0x00464700 100%
 // Ghidra Outfit_HasAutoEjectOutfit (0x00464700): any owned outfit with
@@ -505,13 +502,13 @@ bool Weapon_HasPlayerLaunchBayWeapon(const GameState &state) {
 // Ghidra ShipClass_FindLaunchBayShipClassId (0x00464590): the zero-based class
 // index of the first ejectable bay fighter, -1 when none.
 std::int16_t Weapon_FindLaunchBayShipClassIndex(const GameState &state) {
-  for (std::size_t bank = 0; bank < 0x100; ++bank) {
+  for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
     const Weapon *def =
         state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
     if (def == nullptr || def->weapon_mode_code != kBayWeaponModeCode) {
       continue;
     }
-    if (state.weapon_count_by_class[bank * kPlayerBankStride] < 1) {
+    if (state.player.weapon_banks[bank].mounted < 1) {
       continue;
     }
     if (def->ammo_type < 0x80) {
@@ -544,14 +541,9 @@ bool Outfit_HasEscapePodOrLaunchBay(const GameState &state) {
 
 // Zeroes the live (slot 0) counter of every player weapon bank and the per-
 // bank cooldown/burst state before a stock reseed (the original sweeps all
-// 0x100 banks in the eject/respawn paths).
+// banks in the eject/respawn paths).
 void ZeroPlayerWeaponBanks(GameState &state) {
-  for (std::size_t bank = 0; bank < 0x100; ++bank) {
-    state.weapon_count_by_class[bank * kPlayerBankStride] = 0;
-    state.weapon_secondary_count_by_class[bank * kPlayerBankStride] = 0;
-  }
-  state.weapon_bank_cooldown.fill(0.0F);
-  state.weapon_bank_burst_counter.fill(0);
+  state.player.weapon_banks.fill({});
   state.active_shots.clear();
 }
 

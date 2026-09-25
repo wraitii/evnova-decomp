@@ -102,11 +102,9 @@ struct PilotFile {
   // into the scenario's currently defined systems.
   std::array<std::int16_t, GameState::kMaxSystems> system_discovery{};
   std::array<std::int16_t, GameState::kMaxSystems> system_reputation{};
-  std::array<std::int16_t, 0x200> outfit_owned_count{}; // block1+0x101a
-  std::array<std::int16_t, 0x100 * 100>
-      weapon_count_by_class{}; // block1+0x241a
-  std::array<std::int16_t, 0x100 * 100>
-      weapon_secondary_count_by_class{}; // block1+0x261a
+  std::array<std::int16_t, 0x200> outfit_owned_count{};        // block1+0x101a
+  std::array<std::int16_t, kWeaponBankCount> weapon_mounted{}; // block1+0x241a
+  std::array<std::int16_t, kWeaponBankCount> weapon_ammo{};    // block1+0x261a
   // Junk item quantities (Ghidra g_junk_defs strided counts), block2+0x3488.
   std::array<std::int16_t, 0x80> junk_counts{};
   // Exact Nova Control Bit bytes b0..b9999 (block1+0xb7be). Nonzero means set,

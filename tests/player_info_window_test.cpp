@@ -60,7 +60,7 @@ TEST_CASE("player info extras include mounted stock weapons after reconcile") {
   medium_blaster.lc_name = "medium blaster";
   medium_blaster.lc_plural = "medium blasters";
   medium_blaster.similar_to = 3;
-  state.weapon_count_by_class[7 * 100] = 1;
+  state.player.weapon_banks[7].mounted = 1;
 
   game::NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
 

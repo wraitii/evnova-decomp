@@ -82,17 +82,17 @@ TEST_CASE("mission script E/H adds class default weapons on top of the "
   state.scenario.outfits[0].mod_val = 0;
   state.scenario.outfits[0].max_count = 10;
   state.inventory.outfit_owned_count[0] = 2;
-  state.weapon_count_by_class[0] = 2;
+  state.player.weapon_banks[0].mounted = 2;
   ShipClass &new_class = state.scenario.ships[1];
   new_class.stock_weapons[0].weapon_id = 0x80;
   new_class.stock_weapons[0].count = 1;
 
   Mission_ExecuteScript(state, "C129");
   CHECK(state.inventory.outfit_owned_count[0] == 2);
-  CHECK(state.weapon_count_by_class[0] == 2);
+  CHECK(state.player.weapon_banks[0].mounted == 2);
 
   Mission_ExecuteScript(state, "E129");
-  CHECK(state.weapon_count_by_class[0] == 3);
+  CHECK(state.player.weapon_banks[0].mounted == 3);
 }
 
 TEST_CASE("mission script control bits accept a bare modifier without b") {

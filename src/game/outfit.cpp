@@ -886,18 +886,19 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
   // (1) Ammo-backed weapons: the PRIMARY ModType-3 slot names a weapon bank
   // (mod_val, zero-based). When that weapon defines a per-mount MaxAmmo
   // (WeaponDef +0x1e, loader-read; 0/-1 defers), holdings are capped at
-  // MaxAmmo * the live bank count weapon_count_by_class[mod_val]. The original
+  // MaxAmmo * the live bank mounted count. The original
   // does NOT return here unless the cap is already reached, so an under-cap
   // ammo outfit still runs the ModType-27 / slot-cap arms below.
   if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo) &&
-      o.mod_val >= 0 && o.mod_val < 0x100) {
+      o.mod_val >= 0 &&
+      o.mod_val < static_cast<std::int16_t>(kWeaponBankCount)) {
     const Weapon *weapon =
         state.scenario.Weapon(static_cast<std::int16_t>(o.mod_val + 0x80));
     if (weapon != nullptr && weapon->max_ammo > 0) {
       const std::int16_t ammo_cap = static_cast<std::int16_t>(
           weapon->max_ammo *
-          state.weapon_count_by_class[static_cast<std::size_t>(o.mod_val) *
-                                      100]);
+          state.player.weapon_banks[static_cast<std::size_t>(o.mod_val)]
+              .mounted);
       if (ammo_cap < out.max_allowed) {
         out.max_allowed = ammo_cap;
       }
@@ -1346,15 +1347,14 @@ Outfit_CountCarriedShipsForOutfit(const GameState &state,
     return deployed;
   }
 
-  for (std::size_t bank = 0; bank < 0x100; ++bank) {
+  for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
     const Weapon *weapon =
         state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
-    const std::size_t counter = bank * 100;
     if (weapon != nullptr && weapon->weapon_mode_code == 99 &&
-        state.weapon_count_by_class[counter] > 0 &&
+        state.player.weapon_banks[bank].mounted > 0 &&
         weapon->ammo_type - 0x80 == carried_ship_class &&
-        state.weapon_secondary_count_by_class[counter] > 0) {
-      return state.weapon_secondary_count_by_class[counter];
+        state.player.weapon_banks[bank].ammo > 0) {
+      return state.player.weapon_banks[bank].ammo;
     }
   }
   return 0;

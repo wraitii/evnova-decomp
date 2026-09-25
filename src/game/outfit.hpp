@@ -172,7 +172,7 @@ Player_ComputeCargoAndJunkTotal(const GameState &state);
 // Ghidra 0x0046ea40 Outfit_CountCarriedShipsForOutfit. For an outfit whose
 // ModType-3 slot names a mode-99 launch bay, count active, non-disabled
 // behavior-5 craft attached to the player. If none are deployed, return the
-// matching live weapon bank's secondary counter. `outfit_resource_id` uses
+// matching live weapon bank's ammo counter. `outfit_resource_id` uses
 // the scenario's 0x80-based resource-id convention.
 [[nodiscard]] std::int16_t
 Outfit_CountCarriedShipsForOutfit(const GameState &state,

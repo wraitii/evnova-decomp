@@ -771,7 +771,7 @@ OutfitSaleResult NovaLanded_SellOutfit(GameState &state,
                                   weapon->weapon_mode_code == 99)
                                      ? static_cast<std::size_t>(weapon_index)
                                      : static_cast<std::size_t>(ammo_type);
-        std::int32_t loaded = state.weapon_secondary_count_by_class[bank * 100];
+        std::int32_t loaded = state.player.weapon_banks[bank].ammo;
         if (weapon->weapon_mode_code == 99) {
           // Carrier-bay weapon: count active, non-disabled behavior-5
           // fighters whose class matches the id encoded in ammo_type.
@@ -1028,24 +1028,22 @@ int NovaLanded_HireShip(GameState &state,
 }
 
 // Slot-0 loadout reconciliation for Player_ReplaceShipWithCapturedHull: keeps
-// persistent_on_ship_swap banks, merges the captured hull's live NPC banks
-// (secondary remapped by WeaponDef.ammo_type; mode 99 keeps the bank), then
-// rebuilds from the owned-outfit pool. The secondary gate tests the SOURCE
+// persistent_on_ship_swap banks, merges the captured hull's live banks
+// (ammo remapped by WeaponDef.ammo_type; mode 99 keeps the bank), then
+// rebuilds from the owned-outfit pool. The ammo gate tests the SOURCE
 // bank for emptiness, not the destination ammo bank (original quirk).
 void ReconcileCapturedHullLoadout(GameState &state, const Ship &captured) {
-  constexpr std::size_t kStride = 100;
-  auto bank_ammo = [&](std::int16_t bank) -> std::int16_t & {
-    return state
-        .weapon_count_by_class[static_cast<std::size_t>(bank) * kStride];
+  auto bank_mounted = [&](std::int16_t bank) -> std::int16_t & {
+    return state.player.weapon_banks[static_cast<std::size_t>(bank)].mounted;
   };
-  auto bank_secondary = [&](std::int16_t bank) -> std::int16_t & {
-    return state
-        .weapon_secondary_count_by_class[static_cast<std::size_t>(bank) *
-                                         kStride];
+  auto bank_ammo = [&](std::int16_t bank) -> std::int16_t & {
+    return state.player.weapon_banks[static_cast<std::size_t>(bank)].ammo;
   };
 
   // Persistent banks survive; all others clear.
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     bool persistent = false;
     for (const Outfit &outfit : state.scenario.outfits) {
       if (!outfit.persistent_on_ship_swap) {
@@ -1066,31 +1064,33 @@ void ReconcileCapturedHullLoadout(GameState &state, const Ship &captured) {
       }
     }
     if (!persistent) {
+      bank_mounted(bank) = 0;
       bank_ammo(bank) = 0;
-      bank_secondary(bank) = 0;
     }
   }
 
   // Captured carried weapons/ammo fill only empty player banks.
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     const std::int16_t count =
-        captured.npc_weapon_count_by_class[static_cast<std::size_t>(bank)];
-    if (count > 0 && bank_ammo(bank) < 1) {
-      bank_ammo(bank) = count;
+        captured.weapon_banks[static_cast<std::size_t>(bank)].mounted;
+    if (count > 0 && bank_mounted(bank) < 1) {
+      bank_mounted(bank) = count;
     }
-    const std::int16_t secondary =
-        captured.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
-            bank)];
-    if (secondary > 0 && bank_secondary(bank) < 1) {
+    const std::int16_t ammo =
+        captured.weapon_banks[static_cast<std::size_t>(bank)].ammo;
+    if (ammo > 0 && bank_ammo(bank) < 1) {
       const Weapon *weapon =
           state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
       if (weapon != nullptr && weapon->weapon_mode_code == 99) {
-        bank_secondary(bank) = secondary;
+        bank_ammo(bank) = ammo;
       } else {
         const std::int16_t ammo_bank =
             weapon == nullptr ? -1 : weapon->ammo_type;
-        if (ammo_bank >= 0 && ammo_bank < 0x100) {
-          bank_secondary(ammo_bank) = secondary;
+        if (ammo_bank >= 0 &&
+            ammo_bank < static_cast<std::int16_t>(kWeaponBankCount)) {
+          bank_ammo(ammo_bank) = ammo;
         }
       }
     }
@@ -1374,26 +1374,26 @@ bool NovaLanded_BuyShip(GameState &state,
   }
   NovaWeapon_RebuildBanksFromOwnedOutfits(state);
   // The original takes the maximum of the rebuilt inventory bank and every
-  // stock DefaultWeapon value. Secondary stock is stored against AmmoType,
+  // stock DefaultWeapon value. Loaded ammo is stored against AmmoType,
   // except mode-99 fighter bays which retain the launcher bank index.
   for (const ShipDefaultWeaponBank &stock : new_ship->stock_weapons) {
     if (stock.weapon_id < 0x80 || stock.weapon_id > 0x17f)
       continue;
     const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-    auto &count = state.weapon_count_by_class[bank * 100];
+    auto &count = state.player.weapon_banks[bank].mounted;
     count =
         std::max<std::int16_t>(count, std::max<std::int16_t>(0, stock.count));
     if (stock.ammo_load <= 0)
       continue;
-    std::size_t secondary_bank = bank;
+    std::size_t ammo_bank = bank;
     const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
     if (weapon != nullptr && weapon->weapon_mode_code != 99 &&
-        weapon->ammo_type >= 0 && weapon->ammo_type < 0x100) {
-      secondary_bank = static_cast<std::size_t>(weapon->ammo_type);
+        weapon->ammo_type >= 0 &&
+        weapon->ammo_type < static_cast<std::int16_t>(kWeaponBankCount)) {
+      ammo_bank = static_cast<std::size_t>(weapon->ammo_type);
     }
-    auto &secondary =
-        state.weapon_secondary_count_by_class[secondary_bank * 100];
-    secondary = std::max<std::int16_t>(secondary, stock.ammo_load);
+    auto &ammo = state.player.weapon_banks[ammo_bank].ammo;
+    ammo = std::max<std::int16_t>(ammo, stock.ammo_load);
   }
   Player_TransferCargoAndJunkToEscortByRatio(state, 0);
   state.InvalidateDerivedStatCaches();
@@ -1536,24 +1536,26 @@ namespace {
   return MiscString(amount < 2 ? 0x20 : 0x21);
 }
 
-// Reseeds the class-default weapon secondary ("carried ammo") counters for
-// every one of the 0x100 banks, leaving the loaded-ammo counters untouched —
+// Reseeds the class-default weapon ammo counters for every bank, leaving the
+// mounted counters untouched —
 // the fleet pass's third phase. The clean-room ShipClass carries only the
 // eight stock banks, so non-stock slots reset to 0. Keep the NPC-bank init
 // cache in step so the stock ammo is not re-expanded after an upgrade zeroed
 // it (NovaWeapon_EnsureNpcWeaponBanks).
-void ReseedWeaponSecondary(Ship &ship, const ShipClass *cls) {
-  ship.npc_weapon_secondary_count_by_class.fill(0);
+void ReseedWeaponAmmo(Ship &ship, const ShipClass *cls) {
+  for (WeaponBanks &bank : ship.weapon_banks) {
+    bank.ammo = 0;
+  }
   if (cls != nullptr) {
     for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
       if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
         continue;
       }
-      ship.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
-          stock.weapon_id - 0x80)] = stock.ammo_load;
+      ship.weapon_banks[static_cast<std::size_t>(stock.weapon_id - 0x80)].ammo =
+          stock.ammo_load;
     }
   }
-  ship.npc_weapon_banks_ship_class = ship.ship_class_id;
+  ship.weapon_banks_ship_class = ship.ship_class_id;
 }
 
 } // namespace
@@ -1593,7 +1595,7 @@ void Player_ProcessEscortFleetAtStellar(
     }
 
     // (2) Upgrade marked escorts (ShipState +0xBF), then (3) refill
-    // shield/armor and the weapon secondary for every slot 1..0x3f — the
+    // shield/armor and the weapon ammo for every slot 1..0x3f — the
     // original runs the refill unconditionally inside the same loop.
     for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
       Ship &ship = state.ShipAt(slot);
@@ -1610,8 +1612,10 @@ void Player_ProcessEscortFleetAtStellar(
         state.player.credits -= cost;
         state.InvalidateDerivedStatCaches();
         ship.ship_class_id = cls->upgrade_to_ship_class_id;
-        ship.npc_weapon_count_by_class.fill(0);
-        ship.npc_weapon_secondary_count_by_class.fill(0);
+        for (WeaponBanks &bank : ship.weapon_banks) {
+          bank.mounted = 0;
+          bank.ammo = 0;
+        }
         ship.escort_upgrade_mark = 0;
         cls = state.scenario.Ship(
             static_cast<std::int16_t>(ship.ship_class_id + 0x80));
@@ -1623,7 +1627,7 @@ void Player_ProcessEscortFleetAtStellar(
         ship.shield_points = static_cast<float>(cls->base_shield);
         ship.armor_points = static_cast<float>(cls->base_armor);
       }
-      ReseedWeaponSecondary(ship, cls);
+      ReseedWeaponAmmo(ship, cls);
     }
 
     if (sold > 0 || upgraded > 0) {

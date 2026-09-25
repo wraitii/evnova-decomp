@@ -143,14 +143,14 @@ void Face(float heading,
 // (mode -1/4/6..9, the Ship_AimWeaponPredictive gate) and otherwise fall back
 // to the first armed ready primary bank, for which the aim helper returns the
 // straight bearing a beam/guided weapon wants. -1 when no primary bank is
-// ready. The 100-stride player bank layout matches GameState (see weapon.cpp
-// BankAmmo) and this is automation-only selection, not gameplay state.
+// ready. This is automation-only selection, not gameplay state.
 std::int16_t LeadWeaponBank(const GameState &state, const Ship &ship) {
-  constexpr std::size_t kBankStride = 100;
   std::int16_t first_primary = -1;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
-    if (state.weapon_count_by_class[static_cast<std::size_t>(bank) *
-                                    kBankStride] <= 0) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
+    if (state.player.weapon_banks[static_cast<std::size_t>(bank)].mounted <=
+        0) {
       continue;
     }
     const Weapon *w =

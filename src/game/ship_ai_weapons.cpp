@@ -46,22 +46,17 @@ TruncatedDistanceSquared(float x1, float y1, float x2, float y2) {
 }
 
 struct WeaponBankState {
+  std::int16_t mounted = 0;
   std::int16_t ammo = 0;
-  std::int16_t secondary = 0;
   float cooldown = 0.0F;
 };
 
 [[nodiscard]] WeaponBankState
 ReadWeaponBank(const GameState &state, const Ship &ship, std::int16_t bank) {
+  (void)state;
   const auto index = static_cast<std::size_t>(bank);
-  if (ship.ship_instance_id == 0) {
-    return {state.weapon_count_by_class[index * 100],
-            state.weapon_secondary_count_by_class[index * 100],
-            state.weapon_bank_cooldown[index]};
-  }
-  return {ship.npc_weapon_count_by_class[index],
-          ship.npc_weapon_secondary_count_by_class[index],
-          ship.npc_weapon_bank_cooldown[index]};
+  const WeaponBanks &row = ship.weapon_banks[index];
+  return {row.mounted, row.ammo, row.cooldown};
 }
 
 } // namespace
@@ -69,7 +64,7 @@ ReadWeaponBank(const GameState &state, const Ship &ship, std::int16_t bank) {
 [[nodiscard]] bool
 WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank) {
   const WeaponBankState bank_state = ReadWeaponBank(state, ship, bank);
-  if (bank_state.ammo <= 0 || bank_state.cooldown > 0.0F) {
+  if (bank_state.mounted <= 0 || bank_state.cooldown > 0.0F) {
     return false;
   }
   const Weapon *weapon =
@@ -79,14 +74,14 @@ WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank) {
   }
   // Weapon_CanFireWeaponBank (0x00468990) only consults the secondary
   // counter for ammo-backed weapons and carrier-bay weapons.  Energy weapons
-  // use ammo_type == -1 and remain fireable with a zero secondary counter;
+  // use ammo_type == -1 and remain fireable with a zero ammo counter;
   // requiring secondary > 0 here incorrectly disables NPC energy guns whose
   // stock record carries no ammunition load.
   if (weapon->weapon_mode_code == 99) {
-    return bank_state.secondary >= 1;
+    return bank_state.ammo >= 1;
   }
   if (weapon->ammo_type >= 0 && weapon->ammo_type <= 0xff) {
-    return bank_state.secondary >= 1;
+    return bank_state.ammo >= 1;
   }
   return true;
 }
@@ -166,7 +161,8 @@ std::int16_t AimWeaponInterceptBearing(const GameState &state,
   // Straight bearing fallback (Math_BearingFromPointToPoint(origin, target)).
   std::int16_t bearing = static_cast<std::int16_t>(
       BearingDeg(origin_x, origin_y, target_pos_x, target_pos_y));
-  if (weapon_id < 0 || weapon_id >= 0x100) {
+  if (weapon_id < 0 ||
+      weapon_id >= static_cast<std::int16_t>(kWeaponBankCount)) {
     return bearing;
   }
   const Weapon *w =
@@ -418,11 +414,13 @@ bool NovaAiShip_CanTargetOutrunShooter(const GameState &state,
       NovaShip_ComputeEffectiveStats(state, target, *target_class)
           .turn_rate_deg_per_tick;
   bool has_intercept_bank = false;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
-    // Ghidra 0x004110f0/0x00411107: ammo counter > 0 and secondary counter
+    // Ghidra 0x004110f0/0x00411107: mounted count > 0 and ammo counter
     // > 0 or the -1 infinite-ammo marker.
-    if (bs.ammo <= 0 || (bs.secondary <= 0 && bs.secondary != -1)) {
+    if (bs.mounted <= 0 || (bs.ammo <= 0 && bs.ammo != -1)) {
       continue;
     }
     const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
@@ -692,9 +690,11 @@ void NovaAi_FireTurretAtTarget(GameState &state, Ship &ship) {
   std::int16_t best_mass = 0;
   std::int16_t best_energy_bank = -1;
   std::int16_t best_energy = 0;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
-    if (bs.ammo <= 0 || bs.cooldown > 0.0F) {
+    if (bs.mounted <= 0 || bs.cooldown > 0.0F) {
       continue;
     }
     const Weapon *weapon =
@@ -843,11 +843,13 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
           .turn_rate_deg_per_tick;
 
   std::int16_t chosen = -1;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
     const Weapon *weapon =
         state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
-    if (weapon == nullptr || bs.ammo <= 0) {
+    if (weapon == nullptr || bs.mounted <= 0) {
       continue;
     }
     const bool track_ok =
@@ -916,9 +918,11 @@ void NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(GameState &state,
   std::int16_t best_mass = 0;
   std::int16_t best_energy_bank = -1;
   std::int16_t best_energy = 0;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
-    if (bs.ammo <= 0) {
+    if (bs.mounted <= 0) {
       continue;
     }
     const Weapon *weapon =
@@ -999,9 +1003,11 @@ void NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(GameState &state,
 // most recent fireable general weapon (non mode-0/3, mode < 8).
 void NovaAi_SelectGeneralWeaponBank(GameState &state, Ship &ship) {
   std::int16_t chosen = -1;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
-    if (bs.ammo <= 0 || bs.cooldown > 0.0F) {
+    if (bs.mounted <= 0 || bs.cooldown > 0.0F) {
       continue;
     }
     const Weapon *weapon =
@@ -1033,9 +1039,11 @@ void NovaAi_SelectUnguidedWeaponBank(GameState &state, Ship &ship) {
   const ShipClass *cls = ShipClassFor(state, ship);
   std::int16_t best_bank = -1;
   std::int16_t best_score = 0;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
-    if (bs.ammo <= 0 || bs.cooldown > 0.0F) {
+    if (bs.mounted <= 0 || bs.cooldown > 0.0F) {
       continue;
     }
     const Weapon *weapon =

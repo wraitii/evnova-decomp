@@ -337,9 +337,10 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
     state.control.bits.set(i, pilot_file.control_bits[i] != 0);
   }
   state.player_stat_modifier_pct = pilot_file.stat_modifier_pct;
-  state.weapon_count_by_class = pilot_file.weapon_count_by_class;
-  state.weapon_secondary_count_by_class =
-      pilot_file.weapon_secondary_count_by_class;
+  for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
+    state.player.weapon_banks[bank].mounted = pilot_file.weapon_mounted[bank];
+    state.player.weapon_banks[bank].ammo = pilot_file.weapon_ammo[bank];
+  }
   state.active_mission_runtime_flags = pilot_file.active_mission_runtime_flags;
   state.active_missions = pilot_file.active_missions;
   const std::size_t pers_count = std::min(state.scenario.pers_defs.size(),
@@ -495,8 +496,10 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
                                                        : 0;
   }
   out.stat_modifier_pct = state.player_stat_modifier_pct;
-  out.weapon_count_by_class = state.weapon_count_by_class;
-  out.weapon_secondary_count_by_class = state.weapon_secondary_count_by_class;
+  for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
+    out.weapon_mounted[bank] = state.player.weapon_banks[bank].mounted;
+    out.weapon_ammo[bank] = state.player.weapon_banks[bank].ammo;
+  }
   out.active_mission_runtime_flags = state.active_mission_runtime_flags;
   out.active_missions = state.active_missions;
   const std::size_t pers_count =
@@ -639,17 +642,14 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
              0x101a + 2 * i,
              static_cast<std::uint16_t>(pilot_file.outfit_owned_count[i]));
   }
-  // +0x241a/+0x261a weapon bank ammo/secondary: the original persists only the
-  // first slot of each 100-slot bank (weapon_count_by_class[i*100]).
-  for (std::size_t i = 0; i < 0x100; ++i) {
-    WriteU16(
-        block1,
-        0x241a + 2 * i,
-        static_cast<std::uint16_t>(pilot_file.weapon_count_by_class[i * 100]));
+  // +0x241a/+0x261a weapon-bank mounted and loaded-ammo counters.
+  for (std::size_t i = 0; i < kWeaponBankCount; ++i) {
+    WriteU16(block1,
+             0x241a + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.weapon_mounted[i]));
     WriteU16(block1,
              0x261a + 2 * i,
-             static_cast<std::uint16_t>(
-                 pilot_file.weapon_secondary_count_by_class[i * 100]));
+             static_cast<std::uint16_t>(pilot_file.weapon_ammo[i]));
   }
   WriteU32(block1, 0x281a, static_cast<std::uint32_t>(pilot_file.credits));
   WriteU32(block1,
@@ -989,10 +989,10 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
           ReadU16(block1, 0x101a + 2 * i, big_endian));
       // Original zeroes outfits whose def no longer exists. TODO(decomp).
     }
-    for (std::size_t i = 0; i < 0x100; ++i) {
-      out.weapon_count_by_class[i * 100] = static_cast<std::int16_t>(
+    for (std::size_t i = 0; i < kWeaponBankCount; ++i) {
+      out.weapon_mounted[i] = static_cast<std::int16_t>(
           ReadU16(block1, 0x241a + 2 * i, big_endian));
-      out.weapon_secondary_count_by_class[i * 100] = static_cast<std::int16_t>(
+      out.weapon_ammo[i] = static_cast<std::int16_t>(
           ReadU16(block1, 0x261a + 2 * i, big_endian));
       // Original zeroes banks whose weapon def no longer exists. TODO(decomp).
     }
@@ -1323,13 +1323,15 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
       result = PilotLoadError::kRepairsApplied;
     }
   }
-  for (std::size_t i = 0; !state.scenario.weapons.empty() && i < 0x100; ++i) {
+  for (std::size_t i = 0;
+       !state.scenario.weapons.empty() && i < kWeaponBankCount;
+       ++i) {
     const bool missing = i >= state.scenario.weapons.size() ||
                          state.scenario.weapons[i].name.empty();
-    if (missing && (record.weapon_count_by_class[i * 100] > 0 ||
-                    record.weapon_secondary_count_by_class[i * 100] > 0)) {
-      record.weapon_count_by_class[i * 100] = 0;
-      record.weapon_secondary_count_by_class[i * 100] = 0;
+    if (missing &&
+        (record.weapon_mounted[i] > 0 || record.weapon_ammo[i] > 0)) {
+      record.weapon_mounted[i] = 0;
+      record.weapon_ammo[i] = 0;
       result = PilotLoadError::kRepairsApplied;
     }
   }

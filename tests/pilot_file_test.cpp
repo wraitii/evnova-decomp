@@ -74,10 +74,8 @@ struct TemporaryDirectory {
   p.system_reputation[0x7ff] = 5678;
   p.outfit_owned_count[0] = 1;
   p.outfit_owned_count[0x1ff] = -2;
-  p.weapon_count_by_class[5 * 100] = 7;
-  p.weapon_secondary_count_by_class[5 * 100] = 11;
-  p.weapon_count_by_class[0xff * 100 + 42] =
-      99; // non-first slot: not serialized
+  p.weapon_mounted[5] = 7;
+  p.weapon_ammo[5] = 11;
   p.junk_counts[0x7f] = 13;
   p.control_bits[42] = 1;
   p.control_bits[9999] = 0x8a;
@@ -206,10 +204,8 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.system_reputation == p.system_reputation);
   CHECK(out.outfit_owned_count[0] == 1);
   CHECK(out.outfit_owned_count[0x1ff] == -2);
-  CHECK(out.weapon_count_by_class[5 * 100] == 7);
-  CHECK(out.weapon_secondary_count_by_class[5 * 100] == 11);
-  // Non-first bank slots are not persisted by the original format.
-  CHECK(out.weapon_count_by_class[0xff * 100 + 42] == 0);
+  CHECK(out.weapon_mounted[5] == 7);
+  CHECK(out.weapon_ammo[5] == 11);
   CHECK(out.junk_counts[0x7f] == 13);
   CHECK(out.control_bits == p.control_bits);
   CHECK(out.stellar_dominated[7] == 0x5a);
@@ -450,7 +446,7 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   saved_state.player.fuel_points = p.fuel_points;
   saved_state.player_combat_rating_points = p.player_combat_rating_points;
   saved_state.inventory.outfit_owned_count[0] = 1;
-  saved_state.weapon_count_by_class[5 * 100] = 7;
+  saved_state.player.weapon_banks[5].mounted = 7;
   saved_state.active_mission_runtime_flags[0].is_active = true;
   saved_state.active_missions[0].special_ship_name_string_id = 0x89;
   saved_state.active_missions[0].special_ship_name_entry = 1;
@@ -506,7 +502,7 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   // Fuel is stored as a truncated u16 in the file (block1+0x12).
   CHECK(loaded_state.player.fuel_points == 77.0F);
   CHECK(loaded_state.inventory.outfit_owned_count[0] == 1);
-  CHECK(loaded_state.weapon_count_by_class[5 * 100] == 7);
+  CHECK(loaded_state.player.weapon_banks[5].mounted == 7);
   CHECK_FALSE(loaded_state.active_missions[0].mission_fleet_name.empty());
   CHECK_FALSE(loaded_state.active_missions[0].mission_text_name_b.empty());
   CHECK(loaded_state.active_missions[0].mission_ship_count_active == 7);

@@ -83,7 +83,7 @@ TEST_CASE("ammo-backed outfit caps at MaxAmmo times the live bank count",
   state.scenario.outfits[0].mod_type = kAmmo;
   state.scenario.outfits[0].mod_val = 0; // weapon bank 0
   state.scenario.weapons[0].max_ammo = 5;
-  state.weapon_count_by_class[0] = 3; // three mounted launchers
+  state.player.weapon_banks[0].mounted = 3; // three mounted launchers
 
   // Under the 15-round cap: no clamp, and MaxAmmo still lowers max_allowed.
   state.inventory.outfit_owned_count[0] = 10;

@@ -7,13 +7,10 @@
 //   Weapon_CanFireWeaponBank                      0x00468990
 //   Weapon_FirePlayerWeaponBank                   0x00455150
 //   Weapon_GetWeaponFireIntervalTicks             0x0046f270
-// The original stores 0x100 weapon banks (one per zero-based weapon id),
-// each carrying two counters: `weapon_count_by_class[bank]` (the number of the
-// weapon mounted / shots per volley, >0 gates whether the primary-fire loop
-// touches the bank) and `weapon_secondary_count_by_class[bank]` (carried
-// ammunition rounds). The starter Shuttle mounts a single Light Blaster (stock
-// weapon {id 0x80, count 1, ammo -1=unlimited}); `weapon_count_by_class[0]=1`
-// so it is fireable.
+// The original stores kWeaponBankCount banks (one per zero-based weapon id),
+// each carrying a mounted count and a loaded-ammo count. The starter Shuttle
+// mounts a single Light Blaster (stock weapon {id 0x80, count 1, ammo
+// -1=unlimited}), so bank 0 is fireable.
 //
 // The player still only fires the basic projectile branch here. The shared
 // projectile spawn record carries the ownership/lifetime data consumed by
@@ -37,17 +34,16 @@ struct NovaPreferences;
 void NovaWeapon_TallyInboundWeaponThreat(GameState &state);
 
 // Ghidra Weapon_RebuildWeaponBankPoolsFromOwnedOutfits (0x00463260): rebuilds
-// the player's 0x100 weapon-bank ammo/secondary counters from the currently
+// the player's weapon-bank mounted/ammo counters from the currently
 // owned outfits. Every owned outfit with ModType 1 (kWeapon) contributes its
-// owned count to weapon_count_by_class[mod_val] (mod_val is the zero-based
-// weapon bank slot); every owned ModType 3 (kAmmo) outfit contributes to
-// weapon_secondary_count_by_class[mod_val]. All banks are zeroed first. Mirrors
-// the original's zero-sweep + owned-outfit accumulation. Used when outfit
-// ownership changes (the outfitter buy/sell path).
+// owned count to weapon_banks[mod_val].mounted; every owned ModType 3 (kAmmo)
+// outfit contributes to weapon_banks[mod_val].ammo. All banks are zeroed first.
+// Mirrors the original's zero-sweep + owned-outfit accumulation. Used when
+// outfit ownership changes (the outfitter buy/sell path).
 void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state);
 
-// Seeds the player's 0x100 weapon-bank ammo/secondary counters from a ship
-// class's mounted stock weapons (Ghidra default_weapon_ammo / secondary).
+// Seeds the player's weapon-bank mounted/ammo counters from a ship class's
+// mounted stock weapons.
 // Used by new-game seeding and the shipyard purchase path, followed by
 // NovaWeapon_ReconcileOutfitPoolWithWeaponBanks so mounted stock guns become
 // owned outfits.
@@ -57,7 +53,7 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
 // Additive variant of NovaWeapon_SeedBanksFromShipStock: adds a ship class's
 // mounted stock weapons on top of the live bank counters instead of
 // overwriting them. Ghidra 0x00449370's C/E/H mission-script arm adds
-// default_weapon_ammo/default_weapon_secondary to the player's existing banks
+// default mounted/ammo counts to the player's existing banks
 // after rebuilding them from owned outfits, so the class defaults stack with
 // the retained loadout (SeedBanksFromShipStock, used by new-game seeding and
 // capture, deliberately replaces).
@@ -65,11 +61,11 @@ void NovaWeapon_AddShipClassStockBanks(GameState &state,
                                        std::int16_t ship_class_id);
 
 // Ghidra Weapon_ReconcileOutfitPoolWithWeaponBanks (0x00462ec0): reconciles
-// outfit-pool counts with the live weapon-bank ammo/secondary counters in both
+// outfit-pool counts with the live weapon-bank mounted/ammo counters in both
 // directions. After seeding banks from a ship class's stock weapons
 // (Menu_RunNewGameFlow) or after any buy/sell, it converts leftover positive
-// bank ammo not explained by an owned weapon outfit into an owned outfit
-// (and leftover secondary into an owned ammo outfit), so a mounted stock
+// mounted counts not explained by an owned weapon outfit into an owned outfit
+// (and leftover ammo into an owned ammo outfit), so a mounted stock
 // weapon like the Shuttle's Light Blaster is registered as sellable ownership.
 void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 
@@ -85,24 +81,24 @@ void NovaWeapon_ClearTransientCombatState(GameState &state);
 // Ghidra Weapon_InitShipWeaponBanksFromShipClass-side initializer used by the
 // NPC paths (ship_ai.cpp EnsureNpcWeaponBanks, citing Weapon_InitShipWeapon-
 // Bursts 0x00413810 for the burst-counter preload): rebuilds an NPC ship's
-// 0x100 weapon-bank counters from its ship class's stock weapons. No-op for
+// weapon-bank counters from its ship class's stock weapons. No-op for
 // the player ship and when the cached loadout already matches the class.
 void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
 
 // Copies a ship class's decoded stock weapons (the original's
-// default_weapon_ammo/secondary 0x100 tables) into an NPC ship's flat
+// default mounted/ammo tables) into a ship's flat
 // per-bank counters, zeroing both counters first. Unlike
 // NovaWeapon_EnsureNpcWeaponBanks it leaves the per-bank cooldown and
 // burst-counter arrays untouched, matching Ship_ResetShipToDefaultCombatState's
-// refill arm (0x0041e240), which only overwrites the two count tables. No-op
-// for the player ship. Callers own the npc_weapon_banks_ship_class cache.
+// refill arm (0x0041e240), which only overwrites the two count tables. Callers
+// own the weapon_banks_ship_class cache.
 void NovaWeapon_CopyShipClassStockBanks(const GameState &state, Ship &ship);
 
 // Ghidra Weapon_InitShipWeaponBursts (0x00413810). For every mounted bank whose
 // weapon has both a burst cycle and a reset cooldown, zeroes the burst counter
 // and preloads the bank cooldown to the reset cooldown. Called when a loadout
-// is (re)built and from the shot-hit cloak re-entry reset. No-op for the player
-// ship (no NPC bank state).
+// is (re)built and from the shot-hit cloak re-entry reset, including for the
+// player ship.
 void NovaWeapon_InitShipWeaponBursts(GameState &state, Ship &ship);
 
 // Ghidra 0x004138a0 Weapon_ClassifyShipWeaponAmmoReadiness. Classifies the
@@ -110,11 +106,10 @@ void NovaWeapon_InitShipWeaponBursts(GameState &state, Ship &ship);
 //   2 = no armed banks, or every armed bank is depleted;
 //   1 = armed banks exist and every usable (cost-bearing) bank is depleted;
 //   0 = at least one armed bank is ready.
-// A bank is armed when npc_weapon_count_by_class > 0. Its def's ammo_type
-// (ammo_or_energy_cost_code) classifies it: >= 0 secondary-ammo (ready while
-// npc_weapon_secondary_count_by_class > 0); < -1000 fuel weapon (ready while
-// fuel_points is STRICTLY greater than |cost| - 1000, equality counts
-// depleted); [-1000,-1] free-energy (armed, never depleted).
+// A bank is armed when its mounted count is positive. Its def's ammo_type
+// classifies it: >= 0 loaded-ammo weapon (ready while ammo > 0); < -1000 fuel
+// weapon (ready while fuel_points is STRICTLY greater than |cost| - 1000,
+// equality counts depleted); [-1000,-1] free-energy (armed, never depleted).
 [[nodiscard]] int NovaWeapon_ClassifyAmmoReadiness(const GameState &state,
                                                    const Ship &ship);
 
@@ -140,14 +135,14 @@ NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,
 // Ghidra 0x00464670 Weapon_HasLoadedLaunchBayAmmo: true when the ship's
 // class has a KeyCarried fighter (ShipClass.key_carried_ship_class) and one
 // of its 0x100 banks holds a mode-99 bay weapon with mounted ammo > 0 and
-// loaded secondary > 0 whose ammo_type - 0x80 equals the KeyCarried id.
+// loaded ammo > 0 whose ammo_type - 0x80 equals the KeyCarried id.
 [[nodiscard]] bool NovaWeapon_HasLoadedLaunchBayAmmo(const GameState &state,
                                                      const Ship &ship);
 
 // Ghidra 0x00464520 Weapon_HasLaunchBayWeapon: true when any of the ship's
 // banks is a mode-99 bay weapon with mounted ammo > 0 whose carried ship
 // class (ammo_type) sets capability Flags 0x8000 (escape-ship type). Reads
-// the mounted counter, not the loaded secondary.
+// the mounted counter, not the loaded ammo.
 [[nodiscard]] bool NovaWeapon_HasLaunchBayWeapon(const GameState &state,
                                                  const Ship &ship);
 
@@ -176,16 +171,15 @@ NovaWeapon_HasAnyFireableNonSecondaryWeapon(const GameState &state,
                                                    const Ship &ship);
 
 // Ghidra 0x00468990 Weapon_CanFireWeaponBank: whether the given weapon bank
-// may fire right now for a specific ship (player = GameState strided banks;
-// NPC = Ship.npc_weapon_bank_*). Faithful branching on ship_instance_id==0:
-// for the player the secondary-read index is the COST bank (ammo_type), for an
-// NPC it is the FIRING bank itself. Gates, in original order: NPC-only
-// flags_secondary 0x100 mount gate; cloak-visibility threshold (0x4000 =
-// Bible "can be fired while cloaked"); launch-bay dependency (0x80, resolved
-// through Weapon_HasLoadedLaunchBayAmmo); carrier-bay mode-99 loaded counter;
-// ammo_type [0,0xff] counter; fuel-drawn ammo_type <= -1000 with per-shot
-// fuel (|cost| - 1000) * 0.1 (DAT_00575810; FCOMPP passes on equality -- the
-// readiness classifier 0x004138a0 compares UNSCALED, an original
+// may fire right now for a specific ship. Faithful branching on
+// ship_instance_id==0: for the player the ammo-read index is the COST bank
+// (ammo_type), for an NPC it is the FIRING bank itself. Gates, in original
+// order: NPC-only flags_secondary 0x100 mount gate; cloak-visibility threshold
+// (0x4000 = Bible "can be fired while cloaked"); launch-bay dependency (0x80,
+// resolved through Weapon_HasLoadedLaunchBayAmmo); carrier-bay mode-99 loaded
+// counter; ammo_type [0,0xff] counter; fuel-drawn ammo_type <= -1000 with
+// per-shot fuel (|cost| - 1000) * 0.1 (DAT_00575810; FCOMPP passes on equality
+// -- the readiness classifier 0x004138a0 compares UNSCALED, an original
 // inconsistency preserved on both sides). Returns a plain bool (AL only).
 [[nodiscard]] bool NovaWeapon_CanFireWeaponBank(const GameState &state,
                                                 const Ship &ship,
@@ -376,12 +370,12 @@ void NovaWeapon_TickShots(GameState &state,
 [[nodiscard]] std::string NovaWeapon_BankDisplayName(const GameState &state,
                                                      std::int16_t weapon_bank);
 
-// The ammo/secondary counter shown for a weapon bank in the HUD weapon/ammo
+// The loaded-ammo counter shown for a weapon bank in the HUD weapon/ammo
 // panel, mirroring NovaUi_DrawActiveWeaponAmmoPanel (0x00460ec0). The original
-// reads `weapon_secondary_count_by_class_counter_0[bank*100]` for a special
+// reads the firing bank's ammo counter for a special
 // weapon (weapon_mode_code 99 / out-of-range ammo_type), else the ammo counter
 // of the weapon whose id equals this weapon's ammo_type
-// (weapon_secondary_count_by_class counter `ammo_type`). The panel hides the
+// (the ammo counter at `ammo_type`). The panel hides the
 // count for energy-based weapons (ammo_type == -1 or flags_secondary & 0x40),
 // and returns `-1` to signal that case. Returns -1 when the bank/weapon is
 // invalid.

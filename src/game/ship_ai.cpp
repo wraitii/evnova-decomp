@@ -588,15 +588,15 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   bool should_enter = false;
   const std::uint16_t flags = ship_class->flags_secondary;
   if ((flags & 0x0100U) != 0U) {
-    for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
       const std::size_t bank_index = static_cast<std::size_t>(bank);
-      if (ship.npc_weapon_count_by_class[bank_index] <= 0) {
+      if (ship.weapon_banks[bank_index].mounted <= 0) {
         continue;
       }
       const Weapon *weapon =
           state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
       if (weapon != nullptr && static_cast<float>(weapon->reload_ticks) <
-                                   ship.npc_weapon_bank_cooldown[bank_index]) {
+                                   ship.weapon_banks[bank_index].cooldown) {
         should_enter = true;
         break;
       }
@@ -1206,7 +1206,9 @@ void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
   }
 
   std::int16_t stellar_weapon = -1;
-  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+  for (std::int16_t bank = 0;
+       bank < static_cast<std::int16_t>(kWeaponBankCount);
+       ++bank) {
     const Weapon *weapon =
         state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
     if (weapon == nullptr || (weapon->flags_secondary & 0x400U) == 0U ||
