@@ -405,7 +405,14 @@ using evnova::util::ReadCString;
   }
   w.range_link_extra_count = ReadBeI16(bytes, 0x44);
   for (std::size_t i = 0; i < 4; ++i) {
-    w.jam_vuln[i] = ReadBeI16(bytes, 0x5e + i * 2);
+    // Loader 0x004bd3c0 clamps each JamVuln channel to [0, 100].
+    std::int16_t vuln = ReadBeI16(bytes, 0x5e + i * 2);
+    if (vuln < 0) {
+      vuln = 0;
+    } else if (vuln > 100) {
+      vuln = 100;
+    }
+    w.jam_vuln[i] = vuln;
   }
   return w;
 }
