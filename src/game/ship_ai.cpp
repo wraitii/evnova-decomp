@@ -278,6 +278,7 @@ bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship) {
   return false;
 }
 
+// @port 0x00463550 100%
 // Ghidra 0x00463550 Ship_ComputeShipMaxShieldPoints. Player outfit aggregation
 // runs in Outfit_ComputePlayerEffectiveStats. Keep NPC capacity wide for the
 // original x87 threshold comparisons; behavior 5 explicitly rounds to float.
@@ -761,6 +762,8 @@ void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
 }
 
 // @port 0x004152e0 100% moddata
+// DIVERGENCE(original): per-side weapon reach replaces the original's fixed
+// 382 px range probe (see below).
 // Ghidra 0x004152E0 Ship_IssueEscortOrders.
 // Commands are Formation=0, Defend=1, Attack=2, and Return=3.
 void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
@@ -920,6 +923,8 @@ void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
 }
 
 // @port 0x00401000 80% gameplay,cadence,divergence
+// DIVERGENCE(original): the per-instance AI update throttle is not modelled;
+// the port runs the heavy decision every frame.
 // ---- Ghidra 0x00401000 Ship_UpdateShipAI : the top-level dispatcher. ----
 // Recomputes the effective movement stats cached on the ship when its class is
 // the 0x2ff sentinel (player-side; not relevant to NPCs), selects the
@@ -2285,7 +2290,7 @@ void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
   }
 }
 
-// @port 0x00410700 100% correctness,divergence
+// @port 0x00410700 100% correctness,bugfix
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Ports the escort-mode/state
 // flip plus the pers announcement arm: a personality ship (no mission fleet)
 // whose pers Flags carry 0x10 announces once when made hostile, unless it is

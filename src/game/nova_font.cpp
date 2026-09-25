@@ -666,6 +666,7 @@ void NovaText_Draw(SdlPlatform &platform,
   SDL_DestroyTexture(texture);
 }
 
+// @port 0x004622F0 100% divergence
 // Ghidra 0x004622f0 DrawContext_DrawCenteredPascalStringInBounds.
 void NovaText_DrawCentered(SdlPlatform &platform,
                            NovaFontCache &cache,

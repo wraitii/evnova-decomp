@@ -572,6 +572,7 @@ NovaTravel_PlayerJumpDurationMultiplier(const GameState &state) {
   return 1.0F;
 }
 
+// @port 0x00456CA0 75% rng,rendering
 // Ghidra 0x00456ca0 Stellar_EnterWormhole.
 std::int16_t
 NovaTravel_SelectWormholeDestination(GameState &state,
@@ -619,6 +620,7 @@ NovaTravel_SelectWormholeDestination(GameState &state,
       0, candidates.size() - 1}(state.rng)];
 }
 
+// @port 0x00456480 65% gameplay,rendering
 // Ghidra 0x00456480 Stellar_EnterHypergate; destination validation after
 // NovaUi_RunStarmapWindow returns in its linked-destination mode.
 std::int16_t
@@ -789,6 +791,7 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
   return true;
 }
 
+// @port 0x00462DB0 90% gameplay,divergence
 // ---------------------------------------------------------------------------
 // Ghidra 0x00462db0 Stellar_FindNearestAvailableTravelStellar.
 // ---------------------------------------------------------------------------
@@ -2100,6 +2103,7 @@ bool NovaTravel_PlayerMeetsStellarAccess(const GameState &state,
   return eligible;
 }
 
+// @port 0x00459950 90% gameplay,ui
 // Ghidra 0x00459950 NovaUi_UpdateTravelEngagementProgress.
 void NovaTravel_UpdateEngagementProgress(GameState &state) {
   constexpr std::int16_t kArmedTimer = 0x2ee;

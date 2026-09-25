@@ -555,6 +555,7 @@ void Boarding_ResetShipAndAttackersAfterBoarding(GameState &state, Ship &ship) {
   NovaShip_ApplyInherentGovernmentVoice(state, ship);
 }
 
+// @port 0x0045A3D0 92% cadence
 // Ghidra 0x0045a3d0 Player_HandleBoardTargetCommand.
 //
 // Clean-room summary (see docs/boarding_plunder_capture.md for the full map):
@@ -571,8 +572,11 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                                      GameState &state,
                                      SpaceflightView &view,
                                      HudRenderer &hud) {
-  // The original latches DAT_007354a5 ("player acted") for the frame-timing
-  // refresh in Frame_SpaceflightLoop; not modelled here.
+  // The original sets g_player_did_command_this_frame (DAT_007354a5) on every
+  // board attempt (all arms except the cloaked early-out);
+  // Frame_SpaceflightLoop reads it at 0x00417d0f to refresh
+  // g_last_player_activity_ms. The port has no idle-activity timestamp, so this
+  // side effect is not modelled.
   EnsureTransitionSounds(state);
 
   if (state.player.primary_target_ship_slot == -1) {

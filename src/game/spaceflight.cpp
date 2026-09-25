@@ -808,6 +808,7 @@ void PlayerTick_ShipTargetCommands(GameState &state, const FlightInput &input) {
 
 } // namespace
 
+// @port 0x0045C7A0 100% divergence
 // Ghidra 0x0045c7a0 NovaUi_MarkTravelAndStatusPanelsDirty. The name is a
 // misnomer: it does not mark panels dirty, it sets every player-command edge
 // latch (the 0x007cab35..0x007cab53 swath) so a key held across a modal or mode
@@ -1011,6 +1012,7 @@ enum class LandCommandResult {
   kBlockedFrame,
 };
 
+// @port 0x00462410 80% gameplay
 // Ghidra 0x00462410 System_GetCurrentSystemLinkSpriteWidth (landing use): the
 // landing envelope reads Sprite_GetFrameFullWidth (0x00462390) on the target's
 // link_a spin set, i.e. the full frame width (right - left of the sprite's
@@ -1476,6 +1478,7 @@ void PlayerTick_SelfDestructCommand(GameState &state,
   }
 }
 
+// @port 0x00451940 45% gameplay,license,synthetic
 // Ghidra 0x0044aa70 cloak command + active-cloak upkeep (0x00451db0 ->
 // 0x00451e6f, internal label of the PlayerTick_InteractionCloakAndStatus
 // umbrella). Command (binding 0x29, default DIK 0x16 = U, edge-latched through
@@ -2551,6 +2554,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
       // interaction pathway. It is intentionally not substituted for landing.
+      // @port 0x00454910 65% gameplay,audio
       // Mirrors Ship_HandlePlayerTargetActionCommand (0x00454910): with a ship
       // primary target the action opens the ship-comm dialog (DLOG 0x3ef); with
       // no target (or the 0x38/0x6f commands held) it opens the destination-

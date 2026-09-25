@@ -69,7 +69,7 @@ void NovaWeapon_TallyInboundWeaponThreat(GameState &state) {
       const Weapon *weapon = state.scenario.Weapon(
           static_cast<std::int16_t>(shot.weapon_id + 0x80));
       if (weapon == nullptr) {
-        NovaLog::Todo(
+        NovaLog::Warn(
             "inbound threat tally (0x00422210): skipped shot slot {} with "
             "invalid weapon bank {}",
             shot_slot,

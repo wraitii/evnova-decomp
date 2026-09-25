@@ -2589,6 +2589,7 @@ private:
   }
 
   // @port 0x00448BE0 100% divergence
+  // DIVERGENCE(original): digit-run compare-value token handling (see below).
   // Ghidra 0x00448be0 NovaExpression_EvaluateToken. Case-insensitive B/P/G/O/E
   // terms, parentheses/brackets/comparison operators, and the original's '#'
   // compare-value token for a digit run. For the digit-run divergence see the
@@ -2682,6 +2683,7 @@ private:
 } // namespace
 
 // @port 0x00449020 100% divergence
+// DIVERGENCE(original): flat operator chain, not precedence (see ParseChain).
 // Ghidra 0x00449020 NovaExpression_EvaluateBoolean. ExprParser ports the
 // original's flat operator chain, not precedence; the remaining documented
 // divergences live on the ParseChain comment above.

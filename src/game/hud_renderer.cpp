@@ -207,6 +207,9 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
   return it->second->texture ? it->second.get() : nullptr;
 }
 
+// @port 0x0045EA66 95% rendering,verify
+// @port 0x0045EBE8 95% rendering,verify
+// @port 0x0045F086 95% rendering,verify
 // Draws one life-support bar from its real layout panel rect, faithfully
 // reproducing the game's fill geometry (HudBar_FillRect mirrors
 // NovaUi_DrawPlayerShieldBar 0x0045ea66 / _ArmorBar 0x0045ebe8 /
@@ -475,6 +478,7 @@ void HudRenderer::Draw(SdlPlatform &platform,
   // onto the cockpit art before the other panels refresh.
   DrawRadarPanel(platform, state, force_empty_radar);
 
+  // @port 0x0045E9C0 80% rendering,divergence
   // Life-support bars (Ghidra 0x0045e9c0 NovaUi_DrawPlayerShieldArmorPanels),
   // drawn inside their genuine top-right-strip rects. The
   // Federation shield/armor/fuel slots are x=35..184 at y=200/216/234, and
@@ -506,6 +510,7 @@ void HudRenderer::Draw(SdlPlatform &platform,
   // (the wide slot moves its left edge), so it marks the fraction above the
   // last full hundred tons.
   if (!NovaAiShip_IsDisabled(state, state.player)) {
+    // @port 0x0045EFE0 95% rendering,verify
     const float fuel = state.player.fuel_points;
     const HudPanelRect fuel_panel = anchor_panel(layout_.fuel_panel);
     DrawLifeBar(
@@ -558,6 +563,7 @@ void HudRenderer::Draw(SdlPlatform &platform,
   }
 }
 
+// @port 0x0045E400 95% ui
 // ---------------------------------------------------------------------------
 // Ghidra 0x0045e400 NovaUi_DrawTravelStatusPanel.
 //
@@ -687,6 +693,7 @@ void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
                     label_color);
 }
 
+// @port 0x00460EC0 100%
 // ---------------------------------------------------------------------------
 // Ghidra 0x00460ec0 NovaUi_DrawActiveWeaponAmmoPanel. One centered row at
 // baseline top+12: the idle STR# label when no bank is active (label colour),
@@ -749,6 +756,7 @@ void HudRenderer::DrawWeaponPanel(SdlPlatform &platform,
 // TODO(decomp(0x0045f530)) skipped: debug overlay rows (gated by a debug
 // config byte, never set in normal play).
 // ---------------------------------------------------------------------------
+// @port 0x0045F530 95% ui,divergence
 void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                                   const GameState &state,
                                   const SDL_Color &value_color,
@@ -1008,6 +1016,7 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
   }
 }
 
+// @port 0x004612C0 90% ui
 // ---------------------------------------------------------------------------
 // Ghidra 0x004612c0 NovaUi_DrawCargoMissionStatusPanel.
 //
@@ -1440,6 +1449,10 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
+// @port 0x0045D0A0 100% divergence
+// @port 0x0045D600 85% rng,rendering,divergence
+// DIVERGENCE(original): the radar direct-composite pass differs from the
+// original's surface-space compositing; see the timing note below.
 void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
                                  const GameState &state,
                                  bool force_empty) {
@@ -1453,6 +1466,7 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
   const HudPanelRect radar = HudPanel_AnchorTopRight(
       layout_.radar_panel, static_cast<std::int16_t>(playfield.x));
 
+  // @port 0x0045D320 40% ui
   // Target-status poll (NovaUi_RefreshGameplayPanels 0x0045d320): toggles the
   // blink phase every >= 15 ticks of the original 60 Hz clock (250 ms), which
   // also re-marks the radar dirty (DAT_00596d25) and is the only normal-flight

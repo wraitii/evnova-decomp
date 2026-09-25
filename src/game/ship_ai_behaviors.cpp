@@ -1191,7 +1191,7 @@ void NovaAi_DefenseFleetPrioritizePlayerThreat(GameState &state, Ship &ship) {
   // revalidation -- an out-of-bounds read with no defined value. The port
   // instead revalidates the ship's existing primary target, the evident
   // intent (clear a primary that can no longer be engaged under cloak rules).
-  // TODO(decomp(0x00405120)) divergence: original reads ships[0x40] here.
+  // TODO(decomp(0x00405120)) DIVERGENCE(original): original reads ships[0x40] here.
   if (ship.primary_target_ship_slot != -1) {
     const std::size_t primary =
         static_cast<std::size_t>(ship.primary_target_ship_slot);

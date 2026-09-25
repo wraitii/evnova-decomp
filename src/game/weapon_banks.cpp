@@ -286,6 +286,7 @@ void NovaWeapon_AddShipClassStockBanks(GameState &state,
   }
 }
 
+// @port 0x00463260 95% correctness
 // Ghidra 0x00463260 Weapon_RebuildWeaponBankPoolsFromOwnedOutfits.
 void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state) {
   // Zero-sweep all 0x100 banks (the original clears both counters).
@@ -322,6 +323,7 @@ void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state) {
   }
 }
 
+// @port 0x00462EC0 90% correctness
 void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
   // Ghidra Weapon_ReconcileOutfitPoolWithWeaponBanks (0x00462ec0) reconciles
   // the outfit-pool counts with the live weapon-bank counters in both
