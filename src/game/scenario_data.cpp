@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -1662,7 +1663,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
   // every other high class. Outfits are 0x200, weapons 0x100.
   ships.assign(0x300, {});
   outfits.assign(0x200, {});
-  weapons.assign(0x100, {});
+  weapons.assign(kWeaponBankCount, {});
   stellars.assign(0x600, {});
   systems.assign(0x800, {});
   // GovernmentDef table is capped at 0x100 entries by the original (loop bound
@@ -1938,6 +1939,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
       ++loaded_weapons;
     }
   }
+  assert(weapons.size() == kWeaponBankCount);
   ComputeWeaponEffectiveRanges(weapons);
   // Apply the loader's ship-section default-loadout FreeMass fold once the
   // outfit and weapon tables it resolves against are loaded (0x004bd3c0).

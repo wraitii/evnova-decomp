@@ -694,8 +694,10 @@ struct Outfit {
   [[nodiscard]] std::int32_t PurchaseMass(std::int16_t ship_hull_mass) const;
 };
 
-// Ghidra WeaponDef (g_weapon_defs, 0x100 entries indexed by weapon id minus
-// 0x80). One projectile/beam/bay weapon.
+inline constexpr std::size_t kWeaponBankCount = 0x100;
+
+// Ghidra WeaponDef (g_weapon_defs, kWeaponBankCount entries indexed by weapon
+// id minus 0x80). One projectile/beam/bay weapon.
 struct Weapon {
   std::string name; // resource name / status-display name
 

@@ -330,11 +330,11 @@ void NovaGame_ReseedRandom(GameState &state);
 
 // Ghidra 0x0040d9a0 Ship_LaunchShipFromCarrierBay: per-frame launch driver.
 // Requires an active primary target in-system, then scans the banks for the
-// first loaded mode-99 bay weapon (mounted ammo > 0, loaded secondary > 0,
+// first loaded mode-99 bay weapon (mounted count > 0, loaded ammo > 0,
 // NPC-mount gate Flags2 0x100 clear) whose cooldown has expired, makes it the
 // active bank, spawns the fighter, queues the fire sound, sets the bank
 // cooldown to reload / MOUNTED ammo (original quirk -- the divisor is the
-// mounted count, not the loaded secondary), decrements the secondary, and
+// mounted count, not the loaded ammo), decrements the ammo, and
 // applies the shared-cooldown arm (Flags3 0x20: every other bank's cooldown
 // rises to new_cooldown + 2.0 (DAT_00575040) when smaller). Returns true when
 // a fighter launched.
@@ -355,7 +355,7 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter);
 // outfit_slot and weapon_bank == -1 the holding is resolved: the first armed
 // mode-99 bank whose class (or base-sprite clone family) matches the class,
 // then the ModType-3 fighter-bay outfit bound to that bank; no bay/outfit ->
-// false. Occupancy = the bay's loaded secondary count (or the outfit's owned
+// false. Occupancy = the bay's loaded ammo count (or the outfit's owned
 // count when both slots are explicit); capacity = weapon MaxAmmo x mounted
 // count, or the outfit Max field when MaxAmmo is 0/-1. Also counts active
 // behavior-5 fighters of this class with squad leader 0 and no mission fleet.

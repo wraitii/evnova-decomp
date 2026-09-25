@@ -122,8 +122,8 @@ TEST_CASE("carried-ship outfit count prefers deployed craft then bay ammo",
   bay.weapon_mode_code = 99;
   bay.ammo_type = 0x80;
 
-  state.weapon_count_by_class[0] = 1;
-  state.weapon_secondary_count_by_class[0] = 3;
+  state.player.weapon_banks[0].mounted = 1;
+  state.player.weapon_banks[0].ammo = 3;
   CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 3);
   CHECK(Outfit_PlayerHasOutfitForControlExpression(state, 0x80));
 
@@ -142,7 +142,7 @@ TEST_CASE("carried-ship outfit count prefers deployed craft then bay ammo",
   second.is_active = false;
   CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 3);
 
-  state.weapon_count_by_class[0] = 0;
+  state.player.weapon_banks[0].mounted = 0;
   CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 0);
   CHECK_FALSE(Outfit_PlayerHasOutfitForControlExpression(state, 0x80));
   state.inventory.outfit_owned_count[0] = 1;
@@ -431,9 +431,9 @@ TEST_CASE("stock weapon seeding keys carried ammo on the weapon ammo code",
   state.scenario.weapons[0].ammo_type = 5;
 
   NovaWeapon_SeedBanksFromShipStock(state, 0);
-  CHECK(state.weapon_count_by_class[0] == 1);
-  CHECK(state.weapon_secondary_count_by_class[5 * 100] == 3);
-  CHECK(state.weapon_secondary_count_by_class[0] == 0);
+  CHECK(state.player.weapon_banks[0].mounted == 1);
+  CHECK(state.player.weapon_banks[5].ammo == 3);
+  CHECK(state.player.weapon_banks[0].ammo == 0);
 }
 
 // Ghidra 0x00469760 Player_ComputeFleetCargoCapacity: the player ship's

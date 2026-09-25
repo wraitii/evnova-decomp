@@ -88,9 +88,8 @@ constexpr std::size_t kEscortCap = 6; // Ship_CanPlayerHaveMoreEscorts soft cap
   if (probe == nullptr) {
     return false;
   }
-  for (int bank = 0; bank < 0x100; ++bank) {
-    if (state.weapon_count_by_class[static_cast<std::size_t>(bank) * 100] <=
-        0) {
+  for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
+    if (state.player.weapon_banks[bank].mounted <= 0) {
       continue;
     }
     const Weapon *carried =
@@ -260,10 +259,8 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
   // EnsureNpcWeaponBanks (src/game/ship_ai.cpp).
   {
     int candidates = 0;
-    for (int bank = 0; bank < 0x100; ++bank) {
-      const std::int16_t stock =
-          target.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
-              bank)];
+    for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
+      const std::int16_t stock = target.weapon_banks[bank].ammo;
       const Weapon *w =
           state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
       if (stock > 0 && w != nullptr && w->weapon_mode_code != 99 &&
@@ -276,10 +273,10 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
     } else {
       // Rejection-sample a stocked bank with the same predicate.
       while (true) {
-        const int bank = RandomBelow(state.rng, 0x100);
+        const int bank =
+            RandomBelow(state.rng, static_cast<int>(kWeaponBankCount));
         const std::int16_t stock =
-            target.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
-                bank)];
+            target.weapon_banks[static_cast<std::size_t>(bank)].ammo;
         const Weapon *w =
             state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
         if (stock >= 1 && w != nullptr && w->weapon_mode_code != 99 &&
@@ -2041,9 +2038,8 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
           if (own.limited) {
             break;
           }
-          state.weapon_secondary_count_by_class[static_cast<std::size_t>(
-                                                    options.ammo_bank) *
-                                                100] += 1;
+          state.player.weapon_banks[static_cast<std::size_t>(options.ammo_bank)]
+              .ammo += 1;
           ++transferred;
         }
         if (transferred < 1) {

@@ -477,11 +477,11 @@ void NovaShip_ResetToDefaultCombatState(GameState &state,
   ship.vel_x = 0.0F;
   ship.speed = 0.0F;
   if (refill && cls != nullptr) {
-    // The original copies the class default_weapon_ammo/secondary 0x100 tables
+    // The original copies the class default mounted/ammo tables
     // into the per-bank counters; unlike a fresh bank init it does not reset
     // the per-bank cooldowns or burst state.
     NovaWeapon_CopyShipClassStockBanks(state, ship);
-    ship.npc_weapon_banks_ship_class = ship.ship_class_id;
+    ship.weapon_banks_ship_class = ship.ship_class_id;
   }
   // Six cargo bins clear last, after the refill block (Ghidra 0x0041e5da).
   ship.cargo_bins.fill(0);

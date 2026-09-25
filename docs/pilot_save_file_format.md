@@ -114,8 +114,8 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 | 0x001a | u16[0x800] | per-system discovery/scan state (0x1000 bytes) |
 | 0x101a | u16[0x200] | per-outfit owned counts (0x400 bytes). Saver writes via 8 interleaved-looking stores; `DAT_005993b6..c2` are just `g_outfit_owned_count[1..7]` — flat array. |
 | 0x141a | u16[0x800] | per-system reputation (0x1000 bytes); `DAT_00733bca..d6` = `g_system_reputation[1..7]` slices |
-| 0x241a | u16[0x100] | weapon bank ammo (only [0] of each 100-short bank slot is persisted) |
-| 0x261a | u16[0x100] | weapon bank secondary counters (same stride) |
+| 0x241a | u16[0x100] | weapon bank mounted counts |
+| 0x261a | u16[0x100] | weapon bank loaded-ammo counts |
 | 0x281a | u32 | credits |
 | 0x281e | 16 × 0x14 | active-mission runtime flags (`g_active_misn_runtime_flags`) |
 | 0x295e | 16 × 0x8e6 | active missions (`_g_active_misn` structs, byte copy) |

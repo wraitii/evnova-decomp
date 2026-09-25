@@ -164,6 +164,13 @@ struct ActiveMission {
   std::array<std::byte, 0x8e6> raw_payload{};
 };
 
+struct WeaponBanks {
+  std::int16_t mounted = 0;
+  std::int16_t ammo = 0;
+  float cooldown = 0.0F;
+  std::int16_t burst = 0;
+};
+
 // Results of Mission_ResolveMissionStellarTargets (0x0043d240) needed by
 // active-slot population and personality LinkMission offers.
 struct MissionTargetResolution {
@@ -362,19 +369,11 @@ struct Ship {
 
   // --- Weapon bank / active selection ---
   std::int16_t active_weapon_bank_slot = 0; // +0x72
-  // Ghidra keeps the weapon-bank rows on every ShipState. The player path uses
-  // GameState's equivalent 100-stride arrays; NPCs keep their class loadout
-  // counters here so AI target/intercept helpers do not accidentally inspect
-  // the player's weapons.
-  std::array<std::int16_t, 0x100> npc_weapon_count_by_class{};
-  std::array<std::int16_t, 0x100> npc_weapon_secondary_count_by_class{};
-  std::array<float, 0x100> npc_weapon_bank_cooldown{};
-  // Per-bank burst-cycle tick counter (Ghidra ShipState field_0x17c, a
-  // 200-stride int16 array). Driven by Weapon_FireShipWeapons
-  // (NovaWeapon_FireNpcWeaponBank); resets with Weapon_InitShipWeaponBursts
-  // (0x00413810) when the weapon-bank loadout is (re)built.
-  std::array<std::int16_t, 0x100> npc_weapon_bank_burst_counter{};
-  std::int16_t npc_weapon_banks_ship_class = -1;
+  // Ghidra ShipState +0xc8: 0x100 rows at a 0xc8-byte runtime stride. The
+  // clean-room keeps the four reconstructed fields compact while preserving
+  // one bank table on every ship, including the player in ships_[0].
+  std::array<WeaponBanks, kWeaponBankCount> weapon_banks{};
+  std::int16_t weapon_banks_ship_class = -1;
   // Ghidra ShipState +0xC8DA. The bank Weapon_FireShipWeapons last served a
   // lead-capable weapon mode (-1/6) from; the aim blocks of
   // Ship_ApplyShipAiControls (modes 6/7/0xe) fall back to it when the active
@@ -1660,24 +1659,6 @@ struct GameState {
     cached_ionization_decay_rate = -1.0F;
     cached_ionization_capacity = -1.0F;
   }
-
-  // The original stores 0x100 weapon banks with a 100-element stride.
-  std::array<std::int16_t, 0x100 * 100> weapon_count_by_class{};
-  std::array<std::int16_t, 0x100 * 100> weapon_secondary_count_by_class{};
-  // Per-weapon-bank cooldown, in reference-cadence ticks remaining before the
-  // bank may fire again (Ghidra ShipState.weapon_bank_cooldown_0, a float per
-  // bank). Mirrors the original: after firing, the bank's cooldown is set to
-  // the weapon's reload/cooldown value and counts down each frame; the firing
-  // routine only fires banks whose cooldown has elapsed. Indices are the
-  // zero-based weapon id (bank slot).
-  std::array<float, 0x100> weapon_bank_cooldown{};
-
-  // Per-bank burst-cycle counter (Ghidra ShipState field_0x17c, a 200-stride
-  // int16 array). Advanced once per fired volley by the fire path; when it
-  // reaches Weapon_GetWeaponFireIntervalTicks (0x0046f270) the bank wraps to
-  // 0 and preloads burst_reset_cooldown. Player banks; NPCs keep
-  // Ship.npc_weapon_bank_burst_counter.
-  std::array<std::int16_t, 0x100> weapon_bank_burst_counter{};
 
   // The flight-loop command edge latches (Ghidra 0x007cab35..0x007cab53,
   // including g_playerSecondaryCycleCommandLatch). NovaUi_MarkTravelAndStatus-

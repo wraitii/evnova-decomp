@@ -8,30 +8,6 @@
 
 namespace game::weapon_detail {
 
-// The clean-room weapon banks use the original 100-element stride.
-inline constexpr std::size_t kBankStride = 100;
-
-inline std::int16_t &BankAmmo(GameState &state, std::int16_t bank) {
-  return state
-      .weapon_count_by_class[static_cast<std::size_t>(bank) * kBankStride];
-}
-
-inline const std::int16_t &BankAmmo(const GameState &state, std::int16_t bank) {
-  return state
-      .weapon_count_by_class[static_cast<std::size_t>(bank) * kBankStride];
-}
-
-inline std::int16_t &BankSecondary(GameState &state, std::int16_t bank) {
-  return state.weapon_secondary_count_by_class[static_cast<std::size_t>(bank) *
-                                               kBankStride];
-}
-
-inline const std::int16_t &BankSecondary(const GameState &state,
-                                         std::int16_t bank) {
-  return state.weapon_secondary_count_by_class[static_cast<std::size_t>(bank) *
-                                               kBankStride];
-}
-
 // The weapon loaded in a bank, or nullptr when the bank holds nothing valid.
 inline const Weapon *WeaponAt(const GameState &state, std::int16_t bank) {
   // Banks are indexed by zero-based weapon id; the scenario Weapon() lookup

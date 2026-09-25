@@ -436,8 +436,10 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
               child.vel_y *= 0.5F;
             }
           }
-          ship.npc_weapon_count_by_class.fill(0);
-          ship.npc_weapon_secondary_count_by_class.fill(0);
+          for (WeaponBanks &bank : ship.weapon_banks) {
+            bank.mounted = 0;
+            bank.ammo = 0;
+          }
         }
         NovaShip_TickDestroyedShipVisualStateRawCall(state, ship);
         raw_counter_bits = static_cast<std::uint16_t>(raw_counter_bits + 1U);

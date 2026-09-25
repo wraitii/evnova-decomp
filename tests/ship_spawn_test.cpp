@@ -108,9 +108,11 @@ TEST_CASE("random system dude clears recycled movement state") {
   recycled.ai_forward_thrust_cmd = 12.0F;
   recycled.ai_desired_speed = -50.0F;
   recycled.arrival_monitor_active = true;
-  recycled.npc_weapon_count_by_class.fill(123);
-  recycled.npc_weapon_secondary_count_by_class.fill(456);
-  recycled.npc_weapon_banks_ship_class = 77;
+  for (game::WeaponBanks &bank : recycled.weapon_banks) {
+    bank.mounted = 123;
+    bank.ammo = 456;
+  }
+  recycled.weapon_banks_ship_class = 77;
 
   const int slot = NovaEncounter_SpawnRandomSystemDudeShip(state, kSystemId, 8);
   REQUIRE(slot == 1);
@@ -123,19 +125,21 @@ TEST_CASE("random system dude clears recycled movement state") {
   const game::ShipClass *cls = state.scenario.Ship(
       static_cast<std::int16_t>(spawned.ship_class_id + 0x80));
   REQUIRE(cls != nullptr);
-  CHECK(spawned.npc_weapon_banks_ship_class == spawned.ship_class_id);
-  std::array<std::int16_t, 0x100> expected_ammo{};
-  std::array<std::int16_t, 0x100> expected_secondary{};
+  CHECK(spawned.weapon_banks_ship_class == spawned.ship_class_id);
+  std::array<std::int16_t, game::kWeaponBankCount> expected_mounted{};
+  std::array<std::int16_t, game::kWeaponBankCount> expected_ammo{};
   for (const game::ShipDefaultWeaponBank &stock : cls->stock_weapons) {
     if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
       continue;
     }
     const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-    expected_ammo[bank] = std::max<std::int16_t>(stock.count, 0);
-    expected_secondary[bank] = stock.ammo_load;
+    expected_mounted[bank] = std::max<std::int16_t>(stock.count, 0);
+    expected_ammo[bank] = stock.ammo_load;
   }
-  CHECK(spawned.npc_weapon_count_by_class == expected_ammo);
-  CHECK(spawned.npc_weapon_secondary_count_by_class == expected_secondary);
+  for (std::size_t bank = 0; bank < game::kWeaponBankCount; ++bank) {
+    CHECK(spawned.weapon_banks[bank].mounted == expected_mounted[bank]);
+    CHECK(spawned.weapon_banks[bank].ammo == expected_ammo[bank]);
+  }
 }
 
 // The fleet lead-ship spawner lays a fleet def's lead onto an allocated slot.
@@ -537,8 +541,8 @@ TEST_CASE("pers spawner lays a personality onto the ship", "[pers][spawn]") {
   CHECK(ship.fuel_points == static_cast<float>(cls->base_fuel));
   // Weapon deltas: 0x81/0x83/0x85 +1, 0x87 +2 count and +50 ammo over the
   // class stock loadout.
-  CHECK(ship.npc_weapon_count_by_class[0x81 - 0x80] >= 1);
-  CHECK(ship.npc_weapon_secondary_count_by_class[0x87 - 0x80] >= 50);
+  CHECK(ship.weapon_banks[0x81 - 0x80].mounted >= 1);
+  CHECK(ship.weapon_banks[0x87 - 0x80].ammo >= 50);
   // LinkMission 12 refreshes that mission's offer-time target block.
   const auto &linked_definition =
       state.scenario.missions[static_cast<std::size_t>(jack.link_mission_id)];

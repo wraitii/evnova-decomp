@@ -382,15 +382,15 @@ TEST_CASE("Capture merges the captured hull's carried weapons and ammo",
   state.scenario.outfits[5].mod_val = 0;
   state.scenario.outfits[6].mod_type = 3; // ammo bank 0x10
   state.scenario.outfits[6].mod_val = 0x10;
-  state.ShipAt(1).npc_weapon_count_by_class[0] = 2;
-  state.ShipAt(1).npc_weapon_secondary_count_by_class[0] = 5;
-  state.ShipAt(1).npc_weapon_banks_ship_class = 1;
+  state.ShipAt(1).weapon_banks[0].mounted = 2;
+  state.ShipAt(1).weapon_banks[0].ammo = 5;
+  state.ShipAt(1).weapon_banks_ship_class = 1;
   state.scenario.weapons[0].ammo_type = 0x10;
 
   REQUIRE(
       game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
-  CHECK(state.weapon_count_by_class[0] == 2);
-  CHECK(state.weapon_secondary_count_by_class[0x10 * 100] == 5);
+  CHECK(state.player.weapon_banks[0].mounted == 2);
+  CHECK(state.player.weapon_banks[0x10].ammo == 5);
 }
 
 TEST_CASE("Damaged-capture secondary copy tests the source bank, not the ammo "
@@ -406,15 +406,15 @@ TEST_CASE("Damaged-capture secondary copy tests the source bank, not the ammo "
   state.scenario.outfits[5].mod_val = 0;
   state.scenario.outfits[5].persistent_on_ship_swap = true;
   state.inventory.outfit_owned_count[5] = 1;
-  state.weapon_count_by_class[0] = 1;
-  state.weapon_secondary_count_by_class[0] = 1;
-  state.ShipAt(1).npc_weapon_secondary_count_by_class[0] = 5;
-  state.ShipAt(1).npc_weapon_banks_ship_class = 1;
+  state.player.weapon_banks[0].mounted = 1;
+  state.player.weapon_banks[0].ammo = 1;
+  state.ShipAt(1).weapon_banks[0].ammo = 5;
+  state.ShipAt(1).weapon_banks_ship_class = 1;
   state.scenario.weapons[0].ammo_type = 0x10;
 
   REQUIRE(
       game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
-  CHECK(state.weapon_secondary_count_by_class[0x10 * 100] == 0);
+  CHECK(state.player.weapon_banks[0x10].ammo == 0);
 }
 
 TEST_CASE("Capture keeps a mode-99 captured secondary in its own bank",
@@ -429,13 +429,13 @@ TEST_CASE("Capture keeps a mode-99 captured secondary in its own bank",
   state.scenario.outfits[6].mod_val = 0;
   state.scenario.weapons[0].weapon_mode_code = 99;
   state.scenario.weapons[0].ammo_type = 0x10; // ignored for mode 99
-  state.ShipAt(1).npc_weapon_secondary_count_by_class[0] = 5;
-  state.ShipAt(1).npc_weapon_banks_ship_class = 1;
+  state.ShipAt(1).weapon_banks[0].ammo = 5;
+  state.ShipAt(1).weapon_banks_ship_class = 1;
 
   REQUIRE(
       game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
-  CHECK(state.weapon_secondary_count_by_class[0] == 5);
-  CHECK(state.weapon_secondary_count_by_class[0x10 * 100] == 0);
+  CHECK(state.player.weapon_banks[0].ammo == 5);
+  CHECK(state.player.weapon_banks[0x10].ammo == 0);
 }
 
 TEST_CASE("Captured secondary remap overwrites a non-empty destination bank",
@@ -449,21 +449,21 @@ TEST_CASE("Captured secondary remap overwrites a non-empty destination bank",
   state.scenario.outfits[5].mod_val = 0;
   state.scenario.outfits[5].persistent_on_ship_swap = true;
   state.inventory.outfit_owned_count[5] = 1;
-  state.weapon_count_by_class[0] = 1;
-  state.weapon_secondary_count_by_class[0] = 1;
+  state.player.weapon_banks[0].mounted = 1;
+  state.player.weapon_banks[0].ammo = 1;
   // An ammo outfit at destination bank 0 lets the merge's leftover survive.
   state.scenario.outfits[6].mod_type = 3;
   state.scenario.outfits[6].mod_val = 0;
   // Captured source bank 1 remaps onto destination ammo bank 0. The original
   // gates on the SOURCE bank being empty and then writes the destination
   // unconditionally, overwriting the persistent round (5, not 1+5=6).
-  state.ShipAt(1).npc_weapon_secondary_count_by_class[1] = 5;
-  state.ShipAt(1).npc_weapon_banks_ship_class = 1;
+  state.ShipAt(1).weapon_banks[1].ammo = 5;
+  state.ShipAt(1).weapon_banks_ship_class = 1;
   state.scenario.weapons[1].ammo_type = 0;
 
   REQUIRE(
       game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
-  CHECK(state.weapon_secondary_count_by_class[0] == 5);
+  CHECK(state.player.weapon_banks[0].ammo == 5);
 }
 
 TEST_CASE("Outgoing hull NPC banks seed from the old class stock weapons",
@@ -477,9 +477,9 @@ TEST_CASE("Outgoing hull NPC banks seed from the old class stock weapons",
       game::Player_ReplaceShipWithCapturedHull(state, state.ShipAt(1), false));
   const game::Ship *outgoing = FindActiveHullByClass(state, 0);
   REQUIRE(outgoing != nullptr);
-  CHECK(outgoing->npc_weapon_count_by_class[0] == 3);
-  CHECK(outgoing->npc_weapon_secondary_count_by_class[0] == 7);
-  CHECK(outgoing->npc_weapon_banks_ship_class == 0);
+  CHECK(outgoing->weapon_banks[0].mounted == 3);
+  CHECK(outgoing->weapon_banks[0].ammo == 7);
+  CHECK(outgoing->weapon_banks_ship_class == 0);
 }
 
 TEST_CASE("Replacement hull derives afterburner, mining and voice fields",

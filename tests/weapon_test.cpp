@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <random>
 
+#include "game/compatibility.hpp"
 #include "game/game_state.hpp"
 #include "game/outfit.hpp"
 #include "game/pilot_file.hpp"
@@ -19,7 +20,7 @@ namespace game {
 // path. These assert the weapon-bank population and fire/cooldown behaviour
 // that get the player's main weapon shooting, against the shipped Nova data:
 // the starter ship (class 0x80) mounts one Light Blaster (stock weapon
-// {id 0x80, count 1, ammo -1=unlimited}) in bank 0, so weapon_count_by_class[0]
+// {id 0x80, count 1, ammo -1=unlimited}) in bank 0, so its mounted count
 // must be 1 and the primary-fire path (the primary-fire arm of
 // NovaWeapon_TickPlayerWeaponCommands) must be able to fire it.
 
@@ -58,21 +59,19 @@ void SeedStockWeaponBanks(GameState &state) {
   if (!ship) {
     return;
   }
-  state.weapon_count_by_class.fill(0);
-  state.weapon_secondary_count_by_class.fill(0);
+  state.player.weapon_banks.fill({});
   for (const ShipDefaultWeaponBank &stock : ship->stock_weapons) {
     if (stock.weapon_id < 0x80 || stock.weapon_id > 0x17f) {
       continue;
     }
     const std::size_t bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-    state.weapon_count_by_class[bank * 100] =
+    state.player.weapon_banks[bank].mounted =
         static_cast<std::int16_t>(stock.count > 0 ? stock.count : 0);
     if (stock.ammo_load > 0) {
-      state.weapon_secondary_count_by_class[bank * 100] =
+      state.player.weapon_banks[bank].ammo =
           static_cast<std::int16_t>(stock.ammo_load);
     }
   }
-  state.weapon_bank_cooldown.fill(0.0F);
   state.active_shots.clear();
 }
 
@@ -123,13 +122,11 @@ void SetUpDirectFirePair(GameState &state) {
   npc.pos_y = 100.0F;
   npc.active_weapon_bank_slot = -1;
   npc.ai_fire_trigger_latch = 0;
-  npc.npc_weapon_count_by_class.fill(0);
-  npc.npc_weapon_secondary_count_by_class.fill(0);
-  npc.npc_weapon_bank_cooldown.fill(0.0F);
+  npc.weapon_banks.fill({});
 }
 
 // Arms one synthetic NPC direct-fire bank. mode -1/0/6 are unguided; 1 is
-// guided. ammo_type -1 is the unlimited/energy case, so no secondary counter
+// guided. ammo_type -1 is the unlimited/energy case, so no ammo counter
 // is required by NovaWeapon_CanFireWeaponBank.
 void ArmNpcDirectFireBank(GameState &state,
                           std::int16_t bank,
@@ -152,9 +149,39 @@ void ArmNpcDirectFireBank(GameState &state,
   weapon.blast_radius = blast_radius;
   weapon.beam_length_px = 0;
   weapon.flags_secondary = 0;
-  state.ShipAt(1).npc_weapon_count_by_class[index] = 1;
+  state.ShipAt(1).weapon_banks[index].mounted = 1;
 }
 } // namespace
+
+TEST_CASE("burst initialization includes the player and follows the live "
+          "mounted count under kApplyOriginalBugFixes",
+          "[weapon]") {
+  GameState state;
+  state.scenario.ships.resize(1);
+  state.scenario.weapons.resize(kWeaponBankCount);
+  state.player.ship_instance_id = 0;
+  state.player.ship_class_id = 0;
+  state.scenario.ships[0].stock_weapons[0] = {0x80, 1, 0};
+  state.scenario.weapons[0].burst_cycle_ticks = 2;
+  state.scenario.weapons[0].burst_reset_cooldown = 7;
+  state.player.weapon_banks[0].mounted = 1;
+  state.player.weapon_banks[0].burst = 3;
+
+  NovaWeapon_InitShipWeaponBursts(state, state.player);
+
+  CHECK(state.player.weapon_banks[0].burst == 0);
+  CHECK(state.player.weapon_banks[0].cooldown == 7.0F);
+
+  // A burst bank absent from the class stock: the original skips it because it
+  // tests the class table; under kApplyOriginalBugFixes the live mounted count
+  // is what gates the reset.
+  state.scenario.weapons[1].burst_cycle_ticks = 2;
+  state.scenario.weapons[1].burst_reset_cooldown = 9;
+  state.player.weapon_banks[1].mounted = 1;
+  NovaWeapon_InitShipWeaponBursts(state, state.player);
+  CHECK(state.player.weapon_banks[1].cooldown ==
+        (kApplyOriginalBugFixes ? 9.0F : 0.0F));
+}
 
 TEST_CASE("shot guidance preserves the shared bomb and rocket post-pass",
           "[weapon][guidance]") {
@@ -258,7 +285,7 @@ TEST_CASE("starter light blaster becomes owned and survives a rebuild",
   // the Light Blaster bank mounted, so firing survives any Outfitter
   // transaction.
   NovaWeapon_RebuildBanksFromOwnedOutfits(state);
-  CHECK(state.weapon_count_by_class[0] == 1);
+  CHECK(state.player.weapon_banks[0].mounted == 1);
   CHECK(NovaWeapon_CanFireWeaponBank(state, state.player, 0));
 }
 
@@ -307,7 +334,7 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   CHECK(state.active_shots[0].life_frames == 13);
   // The bank went into cooldown (reload 10 ticks) so a back-to-back fire is a
   // no-op while cooling down.
-  CHECK(state.weapon_bank_cooldown[0] > 0.0F);
+  CHECK(state.player.weapon_banks[0].cooldown > 0.0F);
   FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1); // no second shot while cooling down
 }
@@ -349,7 +376,9 @@ TEST_CASE("the starter light blaster is never an eligible secondary",
   // Positive control: the fire gates are open; the same command fires the
   // Light Blaster when the (unpersisted) selection is forced to bank 0, which
   // is exactly the reload bug this guards against.
-  state.weapon_bank_cooldown.fill(0.0F);
+  for (WeaponBanks &bank : state.player.weapon_banks) {
+    bank.cooldown = 0.0F;
+  }
   state.player.active_weapon_bank_slot = 0;
   NovaWeapon_TickPlayerWeaponCommands(
       state, PlayerWeaponCommandInput{.fire_secondary_held = true}, 0.0F);
@@ -375,14 +404,14 @@ TEST_CASE("secondary cycling wraps past ineligible banks and fires the "
     weapon.reload_ticks = 10;
     weapon.lifetime_ticks = 30;
     weapon.projectile_speed = 1000.0F;
-    state.weapon_count_by_class[static_cast<std::size_t>(bank) * 100] = 1;
+    state.player.weapon_banks[static_cast<std::size_t>(bank)].mounted = 1;
   };
   make_secondary(0x10);
   make_secondary(0x20);
   // A primary weapon between the two secondaries must be skipped by the walk.
   state.scenario.weapons[0x11].flags = 0;
   state.scenario.weapons[0x11].weapon_mode_code = -1;
-  state.weapon_count_by_class[0x11 * 100] = 1;
+  state.player.weapon_banks[0x11].mounted = 1;
 
   const auto cycle = [&](bool backwards) {
     NovaWeapon_TickPlayerWeaponCommands(
@@ -424,12 +453,14 @@ TEST_CASE("secondary cycling wraps past ineligible banks and fires the "
   // onto it from 0x10, then fire and observe no shot.
   Weapon &ammo_secondary = state.scenario.weapons[0x20];
   ammo_secondary.ammo_type = 0x21;
-  state.weapon_secondary_count_by_class[0x21 * 100] = 0;
+  state.player.weapon_banks[0x21].ammo = 0;
   player.active_weapon_bank_slot = 0x10;
   cycle(false);
   CHECK(player.active_weapon_bank_slot == 0x20); // still selectable
   state.active_shots.clear();
-  state.weapon_bank_cooldown.fill(0.0F);
+  for (WeaponBanks &bank : state.player.weapon_banks) {
+    bank.cooldown = 0.0F;
+  }
   NovaWeapon_TickPlayerWeaponCommands(
       state, PlayerWeaponCommandInput{.fire_secondary_held = true}, 0.0F);
   CHECK(state.active_shots.empty());
@@ -443,16 +474,18 @@ TEST_CASE("secondary cycling wraps past ineligible banks and fires the "
 
   // Reloading the cost bank makes the 0x800 bank eligible again; the cycle
   // must re-select it, then firing spends exactly one round.
-  state.weapon_secondary_count_by_class[0x21 * 100] = 3;
+  state.player.weapon_banks[0x21].ammo = 3;
   cycle(false);
   CHECK(player.active_weapon_bank_slot == 0x20);
   state.active_shots.clear();
-  state.weapon_bank_cooldown.fill(0.0F);
+  for (WeaponBanks &bank : state.player.weapon_banks) {
+    bank.cooldown = 0.0F;
+  }
   NovaWeapon_TickPlayerWeaponCommands(
       state, PlayerWeaponCommandInput{.fire_secondary_held = true}, 0.0F);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].weapon_id == 0x20);
-  CHECK(state.weapon_secondary_count_by_class[0x21 * 100] == 2);
+  CHECK(state.player.weapon_banks[0x21].ammo == 2);
 }
 
 TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
@@ -497,7 +530,7 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].owner_ship_slot == 1);
   CHECK(state.active_shots[0].weapon_id == 0);
-  CHECK(npc.npc_weapon_secondary_count_by_class[0] == -1);
+  CHECK(npc.weapon_banks[0].ammo == -1);
   CHECK(npc.active_weapon_bank_slot == -1);
   CHECK(npc.ai_fire_trigger_latch == 0);
 
@@ -541,7 +574,7 @@ TEST_CASE("NPC fire cooldown scales with the player combat-rating ladder",
     npc.ai_fire_trigger_latch = 1;
     state.player_combat_rating_points = rating;
     NovaWeapon_FireNpcWeaponBank(state, npc);
-    return npc.npc_weapon_bank_cooldown[0];
+    return npc.weapon_banks[0].cooldown;
   };
 
   // Pinned base unit 2 -> thresholds 200/800/1600/3200.
@@ -592,11 +625,9 @@ TEST_CASE("continuous NPC weapon handoff retains its bank and trigger",
   npc.armor_points = 100.0F;
   npc.active_weapon_bank_slot = continuous_bank;
   npc.ai_fire_trigger_latch = 1;
-  npc.npc_weapon_count_by_class[static_cast<std::size_t>(continuous_bank)] = 1;
-  npc.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
-      continuous_bank)] = -1;
-  npc.npc_weapon_bank_cooldown[static_cast<std::size_t>(continuous_bank)] =
-      5.0F;
+  npc.weapon_banks[static_cast<std::size_t>(continuous_bank)].mounted = 1;
+  npc.weapon_banks[static_cast<std::size_t>(continuous_bank)].ammo = -1;
+  npc.weapon_banks[static_cast<std::size_t>(continuous_bank)].cooldown = 5.0F;
 
   NovaWeapon_FireNpcWeaponBank(state, npc);
 
@@ -605,7 +636,7 @@ TEST_CASE("continuous NPC weapon handoff retains its bank and trigger",
   CHECK(npc.ai_fire_trigger_latch == 1);
 }
 
-TEST_CASE("NPC energy weapons do not need a secondary ammo counter",
+TEST_CASE("NPC energy weapons do not need a loaded-ammo counter",
           "[weapon][npc]") {
   if (!ArchivesAvailable()) {
     SKIP("Nova .rez archives not present");
@@ -635,11 +666,11 @@ TEST_CASE("NPC energy weapons do not need a secondary ammo counter",
   NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, npc, false);
   REQUIRE(npc.active_weapon_bank_slot == 0);
   // The original treats the Light Blaster's ammo_type == -1 as an energy /
-  // unlimited bank; a zero secondary counter must not suppress firing.
-  npc.npc_weapon_secondary_count_by_class[0] = 0;
+  // unlimited bank; a zero ammo counter must not suppress firing.
+  npc.weapon_banks[0].ammo = 0;
   NovaWeapon_FireNpcWeaponBank(state, npc);
   REQUIRE(state.active_shots.size() == 1);
-  CHECK(npc.npc_weapon_secondary_count_by_class[0] == 0);
+  CHECK(npc.weapon_banks[0].ammo == 0);
 }
 
 TEST_CASE("direct-fire selector picks energy for shielded targets and mass "
@@ -916,7 +947,7 @@ TEST_CASE("an unsuccessful NPC fire request clears its stale bank latch",
   // handoff is consumed by Ship_HandleShip after Weapon_FireShipWeapons.
   npc.active_weapon_bank_slot = 0;
   npc.ai_fire_trigger_latch = 1;
-  npc.npc_weapon_count_by_class[0] = 0;
+  npc.weapon_banks[0].mounted = 0;
 
   NovaWeapon_FireNpcWeaponBank(state, npc);
 
@@ -967,7 +998,7 @@ TEST_CASE("spatial fire gain matches the original distance falloff",
 
 // Regression: mounting a second identical weapon in a bank doubles the fire
 // rate by halving the per-shot cooldown (the original divides the weapon's
-// fire cadence by weapon_count_by_class, the number of weapons in the bank)
+// fire cadence by the number of weapons mounted in the bank)
 // rather than being a no-op. Pins the earlier behaviour where the bank always
 // cooled down at the full reload regardless of mount count, so buying a second
 // Light Blaster changed nothing.
@@ -981,18 +1012,19 @@ TEST_CASE("second mounted weapon halves the bank cooldown", "[weapon]") {
   SeedStockWeaponBanks(state);
 
   // One Light Blaster mounted: cooldown = reload(10) / ammo(1) = 10 ticks.
-  REQUIRE(state.weapon_count_by_class[0] == 1);
+  REQUIRE(state.player.weapon_banks[0].mounted == 1);
   FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
-  const float single_cooldown = state.weapon_bank_cooldown[0];
+  const float single_cooldown = state.player.weapon_banks[0].cooldown;
   REQUIRE(single_cooldown == Catch::Approx(10.0F));
 
   // A second identical weapon in the same bank halves the cooldown.
-  state.weapon_count_by_class[0] = 2;
-  state.weapon_bank_cooldown[0] = 0.0F; // back off cooldown
+  state.player.weapon_banks[0].mounted = 2;
+  state.player.weapon_banks[0].cooldown = 0.0F; // back off cooldown
   FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 2); // previous shot still flying
-  CHECK(state.weapon_bank_cooldown[0] == Catch::Approx(single_cooldown / 2.0F));
+  CHECK(state.player.weapon_banks[0].cooldown ==
+        Catch::Approx(single_cooldown / 2.0F));
 }
 
 // Regression: the light blaster (a turret-group-0 weapon) should exit the
@@ -1053,17 +1085,18 @@ TEST_CASE("fresh-pilot record round-trip keeps the light blaster fireable",
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.ship_class_id = 0;
   SeedStockWeaponBanks(state);
-  REQUIRE(state.weapon_count_by_class[0] == 1);
+  REQUIRE(state.player.weapon_banks[0].mounted == 1);
 
   // Step 6 (new_pilot_flow.cpp): build the fresh record and carry the banks.
   PilotFile record = PilotFile::Fresh();
-  record.weapon_count_by_class = state.weapon_count_by_class;
-  record.weapon_secondary_count_by_class =
-      state.weapon_secondary_count_by_class;
+  for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
+    record.weapon_mounted[bank] = state.player.weapon_banks[bank].mounted;
+    record.weapon_ammo[bank] = state.player.weapon_banks[bank].ammo;
+  }
   PilotFileApply(record, state);
 
   // The seeded Light Blaster must survive the record round-trip.
-  CHECK(state.weapon_count_by_class[0] == 1);
+  CHECK(state.player.weapon_banks[0].mounted == 1);
   CHECK(NovaWeapon_CanFireWeaponBank(state, state.player, 0));
   FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
@@ -1720,7 +1753,7 @@ TEST_CASE("point defense prioritizes and damages an inbound guided shot",
   defender.armor_points = 100.0F;
   defender.pos_x = 0.0F;
   defender.pos_y = 0.0F;
-  state.weapon_count_by_class[0] = 2;
+  state.player.weapon_banks[0].mounted = 2;
 
   ActiveShot incoming;
   incoming.weapon_id = 1;
@@ -1735,7 +1768,7 @@ TEST_CASE("point defense prioritizes and damages an inbound guided shot",
 
   REQUIRE(state.beam_hit_queue[0].forced_targeting == 1);
   CHECK(state.beam_hit_queue[0].target_shot_slot == 0);
-  CHECK(state.weapon_bank_cooldown[0] == Catch::Approx(5.0F));
+  CHECK(state.player.weapon_banks[0].cooldown == Catch::Approx(5.0F));
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
   CHECK(state.active_shots[0].point_defense_durability == 0);
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
@@ -1776,8 +1809,8 @@ TEST_CASE("point defense only evaluates the first ready bank",
   defender.ship_instance_id = 0;
   defender.ship_class_id = 0;
   defender.armor_points = 100.0F;
-  state.weapon_count_by_class[0] = 1;
-  state.weapon_count_by_class[100] = 1; // bank 1, kBankStride = 100
+  state.player.weapon_banks[0].mounted = 1;
+  state.player.weapon_banks[1].mounted = 1;
 
   ActiveShot incoming;
   incoming.weapon_id = 2;
@@ -1791,17 +1824,17 @@ TEST_CASE("point defense only evaluates the first ready bank",
   // Bank 0 is ready first but out of reach: nothing fires, and bank 1 -- which
   // could reach the shot -- is never tried.
   NovaWeapon_SelectTurretTargetWithinArc(state, defender);
-  CHECK(state.weapon_bank_cooldown[0] == 0.0F);
-  CHECK(state.weapon_bank_cooldown[1] == 0.0F);
+  CHECK(state.player.weapon_banks[0].cooldown == 0.0F);
+  CHECK(state.player.weapon_banks[1].cooldown == 0.0F);
   CHECK(state.beam_hit_queue[0].target_shot_slot == -1);
 
   // Put the short-range bank on cooldown; now the long-range bank is the first
   // ready one and fires.
-  state.weapon_bank_cooldown[0] = 5.0F;
+  state.player.weapon_banks[0].cooldown = 5.0F;
   NovaWeapon_SelectTurretTargetWithinArc(state, defender);
   CHECK(state.beam_hit_queue[0].forced_targeting == 1);
   CHECK(state.beam_hit_queue[0].target_shot_slot == 0);
-  CHECK(state.weapon_bank_cooldown[1] == Catch::Approx(10.0F));
+  CHECK(state.player.weapon_banks[1].cooldown == Catch::Approx(10.0F));
 }
 
 TEST_CASE("mode-4 shots follow the owner class turreted-above container flag",
@@ -2026,36 +2059,36 @@ TEST_CASE("NPC weapon bank cooldowns decay, reload targetless bays, and pin "
   Ship &ship = state.ShipAt(1);
   ship.ship_class_id = 0;
   ship.primary_target_ship_slot = -1;
-  ship.npc_weapon_count_by_class[0] = 1;
-  ship.npc_weapon_count_by_class[1] = 1;
-  ship.npc_weapon_bank_cooldown[0] = 0.0F;
-  ship.npc_weapon_bank_cooldown[1] = 5.0F;
+  ship.weapon_banks[0].mounted = 1;
+  ship.weapon_banks[1].mounted = 1;
+  ship.weapon_banks[0].cooldown = 0.0F;
+  ship.weapon_banks[1].cooldown = 5.0F;
 
   NovaWeapon_TickNpcWeaponBanks(state, ship, 1.0F);
   // A targetless mode-99 bay reloads to Reload; the disruptor decays by one.
-  CHECK(ship.npc_weapon_bank_cooldown[0] == Catch::Approx(30.0F));
-  CHECK(ship.npc_weapon_bank_cooldown[1] == Catch::Approx(4.0F));
+  CHECK(ship.weapon_banks[0].cooldown == Catch::Approx(30.0F));
+  CHECK(ship.weapon_banks[1].cooldown == Catch::Approx(4.0F));
 
   // With a primary target the mode-99 reload arm is skipped.
   ship.primary_target_ship_slot = 2;
-  ship.npc_weapon_bank_cooldown[0] = 0.0F;
-  ship.npc_weapon_bank_cooldown[1] = 5.0F;
+  ship.weapon_banks[0].cooldown = 0.0F;
+  ship.weapon_banks[1].cooldown = 5.0F;
   NovaWeapon_TickNpcWeaponBanks(state, ship, 1.0F);
-  CHECK(ship.npc_weapon_bank_cooldown[0] == Catch::Approx(0.0F));
+  CHECK(ship.weapon_banks[0].cooldown == Catch::Approx(0.0F));
 
   // Ionized pin: full ionization charge + flags_quaternary 0x20 -> 1.0.
   state.scenario.ships.resize(1);
   state.scenario.ships[0].ionization_capacity = 100;
   ship.ionization_points = 100.0F;
-  ship.npc_weapon_bank_cooldown[1] = 7.0F;
+  ship.weapon_banks[1].cooldown = 7.0F;
   NovaWeapon_TickNpcWeaponBanks(state, ship, 1.0F);
-  CHECK(ship.npc_weapon_bank_cooldown[1] == Catch::Approx(1.0F));
+  CHECK(ship.weapon_banks[1].cooldown == Catch::Approx(1.0F));
 
   // Ammo gate: a bank with no ammo does not decay.
-  ship.npc_weapon_count_by_class[0] = 0;
-  ship.npc_weapon_bank_cooldown[0] = 5.0F;
+  ship.weapon_banks[0].mounted = 0;
+  ship.weapon_banks[0].cooldown = 5.0F;
   NovaWeapon_TickNpcWeaponBanks(state, ship, 1.0F);
-  CHECK(ship.npc_weapon_bank_cooldown[0] == Catch::Approx(5.0F));
+  CHECK(ship.weapon_banks[0].cooldown == Catch::Approx(5.0F));
 }
 
 } // namespace game

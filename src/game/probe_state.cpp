@@ -289,13 +289,13 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("ai_fire_trigger_latch", ship.ai_fire_trigger_latch);
       row.num("inbound_weapon_threat", ship.inbound_weapon_threat);
       if (ship.active_weapon_bank_slot >= 0 &&
-          ship.active_weapon_bank_slot < 0x100) {
+          ship.active_weapon_bank_slot <
+              static_cast<std::int16_t>(kWeaponBankCount)) {
         const std::size_t bank =
             static_cast<std::size_t>(ship.active_weapon_bank_slot);
-        row.num("active_weapon_ammo", ship.npc_weapon_count_by_class[bank]);
-        row.num("active_weapon_secondary",
-                ship.npc_weapon_secondary_count_by_class[bank]);
-        row.num("active_weapon_cooldown", ship.npc_weapon_bank_cooldown[bank]);
+        row.num("active_weapon_mounted", ship.weapon_banks[bank].mounted);
+        row.num("active_weapon_ammo", ship.weapon_banks[bank].ammo);
+        row.num("active_weapon_cooldown", ship.weapon_banks[bank].cooldown);
       }
       row.boolean("arrival_monitor_active", ship.arrival_monitor_active);
       row.num("arrival_monitor_ticks", ship.arrival_monitor_elapsed_ticks);

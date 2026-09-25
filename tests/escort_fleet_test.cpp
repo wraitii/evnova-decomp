@@ -143,7 +143,7 @@ TEST_CASE("escort fleet trade sells released and upgrades marked escorts",
   // Upgrade: paid the EscUpgrdCost, class switched, mark cleared, banks zeroed.
   CHECK(upgrade.ship_class_id == kShuttleUpgrade);
   CHECK(upgrade.escort_upgrade_mark == 0);
-  CHECK(upgrade.npc_weapon_count_by_class[0] == 0);
+  CHECK(upgrade.weapon_banks[0].mounted == 0);
   CHECK(upgrade.escort_origin_mark == 0); // payroll therefore skipped
   // Net credits: +1000 sale, -5000 upgrade.
   CHECK(state.player.credits == credits_before + 1000 - 5000);

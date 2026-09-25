@@ -207,7 +207,8 @@ int NovaWeapon_SpawnProjectile(GameState &state,
                                std::int16_t weapon_id,
                                bool spawn_without_owner,
                                bool apply_random_spread) {
-  if (weapon_id < 0 || weapon_id >= 0x100) {
+  if (weapon_id < 0 ||
+      weapon_id >= static_cast<std::int16_t>(kWeaponBankCount)) {
     return -1;
   }
   const Weapon *w = WeaponAt(state, weapon_id);
@@ -1112,7 +1113,8 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
                              std::int16_t firing_bearing_deg) {
   if (owner_ship_slot < 0 ||
       owner_ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips) ||
-      weapon_id < 0 || weapon_id >= 0x100) {
+      weapon_id < 0 ||
+      weapon_id >= static_cast<std::int16_t>(kWeaponBankCount)) {
     return false;
   }
   const Weapon *weapon = WeaponAt(state, weapon_id);
@@ -1864,13 +1866,12 @@ void NovaWeapon_TickShots(GameState &state,
     // their owner's bank cooldown to Reload every frame the shot is alive.
     if ((weapon->flags_tertiary & 0x0004U) != 0U) {
       const std::size_t bank = static_cast<std::size_t>(shot.weapon_id);
-      if (shot.owner_ship_slot == 0) {
-        state.weapon_bank_cooldown[bank] = weapon->reload_ticks;
-      } else if (shot.owner_ship_slot > 0 &&
-                 shot.owner_ship_slot <
-                     static_cast<std::int16_t>(GameState::kMaxShips)) {
+      if (shot.owner_ship_slot >= 0 &&
+          shot.owner_ship_slot <
+              static_cast<std::int16_t>(GameState::kMaxShips)) {
         state.ShipAt(static_cast<std::size_t>(shot.owner_ship_slot))
-            .npc_weapon_bank_cooldown[bank] = weapon->reload_ticks;
+            .weapon_banks[bank]
+            .cooldown = weapon->reload_ticks;
       }
     }
   }

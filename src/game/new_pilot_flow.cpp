@@ -340,14 +340,13 @@ void ResetNewGameStateBits(GameState &state) {
 }
 
 void Stub_SeedStartingInventory(GameState &state) {
-  // Menu_RunNewGameFlow zeroes the outfit counts and weapon-bank ammo/secondary
+  // Menu_RunNewGameFlow zeroes the outfit counts and weapon-bank mounted/ammo
   // counters, then seeds them from the starting ship class's default outfit
   // list (DefaultItems) and stock weapon banks. The ship-class tables are
   // available in state.scenario, so for the default ship (id 0x80, zero-based
   // 0) the outfit counts are populated from its default items.
   state.inventory.outfit_owned_count.fill(0);
-  state.weapon_count_by_class.fill(0);
-  state.weapon_secondary_count_by_class.fill(0);
+  state.player.weapon_banks.fill({});
 
   const auto *ship = state.scenario.Ship(
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
@@ -372,20 +371,19 @@ void Stub_SeedStartingInventory(GameState &state) {
   // Seed the weapon banks from the starting ship class's stock weapons,
   // mirroring Menu_RunNewGameFlow: for each stock weapon triple
   // {weapon_id, count, ammo_load} the mounted-count goes into
-  // weapon_count_by_class[weapon_id-0x80] and any carried rounds (ammo_load,
-  // when > 0) into the matching secondary/ammo counter. The starter Shuttle's
+  // weapon_banks[weapon_id-0x80] and any carried rounds (ammo_load, when > 0)
+  // into the matching ammo counter. The starter Shuttle's
   // single Light Blaster ({0x80, 1, -1}: 1 mounted, unlimited ammo) thereby
-  // lands in bank 0 with weapon_count_by_class[0] = 1 > 0, so the primary-fire
+  // lands in bank 0 with mounted = 1, so the primary-fire
   // loop (NovaWeapon_TickPlayerWeaponCommands primary-fire arm) can fire it.
-  // The stock_weapons decode and the loader's default_weapon_ammo/secondary
+  // The stock_weapons decode and the loader's default mounted/ammo
   // mapping are verified in tests/scenario_data_test.cpp.
   NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
   // Reset any lingering per-bank cooldown so a fresh pilot can fire
   // immediately on entering spaceflight.
-  state.weapon_bank_cooldown.fill(0.0F);
   state.active_shots.clear();
   // Menu_RunNewGameFlow calls Weapon_ReconcileOutfitPoolWithWeaponBanks right
-  // after seeding the weapon banks: leftover bank ammo/secondary not explained
+  // after seeding the weapon banks: leftover mounted/ammo not explained
   // by an owned outfit is converted back into owned weapon/ammo outfits. This
   // registers the Shuttle's stock Light Blaster (a mounted bank with no
   // DefaultItem entry) as an owned outfit, so the Outfitter lists it as owned,
@@ -777,9 +775,7 @@ void NovaShip_ResetPlayerShipState(GameState &state) {
   state.inventory.cargo_bins.fill(0);
   state.inventory.outfit_owned_count.fill(0);
   state.inventory.junk_counts.fill(0);
-  state.weapon_count_by_class.fill(0);
-  state.weapon_secondary_count_by_class.fill(0);
-  state.weapon_bank_cooldown.fill(0.0F);
+  state.player.weapon_banks.fill({});
   // Ghidra 0x004b3a6e..0x004b3a9a: for every currently active mission slot,
   // Mission_ClearMisnSlotAssignments(slot, 0) detaches any mission-fleet ships
   // and clears their targeting before the slot latches are zeroed. The
@@ -1086,9 +1082,10 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // weapons) into the record, otherwise PilotFileApply below copies a fresh
   // record whose banks are all zero and clobbers the seeded Light Blaster
   // bank 0, so nothing could ever fire.
-  record.weapon_count_by_class = state.weapon_count_by_class;
-  record.weapon_secondary_count_by_class =
-      state.weapon_secondary_count_by_class;
+  for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
+    record.weapon_mounted[bank] = state.player.weapon_banks[bank].mounted;
+    record.weapon_ammo[bank] = state.player.weapon_banks[bank].ammo;
+  }
   record.outfit_owned_count = state.inventory.outfit_owned_count;
   // Carry the reset control-bit table (Game_ResetNewGameState zeroes it, then
   // the clean-room ferry baseline b311 is re-seeded). Without this the fresh

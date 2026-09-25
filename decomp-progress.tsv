@@ -76,7 +76,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00412550	Boarding_BoardShipAndTransferCargo	src/game/boarding_plunder.cpp	90%	gameplay
 0x004133F0	Ship_UpdateShipCombatOddsScore	src/game/ship_ai.cpp	95%	correctness,moddata
 0x00413610	Government_TryTriggerGovtAssistanceEncounter	src/game/government.cpp	90%	gameplay,moddata
-0x00413810	Weapon_InitShipWeaponBursts	src/game/weapon_banks.cpp	100%	
+0x00413810	Weapon_InitShipWeaponBursts	src/game/weapon_banks.cpp	100%	bugfix
 0x004138A0	Weapon_ClassifyShipWeaponAmmoReadiness	src/game/weapon_banks.cpp	100%	
 0x00413990	Ship_UpdateEscortFormations	src/game/escort_formation.cpp	100%	
 0x00413B60	Ship_SetEscortLaunchOffsetVelocity	src/game/escort_formation.cpp	100%	

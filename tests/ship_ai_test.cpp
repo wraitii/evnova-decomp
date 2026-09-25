@@ -633,8 +633,7 @@ TEST_CASE(
   // attacker's banks forces the no-bank path, which must return true here.
   state.player.ship_class_id = attacker_class;
   state.player.vel_y = -10.0F;
-  attacker.npc_weapon_count_by_class.fill(0);
-  attacker.npc_weapon_secondary_count_by_class.fill(0);
+  attacker.weapon_banks.fill({});
   CHECK(NovaAiShip_CanTargetOutrunShooter(state, attacker));
 }
 
@@ -1174,7 +1173,7 @@ TEST_CASE("warship behavior reacquires a target from travel states") {
   ship.pers_def_slot = 0;
   ship.ai_behavior_code = 3;
   ship.armor_points = 1000.0F;
-  ship.npc_weapon_count_by_class[static_cast<std::size_t>(weapon_bank)] = 1;
+  ship.weapon_banks[static_cast<std::size_t>(weapon_bank)].mounted = 1;
 
   for (const std::int16_t state_code : {1, 0x14, 2}) {
     ship.primary_target_ship_slot = -1;
@@ -1255,7 +1254,7 @@ TEST_CASE("interceptor behavior scans and caches its target") {
   ship.armor_points = 1000.0F;
   // No stocked weapons -> Weapon_ClassifyShipWeaponAmmoReadiness bucket 2, so
   // Ship_AcquirePrimaryTargetForShip returns without a target.
-  ship.npc_weapon_count_by_class.fill(0);
+  ship.weapon_banks.fill({});
 
   for (int i = 0; i < 8; ++i) {
     const int candidate = NovaShip_AllocateShipSlot(state, 0, 0);
@@ -1573,7 +1572,7 @@ TEST_CASE("ApplyControls mode 6 arms a turret bank via the current-target "
   state.scenario.weapons.resize(1);
   state.scenario.weapons[0].name = "SyntheticTurret";
   state.scenario.weapons[0].weapon_mode_code = 7;
-  state.scenario.weapons[0].ammo_type = -1; // energy: no secondary counter
+  state.scenario.weapons[0].ammo_type = -1; // energy: no ammo counter
   state.scenario.weapons[0].mass_damage = 10;
   state.scenario.weapons[0].energy_damage = 10;
   state.scenario.weapons[0].range_scalar = 1000.0F;
@@ -1603,10 +1602,8 @@ TEST_CASE("ApplyControls mode 6 arms a turret bank via the current-target "
   ship.defense_fleet_home_stellar_id = -1;
   ship.active_weapon_bank_slot = -1;
   ship.ai_fire_trigger_latch = 0;
-  ship.npc_weapon_count_by_class.fill(0);
-  ship.npc_weapon_secondary_count_by_class.fill(0);
-  ship.npc_weapon_bank_cooldown.fill(0.0F);
-  ship.npc_weapon_count_by_class[0] = 1;
+  ship.weapon_banks.fill({});
+  ship.weapon_banks[0].mounted = 1;
 
   NovaAi_ApplyControls(state, ship, 1.0F);
 
@@ -2406,8 +2403,8 @@ game::Ship &MakeLoadedCarrier(GameState &state) {
   carrier.ai_behavior_code = 3;
   carrier.armor_points = 100.0F;
   carrier.shield_points = 100.0F;
-  carrier.npc_weapon_count_by_class[kBayBank] = 1;
-  carrier.npc_weapon_secondary_count_by_class[kBayBank] = 2;
+  carrier.weapon_banks[kBayBank].mounted = 1;
+  carrier.weapon_banks[kBayBank].ammo = 2;
   return carrier;
 }
 
@@ -2451,7 +2448,7 @@ TEST_CASE("state-4 carrier launches fighters for a non-0xe control mode",
 
   CHECK(carrier.ai_control_mode == 6);
   CHECK(ActiveShipCount(state) == before + 1);
-  CHECK(carrier.npc_weapon_secondary_count_by_class[kBayBank] == 1);
+  CHECK(carrier.weapon_banks[kBayBank].ammo == 1);
   bool spawned_fighter = false;
   for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
     const game::Ship &s = state.ShipAt(i);
@@ -2490,7 +2487,7 @@ TEST_CASE("state-0xd boarding approach does not launch carried fighters",
 
   CHECK(carrier.ai_control_mode == 0xf);
   CHECK(ActiveShipCount(state) == before);
-  CHECK(carrier.npc_weapon_secondary_count_by_class[kBayBank] == 2);
+  CHECK(carrier.weapon_banks[kBayBank].ammo == 2);
 }
 
 // The Flags2 0x0002 standoff arm selects the control mode from the truncated
@@ -2511,7 +2508,7 @@ TEST_CASE("state-4 standoff class selects mode from weapon range",
   carrier.ai_behavior_code = 3;
   carrier.armor_points = 100.0F;
   carrier.shield_points = 100.0F;
-  carrier.npc_weapon_count_by_class[kStandoffBank] = 1;
+  carrier.weapon_banks[kStandoffBank].mounted = 1;
   carrier.pos_x = 0.0F;
   carrier.pos_y = 0.0F;
 
@@ -2610,9 +2607,7 @@ TEST_CASE("capture-approach drive boards a disabled ship end-to-end",
   boarder.ai_behavior_code = 3;
   boarder.armor_points = static_cast<float>(
       state.scenario.ships[static_cast<std::size_t>(boarder_class)].base_armor);
-  boarder
-      .npc_weapon_count_by_class[static_cast<std::size_t>(free_energy_bank)] =
-      1;
+  boarder.weapon_banks[static_cast<std::size_t>(free_energy_bank)].mounted = 1;
   boarder.pos_x = 0.0F; // override the allocator's spawn scatter
   boarder.pos_y = 0.0F;
 
@@ -2776,8 +2771,8 @@ TEST_CASE("capture warship abandons only a disabled high-AI target",
       state.scenario.ships[static_cast<std::size_t>(ship_class)].base_armor);
   attacker.ai_state_code = 4;
   attacker.primary_target_ship_slot = static_cast<std::int16_t>(target_slot);
-  attacker.npc_weapon_count_by_class[static_cast<std::size_t>(
-      secondary_free_energy_bank)] = 1;
+  attacker.weapon_banks[static_cast<std::size_t>(secondary_free_energy_bank)]
+      .mounted = 1;
 
   game::Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
   target.ship_class_id = static_cast<std::int16_t>(ship_class);
@@ -2950,7 +2945,7 @@ TEST_CASE("acquire refuses a ship with no ready weapons") {
   ship.ai_state_code = 0;
   ship.ai_hostility_accumulator = 1; // would otherwise target the player
   ship.primary_target_ship_slot = -1;
-  ship.npc_weapon_count_by_class.fill(0); // readiness bucket 2
+  ship.weapon_banks.fill({}); // readiness bucket 2
 
   game::NovaAi_AcquirePrimaryTarget(state, ship);
   CHECK(ship.primary_target_ship_slot == -1);
@@ -3541,7 +3536,7 @@ TEST_CASE("mission stellar attack directive selects a hostile stellar") {
   ship.current_system_id = 0;
   ship.faction_or_government_id = 0;
   ship.armor_points = 100.0F;
-  ship.npc_weapon_count_by_class[0] = 1;
+  ship.weapon_banks[0].mounted = 1;
 
   game::Mission_UpdateShipMissionStellarAttackDirective(state, ship);
 

@@ -2124,6 +2124,9 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     // still hit it once disabled. The rating table is not loaded
     // (ShipClass) and the roll is not seeded (NovaWeapon_SpawnProjectile,
     // src/game/weapon_shots.cpp). See Ghidra plates on 0x0041fd30/0x00426ef0.
+    // When porting, record this as an engine eccentricity (a larger hull's
+    // turret/PD fire can pass through an active smaller hull) in
+    // docs/known_original_bugs.md so players see it documented.
 
     const bool owner_chain_to_player =
         OwnerChainReachesPlayer(state, owner_slot);

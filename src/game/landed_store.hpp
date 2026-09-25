@@ -185,7 +185,7 @@ void Player_TransferCargoAndJunkToEscortByRatio(GameState &state,
 // run at the end of the Spaceport interaction loop: at a shipyard-capable
 // stellar (`travel_flags & 8`) it sells escorts marked for release, upgrades
 // escorts marked for upgrade (when UpgradeTo is set and affordable), refills
-// base shield/armor and weapon secondary for every ship slot, shows the
+// base shield/armor and weapon ammo for every ship slot, shows the
 // localized summary, then advances `(sold + upgraded) / 2` days. Always ends
 // by calling Player_ProcessEscortPayroll(1). `show_text` presents the summary
 // messages (the original's Ui_RunTravelSelectionDialog); pass an empty
