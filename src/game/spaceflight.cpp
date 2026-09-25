@@ -2353,6 +2353,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // Stellar_TriggerHyperspaceAudioOnce one-shot (g_playerHyperspaceAudio-
       // Latch gating NovaAudio_QueueCenteredSound)
       // [Ghidra 0x00431420].
+      // @port 0x0046ab00 25% audio
+      // Ghidra 0x0046ab00 NovaAudio_PreStageJumpSoundBySeconds. TODO(decomp):
+      // the original's seconds-based pre-stage scheduling is not modelled;
+      // the duration scale (65536/multiplier) is folded into the SDL playback
+      // rate at the play call instead.
       if (state.warp_up_sound_pending) {
         if (state.warp_up_sound.has_value()) {
           // The fire gate in NovaTravel_Tick waits for this voice to finish,

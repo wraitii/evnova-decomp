@@ -628,6 +628,10 @@ int NovaWeapon_GetShipMaxWeaponRange(const GameState &state, const Ship &ship) {
   return max_range;
 }
 
+// @port 0x00468990 100%
+// Ghidra 0x00468990 Weapon_CanFireWeaponBank. See the .hpp contract; the
+// 0x004138a0 fuel classifier is kept UNSCALED, matching the original's
+// inconsistency.
 bool NovaWeapon_CanFireWeaponBank(const GameState &state,
                                   const Ship &ship,
                                   std::int16_t weapon_bank) {

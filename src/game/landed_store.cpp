@@ -231,6 +231,8 @@ void NovaLanded_ExecuteControlSet(GameState &state,
       state, expression, MissionScriptContext{origin});
 }
 
+// @port 0x0046a220 60% gameplay
+// Ghidra 0x0046a220 Outfit_RebuildAvailableOutfitListForTravelStellar.
 std::vector<std::int16_t>
 BuildOutfitterIds(GameState &state,
                   const Stellar &stellar,
@@ -298,6 +300,7 @@ BuildOutfitterIds(GameState &state,
   return ids;
 }
 
+// @port 0x00469e90 90% license
 // Ghidra 0x00469e90 NovaUi_RebuildShipyardAvailabilityList: shared filter
 // chain (tech level, per-class daily roll pair, Require bits, availability
 // expression, display-weight ordering and the 0x4000 equal-weight
@@ -1408,6 +1411,7 @@ bool NovaLanded_BuyShip(GameState &state,
   return true;
 }
 
+// @port 0x00469810 95% correctness
 // Ghidra 0x00469810 Player_TransferCargoAndJunkToEscortByRatio.
 void Player_TransferCargoAndJunkToEscortByRatio(GameState &state,
                                                 std::int16_t escort_ship_slot) {

@@ -314,6 +314,7 @@ void NovaHud_ShowLaunchDepartureMessage(GameState &state,
   NovaHud_ShowCachedOverlayMessage(state, /*extend=*/true);
 }
 
+// @port 0x00467cf0 100%
 // Ghidra 0x00467cf0 System_ShowSystemEventMessage.
 void System_ShowSystemEventMessage(GameState &state, std::int16_t message_id) {
   if (message_id < 0) {

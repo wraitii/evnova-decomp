@@ -2407,6 +2407,8 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
   fighter.ai_behavior_code = -1;
 }
 
+// @port 0x004694a0 100%
+// Ghidra 0x004694a0 ShipClass_HasPlayerBayCapacityFor.
 bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
                                            std::int16_t ship_class_id,
                                            std::int16_t outfit_slot,

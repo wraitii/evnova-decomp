@@ -73,6 +73,7 @@ NovaAudio_SelectVoiceInsertion(std::span<const NovaAudioVoicePriority> active,
   return index;
 }
 
+// @port 0x0046aad0 95% audio
 // Ghidra 0x0046aad0 NovaAudio_QueueCenteredSound; 0x004d64f0
 // NovaAudio_FillVoiceSlotDescriptor; 0x004d6550 Audio_AllocateVoiceSlot.
 void SdlAudio::Play(const NovaSoundData &sound,

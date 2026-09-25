@@ -53,6 +53,7 @@ namespace game {
 
 using namespace ship_ai_detail;
 
+// @port 0x004688e0 100%
 // Ghidra 0x004688e0 Ship_IsShipDestroyed (see game_state.hpp); named AI entry
 // point for its existing callers.
 bool NovaAiShip_IsDestroyed(const Ship &ship) { return IsShipDestroyed(ship); }
@@ -218,6 +219,7 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
   return true;
 }
 
+// @port 0x004687b0 100%
 // Ghidra 0x004687b0 Ship_IsShipDisabled. True when the ship must not
 // fire/act this frame: derelict government (flags_primary 0x800); a mission
 // ShipGoal-5 special ship that is still active and unprovoked; or critically
@@ -535,11 +537,13 @@ void ClearCloakTransition(GameState &state, Ship &ship) {
 
 } // namespace
 
+// @port 0x004680d0 100%
 // Ghidra 0x004680d0 Ship_OnShipCloakStateEntered.
 void NovaAi_OnShipCloakStateEntered(GameState &state, Ship &ship) {
   BeginCloakTransition(state, ship);
 }
 
+// @port 0x00468190 100%
 // Ghidra 0x00468190 Ship_OnShipCloakStateCleared.
 void NovaAi_OnShipCloakStateCleared(GameState &state, Ship &ship) {
   ClearCloakTransition(state, ship);
@@ -1583,6 +1587,7 @@ bool NovaAiShip_CanEngageTargetUnderCloakRules(const GameState &state,
   return false;
 }
 
+// @port 0x00467e80 100% bugfix
 // Ghidra 0x00467e80 Ship_CanMaintainCloakState.
 bool NovaAiShip_CanMaintainCloakState(const GameState &state,
                                       const Ship &ship) {

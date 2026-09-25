@@ -934,6 +934,7 @@ std::int16_t NovaSystem_ResolveVisibleForTravel(const GameState &state,
   return sys.is_visible ? system_id : -1;
 }
 
+// @port 0x00468af0 100%
 // Ghidra 0x00468af0 System_HasUsableTravelDestination. Scans the departure
 // stellar list (nav_stellar_ids) and accepts a spob that is a normal,
 // reachable destination: travel_flags bit 0x20 clear and availability_flags
@@ -1032,6 +1033,9 @@ bool NovaSystem_HasExploredToken(const GameState &state,
   return state.scenario.systems[idx].discovery_state > 0;
 }
 
+// @port 0x00467ab0 95% gameplay
+// Ghidra 0x00467ab0 System_FloodDiscoverAdjacentSystems. Depth-gated
+// recursion through NovaSystem_ResolveVisibleForTravel (0x0046b920).
 void NovaSystem_FloodDiscoverAdjacentSystems(
     GameState &state,
     std::int16_t zero_based_system_id,
@@ -1093,6 +1097,11 @@ void NovaSystem_FloodDiscoverAdjacentSystems(
   }
 }
 
+// @port 0x00467970 90% gameplay
+// Ghidra 0x00467970 System_RebuildSystemVisibilityMap. Clears the flood mask,
+// floods the origin at (max_depth, threshold), then rebuilds the one-jump-ahead
+// discovered_this_rebuild latch. The port shares the latch pass with
+// NovaSystem_RebuildDiscoveredLatch (0x00432470 scope B).
 void NovaSystem_RebuildDiscoveryState(GameState &state,
                                       std::int16_t origin_zero_based,
                                       std::int16_t max_depth,
@@ -1155,6 +1164,8 @@ void NovaSystem_RebuildDiscoveredLatch(GameState &state) {
   }
 }
 
+// @port 0x00467bd0 80% gameplay
+// Ghidra 0x00467bd0 Frame_TriggerSystemRegionEvents.
 void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
                                           std::int16_t zero_based_system_id) {
   if (state.scenario.nebulae.empty() || zero_based_system_id < 0 ||
@@ -1569,6 +1580,10 @@ void NovaTravel_Tick(GameState &state,
       // enter AI state 0x0B, holding formation until the jump fires. They
       // transfer systems at arrival via escort adoption, not here.
       NovaAi_SyncJumpStateToSquad(state, player, state.tick_60hz);
+      // @port 0x00467e60 100% divergence
+      // DIVERGENCE(original): the Windows build calls the bare-RET
+      // NoSys_NoOp_00467e60 and its fade build-up is dead; the port follows
+      // the Mac _FadeWhiteIn display behaviour unconditionally.
       // Ghidra 0x00467e60 NoSys_NoOp_00467e60.
       // Mac progressive white fade-in (the top block of Ship_HandlePlayer-
       // ShipCore 0x0044aa70; Mac _HandlePlayer ~0x683bf): the tunnel scalar

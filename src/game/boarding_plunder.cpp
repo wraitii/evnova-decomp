@@ -74,6 +74,7 @@ constexpr std::size_t kEscortCap = 6; // Ship_CanPlayerHaveMoreEscorts soft cap
   return static_cast<std::int32_t>(v);
 }
 
+// @port 0x00469230 100%
 // Ghidra 0x00469230 Weapon_HasMatchingWeaponAmmoCarried: scans the PLAYER
 // ship's weapon banks for ammo/secondaries relevant to `weapon_bank`
 // (compared by the weapon's ammo_type code, including a carried mode-99
@@ -137,6 +138,7 @@ struct OutfitModPair {
 
 } // namespace
 
+// @port 0x00468920 100%
 // Ghidra 0x00468920 Ship_CanPlayerHaveMoreEscorts. Counts active behavior-6
 // escorts (targeting the player, no mission fleet) and compares against the
 // soft cap of 6. Unlike the capture-odds accumulation in BuildOptions this

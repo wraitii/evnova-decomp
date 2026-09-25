@@ -102,6 +102,11 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
   return {state.player.pos_x, state.player.pos_y};
 }
 
+// @port 0x0046a870 70% rendering
+// Ghidra 0x0046a870 NovaUi_RedrawGameplayViewportAndRadar. The synchronous
+// viewport + radar redraw is expressed structurally: SpaceflightView::Draw
+// rebuilds the world each frame and HudRenderer::DrawRadarPanel redraws the
+// radar; the SDL port has no saved-backdrop offscreen surface.
 // The flight world's camera viewport, in window points: the render owner minus
 // the right-hand cockpit strip. The original's play area is
 // `[RenderOwner.left, RenderOwner.right - DAT_0088c020]` (see
