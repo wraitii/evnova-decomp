@@ -11,6 +11,7 @@
 #include "hud_renderer.hpp"
 #include "landed_store.hpp"
 #include "nova_font.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
 #include "scenario_data.hpp"
@@ -370,6 +371,10 @@ void Stellar_Launch(GameState &state) {
   // ship after the population rebuild below.
   state.player.primary_target_ship_slot = -1;
   state.ship_reticle_pulse = 0.0F;
+  // Stellar_HandleStellarEntryAndExit 0x0045830a: reseed the ambient-traffic
+  // escalation cooldown (Rand(0x1e)+0x1e) alongside the vacant-ship sweep.
+  state.ambient_traffic_escalation_cooldown =
+      static_cast<std::int16_t>(RandomBelow(state, 0x1e) + 0x1e);
 
   // Stellar_HandleStellarEntryAndExit 0x00458a47..0x00458bd2 performs the
   // vacant-ship sweep and System_RebuildInitialNpcAndMissionPopulation only

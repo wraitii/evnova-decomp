@@ -467,13 +467,12 @@ void FireJump(GameState &state) {
   state.escort.panel_timer = 0;
   // TODO(decomp(0x0044f803)) skipped: the remaining arrival resets target
   // globals the port does not model -- g_last_system_for_ambient_rolls
-  // (0xffff), the interaction bribe latch
-  // (-1) and action index (rand 0x800), DAT_00596d30/31 (0), the ambient
-  // mission-spawn re-arm DAT_007353f4 = rand(30)+30 (its consumer
-  // Registration_SpawnLicenseEnforcer is unported), g_travel_countdown (0),
-  // the HUD dirty flags (immediate-mode rendering makes them moot) and the
-  // starmap-window hide (Sprite_SetVisible 0x0044f857; the map is modal in
-  // the port and cannot be open during flight).
+  // (0xffff), the interaction bribe latch (-1), DAT_00596d30/31 (0),
+  // g_travel_countdown (0), the HUD dirty flags (immediate-mode rendering makes
+  // them moot) and the starmap-window hide (Sprite_SetVisible 0x0044f857; the
+  // map is modal in the port and cannot be open during flight). The interaction
+  // action index draw and the ambient-traffic escalation re-arm are ported in
+  // PlayerTick_JumpArrivalBlock.
   // Arrival route maintenance (Ship_HandlePlayerShipCore's arrival tick):
   // the map pan re-centres on the new system (0x0044f8a6, reading
   // g_system_defs_ptr[current_system_id].pos_x/y), a plotted route hop that

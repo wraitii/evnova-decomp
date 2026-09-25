@@ -107,29 +107,17 @@ struct PilotTemplateEntry {
   return out;
 }
 
-// @port 0x004CD350 70% gameplay
+// @port 0x004CD350 100%
 // Ghidra 0x004cd350 PilotData_ResolveStartType: the starting ship class from
-// the named character block (+4 minus 0x80; values < 0x80 resolve to class 0).
-// Remaining: the original's block grow/release and by-key access semantics are
-// not reproduced.
+// the named character block (block+4 minus 0x80; values < 0x80 resolve to
+// class 0, the stock fresh-pilot default). The original's keyed lookup is
+// ResourceData_AccessByKey -> NovaResource_AccessCharacterBlockByKey (via
+// CharacterTemplate_Read), and its ResourceData_EnsureBlockSize(0x16a) is a
+// no-op for archive blocks (the stock .Trader block is already 0x16a bytes).
 [[nodiscard]] std::int16_t
 ResolveStartTypeFromTemplate(const std::string &template_name) {
-  for (const auto &entry : EnumeratePilotTemplates()) {
-    if (entry.name != template_name) {
-      continue;
-    }
-    const auto block =
-        NovaResource_Load(kResourceTypeCharacter, entry.resource_id);
-    if (!block || block->size() < 6) {
-      return 0;
-    }
-    const std::int16_t designator = static_cast<std::int16_t>(
-        (std::to_integer<unsigned>((*block)[4]) << 8U) |
-        std::to_integer<unsigned>((*block)[5]));
-    return designator >= 0x80 ? static_cast<std::int16_t>(designator - 0x80)
-                              : 0;
-  }
-  return 0;
+  const auto tmpl = CharacterTemplate_Read(template_name);
+  return tmpl ? tmpl->ship_class_id : 0;
 }
 
 // Selections captured by the new-pilot dialogs. Held in locals until every
@@ -324,33 +312,31 @@ void Stub_LoadScenarioResourceTables(GameState &state, bool ship_animations) {
   state.system_reputation.assign(state.scenario.systems.size(), 0);
 }
 
-// @port 0x004B4220 10% gameplay
-// @port 0x004B4690 25% gameplay
-// Ghidra Game_ResetReputationAndAvailability (0x004b4220) and
-// Game_ResetNewGameState (0x004b4690) are only partially ported; their
-// control-bit/rating reset slices run inline in this stub.
-void Stub_ResetReputationAndWorldTables(GameState &state) {
-  // Ghidra Game_ResetReputationAndAvailability (0x004b4220) and
-  // Game_ResetNewGameState (0x004b4690). The latter zeroes the whole
-  // g_nova_control_bits array (0x004b477e loop): a second new game must not
-  // inherit the previous pilot's story/mission control bits. Gender and the
-  // license `registered` flag are separate globals and stay untouched, so
-  // preserve them here. Re-seed the clean-room ferry baseline (b311).
+// @port 0x004B4690 100% divergence
+// Ghidra Game_ResetNewGameState (0x004b4690). DIVERGENCE(original): the
+// original mutates the already-loaded tables in place at step 3 of
+// Menu_RunNewGameFlow, then reloads them from the archives at step 11, so its
+// përs alive/grudge, disaster-runtime and region-trigger clears are transient.
+// The clean-room reloads the scenario first and relies on the loader defaults,
+// which is equivalent. The remaining unmodeled globals are UI-only
+// (DAT_007354a6 is the starmap-window context, _DAT_0059799c is
+// write-only/dead) or owned elsewhere (NovaEffects_QueuedAmbientStarParticles
+// -> SpaceflightView spawn on entry), and the "No Name" name/date-prefix
+// prefill is overwritten by the dialog success tail. Only the control-bit clear
+// and the intro latch need applying here; the stellar Strength/hazard pass is
+// ResetStellarStrengthForNewGame.
+void ResetNewGameStateBits(GameState &state) {
+  // Game_ResetNewGameState zeroes the whole g_nova_control_bits array
+  // (0x004b477e loop): a second new game must not inherit the previous
+  // pilot's story/mission control bits. Gender and the license `registered`
+  // flag are separate globals and stay untouched, so preserve them here.
+  // Re-seed the clean-room ferry baseline (b311).
   state.control.bits.reset();
   state.control.persisted_bit_bytes.fill(0);
   state.control.SetControlBit(311, true);
   state.control.map_grant_latch = false;
   state.control.record_grant_latch = false;
-  // Game_ResetReputationAndAvailability 0x004b4220 param_1 != 0 zeroes the
-  // player combat rating and clears the recently-activated rank latch. The
-  // character template (ApplyCharacterTemplate) overwrites the rating when
-  // present; without this a template-less pilot would inherit the previous
-  // pilot's rating.
-  state.player_combat_rating_points = 0;
-  state.recently_activated_rank_id = -1;
   state.intro_played = false;
-  NovaLog::Todo("new-game faction reputation and mission flags not tracked; "
-                "control bits and intro_played latch reset only");
 }
 
 void Stub_SeedStartingInventory(GameState &state) {
@@ -724,9 +710,54 @@ void ResetStellarStrengthForNewGame(GameState &state) {
 
 } // namespace
 
-// @port 0x004B3350 55% gameplay
+// @port 0x004B4220 100%
+// Ghidra 0x004b4220 Game_ResetReputationAndAvailability: baseline
+// reputation/availability reset run before every pilot load, paired after
+// Ship_ResetPlayerShipState. `reset_combat_rating` is the original's param_1
+// (nonzero on all four callers: NovaGameSession_Run, Menu_RunNewGameFlow,
+// Menu_OpenPilotFileDialog, PilotData_AutoresumeLastPilot) and zeroes the
+// aggregate combat rating.
+//
+// Reputation is only ever RAISED to the owning government's InitialRec floor
+// (GovtDef +0x52, payload +0x14), never lowered; a government id below 0 uses
+// a 0 floor. Ship_ResetPlayerShipState's param_1 branch assigns the same
+// InitialRec value to a zeroed table first, so the floor raise subsumes it.
+// Every stellar's persistent domination latch is re-derived from
+// availability_flags bit 0x20 (the same latch Game_ResetNewGameState applies),
+// and the recently-activated rank latch is cleared.
+void NovaGame_ResetReputationAndAvailability(GameState &state,
+                                             bool reset_combat_rating) {
+  if (reset_combat_rating) {
+    state.player_combat_rating_points = 0;
+  }
+  // The original's g_system_reputation is a fixed system-indexed table; size
+  // the clean-room vector to the loaded systems before applying the floor.
+  if (state.system_reputation.size() < state.scenario.systems.size()) {
+    state.system_reputation.resize(state.scenario.systems.size(), 0);
+  }
+  const std::size_t system_count = state.scenario.systems.size();
+  for (std::size_t i = 0; i < system_count; ++i) {
+    const std::int16_t govt = state.scenario.systems[i].government_id;
+    const Government *gov_def = state.scenario.GovernmentByIndex(govt);
+    const std::int16_t floor = gov_def != nullptr ? gov_def->initial_rec : 0;
+    if (state.system_reputation[i] < floor) {
+      state.system_reputation[i] = floor;
+    }
+  }
+  for (Stellar &stellar : state.scenario.stellars) {
+    stellar.dominated = (stellar.availability_flags & 0x20U) != 0U ? 1 : 0;
+  }
+  state.recently_activated_rank_id = -1;
+}
+
+// @port 0x004B3350 75% gameplay
 // Ghidra 0x004b3350 Ship_ResetPlayerShipState: fresh position/velocity,
 // default class id, cleared targeting/travel/mission/AI fields and debuffs.
+// The param_1 reputation seed to each government's InitialRec is subsumed by
+// NovaGame_ResetReputationAndAvailability's floor pass (the table starts at 0).
+// The param_1 mission-slot detachment is applied below. Remaining: the
+// unmodeled transient/UI globals and the param_1 per-system personality-slot
+// / region-trigger slices (reload-covered; see the flow comment).
 void NovaShip_ResetPlayerShipState(GameState &state) {
   // Ghidra 0x004b3350 does not overwrite g_player_ship_name. The selected
   // christening must survive this reset before the fresh pilot record is
@@ -749,6 +780,19 @@ void NovaShip_ResetPlayerShipState(GameState &state) {
   state.weapon_count_by_class.fill(0);
   state.weapon_secondary_count_by_class.fill(0);
   state.weapon_bank_cooldown.fill(0.0F);
+  // Ghidra 0x004b3a6e..0x004b3a9a: for every currently active mission slot,
+  // Mission_ClearMisnSlotAssignments(slot, 0) detaches any mission-fleet ships
+  // and clears their targeting before the slot latches are zeroed. The
+  // no-payload arm avoids running each mission's OnAbort script on a reset.
+  for (std::size_t slot = 0; slot < state.active_mission_runtime_flags.size();
+       ++slot) {
+    if (state.active_mission_runtime_flags[slot].is_active) {
+      Mission_ClearMisnSlotAssignments(state,
+                                       static_cast<std::int16_t>(slot),
+                                       /*emit_completion_payload=*/false,
+                                       state.gameplay_now_ms);
+    }
+  }
   state.active_mission_runtime_flags = {};
   state.active_missions = {};
   // Ghidra Ship_ResetPlayerShipState 0x004b3dad raises the four "clear
@@ -917,11 +961,16 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // systems) as part of the fresh world reset; the ship reset and inventory
   // seed below read class stats, so load the tables first.
   Stub_LoadScenarioResourceTables(state, ship_animations);
-  // Ghidra Game_ResetNewGameState applies the starts-destroyed/hazard reset to
-  // every stellar immediately after the tables load.
-  ResetStellarStrengthForNewGame(state);
   ResetPlayerShipForNewGame(state);
-  Stub_ResetReputationAndWorldTables(state);
+  // Ghidra Game_ResetReputationAndAvailability (0x004b4220), called right
+  // after Ship_ResetPlayerShipState: raise each system's reputation to its
+  // owning government's InitialRec floor before the character template
+  // overlays its legal record, and re-derive the stellar domination latches.
+  NovaGame_ResetReputationAndAvailability(state, /*reset_combat_rating=*/true);
+  // Ghidra Game_ResetNewGameState (0x004b4690), applied to every stellar
+  // immediately after the tables load and the reputation reset above.
+  ResetStellarStrengthForNewGame(state);
+  ResetNewGameStateBits(state);
   Stub_SeedStartingInventory(state);
   // Game_ResetNewGameState seeds the calendar from the local clock+250; the
   // selected character template then overrides it
@@ -966,16 +1015,30 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // 0x00458802 arm also re-rolls on arrival; the loader zeroed the table).
   Mission_RerollOfferingRolls(state);
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
-  // TODO(decomp(0x00489d70)) skipped scopes from Menu_RunNewGameFlow's
-  // fresh-world tail, each with a known original call:
-  //   - the stellar hazard-marker pass (availability flags 0x20/0x40 over all
-  //     0x800 stellars)
-  //   - the live date-block copy (g_current_game_year_month/day, DAT_00735460)
-  //   - current-system field_0xc8/0xc4
-  //   - per-ship zeroing of ionization_points/field_0xb0/
-  //     turn_bank_animation_phase/ai_turn_bias_dir and DAT_007cab1c = 0xfffd
-  //   - the second PilotData_InitializePlayerState pass (param 0) after the
-  //     availability rolls
+  // Menu_RunNewGameFlow's fresh-world tail scopes (verified against the
+  // decompile):
+  //   - the stellar hazard-marker pass -> ResetStellarStrengthForNewGame (plus
+  //     the same domination latch in NovaGame_ResetReputationAndAvailability)
+  //   - the live date-block copy -> SetNewGameDateAndStrings + the character
+  //     template overlay (the hour/min/sec/7th words at 0x73545e..0x735464 are
+  //     not template-driven and are not modelled; the date formatters only read
+  //     year/month/day)
+  //   - current-system reinf_countdown/reinf_cooldown_days ->
+  //     PlacePlayerInStartSystem
+  //   - per-ship zeroing of ionization/field_0xb0/turn_bank/ai_turn_bias_dir
+  //   and
+  //     DAT_007cab1c = 0xfffd -> NovaShip_ResetPlayerShipState + the
+  //     travel_hint_state = -3 assignment at the end of this flow
+  //   - the second PilotData_InitializePlayerState(0) pass -> the OnStart
+  //   script
+  //     execution below
+  // TODO(decomp(0x00489d70)) remaining:
+  // System_UpdateSystemAndStellarDisplayState (0x00432470) is only partially
+  // ported (scope 3; NovaResources_EvaluateAvailability
+  // + NovaSystem_RebuildDiscoveredLatch stand in for the twin/discovery
+  // passes), and the render/transition tail
+  // (SpriteWorld_ReleaseAllSpriteFrames, NovaView_UpdateGameplayViewport,
+  // DAT_007d1fa3, the 0x596d29..2d latches) is owned by the outer render loop.
 
   // ---- Step 6: assemble the persistent pilot record and apply it ----------
   // Ghidra keeps the freshly-seeded pilot in a pilot-save block (resource id

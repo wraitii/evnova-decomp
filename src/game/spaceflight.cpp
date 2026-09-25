@@ -975,6 +975,10 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   // Ghidra 0x0044f815..0x0044f829 seeds the hail selector after the arrival
   // presentation reset and immediately before the arrival random roll tables.
   state.travel.interaction_action_index_b = RandomBelow(state, 0x800);
+  // Ghidra 0x0044f83d..0x0044f851: reseed the ambient-traffic escalation
+  // cooldown (Rand(0x1e)+0x1e) on every arrival.
+  state.ambient_traffic_escalation_cooldown =
+      static_cast<std::int16_t>(RandomBelow(state, 0x1e) + 0x1e);
   Mission_RerollOfferingRolls(state);
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
   // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of

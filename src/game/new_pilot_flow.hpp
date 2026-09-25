@@ -23,6 +23,16 @@ namespace game {
 // per-flight/per-pilot tables before either a new game or pilot-file load.
 void NovaShip_ResetPlayerShipState(GameState &state);
 
+// Ghidra 0x004b4220 Game_ResetReputationAndAvailability. Baseline
+// reputation/availability reset run before every pilot load, paired after
+// NovaShip_ResetPlayerShipState. Raises each system's reputation to its
+// owning government's InitialRec floor (never lowers), re-derives every
+// stellar's domination latch from availability_flags bit 0x20, and clears the
+// recently-activated rank latch. `reset_combat_rating` is the original's
+// param_1 and zeroes the aggregate combat rating.
+void NovaGame_ResetReputationAndAvailability(GameState &state,
+                                             bool reset_combat_rating);
+
 // Runs the full "new pilot" path from the main menu: picks random opener
 // strings, runs the pilot-name/selection step, resolves the start type,
 // resets the per-pilot world for a fresh character, loads scenario tables,

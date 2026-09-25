@@ -1617,6 +1617,14 @@ struct GameState {
   std::array<std::int16_t, kMaxSystems> reinforcement_retrigger_delay{};
   std::array<float, kMaxSystems> reinforcement_countdown{};
 
+  // Ghidra DAT_007353f4 (word): ambient-traffic escalation cooldown. Seeded on
+  // system entry to Rand(0x1e)+0x1e (Stellar_ProcessTravelAndLanding
+  // 0x0044f851, Stellar_HandleStellarEntryAndExit 0x00458315) and decremented
+  // once per raw NPC-maintenance call; at zero, System_TickNpcSpawnMaintenance
+  // (0x0041d6e0) escalates traffic via encounter fleet 0xfe/0xff at AI mode 4
+  // and latches it to -1 until the next system entry.
+  std::int16_t ambient_traffic_escalation_cooldown = -1;
+
   // The player's owned outfits, cargo and junk. The new-game flow zeroes it
   // then seeds the outfit counts from the starting ship class's default item
   // list (see new_pilot_flow.cpp). Ghidra g_outfit_owned_count + the ship

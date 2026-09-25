@@ -2,6 +2,7 @@
 
 #include "game/collision.hpp"
 #include "game/government.hpp"
+#include "game/new_pilot_flow.hpp"
 #include "game/outfit.hpp"
 #include "game/scenario_data.hpp"
 
@@ -351,6 +352,56 @@ TEST_CASE("outfit-derived state marks governments and rebuilds policy flags",
   state.scenario.ranks[0].active = false;
   game::NovaOutfit_RecomputeOutfitDerivedState(state);
   CHECK(state.scenario.governments[0].policy_flags[0] == 0);
+}
+
+// Game_ResetReputationAndAvailability (0x004b4220): only ever raises a
+// system's reputation up to its owning government's InitialRec floor, never
+// lowers it, re-derives the stellar domination latch from availability_flags
+// bit 0x20, and clears the recently-activated rank latch.
+TEST_CASE("reputation/availability reset raises to InitialRec and never lowers",
+          "[government][reputation][newpilot]") {
+  GameState state;
+  state.scenario.governments.assign(2, Government{});
+  state.scenario.governments[1].initial_rec = 25;
+
+  state.scenario.systems.resize(4);
+  state.scenario.systems[0].government_id = 1;  // floor 25
+  state.scenario.systems[1].government_id = 0;  // floor 0
+  state.scenario.systems[2].government_id = -1; // independent, floor 0
+  state.scenario.systems[3].government_id = 1;  // floor 25
+  state.system_reputation.assign(4, 0);
+  state.system_reputation[0] = 10; // below floor -> raised to 25
+  state.system_reputation[1] =
+      -10; // zero floor -> raised to 0 (floor, not a clamp)
+  state.system_reputation[2] = 3;  // unchanged
+  state.system_reputation[3] = 50; // above floor -> 50 survives
+
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[0].availability_flags = 0x20;
+  state.scenario.stellars[1].availability_flags = 0x00;
+  state.player_combat_rating_points = 123;
+  state.recently_activated_rank_id = 5;
+
+  game::NovaGame_ResetReputationAndAvailability(state,
+                                                /*reset_combat_rating=*/true);
+
+  CHECK(state.system_reputation[0] == 25);
+  CHECK(state.system_reputation[1] == 0);
+  CHECK(state.system_reputation[2] == 3);
+  CHECK(state.system_reputation[3] == 50);
+  CHECK(state.player_combat_rating_points == 0);
+  CHECK(state.recently_activated_rank_id == -1);
+  CHECK(state.scenario.stellars[0].dominated == 1);
+  CHECK(state.scenario.stellars[1].dominated == 0);
+
+  // The original's param_1 gates only the combat-rating clear; the rank latch
+  // and availability passes always run.
+  state.player_combat_rating_points = 7;
+  state.recently_activated_rank_id = 2;
+  game::NovaGame_ResetReputationAndAvailability(state,
+                                                /*reset_combat_rating=*/false);
+  CHECK(state.player_combat_rating_points == 7);
+  CHECK(state.recently_activated_rank_id == -1);
 }
 
 } // namespace

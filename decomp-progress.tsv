@@ -109,15 +109,15 @@ address	name	impl_file	reimpl_pct	comment
 0x004186B0	Frame_TickSystems	src/game/spaceflight.cpp	20%	gameplay,cadence
 0x00419210	Frame_RefreshTransitionFrameAuxVisuals		0%	
 0x004192D0	Ship_ApplyDamageToShip	src/game/collision.cpp	100%	license
-0x0041AD50	Ship_DeactivateVacantShipsAndTally	src/game/ship_spawn.cpp	90%	gameplay
-0x0041AF90	System_RebuildInitialNpcAndMissionPopulation	src/game/ship_spawn.cpp	80%	gameplay
-0x0041BA80	EncounterFleet_SpawnRandomSystemDudeShip	src/game/ship_spawn.cpp	93%	gameplay
+0x0041AD50	Ship_DeactivateVacantShipsAndTally	src/game/ship_spawn.cpp	100%	
+0x0041AF90	System_RebuildInitialNpcAndMissionPopulation	src/game/ship_spawn.cpp	100%	
+0x0041BA80	EncounterFleet_SpawnRandomSystemDudeShip	src/game/ship_spawn.cpp	98%	rendering
 0x0041C710	Dude_SpawnRandomDudeShipInSystem	src/game/ship_spawn.cpp	100%	moddata
 0x0041C9F0	Dude_SpawnShipFromDudeDefInSystem	src/game/ship_spawn.cpp	100%	divergence
 0x0041CF40	Mission_SpawnMissionShipFromDudeDef	src/game/ship_spawn.cpp	100%	divergence
-0x0041D6E0	System_TickNpcSpawnMaintenance	src/game/ship_spawn.cpp	80%	gameplay
+0x0041D6E0	System_TickNpcSpawnMaintenance	src/game/ship_spawn.cpp	95%	license
 0x0041E240	Ship_ResetShipToDefaultCombatState	src/game/escort_formation.cpp	100%	rendering,divergence
-0x0041E640	Weapon_SpawnShipFromCarrierBayWeapon	src/game/ship_spawn.cpp	95%	gameplay
+0x0041E640	Weapon_SpawnShipFromCarrierBayWeapon	src/game/ship_spawn.cpp	98%	rendering
 0x0041F330	Player_RedistributeFleetCargoOverflow	src/game/outfit.cpp	95%	gameplay
 0x0041F800	Ship_SpawnFreeflightObjectForShip	src/game/freeflight_objects.cpp	100%	
 0x0041FB50	Ship_SpawnFreeflightObjectAtPosition	src/game/freeflight_objects.cpp	90%	gameplay
@@ -141,8 +141,8 @@ address	name	impl_file	reimpl_pct	comment
 0x00423FA0	Player_ReplaceShipWithCapturedHull	src/game/landed_store.cpp	100%	divergence
 0x00424F90	System_UpdateDisasterStates	src/game/mission_world.cpp	100%	divergence
 0x004250F0	Player_RefuelShipWithCredits	src/game/landed_window.cpp	100%	divergence
-0x00425280	EncounterFleet_TrySpawnRandomEncounterFleet	src/game/ship_spawn.cpp	90%	gameplay,ui
-0x004254B0	Ship_AllocateShipSlotInSystem	src/game/ship_spawn.cpp	75%	gameplay
+0x00425280	EncounterFleet_TrySpawnRandomEncounterFleet	src/game/ship_spawn.cpp	100%	
+0x004254B0	Ship_AllocateShipSlotInSystem	src/game/ship_spawn.cpp	95%	rendering
 0x004259B0	EncounterFleet_SpawnRandomEncounterFleet	src/game/ship_spawn.cpp	90%	audio
 0x00426CE0	Frame_QueueCombatChatter	src/game/spaceflight.cpp	100%	
 0x00426D10	Mission_ShowMissionShipAnnouncement	src/game/mission.cpp	100%	
@@ -198,7 +198,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00439D00	Frame_DrawViewportFlashAndParticles		0%	
 0x00439D20	Frame_RestoreViewportRectsAndParticles		0%	
 0x00439D40	Frame_PresentViewportAndParticles		0%	
-0x0043A020	System_UpdateRandomEncounterCountdown	src/game/ship_spawn.cpp	70%	gameplay,audio,ui
+0x0043A020	System_UpdateRandomEncounterCountdown	src/game/ship_spawn.cpp	100%	
 0x0043A310	Weapon_SelectTurretTargetWithinArc	src/game/weapon.cpp	100%	
 0x0043ADB0	Stellar_TickStellarGravityPull	src/game/spaceflight_player_state.cpp	10%	gameplay
 0x0043AED0	Stellar_HandleShipStellarCrash	src/game/collision.cpp	80%	ui
@@ -756,12 +756,12 @@ address	name	impl_file	reimpl_pct	comment
 0x004AF020	SpriteWorld_RebuildSessionSpritePools	src/game/hud_renderer.cpp	85%	rendering
 0x004B0740	NovaAudio_PreloadGameplayData	src/game/weapon.cpp	25%	audio
 0x004B0A30	FUN_004b0a30		0%	
-0x004B3350	Ship_ResetPlayerShipState	src/game/new_pilot_flow.cpp	55%	gameplay
-0x004B4220	Game_ResetReputationAndAvailability	src/game/new_pilot_flow.cpp	10%	gameplay
+0x004B3350	Ship_ResetPlayerShipState	src/game/new_pilot_flow.cpp	75%	gameplay
+0x004B4220	Game_ResetReputationAndAvailability	src/game/new_pilot_flow.cpp	100%	
 0x004B42F0	FUN_004b42f0		0%	
 0x004B4320	NovaPrefs_ResetToDefaults	src/game/preferences.cpp	85%	gameplay
 0x004B4400	NovaPrefs_ResetKeyBindings	src/game/preferences.cpp	90%	gameplay
-0x004B4690	Game_ResetNewGameState	src/game/new_pilot_flow.cpp	25%	gameplay
+0x004B4690	Game_ResetNewGameState	src/game/new_pilot_flow.cpp	100%	divergence
 0x004B4E10	FUN_004b4e10		0%	
 0x004B4EE0	ShipClass_LoadShipClassVisualAndLaunchData	src/game/ship_visual.cpp	74%	gameplay
 0x004B6620	FUN_004b6620		0%	
@@ -881,7 +881,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004CD1F0	Resource_DrawStringEntry		0%	
 0x004CD230	NameString_StripSubtitleSuffix	src/game/nova_name_text.hpp	100%	
 0x004CD290	PilotData_FindActivePilotName	src/game/pilot_file.cpp	80%	gameplay
-0x004CD350	PilotData_ResolveStartType	src/game/new_pilot_flow.cpp	70%	gameplay
+0x004CD350	PilotData_ResolveStartType	src/game/new_pilot_flow.cpp	100%	
 0x004CD3B0	IntroCinematic_SetupFrames	src/game/intro_cinematic.cpp	95%	ui
 0x004CD4B0	PilotData_InitializePlayerState	src/game/pilot_file.cpp	75%	gameplay
 0x004CD7E0	ResourceData_VerifyCatalogChecksum		0%	Full-catalog resource integrity check: sums FUN_004fe285 over 0x17 resource types and compares to the stored checksum in resource type 0x63739f6d, showing STR# 0x8c entry 7 on mismatch. Called between the startup splash and the progress-bar reveal. Deliberately not ported (licence/tamper checks out of scope); the loading bar therefore appears immediately on the startup splash instead of after this pass.
