@@ -68,6 +68,7 @@ float Stellar_MaxLandingDistance(std::int16_t target_sprite_full_width) {
       static_cast<double>(target_sprite_full_width) * kSpriteRangeScale));
 }
 
+// @port 0x004250f0 100% divergence
 // Ghidra 0x004250f0 Player_RefuelShipWithCredits. Arrival auto-refuel for the
 // auto-refueller outfit (ModType 19). Runs once per landing at a landable
 // stellar (travel_flags 0x20 clear) from the Stellar_RunDockAndLaunchSequence

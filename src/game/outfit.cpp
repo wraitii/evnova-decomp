@@ -1085,6 +1085,7 @@ std::int16_t Outfit_RemoveOutfit(GameState &state,
 // ---------------------------------------------------------------------------
 // On-acquire side effects
 // ---------------------------------------------------------------------------
+// @port 0x00427770 85% ui
 // Ghidra 0x00427770 Outfit_GrantOutfitToPlayer. See outfit.hpp for the effect
 // inventory. Returns true when the outfit was a consumed one-shot effect item
 // (map reveal / paint / clean-record) rather than a stackable owned outfit.
@@ -1511,6 +1512,7 @@ std::int16_t Player_ComputeRemainingCargoSpace(const GameState &state) {
   return static_cast<std::int16_t>(ship_capacity - carried);
 }
 
+// @port 0x0041f330 95% gameplay,verify
 // Ghidra 0x0041f330 Player_RedistributeFleetCargoOverflow. See the header.
 void Player_RedistributeFleetCargoOverflow(GameState &state,
                                            bool jettison_all,

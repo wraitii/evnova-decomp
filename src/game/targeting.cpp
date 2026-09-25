@@ -582,6 +582,7 @@ NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x00432470 67% gameplay,rendering
 // Ghidra 0x00432470 System_UpdateSystemAndStellarDisplayState (scope 3).
 // ---------------------------------------------------------------------------
 // For the player's current system, re-derive each stellar's owning system_id

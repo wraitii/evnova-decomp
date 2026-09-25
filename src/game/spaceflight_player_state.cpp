@@ -412,6 +412,7 @@ bool Frame_ShouldTriggerAutoRepairTick(GameState &state, const Ship &ship) {
 // spaceflight.cpp now invokes both there; the launch tail invokes the jitter
 // only.
 
+// @port 0x00431480 100%
 // Ghidra 0x00431480 Frame_JitterPlayerStatModifiers. The two-step jitter and
 // the [85,115] clamp are branch-faithful (NovaRandom_Range(3): 0 -> -1,
 // 1 -> +1, 2 -> unchanged).
@@ -428,6 +429,7 @@ void NovaFrame_JitterPlayerStatModifiers(GameState &state) {
   }
 }
 
+// @port 0x00431500 100% verify
 // Ghidra 0x00431500 Frame_RerollPlayerStatModifiers: [90,114] percent.
 void NovaFrame_RerollPlayerStatModifiers(GameState &state) {
   for (std::size_t i = 2; i < 4; ++i) {

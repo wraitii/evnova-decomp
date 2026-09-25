@@ -68,6 +68,7 @@ std::int16_t RandomSpinRate(GameState &state) {
 
 } // namespace
 
+// @port 0x0041f800 100%
 // Ghidra 0x0041f800 Ship_SpawnFreeflightObjectForShip.
 void NovaFreeflight_SpawnForShip(GameState &state, const Ship &ship) {
   for (FreeflightObjectState &object : state.freeflight_objects) {
@@ -103,6 +104,7 @@ void NovaFreeflight_SpawnForShip(GameState &state, const Ship &ship) {
   }
 }
 
+// @port 0x0041fb50 90% gameplay
 // Ghidra 0x0041fb50 Ship_SpawnFreeflightObjectAtPosition.
 void NovaFreeflight_SpawnAtPosition(GameState &state,
                                     float pos_x,
@@ -134,6 +136,7 @@ void NovaFreeflight_SpawnAtPosition(GameState &state,
   }
 }
 
+// @port 0x0042c1b0 85% rendering,divergence
 // Ghidra 0x0042c1b0 Frame_UpdateFreeflightObjectSprites (simulation half).
 // The original also cancels every object when the DAT_00596d2a "clear
 // transient sprites" latch is set. The port instead wipes the pool

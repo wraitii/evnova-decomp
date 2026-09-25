@@ -1105,6 +1105,7 @@ int NovaApp_Run(NovaRuntime &runtime) {
   return 0;
 }
 
+// @port 0x00416100 45% gameplay,divergence
 // Ghidra: 0x00416100 NovaGameSession_Run
 void NovaGameSession_Run(NovaRuntime &runtime) {
   // Resource and QuickTime startup are not reconstructed yet. Licence checks

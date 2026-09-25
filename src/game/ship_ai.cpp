@@ -2165,6 +2165,7 @@ void NovaAi_EnterStateBClearTargetsSeedHold(Ship &ship,
   }
 }
 
+// @port 0x00422340 100%
 // Ghidra 0x00422340 Ship_SyncJumpStateToSquad. During the squad leader's
 // jump-engage hold, copies the leader's hold clock (ai_station_hold_timer +
 // ai_mode_start_time_ms) into every active squadmate with no stellar

@@ -749,6 +749,7 @@ void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
   state.player_combat_rating_points = static_cast<std::int32_t>(scaled);
 }
 
+// @port 0x004192d0 100% license
 // Ghidra Ship_ApplyDamageToShip (0x004192d0). Core ship-hit
 // resolution: impulse, shield-first/armor damage, disable-variant armor
 // clamping, and the aggro/hostility response (eligibility chain, retaliation,
@@ -1456,6 +1457,7 @@ void Ship_ApplyDamageToShip(GameState &state,
   }
 }
 
+// @port 0x00437780 90% verify
 // Ghidra Shot_ResolveShotCollisionHit (0x00437780). Applies the primary area
 // impact effect, the direct damage/impulse/ionization package, and the axis-
 // aligned splash to every other eligible ship.
@@ -1702,6 +1704,7 @@ void ResolveAsteroidDestructionPackage(GameState &state,
   asteroid.active = false;
 }
 
+// @port 0x00436ff0 75% gameplay,verify
 // Ghidra NovaUi_ResolveWeaponSplashImpact (0x00436ff0): a blast weapon that
 // reaches an asteroid (flags_quaternary bit 0 clear) spawns the area impact,
 // splashes nearby ships (player-owned shots only), decrements the asteroid's
@@ -1824,6 +1827,7 @@ void NovaCollision_RefreshCollisionMasks(GameState &state) {
   RefreshCollisionMasks(state);
 }
 
+// @port 0x0042d890 90% gameplay,cadence,audio
 // Ghidra Stellar_TickStellarDefenseBatteries (0x0042d890).
 //
 // Runs in Frame_TickSystems scope 8 before Stellar_TickStellarGravityPull /
@@ -2005,6 +2009,7 @@ void NovaStellar_HandleShipStellarCrash(GameState &state) {
 bool NovaWeapon_CanProjectileHitShip(const GameState &state,
                                      const ActiveShot &shot,
                                      std::int16_t target_slot) {
+  // @port 0x00426ef0 90% gameplay
   // Ghidra 0x00426ef0 Weapon_CanWeaponHitTarget.
   const Weapon *weapon = WeaponForShot(state, shot);
   if (weapon == nullptr || !ValidShipSlot(target_slot) || shot.consumed) {
@@ -2163,6 +2168,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   return true;
 }
 
+// @port 0x00436f70 85% verify
 // Ghidra Asteroid_HandleSpritePairCollision (0x00436f70): the sprite-layer
 // callback installed on the 16 asteroid sprites. Ship_TestSpriteLayerOverlaps
 // invokes it for every (asteroid sprite, shot sprite) overlap. It resolves the
@@ -2204,6 +2210,7 @@ void ResolveDirectAsteroidContact(GameState &state,
   }
 }
 
+// @port 0x004374f0 90% gameplay
 // Ghidra Ship_HandleSpritePairCollision (0x004374f0) with its sprite-layer
 // driver inlined: the original is invoked per overlapping (ship sprite, shot
 // sprite) pair by TestSpriteLayerOverlaps and picks the bounding-circle or
@@ -2457,6 +2464,7 @@ bool ResolveShotStellarContact(GameState &state,
   return false;
 }
 
+// @port 0x00437e20 80% gameplay
 // Ghidra Shot_ResolveCollisions (0x00437e20): the blast-proximity pass. It
 // runs after the direct-contact pass, so a shot that already connected skips.
 void NovaWeapon_ResolveProjectileCollisions(GameState &state) {

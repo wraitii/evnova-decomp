@@ -296,6 +296,7 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
 // current system. The first projectile slice of the weapon/combat scope is
 // also wired here; beams, turrets, carrier-bay, disable, and mission effects
 // remain deferred.
+// @port 0x00433050 100% divergence,cadence
 void Stub_HandleShips(GameState &state, float elapsed_ticks) {
   const std::int16_t current_system = state.player.current_system_id;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
@@ -524,6 +525,7 @@ void Stub_BeamHitQueue(GameState &state, float elapsed_ticks) {
   NovaWeapon_TickBeamHitQueue(state, elapsed_ticks);
 }
 
+// @port 0x004186b0 20% gameplay,cadence
 // Ghidra 0x004186b0 Frame_TickSystems. Reconstructs only the *structure*:
 // the scope ordering and the run_full_tick gate. Each scope is a loud stub
 // (see above). Called full before drawing and reduced during transitions.
@@ -1529,6 +1531,7 @@ void PlayerTick_InteractionCloakAndStatus(GameState &state,
   }
 }
 
+// @port 0x00417600 15% gameplay,cadence,rendering
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
 // phase skeleton (setup + full first tick, then per-frame pre-draw/sim,
 // drawing, post-draw) and the run_full_tick freeze gate. Simulation is still
@@ -2325,6 +2328,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           state.player.ai_selected_as_resolved_target) {
         Ship_UpdateEscortFormations(state, state.player, /*snap=*/false);
       }
+      // @port 0x00431420 40% audio
       // Play the hyperspace jump sounds latched by the travel state machine
       // (the 'Warp up' cue as the zoom thrust begins and the 'Warp out' boom at
       // the fire/arrival, synced with the screen flash). The loop owns the
@@ -2891,6 +2895,7 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   NovaLog::Info("leaving spaceflight mode to the main menu");
 }
 
+// @port 0x00426ce0 100%
 // Ghidra Frame_QueueCombatChatter (0x00426ce0). The original writes three
 // globals; the clean-room latches the same triple on GameState.
 void NovaFrame_QueueCombatChatter(GameState &state,
@@ -2902,6 +2907,7 @@ void NovaFrame_QueueCombatChatter(GameState &state,
   state.pending_combat_chatter_variant = variant;
 }
 
+// @port 0x004311f0 100%
 // Ghidra 0x004311F0 Frame_UpdateCombatChatter.
 void NovaFrame_UpdateCombatChatter(GameState &state, SdlAudio &audio) {
   if (state.active_combat_chatter_sound.has_value() &&
@@ -2982,6 +2988,7 @@ void NovaFrame_UpdateCombatChatter(GameState &state, SdlAudio &audio) {
              /*priority_width=*/0x0f);
 }
 
+// @port 0x004313c0 100%
 // Ghidra 0x004313C0 Frame_CancelCombatChatter.
 void NovaFrame_CancelCombatChatter(GameState &state, SdlAudio &audio) {
   if (state.active_combat_chatter_sound.has_value() &&

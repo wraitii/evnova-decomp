@@ -29,6 +29,7 @@ bool ValidEffectId(std::int16_t effect_id) {
 
 } // namespace
 
+// @port 0x00421500 55% rendering
 // Ghidra 0x00421500 Shot_SpawnImpactEffectSprite.
 void NovaEffects_SpawnImpactEffect(GameState &state,
                                    float x,
@@ -53,6 +54,7 @@ void NovaEffects_SpawnImpactEffect(GameState &state,
   }
 }
 
+// @port 0x00428090 95% verify
 // Ghidra 0x00428090 Shot_SpawnShipDestructionDebrisPuff.
 void NovaEffects_SpawnShipDestructionDebrisPuff(GameState &state,
                                                 const Ship &ship) {
@@ -102,6 +104,7 @@ void NovaEffects_TickFadingEffects(GameState &state, float elapsed_ticks) {
   }
 }
 
+// @port 0x004211d0 100%
 // Ghidra 0x004211d0 Shot_SpawnAreaImpactEffects.
 void NovaEffects_SpawnAreaImpact(GameState &state,
                                  float x,
@@ -174,6 +177,7 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
   }
 }
 
+// @port 0x004274d0 85% verify
 // Ghidra Weapon_SpawnWeaponImpactParticleBurst (0x004274d0).
 void NovaEffects_SpawnWeaponImpactParticleBurst(GameState &state,
                                                 float x,
@@ -312,6 +316,7 @@ void NovaEffects_SpawnWeaponTrailParticles(GameState &state,
                                              /*position_scatter=*/0);
 }
 
+// @port 0x0042e160 55% rendering
 // Ghidra 0x0042e160 Shot_UpdateImpactEffectSprites.
 void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
   const float delta = std::max(0.0F, elapsed_ticks);

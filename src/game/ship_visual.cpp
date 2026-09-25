@@ -97,6 +97,7 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
   return d;
 }
 
+// @port 0x00428340 85% rendering
 // Ghidra 0x00428340 Ship_UpdateVisualState, debris-puff window (the
 // Shot_SpawnAreaImpactEffects call at 0x00428d6a). While the
 // death timer is above the finale threshold the original rolls 1-in-1/2/4/8

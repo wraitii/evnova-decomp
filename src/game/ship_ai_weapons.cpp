@@ -755,6 +755,7 @@ void NovaAi_FireTurretAtTarget(GameState &state, Ship &ship) {
   }
 }
 
+// @port 0x004221d0 100%
 // Ghidra 0x004221d0 Ship_IsInboundThreatExceedingDefenses.
 bool NovaAi_IsInboundThreatExceedingDefenses(const Ship &ship) {
   // The original first rounds the defensive sum to float, then multiplies by

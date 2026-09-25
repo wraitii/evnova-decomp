@@ -1116,6 +1116,7 @@ void ReconcileCapturedHullLoadout(GameState &state, const Ship &captured) {
   NovaWeapon_RebuildBanksFromOwnedOutfits(state);
 }
 
+// @port 0x00423fa0 100% divergence
 // Ghidra 0x00423fa0 Player_ReplaceShipWithCapturedHull (renamed from the
 // former clean-room Player_SwapShipWithEscort): promotes a captured hull into
 // player slot 0 and moves the outgoing player hull into a newly allocated
@@ -1544,6 +1545,7 @@ void ReseedWeaponSecondary(Ship &ship, const ShipClass *cls) {
 
 } // namespace
 
+// @port 0x004229d0 90% divergence
 // Ghidra 0x004229d0 Player_ProcessEscortFleetAtStellar.
 void Player_ProcessEscortFleetAtStellar(
     GameState &state,
@@ -1654,6 +1656,7 @@ void Player_ProcessEscortFleetAtStellar(
   Player_ProcessEscortPayroll(state, 1, show_text);
 }
 
+// @port 0x004232d0 90% gameplay,audio,ui
 // Ghidra 0x004232d0 Player_ProcessEscortPayroll.
 void Player_ProcessEscortPayroll(
     GameState &state,

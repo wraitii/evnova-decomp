@@ -14,6 +14,7 @@ inline constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
 
 // Normalized-tick delta -> whole raw spaceflight calls at the original
 // maximum rate.
+// @port 0x00432ea0 40% cadence,divergence
 [[nodiscard]] constexpr float RawSpaceflightCallTicks(float elapsed_ticks) {
   return elapsed_ticks / kOriginalMaxRateFrameTicks;
 }

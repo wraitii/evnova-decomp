@@ -53,6 +53,8 @@ FUNC_DEF_RE = re.compile(
 #   cadence     - behavior tied to frame time or update cadence (throttles,
 #                 per-frame vs staggered work, frame-count timers).
 #   ui          - HUD/menu/dialog presentation with no simulation effect.
+#   rendering   - sprite/world/effect drawing and its resolved frames; visual
+#                 fidelity only, no simulation outcome.
 #   audio       - sound or voice cue gaps.
 #   license     - shareware/registration/nag paths; out of scope by design
 #                 and permanent, so it does not also need `divergence`.
@@ -74,6 +76,7 @@ PORT_TAGS = {
     "correctness",
     "cadence",
     "ui",
+    "rendering",
     "audio",
     "verify",
     "divergence",
