@@ -200,7 +200,7 @@ void NovaWeapon_ClearTransientCombatState(GameState &state) {
   state.pending_impact_sounds.clear();
 }
 
-// @port 0x0041fd30 93% gameplay
+// @port 0x0041fd30 95% gameplay,rng
 int NovaWeapon_SpawnProjectile(GameState &state,
                                std::int16_t owner_ship_slot,
                                std::int16_t target_ship_slot,
@@ -212,6 +212,11 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   }
   const Weapon *w = WeaponAt(state, weapon_id);
   if (w == nullptr) {
+    return -1;
+  }
+  // Original (0x0041fd30): a weapon whose shot sprite set id is outside the
+  // 0..0xff resource range cannot spawn.
+  if (w->sprite_id < 0 || w->sprite_id > 0xff) {
     return -1;
   }
 
@@ -324,22 +329,31 @@ int NovaWeapon_SpawnProjectile(GameState &state,
 
   shot.heading_deg = static_cast<float>(RoundHeadingDeg(heading));
 
-  // Interference confusion (mode 1 + Seeker 0x0008): at launch the system's
-  // Interference stat gates a Random(k_interference_scale / frame_scale) roll;
-  // a hit latches the 999 weave state for the whole flight.
-  if (mode == 1 && (w->flags_quaternary & 0x0008U) != 0U && owner_in_range) {
-    const System *system =
-        state.scenario.System(static_cast<std::int16_t>(shot.system_id + 0x80));
-    if (system != nullptr && system->interference > 0) {
-      // 0x0041fd30 truncates 100/frame_scale toward zero (x87 FIST +
-      // residual/sign correction), then floors the result at 1.
-      const int roll_range =
-          std::max(1,
-                   static_cast<int>(
-                       100.0F / std::max(0.01F, state.last_frame_tick_scale)));
-      if (RandomBelow(state, roll_range) + 1 <= system->interference) {
-        shot.guidance_state = 999;
-      }
+  // Shot_SpawnShotFromWeapon seeds the animated sprite cycle from Random(0x24);
+  // flags_primary 0x4 (a fixed/heading sprite set) pins it to 0. Drawn before
+  // the interference roll, matching the original ordering.
+  shot.frame_cycle_index =
+      (w->flags & 0x0004U) != 0U ? 0 : RandomBelow(state, 0x24);
+
+  // Interference confusion (mode 1 + Seeker 0x0008): at launch the player's
+  // current system's Interference stat gates a Random(k_interference_scale /
+  // frame_scale) roll; a hit latches the 999 weave state for the whole flight.
+  // The original reads g_ship_states[0].current_system_id (the player, not the
+  // owner) and consumes the roll even when Interference is 0.
+  if (mode == 1 && (w->flags_quaternary & 0x0008U) != 0U) {
+    // 0x0041fd30 special-cases a non-positive frame scale to 100, otherwise
+    // truncates 100/frame_scale toward zero (x87 FIST + residual/sign
+    // correction), then floors the result at 1.
+    const float frame_scale = state.last_frame_tick_scale;
+    const int roll_range =
+        frame_scale <= 0.0F
+            ? 100
+            : std::max(1, static_cast<int>(100.0F / frame_scale));
+    const int roll = RandomBelow(state, roll_range) + 1;
+    const System *system = state.scenario.System(
+        static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+    if (system != nullptr && roll <= system->interference) {
+      shot.guidance_state = 999;
     }
   }
 
@@ -410,10 +424,11 @@ int NovaWeapon_SpawnProjectile(GameState &state,
       std::max(1.0F, static_cast<float>(w->lifetime_ticks));
   shot.life_frames = static_cast<int>(std::ceil(shot.life_ticks_remaining));
   shot.collision_radius_px = 2.0F;
-  // @port 0x0046C2F0 10% gameplay
+  // @port 0x0046C2F0 100%
   // Weapon_GetShotImpactVariant (0x0046c2f0): Flags2 bit 0x1000 makes a
-  // weapon disable but not destroy. Ship_ApplyDamageToShip preserves
-  // one armor point for that variant.
+  // weapon disable but not destroy. Disassembly-verified: the function returns
+  // AL 1 or 0 from (flags_secondary & 0x1000) and nothing else.
+  // Ship_ApplyDamageToShip preserves one armor point for that variant.
   shot.impact_variant =
       (w->flags_secondary & 0x1000U) != 0U ? static_cast<std::int8_t>(1) : 0;
   // @port 0x004115a0 100%
