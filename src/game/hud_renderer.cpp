@@ -218,9 +218,11 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
 // filled portion is drawn
 // (opaque on the panel); the surrounding bar trough art lives in the cockpit
 // PICT, which is composited separately.
-// TODO(decomp(0x0045ea66)): the port draws only the fill and relies on the
-// cockpit PICT for the trough; verify the fill geometry (axis/rounding) against
-// the original blitter path for all three bars.
+// TODO(decomp(0x0045ea66)): the original first blits a cached clean cockpit
+// rect over the bar (DrawContext_BlitClippedRect in 0x0045ea66) and then fills
+// the coloured portion; the port repaints the whole cockpit PICT instead and
+// relies on its trough art. Verify the PICT trough pixels match the original's
+// cached clean rect and that the fill geometry (axis/rounding) is equivalent.
 void DrawBarFill(SDL_Renderer *renderer,
                  const HudBarFill &fill,
                  SDL_Color color) {

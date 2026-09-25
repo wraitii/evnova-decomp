@@ -179,7 +179,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00433050	Ship_HandleShip	src/game/spaceflight.cpp	100%	divergence,cadence
 0x00435830	Shot_HandleShot	src/game/weapon_shots.cpp	100%	rendering,divergence,cadence
 0x00436910	Asteroid_UpdateSprites	src/game/asteroid.cpp	80%	divergence,gameplay
-0x00436F70	Asteroid_HandleSpritePairCollision	src/game/collision.cpp	85%	rendering,synthetic
+0x00436F70	Asteroid_HandleSpritePairCollision	src/game/collision.cpp	100%	divergence,synthetic
 0x00436FF0	NovaUi_ResolveWeaponSplashImpact	src/game/collision.cpp	75%	gameplay
 0x004374F0	Ship_HandleSpritePairCollision	src/game/collision.cpp	90%	gameplay
 0x00437780	Shot_ResolveShotCollisionHit	src/game/collision.cpp	90%	gameplay
