@@ -1433,12 +1433,15 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       outfit_store
           ? NovaLanded_OpenOutfitterSession(state, stellar_id)
           : NovaLanded_OpenShipyardSession(state, stellar_id, hire_mode);
-  // Ghidra 0x00492f30: an empty availability list pops the STR# 0x7d2
-  // 0xdf/0xe0 notice (per mode) instead of opening the store window.
+  // Ghidra 0x00492f30: an empty availability list pops a STR# 0x7d2 notice
+  // (per mode) instead of opening the store window. The original literals are
+  // 1-based 0xdf (purchase) / 0xe0 (hire); InfoString wants the 0-based pool
+  // index, so hire -> 0xdf ("There are no ships available for hire.") and
+  // purchase -> 0xde ("There are no ships available for purchase here.").
   if (!outfit_store && session.available_ids.empty()) {
     NovaUi_RunTextReaderDialog(platform,
                                state,
-                               InfoString(hire_mode ? 0xe0 : 0xdf),
+                               InfoString(hire_mode ? 0xdf : 0xde),
                                false,
                                render_background);
     return LandedExit::kServiceComplete;
