@@ -1,6 +1,7 @@
 #include "ship_spawn.hpp"
 
 #include "../log.hpp"
+#include "../util/math.hpp"
 #include "escort_formation.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
@@ -20,6 +21,8 @@
 
 namespace game {
 namespace {
+
+using evnova::util::AddPolar;
 
 constexpr std::int16_t kResourceIdBase = 0x80;
 
@@ -130,7 +133,7 @@ void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
 
 } // namespace
 
-// @port 0x004254b0 75% gameplay
+// @port 0x004254b0 95% rendering
 // Ghidra 0x004254b0 Ship_AllocateShipSlotInSystem.
 //
 // Slot scan: iterate slots 1..(0x40 - count)-1 and return the first inactive
@@ -140,25 +143,17 @@ void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
 // 0 is never reallocated.
 //
 // On a successful allocation it marks the slot active in system_id and resets
-// the full ShipState to baseline defaults. We reconstruct the load-bearing /
-// gameplay-relevant subset (identity, kinematics, targeting/AI slots, mission
-// slots, timers, credits and the [-750, 750) position scatter).
+// the ShipState to baseline defaults, including the RNG draws in the original's
+// order: skill variance (class 0), random_ai_render_cadence, the class-0
+// animation/combat seeds, then the [-750,750) position scatter. The seed values
+// come from the class AS RESET (class 0), before any spawner rewrites the class
+// id; spawners that care redraw from their own class.
 //
-// TODO(decomp) intentional omissions (these are deep combat/AI residual fields
-// that Ship_AllocateShipSlotInSystem zero/-1-resets but which are only consumed
-// once the ship AI/combat systems are reconstructed; Ship's defaults already
-// match a zero/-1 reset for them):
-//   * jamming_score_1..4, sprite_animation_timer / waypoint markers /
-//     shield_bubble_flash_intensity /
-//     player_aggro_accumulator / ai_turn_bias_dir and the various untyped
-//     field_0x* offsets (0x60/0x64/0xac/0xb0/0xb9/0xbb-0xbd/0xc8cc) are all
-//     left at defaults. The visual fields at +0xc8d6,
-//     +0xc8e4/+0xc8e8/+0xc8ec, and +0xc8f4/+0xc8f6; their reset/seed behavior
-//     remains deferred with the presentation subsystem.
-//   * the random inits gated on ShipClassDef.combat_state_init_range /
-//     animation_cycle_count (0x9FE/0xA00) and the derelict-government
-//     engine-glow override are skipped (those ShipClassDef fields are not yet
-//     loaded from scenario data).
+// TODO(decomp(0x004254b0)) that remains unmodelled (untyped presentation/AI
+// latches with no clean-room field): ShipState field_0xc924 (0xffff) and the
+// other untyped +0x60/+0x64/+0xac/+0xb0/+0xb9/+0xbb-0xbd offsets in the
+// allocator's reset list. The original writes them zero/-1 and no reconstructed
+// system consumes them.
 int NovaShip_AllocateShipSlot(GameState &state,
                               std::int16_t system_id,
                               std::int16_t reserved_tail) {
@@ -198,6 +193,7 @@ int NovaShip_AllocateShipSlot(GameState &state,
   ship.vel_x = 0.0F;
   ship.vel_y = 0.0F;
   ship.speed = 0.0F;
+  ship.travel_transfer_mode = -1;
   ship.ai_state_code = 0;
   ship.ai_control_mode = 0;
   ship.mission_fleet_slot = -1;
@@ -206,24 +202,30 @@ int NovaShip_AllocateShipSlot(GameState &state,
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = -1;
   ship.death_timer_active = 0.0F;
+  ship.ai_odds_score = -1.0F;
+  ship.escort_command_code = -1;
+  ship.waypoint_arrival_marker_a = 0;
+  ship.engine_glow_level = 0x20;
   if (const auto *ship_class = state.scenario.Ship(
           static_cast<std::int16_t>(ship.ship_class_id + 0x80));
       ship_class != nullptr) {
     ship.timed_action_counter = ship_class->escape_pod_count;
+    ship.waypoint_arrival_marker_b =
+        static_cast<std::int16_t>(ship_class->animation_cycle_count - 1);
     ship.skill_variance_scale = SkillVarianceScale(state, ship_class);
   } else {
     ship.timed_action_counter = 0;
+    ship.waypoint_arrival_marker_b = -1;
     ship.skill_variance_scale = 1.0F;
   }
   ship.mission_owner_slot = -1;
   ship.credits = 0;
   ship.defense_fleet_home_stellar_id = -1;
 
-  // The original's allocator draws the sprite-animation cadence seeds from
-  // the ship class AS RESET (class 0), before any spawner rewrites the class
-  // id and before the position scatter; spawners that care redraw from their
-  // own class.
+  // The class-0 animation/combat seed draws, preceded by the cadence draw.
   if (const ShipClass *class0 = state.scenario.Ship(0x80); class0 != nullptr) {
+    ship.random_ai_render_cadence =
+        static_cast<std::int16_t>(RandomBelow(state, 3) ^ 2);
     if (class0->animation_cycle_count > 0) {
       ship.sprite_animation_cycle_index =
           RandomBelow(state, class0->animation_cycle_count);
@@ -358,7 +360,8 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
     ship.afterburner_latch =
         NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;
     ship.mining_scoop_active = NovaOutfit_HasMiningScoopOutfit(state, ship);
-    ship.skill_variance_scale = SkillVarianceScale(state, cls);
+    // The lead keeps the class-0 skill_variance_scale drawn by
+    // Ship_AllocateShipSlotInSystem; the original does not redraw it here.
     ship.shield_points = static_cast<float>(cls->base_shield);
     ship.armor_points = static_cast<float>(cls->base_armor);
     ship.timed_action_counter = cls->escape_pod_count;
@@ -515,7 +518,7 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   return slot;
 }
 
-// @port 0x0043A020 70% gameplay,audio,ui
+// @port 0x0043A020 100%
 // Ghidra 0x0043A020 System_UpdateRandomEncounterCountdown.
 void NovaSystem_UpdateReinforcementCountdown(GameState &state,
                                              float elapsed_ticks) {
@@ -538,17 +541,45 @@ void NovaSystem_UpdateReinforcementCountdown(GameState &state,
   if (countdown > 0.0F) {
     if (countdown < static_cast<float>(system->reinf_time) * 0.25F &&
         state.reinforcement_retrigger_delay[index] < 1) {
-      // TODO(decomp(0x0043A020)) skipped: reinforcement warning overlay and
-      // centered alert sound are not reproduced yet.
-      NovaLog::Todo("reinforcement countdown: warning presentation not ported");
+      // Warning arm: the original only shows it when the reinforcement lead
+      // fleet's government has a non-empty medium name. The banner is STR#
+      // 0x7d2 entries 0x132/0x133 wrapped around the government's medium name,
+      // cued with transition sound 0x00591570 (snd 154) and shown for 0xf0
+      // frames.
+      const FleetDef *fleet = state.scenario.Fleet(
+          static_cast<std::int16_t>(system->reinf_fleet + 0x80));
+      const Government *govt =
+          fleet != nullptr
+              ? state.scenario.GovernmentByIndex(fleet->government_id)
+              : nullptr;
+      if (govt != nullptr && !govt->medium_name.empty()) {
+        std::string message;
+        if (const auto prefix = NovaHud_LoadStringEntry(0x7d2, 0x132);
+            prefix.has_value()) {
+          message = *prefix;
+        }
+        message += ' ';
+        message += govt->medium_name;
+        message += ' ';
+        if (const auto suffix = NovaHud_LoadStringEntry(0x7d2, 0x133);
+            suffix.has_value()) {
+          message += *suffix;
+        }
+        state.pending_ui_sounds.push_back({4, 1});
+        NovaHud_ShowOverlayMessage(
+            state, std::move(message), static_cast<std::uint64_t>(0xf0U));
+      }
       state.reinforcement_retrigger_delay[index] =
           std::max<std::int16_t>(system->reinf_interval, 1);
     }
     return;
   }
 
-  (void)NovaEncounter_SpawnFleetLeadShip(
-      state, system_id, system->reinf_fleet, /*ai_behavior_code=*/4);
+  (void)NovaEncounter_SpawnFleetLeadShip(state,
+                                         system_id,
+                                         system->reinf_fleet,
+                                         /*ai_behavior_code=*/4,
+                                         /*ignore_ship_availability=*/true);
   countdown = -1.0F;
   state.reinforcement_retrigger_delay[index] =
       std::max<std::int16_t>(system->reinf_interval, 1);
@@ -657,7 +688,7 @@ int NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
   return -1;
 }
 
-// @port 0x00425280 90% gameplay,ui
+// @port 0x00425280 100%
 // Ghidra 0x00425280 EncounterFleet_TrySpawnRandomEncounterFleet. See the
 // header for the full filter decode and the selection semantics. The original
 // scans all 0x100 FleetDef slots (g_random_encounter_fleet_defs); our
@@ -774,16 +805,20 @@ int NovaDude_SelectShipTypeIndex(const DudeDef &dude,
   return -1; // unreachable for consistent weights
 }
 
-// @port 0x0041ba80 93% gameplay
+// @port 0x0041ba80 98% rendering
 // Ghidra 0x0041ba80 EncounterFleet_SpawnRandomSystemDudeShip. See the header.
 // The original scans the first inactive ship slot and, within it, picks a
 // random system-bound dude class (NovaDude_SelectRandomSystemDudeClassIndex)
 // then a weighted ship type from that dude def (NovaDude_SelectShipTypeIndex),
 // and lays the dude-def's identity + class stats onto the slot in place (it
 // does NOT go through Ship_AllocateShipSlotInSystem; the slot was already
-// found inactive). We reconstruct the load-bearing identity/kinematics/vitals
-// subset and class weapon-bank loadout; deep combat/AI residual fields remain
-// deferred (see the header).
+// found inactive). All RNG draws are reproduced in the original's order:
+// position/anchor, heading, skill variance, cadence, the afterburner gate,
+// voice, then the class animation/combat seeds.
+//
+// TODO(decomp(0x0041ba80)) that remains unmodelled: the untyped ShipState
+// field_0xc924 (0xffff) and a few other zero/-1 latches with no clean-room
+// field (see Ship_AllocateShipSlotInSystem).
 int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
                                             std::int16_t system_id,
                                             std::uint16_t reserved_slots) {
@@ -849,6 +884,12 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
       if (const auto *st = state.scenario.Stellar(sys->nav_defs[0]); st) {
         ship.pos_x = static_cast<float>(st->pos_x);
         ship.pos_y = static_cast<float>(st->pos_y);
+        // The original offsets the anchored ship by a random polar vector of
+        // magnitude 100 (DAT_00575268 = 100.0) before resetting its velocity.
+        const float anchor_angle =
+            static_cast<float>(RandomBelow(state, 0x168)) *
+            0.017453292519943295F;
+        AddPolar(anchor_angle, 100.0F, ship.pos_x, ship.pos_y);
       } else {
         ship.pos_x = ship.pos_y = 0.0F;
       }
@@ -862,6 +903,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     ship.speed = 0.0F;
     ship.heading =
         static_cast<float>(RandomBelow(state, 0x168)) * 0.017453292519943295F;
+    ship.travel_transfer_mode = -1;
     ship.jump_destination_stellar_id = -2;
     ship.ai_state_code = 0;
     ship.ai_control_mode = 0;
@@ -873,18 +915,56 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
     ship.death_timer_active = 0.0F;
+    ship.waypoint_arrival_marker_a = 0;
+    ship.escort_origin_mark = 0;
+    ship.mission_hail_latch = 0;
+    ship.escort_command_code = -1;
+    ship.ai_odds_score = -1.0F;
+    ship.engine_glow_level = 0x20;
     ship.timed_action_counter = cls != nullptr ? cls->escape_pod_count : 0;
+    ship.waypoint_arrival_marker_b =
+        cls != nullptr
+            ? static_cast<std::int16_t>(cls->animation_cycle_count - 1)
+            : -1;
     ship.credits = 10000;
-    // The original derives mining_scoop_active from the spawned class's scoop
-    // outfit (Outfit_HasMiningScoopOutfit); the clean-room leaves it false (it
-    // only affects mining AI, not yet reconstructed). TODO(decomp).
-    ship.mining_scoop_active = false;
     ship.defense_fleet_home_stellar_id = -1;
     if (cls != nullptr) {
       ship.skill_variance_scale = SkillVarianceScale(state, cls);
       ship.shield_points = static_cast<float>(cls->base_shield);
       ship.armor_points = static_cast<float>(cls->base_armor);
       ship.fuel_points = static_cast<float>(cls->base_fuel);
+    }
+    // Draw order: skill variance above, then random_ai_render_cadence, then the
+    // afterburner gate (which can itself consume an RNG draw for
+    // capability-0x20 classes), then voice_type_mode, then the class
+    // animation/combat seeds.
+    ship.random_ai_render_cadence =
+        static_cast<std::int16_t>(RandomBelow(state, 3) ^ 2);
+    ship.afterburner_latch =
+        NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;
+    ship.mining_scoop_active = NovaOutfit_HasMiningScoopOutfit(state, ship);
+    ship.voice_type_mode = RandomBelow(state, 2);
+    if (cls != nullptr && cls->inherent_attributes_govt != -1) {
+      if (const Government *govt =
+              state.scenario.GovernmentByIndex(cls->inherent_attributes_govt);
+          govt != nullptr && govt->voice_type_mode != -1) {
+        ship.voice_type_mode = govt->voice_type_mode;
+      }
+    }
+    if (ship.faction_or_government_id >= 0) {
+      if (const Government *govt =
+              state.scenario.GovernmentByIndex(ship.faction_or_government_id);
+          govt != nullptr && (govt->flags_primary & 0x0800U) != 0U) {
+        ship.engine_glow_level = 0;
+      }
+    }
+    if (cls != nullptr && cls->animation_cycle_count > 0) {
+      ship.sprite_animation_cycle_index =
+          RandomBelow(state, cls->animation_cycle_count);
+    }
+    if (cls != nullptr && cls->combat_state_init_range > 0) {
+      ship.sprite_animation_timer =
+          static_cast<float>(RandomBelow(state, cls->combat_state_init_range));
     }
     // Ghidra 0x0041ba80 copies all 0x100 class-default ammo and secondary
     // counters into the new ShipState immediately before resetting its AI
@@ -1577,17 +1657,18 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
   }
 }
 
-// @port 0x0041af90 80% gameplay
-// Ghidra 0x0041af90 System_RebuildInitialNpcAndMissionPopulation, initial
-// ambient-population slice. The larger function first restores mission fleets
-// and player escorts,
-// then performs exactly avg_ships attempts here. Unlike per-tick maintenance,
-// its ordinary-dude branch deliberately calls the low-level spawner directly,
-// so those ships keep their inner-system [-750,750) scatter instead of being
-// moved to the polar state-8 / restricted-stellar state-15 arrival paths.
-// TODO(decomp(0x0041af90)): the mission-fleet restore arm and the exact
-// mission/encounter 1-in-7 dispatch ordering remain to be confirmed against
-// the original.
+// @port 0x0041af90 100%
+// Ghidra 0x0041af90 System_RebuildInitialNpcAndMissionPopulation, ambient
+// population slice. The full original is spread across this function plus
+// NovaSystem_RestorePlayerEscorts (escort adoption/station-hold scatter) and
+// NovaSystem_RestoreMissionFleets (mission-fleet restore); call sites run them
+// in the original order. This slice performs exactly avg_ships attempts and the
+// eight personality rolls. The ordinary-dude branch calls the low-level spawner
+// directly, so those ships keep their inner-system [-750,750) scatter instead
+// of the polar state-8 / restricted-stellar state-15 arrival paths. The
+// per-branch system id matches the original: the dude branch uses the passed
+// system_id, while the përs/encounter/personality branches use the player's
+// current system.
 void NovaSystem_PopulateInitialNpcShips(GameState &state,
                                         std::int16_t system_id) {
   const System *sys =
@@ -1603,9 +1684,13 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
     if (cls == nullptr) {
       return;
     }
-    const float base_speed = static_cast<float>(cls->speed) / 100.0F;
-    ship.vel_x = std::sin(ship.heading) * base_speed;
-    ship.vel_y = -std::cos(ship.heading) * base_speed;
+    // Math_AddPolarVelocityWithClamp(heading, class base_speed, ., class
+    // base_speed) with a zero starting velocity reduces to the unclamped polar
+    // add.
+    AddPolar(ship.heading,
+             static_cast<float>(cls->speed) / 100.0F,
+             ship.vel_x,
+             ship.vel_y);
   };
 
   const auto stop_if_derelict = [&state](int slot) {
@@ -1631,8 +1716,11 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
       // without the derelict exclusion. The spawned personality is left at
       // the allocator scatter and then reaches the same base-velocity tail as
       // an ordinary dude.
-      const int pers_slot = NovaPers_SpawnShipFromPersDef(
-          state, system_id, /*exclude_derelict_govts=*/false, -1);
+      const int pers_slot =
+          NovaPers_SpawnShipFromPersDef(state,
+                                        state.player.current_system_id,
+                                        /*exclude_derelict_govts=*/false,
+                                        -1);
       if (pers_slot >= 0) {
         slot = pers_slot;
         stop_if_derelict(slot);
@@ -1642,7 +1730,9 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
       // placement; the original does not apply the base-velocity step below to
       // this branch because it does not return the spawned slot to this caller.
       (void)NovaEncounter_TrySpawnRandomFleet(
-          state, system_id, /*ignore_ship_availability=*/false);
+          state,
+          state.player.current_system_id,
+          /*ignore_ship_availability=*/false);
       continue;
     } else {
       slot = NovaEncounter_SpawnRandomSystemDudeShip(state, system_id, 8);
@@ -1700,8 +1790,11 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
                      sys->personality_spawn_probabilities[i]);
       continue;
     }
-    const int spawned = NovaPers_SpawnShipFromPersDef(
-        state, system_id, /*exclude_derelict_govts=*/false, pers_slot);
+    const int spawned =
+        NovaPers_SpawnShipFromPersDef(state,
+                                      state.player.current_system_id,
+                                      /*exclude_derelict_govts=*/false,
+                                      pers_slot);
     if (spawned < 0) {
       NovaLog::Debug("system {} personality[{}] pers 0x{:x} '{}' spawn failed "
                      "(dedup/alloc)",
@@ -1716,15 +1809,12 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
   }
 }
 
-// @port 0x0041d6e0 80% gameplay
-// Ghidra 0x0041d6e0 System_TickNpcSpawnMaintenance (ambience slice). See the
-// header. Scope 0xb replays this at the original 21 ms raw-call cadence. The
-// original counts the ambient active ships in the system whose
-// squad_leader_ship_slot != 0 (ships not actively engaged on the player), then
-// below the AvgShips cap rolls a 1-in-500 encounter pick (gated by
-// encounter_chance_percent) and otherwise spawns a random dude ship. Tichel and
-// most ordinary systems bind no encounter fleets, so the dude spawn is the
-// dominant population path.
+// @port 0x0041d6e0 95% license
+// Ghidra 0x0041d6e0 System_TickNpcSpawnMaintenance. See the header. Scope 0xb
+// replays this at the original 21 ms raw-call cadence. Covers the mission-fleet
+// stepper, the 1-in-500 ambient encounter/dude spawn, the stellar defense
+// trickle and the ambient-traffic escalation. The only deferred arm is the
+// shareware Registration_SpawnLicenseEnforcer call.
 void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
                                         std::int16_t system_id,
                                         std::uint32_t now_ms) {
@@ -1917,13 +2007,46 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
       break;
     }
   }
-  // TODO(decomp): the original then runs Registration_SpawnLicenseEnforcer
-  // (0x0046ac50) and
-  // the DAT_007353f4-latched ambient-traffic encounter escalation (<200
-  // ships -> fleet 0xff, >0x31 -> fleet 0xfe at mode 4).
+  // Ambient-traffic escalation (0x0041d6e0 tail). The cooldown is seeded on
+  // system entry (0x0044f851/0x00458315) to Rand(0x1e)+0x1e and decremented
+  // once per raw call; at zero the cargo-hold total of the player's non-mission
+  // behavior-6 escorts selects the escalation fleet: 0xfe (mode 4) when the
+  // total is between 0x31 and 199, 0xff (mode 4) when 200 or more.
+  if (state.ambient_traffic_escalation_cooldown == 0) {
+    state.ambient_traffic_escalation_cooldown = -1;
+    std::int32_t cargo_holds = 0;
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      const Ship &ship = state.ShipAt(slot);
+      if (!ship.is_active || ship.squad_leader_ship_slot != 0 ||
+          ship.ai_behavior_code != 6 || ship.mission_fleet_slot != -1) {
+        continue;
+      }
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      if (cls != nullptr && cls->default_ai_behavior < 3) {
+        cargo_holds += cls->cargo_holds;
+      }
+    }
+    if (cargo_holds >= 200) {
+      (void)NovaEncounter_SpawnFleetLeadShip(
+          state, state.player.current_system_id, 0xff, 4, /*ignore=*/true);
+    } else if (cargo_holds > 0x31) {
+      (void)NovaEncounter_SpawnFleetLeadShip(
+          state, state.player.current_system_id, 0xfe, 4, /*ignore=*/true);
+    }
+  } else {
+    // The original decrements the 16-bit cooldown unconditionally
+    // (0x41e206: SUB word ptr [...],1), so the value wraps rather than
+    // clamping; replicate that.
+    state.ambient_traffic_escalation_cooldown = static_cast<std::int16_t>(
+        state.ambient_traffic_escalation_cooldown - 1);
+  }
+  // TODO(decomp(0x0041d6e0)) skipped: Registration_SpawnLicenseEnforcer
+  // (0x0046ac50, shareware day thresholds / licensed-traffic gates) runs at
+  // this point in the original, before the escalation block.
 }
 
-// @port 0x0041ad50 90% gameplay
+// @port 0x0041ad50 100%
 // Ghidra 0x0041ad50 Ship_DeactivateVacantShipsAndTally. Scans every NPC ship
 // slot (1..kMaxShips-1) and deactivates the "vacant" ones, tallying them into
 // their spawn-quota bucket before the cleanup:
@@ -1932,8 +2055,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 //     present_ship_count, capped at its max_ship_count (the mounted garrison
 //     size -- this is what feeds the hostile re-spawn bookkeeping);
 //   * a mission ship (mission_owner_slot != -1) increments its mission fleet's
-//     current-ship count (capped at the fleet max) -- mission fleets are not
-//     reconstructed, so that arm is a logged no-op (TODO(decomp));
+//     current-ship count (capped at the fleet max);
 // then clears is_active and the targeting/mission/system slots.
 //
 // Vacancy predicate (bVar3 in the decomp): a slot is SPARED only when it is
@@ -2007,12 +2129,16 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
     }
 
     // Clear the slot fields, mirroring the original's cleanup writes
-    // (velocity_match_target_ship_slot / field_0xbb / field_0xbc included;
-    // the two byte flags are unmodelled AI latches, TODO(decomp)).
+    // (mission_fleet_slot, defense_fleet_home_stellar_id,
+    // velocity_match_target_ship_slot, field_0xbb = escort_origin_mark,
+    // mission_hail_latch, mission_owner_slot, current_system_id,
+    // squad_leader_ship_slot).
     ship.is_active = false;
     ship.mission_fleet_slot = -1;
     ship.defense_fleet_home_stellar_id = -1;
     ship.velocity_match_target_ship_slot = -1;
+    ship.escort_origin_mark = 0;
+    ship.mission_hail_latch = 0;
     ship.mission_owner_slot = -1;
     ship.current_system_id = -1;
     ship.squad_leader_ship_slot = -1;
@@ -2037,7 +2163,7 @@ void NovaGame_ReseedRandom(GameState &state) {
                  "vary across sessions");
 }
 
-// @port 0x0041e640 95% gameplay
+// @port 0x0041e640 98% rendering
 int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
                                              const Ship &launcher,
                                              std::int16_t weapon_bank) {
@@ -2086,12 +2212,13 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.ai_hostility_accumulator = 0;
   ship.jump_destination_stellar_id = -2;
   ship.jump_destination_system_id = -2;
-  // The original calls Ship_ComputeShipMaxShieldPoints / MaxArmor
-  // (0x00463550/0x004637a0); for a freshly spawned, outfit-less fighter those
-  // equal the class base.
+  // Ship_ComputeShipMaxShieldPoints / MaxArmor (0x00463550/0x004637a0). The
+  // fighter is behavior-5 with no personality, so the effective values are the
+  // class base times the behavior-5 difficulty multiplier (1.333), not the raw
+  // class base.
   ship.shield_points =
-      static_cast<float>(cls != nullptr ? cls->base_shield : 0);
-  ship.armor_points = static_cast<float>(cls != nullptr ? cls->base_armor : 0);
+      static_cast<float>(NovaAi_ComputeMaxShieldPoints(state, ship));
+  ship.armor_points = NovaAi_ComputeMaxArmorPoints(state, ship);
   ship.ai_maneuver_timer_ms = static_cast<float>(bay_weapon->lifetime_ticks);
   ship.squad_leader_ship_slot = launcher.ship_instance_id;
   ship.heading = launcher.heading;
@@ -2115,10 +2242,11 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.cloak_damage_deactivate_latch = -1;
   ship.escort_command_code = -1;
   ship.escort_command_pending = 0;
-  // TODO(decomp): the original also zeroes ShipState fields not yet on the
-  // clean-room Ship struct: field_0x60, weapon_exit_animation_phase,
-  // alternate_sprite_cycle_index, weapon_sprite_flash_level, and the
-  // field_0xc924 short (0xffff).
+  // TODO(decomp(0x0041e640)) the original also zeroes ShipState
+  // weapon_exit_animation_phase and the field_0xc924 short (0xffff); neither is
+  // modelled. The other zeroed latches (field_0x60 = light_intensity,
+  // alternate_sprite_cycle_index, weapon_sprite_flash_level) already match
+  // Ship's defaults.
   ship.voice_type_mode = RandomBelow(state, 2);
   if (cls != nullptr && cls->inherent_attributes_govt != -1) {
     if (const Government *govt =

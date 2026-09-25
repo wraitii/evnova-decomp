@@ -1642,6 +1642,10 @@ PilotLoadError PilotData_AutoresumeLastPilot(GameState &state) {
     path = marker.parent_path() / path;
   }
   NovaShip_ResetPlayerShipState(state);
+  // Ghidra 0x004ca120: Game_ResetReputationAndAvailability(1) runs after the
+  // ship reset and before the load (the loaded block then overwrites the
+  // seeded table).
+  NovaGame_ResetReputationAndAvailability(state, /*reset_combat_rating=*/true);
   return PilotFileLoadSave(path, state);
 }
 

@@ -358,6 +358,7 @@ TEST_CASE("system entry force-spawns mission-gated system personalities") {
 
   constexpr std::int16_t kRautherionSystem = 166 - 0x80;
   constexpr std::int16_t kTutorialDerelictPers = 642 - 0x80;
+  state.player.current_system_id = kRautherionSystem;
   auto &system = state.scenario.systems[kRautherionSystem];
   system.avg_ships = 0;
   REQUIRE(system.personality_slots[0] == kTutorialDerelictPers);

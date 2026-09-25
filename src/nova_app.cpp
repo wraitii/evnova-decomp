@@ -1140,8 +1140,12 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   // per-definition mission offering rolls before loading/resuming a pilot;
   // keep that observable RNG/table side effect in the session bootstrap.
   game::Mission_RerollOfferingRolls(runtime.game);
-  runtime.game.system_reputation.assign(runtime.game.scenario.systems.size(),
-                                        0);
+  // Ghidra 0x00416e9d (NovaGameSession_Run):
+  // Game_ResetReputationAndAvailability seeds the session's baseline reputation
+  // and availability before any pilot is loaded or resumed. (Replaces a plain
+  // all-zero assign so the per-system government InitialRec floor is honoured.)
+  game::NovaGame_ResetReputationAndAvailability(runtime.game,
+                                                /*reset_combat_rating=*/true);
   // Idle main menu shows only the "No Pilot File Loaded" prompt (or, with a
   // pilot loaded, the status panel); the original draws no other status line
   // (Ghidra 0x004873b0).
@@ -1245,6 +1249,10 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
       NovaLog::Error("Open Pilot file dialog failed: {}", selection->error);
     } else if (selection->path) {
       game::NovaShip_ResetPlayerShipState(runtime.game);
+      // Ghidra 0x004c9e90: Game_ResetReputationAndAvailability(1) follows the
+      // ship reset and precedes the save load.
+      game::NovaGame_ResetReputationAndAvailability(
+          runtime.game, /*reset_combat_rating=*/true);
       const game::PilotLoadError result =
           game::PilotFileLoadSave(*selection->path, runtime.game);
       if (result == game::PilotLoadError::kOk ||

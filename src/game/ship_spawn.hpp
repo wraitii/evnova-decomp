@@ -8,10 +8,9 @@
 // ShipClassDef/DudeDef/fleet-def on top of it.
 //
 // This module reconstructs the allocation primitive against GameState.ships_.
-// The deep combat/AI residual fields the original zero-resets here are not yet
-// modelled (they only carry weight once the ship AI/combat systems are
-// reconstructed); Ship's defaults already match the net zero/-1 reset, and the
-// intentional omissions are logged as TODO(decomp) in ship_spawn.cpp.
+// The allocator now mirrors the original's reset and RNG seed order; only a
+// handful of untyped ShipState presentation/AI latches remain unmodelled
+// (logged as a precise TODO(decomp) in ship_spawn.cpp).
 
 #include "game_state.hpp"
 
@@ -19,7 +18,9 @@ namespace game {
 
 // Ghidra 0x004254b0 Ship_AllocateShipSlotInSystem: finds the first inactive
 // ship slot in [1, kMaxShips - reserved_tail), marks it active in system_id and
-// resets it to baseline defaults. Returns the allocated slot or -1 when none is
+// resets it to baseline defaults (including the original's RNG seed order:
+// skill variance, random_ai_render_cadence, class-0 animation/combat seeds,
+// then the position scatter). Returns the allocated slot or -1 when none is
 // free (or the reserved tail consumes the whole array).
 [[nodiscard]] int NovaShip_AllocateShipSlot(GameState &state,
                                             std::int16_t system_id,
@@ -122,10 +123,11 @@ void NovaSystem_UpdateReinforcementCountdown(GameState &state,
 // selectable or no slot is free.
 //
 // The selected class's complete stock weapon-bank loadout is copied onto the
-// NPC. Deferred (see ship_spawn.cpp): remaining deep combat/AI residual fields
-// (jamming, combat_state, voice_type, escort-eligibility). The NPC is left at
-// a visible heading/position (ai_state_code 0) so it renders without the
-// AI-state entry.
+// NPC, and the original's RNG draws are reproduced (position/anchor, heading,
+// skill variance, cadence, afterburner gate, voice, sprite seeds).
+// TODO(decomp): only the untyped field_0xc924 latch remains unmodelled. The NPC
+// is left at a visible heading/position (ai_state_code 0) so it renders without
+// the AI-state entry.
 [[nodiscard]] int NovaEncounter_SpawnRandomSystemDudeShip(
     GameState &state, std::int16_t system_id, std::uint16_t reserved_slots);
 
@@ -193,14 +195,14 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
 //     (NovaEncounter_SpawnFleetLeadShip), otherwise spawn a random
 //     system-bound dude ship (NovaDude_SpawnRandomDudeShipInSystem).
 //  3. Stellar defense-fleet trickle: scan the 16 nav stellars for the first
-//     with defense_fleet_mounted set and a positive present_ship_count whose live
-//     defenders number below max_ship_count % 10; spawn one
+//     with defense_fleet_mounted set and a positive present_ship_count whose
+//     live defenders number below max_ship_count % 10; spawn one
 //     (NovaStellar_SpawnDefenseFleetShip) and decrement the budget. At most
 //     one defense spawn per tick.
 //
-// Deferred (TODO(decomp), see ship_spawn.cpp): the roaming-NPC population cap,
-// the <200-traffic ambient-fleet escalation and the ambient-mission-ship
-// respawn latch.
+// The stellar defense-fleet trickle and the ambient-traffic escalation are
+// included. Deferred (TODO(decomp), see ship_spawn.cpp): only the shareware
+// Registration_SpawnLicenseEnforcer call (0x0046ac50).
 void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
                                         std::int16_t system_id,
                                         std::uint32_t now_ms);
@@ -240,9 +242,9 @@ NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
 // stellar's defender (Ship.defense_fleet_home_stellar_id), forces behavior-3
 // warship, seeds it at the stellar's map position with a random heading and an
 // initial velocity at the effective max speed, makes it hostile to the player,
-// and latches the stellar's defense_fleet_mounted so the per-tick defense trickle in
-// NovaSystem_TickNpcSpawnMaintenance can replace losses. `stellar_id` is the
-// stellar resource id; returns the slot or -1.
+// and latches the stellar's defense_fleet_mounted so the per-tick defense
+// trickle in NovaSystem_TickNpcSpawnMaintenance can replace losses.
+// `stellar_id` is the stellar resource id; returns the slot or -1.
 [[nodiscard]] int NovaStellar_SpawnDefenseFleetShip(GameState &state,
                                                     std::int16_t stellar_id);
 
@@ -286,9 +288,10 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
 // false (the original's flag==0). Everything else (idle wanderers/dudes,
 // parked-at-stellar ships, mission ships, disabled ships) is
 // deactivated: parked ships increment their stellar's present_ship_count
-// (capped at max_ship_count), mission ships would increment their mission
-// fleet's current-ship count (mission fleets not reconstructed; logged no-op),
-// then is_active and the targeting/mission/system slots are cleared.
+// (capped at max_ship_count), mission ships increment their mission fleet's
+// current-ship count (capped at the fleet max), then is_active and the
+// targeting/mission/system slots (including field_0xbb = escort_origin_mark and
+// mission_hail_latch) are cleared.
 //
 // The original runs this with flag==0 on travel/landing arrival
 // (Stellar_HandleStellarEntryAndExit 0x00457580) and system entry
