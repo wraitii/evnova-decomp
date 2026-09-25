@@ -26,9 +26,9 @@ These root-level TSVs must be disjoint and jointly cover the decompile dump with
 
 `decomp-progress.tsv` is the canonical reimplementation tracker: `address\tname\timpl_file\treimpl_pct\tcomment`.
 
-- **Update affected rows in the same change** as the implementation. `impl_file` is the `src/...` path (empty at 0%); `comment` records confidence, remaining gaps, and deliberate divergences.
-- Estimate completeness conservatively: **0%** unported, regardless of Ghidra annotations; **10–30%** skeleton/cadence only; **40–90%** substantial but incomplete; **100%** faithful reimplementation.
-- **Never dump or rewrite the whole file.** Locate target addresses with `rg` and patch only affected rows in place.
+- **Update affected rows in the same change** as the implementation. `impl_file` is the `src/...` path (empty at 0%). For a row that has an `@port` marker, the source is authoritative for `reimpl_pct` and `comment`: `comment` is the marker's tag CSV, and `python3 tools/ref_audit.py --gen` rewrites the row from it. For a row with no marker, `comment` is still free prose recording confidence, remaining gaps, and deliberate divergences until it is migrated.
+- Estimate completeness conservatively: **0%** unported, regardless of Ghidra annotations; **10–30%** skeleton/cadence only; **40–90%** substantial but incomplete; **100%** scope reconstructed. The number is gap magnitude only; known deviations and uncertainties are carried by the `@port` tags, so a 100% row may still be tagged `correctness`, `verify`, or `divergence`.
+- **Never dump or rewrite the whole file.** Patch only affected rows in place: hand-edit unmarked rows with `rg`, and let `tools/ref_audit.py --gen` regenerate the marked rows (unmarked rows stay byte-identical).
 
 `decomp-skipped.tsv` records functions deliberately not ported: SDL3/OS/codec replacements and game-code functions with no port need: `address\tname\tlibrary\tcomment`.
 
@@ -43,10 +43,11 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 - Mark intentional corrections to confirmed bugs in the original executable or shipped scenario data as `BUGFIX(original)`, gate them through the shared compatibility policy, and always flag them to the user before implementing them. Do not use this marker for ordinary SDL/platform divergences.
 - Trace every reimplemented Ghidra function to its original binary address; keep its progress row current.
 - Citation format: `// Ghidra 0xaabbccdd Original_Name.` directly above the port function. When one original function is spread across port helpers, cite it at the primary site and name the others in the same comment ("… runs inline in X"), not one citation per fragment.
+- Port-site marker: `// @port 0xADDR[,0xADDR…] NN% [tag[,tag…]]` at the primary port site (a header counts when the port is a header inline). Addresses are Ghidra function entry points. The tags are a comma-separated CSV whose meaning is defined at `PORT_TAGS` in `tools/ref_audit.py`; leave them empty only at 100%, and tag any `pct<100` row. `divergence` is reserved for deliberate differences we expect to keep permanently — a temporary divergence is `gameplay` or `correctness`. Keep the marker short; put narrative detail in the adjacent `// Ghidra …` comment. `tools/ref_audit.py` validates markers against the tracker and fails on unknown addresses, file mismatches, pct mismatches, and unrecognized tags.
 - Divergence/skip markers: plain `TODO(decomp)` for an unported scope; `TODO(decomp(0xaabbccdd)) skipped: <reason>` when original behavior is known and deliberately not reproduced. Never leave a comment-only `if` block as a deferral marker.
 - Citation and TODO markers may live in the sibling header when the port is a header inline; the audit (`tools/ref_audit.py`) checks both.
 - Check the Ghidra decompilation before writing or modifying a port; consult disassembly when needed. Document previously undescribed behavior in Ghidra before implementing it.
-- Log unported behavior, divergences, and skips with `NovaLog::Todo()` (the project's TODO logger). In very hot paths, a TODO comment may replace runtime logging. Record remaining gaps in `decomp-progress.tsv` either way.
+- Log unported behavior, divergences, and skips with `NovaLog::Todo()` (the project's TODO logger). In very hot paths, a TODO comment may replace runtime logging. Record remaining gaps in `decomp-progress.tsv` either way — for a marked row, via its `@port` tag CSV.
 - Use straightforward C++23: small functions, early returns, `enum class`, `std::span`, `std::optional`, and strong domain types; avoid clever abstractions and template-heavy code.
 - Prefer value types, RAII, and `std::unique_ptr` for deterministic ownership. No raw new/delete; raw pointers are non-owning. Wrap SDL handles in small RAII types.
 - Represent game state explicitly; avoid hidden globals and singletons, even if ownership differs from the original. Keep game logic independent of SDL where practical.
@@ -61,7 +62,7 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 - Default iteration: `cmake --build build/release`; run relevant tests with `ctest --test-dir build/release --output-on-failure -R '<pattern>'` (omit `-R` for the full suite).
 - For C++ changes, also build debug with `cmake --build build/debug`. Configure missing build directories with `cmake --preset release` / `cmake --preset debug` / `cmake --preset tidy`; these require `VCPKG_ROOT`.
 - Treat compiler warnings as errors. Format changed C++ files with `clang-format -i`. Keep whole-build clang-tidy disabled; run it on affected translation units with `SDKROOT="$(xcrun --show-sdk-path)" /opt/homebrew/opt/llvm/bin/clang-tidy -p build/tidy src/path.cpp` (the check set and warnings-as-errors live in the repo-root `.clang-tidy`, which clang-tidy discovers automatically). `build/tidy` is a PCH-off configure preset (`cmake --preset tidy`): Homebrew LLVM's clang-tidy cannot read AppleClang-generated PCHs, so the normal build dirs are unusable for manual tidy runs. On macOS, Homebrew LLVM's `clang-tidy` is not on `PATH` in the agent shell; use that absolute path and prefix it with the SDK root (`SDKROOT="$(xcrun --show-sdk-path)"`). Homebrew LLVM does not inherit AppleClang's implicit sysroot, so otherwise SDK headers such as `AvailabilityMacros.h` are not found.
-- After reimplementation or tracker changes, run `python3 tools/ref_audit.py` with Ghidra available and inspect `analysis/ref_audit.txt`. Dump coverage is checked only when `/tmp/ghidra_full_decompile` exists.
+- After reimplementation or tracker changes, run `python3 tools/ref_audit.py` with Ghidra available and inspect `analysis/ref_audit.txt`; run `python3 tools/ref_audit.py --gen` to regenerate marked rows from the `@port` markers. Dump coverage is checked only when `/tmp/ghidra_full_decompile` exists.
 - Documentation-only changes do not require builds or tests.
 
 # Ghidra server API

@@ -44,8 +44,13 @@ constexpr float kRouteMapViewScale = 0.25F;
 } // namespace
 
 void RouteMap_Open(GameState &state) {
+  // @port 0x004A9B30 100% correctness,divergence
   // Ghidra 0x004a9b30: zoom reset gate, flag set, interaction stamp. The
-  // mission-target list rebuild the original performs here happens at draw
+  // original reset threshold is a separate global, DAT_005759e8 = 0.0 (not the
+  // 0.5 zoom-out clamp kZoomMin), so it is effectively dead; the port resets at
+  // <= kZoomMin instead, visible when a fully zoomed-out map is reopened.
+  // TODO(decomp(0x004a9b30)): align the reset threshold to 0.0.
+  // The mission-target list rebuild the original performs here happens at draw
   // time in the port. The highlight (g_starmap_selected_system_id) is
   // re-derived at draw time from travel_transfer_mode/travel_slot.
   if (state.route_map.zoom_scale <= kZoomMin) {

@@ -14,6 +14,7 @@ namespace game {
   return d < 0.0F ? d + kFullCircleDeg : d;
 }
 
+// @port 0x0046B210 100%
 // Ghidra Math_ShortestAngleDeltaDeg (0x0046b210): absolute shortest angular
 // distance between two game-degree bearings, in [0,180]. The original loses the
 // rotation sign; direction is recovered by comparing the raw wrapped delta

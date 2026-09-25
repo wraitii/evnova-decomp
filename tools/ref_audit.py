@@ -8,12 +8,25 @@ For each row with an impl_file:
   * locate the port function in the impl file (exact, then fuzzy-normalized)
   * check whether the Ghidra address is cited anywhere in the impl file
 
+Also cross-checks the in-source `@port` markers against the tracker:
+  // @port 0xADDR[,0xADDR...] NN% [tag[,tag...]]
+The marker is the authoritative port-site annotation: the percentage is the
+gap magnitude and the tags classify the kind of remaining work (see PORT_TAGS).
+The audit reports markers with no tracker row, marker file or pct mismatches,
+unrecognized tags, pct<100 rows with no tags, and ported rows without a marker
+(migration coverage, not a failure).
+
 Writes a report to analysis/ref_audit.txt. Read-only; no writes to the DB.
+
+With `--gen`, rows carrying an `@port` marker have their `reimpl_pct` and
+`comment` (the tag CSV) overwritten from source; all other rows stay
+byte-identical.
 """
 import csv
 import json
 import os
 import re
+import sys
 import urllib.request
 from collections import Counter
 from pathlib import Path
@@ -25,6 +38,53 @@ ADDR_RE = re.compile(r"0x[0-9A-Fa-f]{6,8}")
 FUNC_DEF_RE = re.compile(
     r"^(?:[A-Za-z_][\w:<>,*&\s\[\]]*?\s+)?([A-Za-z_]\w*)\s*\(", re.M
 )
+# Controlled vocabulary for `@port` tags: what remains in a ported function.
+# Tags let a resumer distinguish a 95% row whose gap is `license` from one
+# whose gap is `gameplay`. Keep the set small; the audit rejects unknown tags.
+#
+# Domain tags (where the gap lives):
+#   gameplay    - simulation or player-outcome behavior is missing or altered.
+#                 A temporary divergence from the original is `gameplay` or
+#                 `correctness`, not `divergence`.
+#   rng         - visible behavior matches but the random draw count, order or
+#                 seed differs, breaking replay parity with the original.
+#   correctness - a known small deviation from the original (wrong constant,
+#                 evaluation order, precision, guard timing); exact fix known.
+#   cadence     - behavior tied to frame time or update cadence (throttles,
+#                 per-frame vs staggered work, frame-count timers).
+#   ui          - HUD/menu/dialog presentation with no simulation effect.
+#   audio       - sound or voice cue gaps.
+#   license     - shareware/registration/nag paths; out of scope by design
+#                 and permanent, so it does not also need `divergence`.
+#
+# Status tags:
+#   verify      - our value/behavior is unconfirmed and must be checked against
+#                 Ghidra before it can be trusted.
+#   divergence  - a deliberate difference from the original that we expect to
+#                 keep permanently. A temporary divergence is `gameplay` or
+#                 `correctness`, never `divergence`.
+PORT_TAGS = {
+    "gameplay",
+    "rng",
+    "license",
+    "correctness",
+    "cadence",
+    "ui",
+    "audio",
+    "verify",
+    "divergence",
+}
+# In-source port-site marker. One comment line, one or more addresses, an
+# optional percentage, and an optional comma-separated tag CSV.
+PORT_RE = re.compile(
+    r"^[ \t]*//[ \t]*@port[ \t]+"
+    r"(?P<addrs>0x[0-9A-Fa-f]{6,8}(?:[ \t]*,[ \t]*0x[0-9A-Fa-f]{6,8})*)"
+    r"(?:[ \t]+(?P<pct>\d{1,3})%)?"
+    r"(?:[ \t]+(?P<tags>[A-Za-z][A-Za-z0-9_]*(?:[ \t]*,[ \t]*[A-Za-z][A-Za-z0-9_]*)*))?"
+    r"[ \t]*$",
+    re.M,
+)
+SRC_SUFFIXES = {".cpp", ".cc", ".hpp", ".hh", ".h"}
 
 
 def ghidra_get(path: str):
@@ -61,6 +121,67 @@ def file_symbols(text: str) -> set[str]:
             continue
         syms.add(s)
     return syms
+
+
+def collect_port_markers() -> tuple[dict[str, list[dict]], list[str]]:
+    """Scan src/ for @port markers keyed by lowercased address.
+
+    Returns (markers, malformed) where malformed lists lines that mention
+    @port but do not parse, so a typo cannot silently drop tracking.
+    """
+    markers: dict[str, list[dict]] = {}
+    malformed: list[str] = []
+    for path in sorted((ROOT / "src").rglob("*")):
+        if path.suffix not in SRC_SUFFIXES or not path.is_file():
+            continue
+        text = path.read_text()
+        rel = path.relative_to(ROOT).as_posix()
+        for lineno, raw in enumerate(text.splitlines(), start=1):
+            if "@port" not in raw:
+                continue
+            m = PORT_RE.match(raw)
+            if m is None:
+                malformed.append(f"{rel}:{lineno} {raw.strip()}")
+                continue
+            pct = f"{m.group('pct')}%" if m.group("pct") else ""
+            tags = [t.strip().lower() for t in (m.group("tags") or "").split(",") if t.strip()]
+            for addr in m.group("addrs").split(","):
+                markers.setdefault(addr.strip().lower(), []).append(
+                    {"file": rel, "line": lineno, "pct": pct, "tags": tags}
+                )
+    return markers, malformed
+
+
+def apply_markers(rows: list[dict], markers: dict[str, list[dict]]) -> int:
+    """Regenerate marked rows from source; return the number changed.
+
+    Only lines whose address carries an `@port` marker are touched, so the
+    untagged backlog stays byte-identical. The first marker for an address
+    owns the row; conflicting markers for one address are an audit error path.
+    """
+    path = ROOT / "decomp-progress.tsv"
+    lines = path.read_text().splitlines()
+    if not lines:
+        return 0
+    changed = 0
+    out = [lines[0]]
+    for line in lines[1:]:
+        parts = line.split("\t")
+        ms = markers.get(parts[0].lower()) if parts and parts[0] else None
+        if not ms:
+            out.append(line)
+            continue
+        m = ms[0]
+        parts += [""] * (5 - len(parts))
+        new_pct = m["pct"] or parts[3]
+        new_comment = ",".join(m["tags"])
+        new_line = "\t".join([parts[0], parts[1], parts[2], new_pct, new_comment])
+        if new_line != line:
+            changed += 1
+        out.append(new_line)
+    if changed:
+        path.write_text("\n".join(out) + "\n")
+    return changed
 
 
 def load_tsv(path: Path, fields: list[str]) -> list[dict]:
@@ -144,7 +265,67 @@ def main() -> None:
     else:
         out.append("(no decompile dump at /tmp/ghidra_full_decompile; union check skipped)")
 
+    # --- @port marker cross-check ---------------------------------------
+    markers, malformed = collect_port_markers()
+    row_by_addr = {r["address"].lower(): r for r in rows}
+    unknown_marker = []       # marker address has no tracker row
+    marker_file_mismatch = []  # marker file != row impl_file
+    pct_mismatch = []          # marker pct != row pct
+    unknown_tag = []           # tag not in PORT_TAGS
+    uncharacterized = []       # pct<100 but no tags
+    unmarked = []              # ported row with no @port marker
+    tag_census: Counter = Counter()
+    seen = set()
+    for addr, ms in sorted(markers.items()):
+        row = row_by_addr.get(addr)
+        for m in ms:
+            loc = f"{m['file']}:{m['line']}"
+            if row is None:
+                unknown_marker.append(f"{addr} {loc}")
+                continue
+            seen.add(addr)
+            if row["impl_file"] and row["impl_file"] != m["file"]:
+                marker_file_mismatch.append(
+                    f"{addr} marker={m['file']} row={row['impl_file']}"
+                )
+            if m["pct"] and m["pct"] != row["reimpl_pct"]:
+                pct_mismatch.append(
+                    f"{addr} marker={m['pct']} row={row['reimpl_pct']} {loc}"
+                )
+            for tag in m["tags"]:
+                tag_census[tag] += 1
+                if tag not in PORT_TAGS:
+                    unknown_tag.append(f"{addr} tag='{tag}' {loc}")
+            if m["pct"] and m["pct"] != "100%" and not m["tags"]:
+                uncharacterized.append(f"{addr} {m['pct']} {loc}")
+    for r in rows:
+        if r["impl_file"] and r["address"].lower() not in markers:
+            unmarked.append(f"{r['address']} {r['name']} -> {r['impl_file']}")
+
     out.append(f"\nrows with impl_file: {sum(1 for r in rows if r['impl_file'])}")
+    out.append(
+        f"@port markers: {len(markers)} addresses ({sum(len(v) for v in markers.values())} lines); "
+        f"ported rows marked: {len(seen)}"
+    )
+    if tag_census:
+        out.append(
+            "@port tag census: "
+            + ", ".join(f"{t}={n}" for t, n in sorted(tag_census.items()))
+        )
+    out.append(f"\n== malformed @port line ({len(malformed)}) ==")
+    out += malformed
+    out.append(f"\n== @port marker with no progress row ({len(unknown_marker)}) ==")
+    out += unknown_marker
+    out.append(f"\n== @port marker file != row impl_file ({len(marker_file_mismatch)}) ==")
+    out += marker_file_mismatch
+    out.append(f"\n== @port pct != row pct ({len(pct_mismatch)}) ==")
+    out += pct_mismatch
+    out.append(f"\n== @port unrecognized tag ({len(unknown_tag)}) ==")
+    out += unknown_tag
+    out.append(f"\n== @port pct<100 without tags ({len(uncharacterized)}) ==")
+    out += uncharacterized
+    out.append(f"\n== ported rows without @port marker ({len(unmarked)}) ==")
+    out += unmarked
     out.append(f"\n== Ghidra name != csv name ({len(ghidra_mismatch)}) ==")
     out += sorted(ghidra_mismatch)
     out.append(f"\n== address not cited in impl file or sibling header ({len(no_citation)}) ==")
@@ -154,6 +335,14 @@ def main() -> None:
     report = "\n".join(out)
     (ROOT / "analysis" / "ref_audit.txt").write_text(report)
     print(report[:4000])
+
+    # Hard marker inconsistencies fail the audit; the unmarked backlog does not.
+    if unknown_marker or marker_file_mismatch or pct_mismatch or unknown_tag or malformed:
+        sys.exit(1)
+
+    if "--gen" in sys.argv:
+        changed = apply_markers(rows, markers)
+        print(f"\n--gen: regenerated {changed} marked row(s) in decomp-progress.tsv")
 
 
 if __name__ == "__main__":
