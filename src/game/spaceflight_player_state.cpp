@@ -112,6 +112,7 @@ constexpr int kAutoRepairFrameRerollRange = 500;
 
 namespace {
 
+// @port 0x0043ADB0 10% gameplay
 // Ghidra 0x0043adb0 Stellar_TickStellarGravityPull (player-side port; NPC
 // iteration/crash consequences not reconstructed). The protected_from_gravity
 // check below ports Stellar_ShipHasGravityShielding (0x0046e120) for the

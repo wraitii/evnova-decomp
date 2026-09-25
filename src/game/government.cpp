@@ -469,6 +469,7 @@ bool NovaGovernment_TryTriggerAssistanceEncounter(GameState &state,
   return true;
 }
 
+// @port 0x00440750 100%
 // Ghidra 0x00440750 Government_ApplyReputationCreditDelta. The mission
 // PayVal opcode (EV Nova Bible, mïsn "PayVal"):
 //   1..            flat credit award (inventory/loadout latch dirtied)

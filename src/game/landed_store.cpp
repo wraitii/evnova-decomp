@@ -1545,7 +1545,7 @@ void ReseedWeaponSecondary(Ship &ship, const ShipClass *cls) {
 
 } // namespace
 
-// @port 0x004229d0 90% divergence
+// @port 0x004229d0 100% divergence
 // Ghidra 0x004229d0 Player_ProcessEscortFleetAtStellar.
 void Player_ProcessEscortFleetAtStellar(
     GameState &state,

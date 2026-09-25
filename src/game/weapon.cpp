@@ -414,6 +414,7 @@ bool QueuePointDefenseBeamHit(GameState &state,
 
 } // namespace
 
+// @port 0x0043A310 100%
 // Ghidra 0x0043a310 Weapon_SelectTurretTargetWithinArc.
 void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
   if (ship.ai_station_hold_timer > 0.0F) {

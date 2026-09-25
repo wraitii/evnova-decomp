@@ -138,6 +138,8 @@ constexpr std::size_t kMissionComputerCommand = 0x28;
   return layout;
 }
 
+// @port 0x00441620 65% ui,rendering
+// Ghidra 0x00441620 NovaUi_DrawMissionBbsWindow.
 void DrawMissionBbsContents(SdlPlatform &platform,
                             NovaFontCache &font_cache,
                             const ServicesButtonArt &button_art,
@@ -482,6 +484,7 @@ MissionDestinationPreselect(const GameState &state,
 
 } // namespace
 
+// @port 0x0043C470 78% ui,gameplay
 // Ghidra 0x0043c470 NovaUi_RunMissionBbsWindow (partial port of the landed
 // Mission BBS: layout, list/description rendering, selection, accept). The
 // 0x00440c90 NovaUi_PollMissionBbsWindow selection/navigation slice runs
@@ -590,6 +593,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
           : static_cast<int>(missions.page_zero.front()));
 
   while (!platform.quit_requested()) {
+    // @port 0x00440C90 72% ui
     // Ghidra 0x00440c90 (top of NovaUi_PollMissionBbsWindow): a mission
     // script's 'Q' stages g_pending_overlay_message; while it is non-empty
     // the BBS poll returns action 7 and the run loop leaves without drawing
@@ -775,6 +779,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x00442510 90% ui,rendering
 // Ghidra 0x00442510 NovaUi_RunMissionOfferWindow. The 0x00447170
 // NovaUi_PollMissionOfferWindow input slice and 0x00447680
 // NovaUi_DrawMissionOfferWindow draw slice run inline in this function and its
@@ -1127,6 +1132,7 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
         MakeAcceptanceSink(platform, state, render_background));
     return MissionOfferResult::kDeclined;
   };
+  // @port 0x00447680 68% ui,rendering
   // One window frame over the docked backing store. The original's draw
   // callback (NovaUi_DrawMissionOfferWindow 0x00447680) fills the
   // window, blits the main art top-anchored (clipped), then the top and
@@ -1251,6 +1257,7 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
       // maps 0x1b to exit) the offer window closes only through its buttons,
       // Return, or the caption mnemonic, so Esc is deliberately ignored.
       if (input->key == TextKey::character) {
+        // @port 0x00447170 85% ui
         // Ghidra 0x00447170 key arms: Return (0xd) is action 1 (accept, same
         // in both arms); otherwise the first lower-case letter of a caption is
         // that button's mnemonic. The original honours the mnemonics only when
@@ -1437,6 +1444,7 @@ struct MissionInfoLayout {
   return layout;
 }
 
+// @port 0x00445DC0 85% ui,rendering
 // Ghidra 0x00445dc0 NovaUi_RebuildSpecialInteractionList (mission-info arm):
 // rows are the active missions whose flags_at_accept lack the 0x400
 // "invisible in the mission info dialog" bit, in slot order. Each row is the
@@ -1499,6 +1507,7 @@ BuildMissionInfoRows(const GameState &state) {
 
 } // namespace
 
+// @port 0x00446150 88% ui,rendering
 // Ghidra 0x00446150 NovaUi_RunMissionComputerWindow (the gameplay command
 // 0x28 window, default key I). Modal over the flight scene: the active-
 // mission list (0x00445dc0 NovaUi_RebuildMissionComputerList), the selected
@@ -1707,6 +1716,7 @@ void NovaMission_RunMissionInfoWindow(
     }
     NovaUi_DrawListScrollbar(platform, list_control, info_scrollbar);
 
+    // @port 0x00446E00 70% ui,rendering
     // Description panel (0x00446e00): the filled-rect draw paints a white
     // rect with black text and the follow-up DrawContext_InvertRect cancels
     // both, so the net panel is BLACK with white left-aligned wrapped text
@@ -1876,6 +1886,7 @@ void NovaMission_RunMissionInfoWindow(
       break;
     }
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
+      // @port 0x00446770 65% ui
       // PollSpecialInteractionWindow (0x00446770): Enter/Esc/I close, arrows
       // move the selection; the map command is polled above the loop.
       if (input->key_code != 0xffff && input->key_code == mission_info_key) {

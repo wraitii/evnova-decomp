@@ -1928,6 +1928,7 @@ void NovaStellar_TickStellarDefenseBatteries(GameState &state) {
   }
 }
 
+// @port 0x0043AED0 80% ui
 // Ghidra Stellar_HandleShipStellarCrash (0x0043aed0). Physical collision pass
 // running in Frame_TickSystems scope 8, immediately after
 // Stellar_TickStellarGravityPull (0x0043adb0). For each fatal stellar

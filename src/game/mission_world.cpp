@@ -52,6 +52,7 @@ void Mission_AdvanceGameDate(GameDate &date) {
   }
 }
 
+// @port 0x0043F080 100%
 // Ghidra 0x0043f080 Mission_ComputeDateAfterSteps. The original
 // leaves the out buffer untouched for steps < 1; callers only invoke it with
 // a positive count (see Mission_ActivateAtSlot).
@@ -199,7 +200,7 @@ namespace {
   return true;
 }
 
-// @port 0x00439750 95% divergence
+// @port 0x00439750 100% divergence
 // Ghidra 0x00439750 Mission_ActivateCronEvent. Fires the event's OnStart
 // set-string through the reaction-script executor. With flags 0x0001 the
 // original re-runs it while the Require mask and EnableOn expression hold,
@@ -225,7 +226,7 @@ void Mission_ActivateCronEvent(GameState &state, std::int16_t cron_index) {
   }
 }
 
-// @port 0x004398b0 95% divergence
+// @port 0x004398b0 100% divergence
 // Ghidra 0x004398b0 Mission_TerminateCronEvent. Fires OnEnd; flags 0x0002
 // selects the same iterative arm as activation.
 void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
@@ -251,7 +252,7 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
 
 } // namespace
 
-// @port 0x00439500 95% divergence
+// @port 0x00439500 100% divergence
 // Ghidra 0x00439500 Mission_TickDailyCronEvents. Once-per-game-day driver
 // over the 0x200 crön slots (called from Mission_TickDailyWorldUpdate right
 // after the calendar advance):

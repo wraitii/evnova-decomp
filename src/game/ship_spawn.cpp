@@ -240,7 +240,7 @@ int NovaShip_AllocateShipSlot(GameState &state,
   return slot;
 }
 
-// @port 0x00422400 85% divergence
+// @port 0x00422400 100% divergence
 // Ghidra 0x00422400 ShipClass_SpawnEscortShipFromClass.
 int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
                                            std::int16_t ship_class_id,
@@ -512,6 +512,7 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   return slot;
 }
 
+// @port 0x0043A020 70% gameplay,audio,ui
 // Ghidra 0x0043A020 System_UpdateRandomEncounterCountdown.
 void NovaSystem_UpdateReinforcementCountdown(GameState &state,
                                              float elapsed_ticks) {
@@ -1218,7 +1219,7 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
   return slot;
 }
 
-// @port 0x0041c9f0 85% divergence
+// @port 0x0041c9f0 100% divergence
 // Ghidra 0x0041c9f0 Dude_SpawnShipFromDudeDefInSystem. See the header. The
 // original also copies the class's per-weapon 0x100-entry ammo/secondary
 // tables into the ship state here; the clean-room builds them lazily on the
@@ -1261,7 +1262,7 @@ int NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
   return slot;
 }
 
-// @port 0x00421fd0 95% divergence
+// @port 0x00421fd0 100% divergence
 // Ghidra 0x00421fd0 Stellar_SpawnDefenseFleetShip. Spawns one ship for a
 // stellar's Bible defense fleet (spöb DefenseDude): allocate via
 // Dude_SpawnShipFromDudeDefInSystem (slot pool 2, retried with ship
@@ -1336,7 +1337,7 @@ int NovaStellar_SpawnDefenseFleetShip(GameState &state,
   return slot;
 }
 
-// @port 0x0041cf40 95% divergence
+// @port 0x0041cf40 100% divergence
 // Ghidra 0x0041cf40 Mission_SpawnMissionShipFromDudeDef. See the header. The
 // original bounds the ship-type index with `< 0x11`, which would read one
 // entry past the 16-slot ship_types table; that is unreachable in practice

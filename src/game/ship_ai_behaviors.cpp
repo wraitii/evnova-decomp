@@ -1118,7 +1118,7 @@ void NovaAi_UpdateAsteroidMinerBehavior(GameState &state, Ship &ship) {
   }
 }
 
-// @port 0x00405120 90% moddata
+// @port 0x00405120 100% moddata
 // Ghidra 0x00405120 Ship_DefenseFleetPrioritizePlayerThreat. Per-frame
 // supervisor run by Ship_UpdateShipAI (0x00401000) INSTEAD of a behavior
 // supervisor when the ship holds a stellar assignment
