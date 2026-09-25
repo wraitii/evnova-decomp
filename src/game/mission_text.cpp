@@ -211,6 +211,7 @@ void ReplaceMissionToken(std::string &text,
   return state.scenario.systems[static_cast<std::size_t>(resolved)].name;
 }
 
+// @port 0x00465c10 100%
 // Ghidra 0x00465c10 CString_AppendFormattedQuantity: plain digits below 1000,
 // comma grouping below one million, x.xxM above.
 [[nodiscard]] std::string FormatMissionQuantity(std::uint32_t value) {

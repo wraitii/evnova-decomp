@@ -592,6 +592,7 @@ namespace {
 
 } // namespace
 
+// @port 0x00467140 100%
 // Ghidra 0x00467140 Government_PropagateFactionCombatInfluenceToNearbySystems.
 // See the header for the contract. Faithful to the original branch ladder:
 //  - visit-mask re-entry guard on the 0x800-entry system table;
@@ -718,6 +719,7 @@ void NovaGovernment_PropagateFactionCombatInfluence(
   }
 }
 
+// @port 0x00466fc0 100%
 // Ghidra 0x00466fc0 Government_ProcessFactionCombatEvent. See the header.
 void NovaGovernment_ProcessFactionCombatEvent(
     GameState &state,

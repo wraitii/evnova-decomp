@@ -485,6 +485,7 @@ bool NovaTargeting_IsStellarUsableForTravel(const Stellar &st) {
 }
 
 // ---------------------------------------------------------------------------
+// @port 0x00465610 100%
 // Ghidra 0x00465610 Stellar_ComputeTravelRangeSq.
 // ---------------------------------------------------------------------------
 // Base no-jump radius 1000; each owned outfit of ModType 23 (hyperspace

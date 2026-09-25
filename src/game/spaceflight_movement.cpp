@@ -416,6 +416,8 @@ void spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
   }
 }
 
+// @port 0x00463e70 55% gameplay
+// @port 0x004640a0 95% correctness
 // Ghidra 0x00463e70 Ship_ComputeShipMaxTurnRateDeg (NPC branch; the player
 // path applies the same base*0.1 + opcode-9/rule inside NovaPlayer_Integrate-
 // Movement).
@@ -496,6 +498,7 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
   return stats;
 }
 
+// @port 0x004642e0 90% gameplay
 // Ghidra 0x004642e0 Ship_ComputeShipEffectiveMaxSpeed tail applied to the
 // port's split bodies: NovaShip_ComputeEffectiveStats is the NPC main body and
 // Outfit_ComputePlayerEffectiveStats supplies the player opcode-8 aggregate.

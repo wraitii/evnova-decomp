@@ -96,6 +96,7 @@ namespace {
 // Guided-turn threshold (Ghidra DAT_00575780 = 2.0f deg/tick).
 constexpr float kGuidedTrackMinTurnRate = 2.0F;
 
+// @port 0x00463dc0 100%
 // Ghidra 0x00463dc0 Weapon_WeaponCanTrackTarget. `turn_rate_deg_per_tick` is
 // the TARGET ship's Ship_ComputeShipMaxTurnRateDeg result: the original is
 // called as Weapon_WeaponCanTrackTarget(weapon_bank, target_ship) from both
@@ -107,6 +108,9 @@ constexpr float kGuidedTrackMinTurnRate = 2.0F;
 // gate without consulting either field. The original int-converts the rate
 // with C truncation toward zero; an unordered (NaN) guided_turn_rate counts as
 // trackable (the FCOMP unordered path returns true).
+// The player outfit opcode-9 branch of the internally-called
+// Ship_ComputeShipMaxTurnRateDeg is tracked on the 0x00463e70 row; both of this
+// function's callers sit on the per-NPC AI pass.
 [[nodiscard]] bool WeaponCanTrackTarget(float target_turn_rate_deg_per_tick,
                                         const Weapon &weapon) {
   if (static_cast<int>(target_turn_rate_deg_per_tick) <= 3) {
@@ -265,6 +269,11 @@ std::int16_t NovaAi_AimWeaponLeadVelocity(const GameState &state,
                                    /*include_mode6=*/false);
 }
 
+// @port 0x00464810 100% divergence
+// Ghidra 0x00464810 Ship_GetShipJammingScore.
+// DIVERGENCE(original): the port also invalidates the persistent player
+// jamming cache on outfit change and system transitions (OutfitMarkStatsDirty);
+// the original only reseeds it at ship-slot allocation.
 int NovaAi_GetShipJammingScore(const GameState &state,
                                Ship &ship,
                                int seek_channel) {

@@ -381,6 +381,7 @@ void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
   state.recently_hit_timer = -1.0F;
 }
 
+// @port 0x00464b50 95% correctness
 // Ghidra 0x00464b50 Outfit_HasCloakingDevice.
 bool NovaOutfit_HasCloakingDevice(const GameState &state, const Ship &ship) {
   if (ship.ship_instance_id == 0) {
@@ -401,6 +402,7 @@ bool NovaOutfit_HasCloakingDevice(const GameState &state, const Ship &ship) {
   return ShipClassHasCloakingDevice(state, ship, false);
 }
 
+// @port 0x00464c80 100%
 // Ghidra 0x00464c80 Outfit_HasAreaCloakingDevice.
 bool NovaOutfit_HasAreaCloakingDevice(const GameState &state,
                                       const Ship &ship) {
@@ -475,6 +477,7 @@ bool NovaPlayer_IsInertialess(const GameState &state) {
   return Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener);
 }
 
+// @port 0x00464db0 95% correctness
 // Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags.
 std::int16_t NovaOutfit_GetCloakFuelDrainFlags(const GameState &state,
                                                const Ship &ship) {
@@ -485,6 +488,7 @@ std::int16_t NovaOutfit_GetCloakFuelDrainFlags(const GameState &state,
              : 0;
 }
 
+// @port 0x00465090 100%
 // Ghidra 0x00465090 Outfit_GetCloakShieldDrainFlags. ModVal bits
 // 0x0100..0x0800.
 std::int16_t NovaOutfit_GetCloakShieldDrainFlags(const GameState &state,
@@ -496,6 +500,7 @@ std::int16_t NovaOutfit_GetCloakShieldDrainFlags(const GameState &state,
              : 0;
 }
 
+// @port 0x00464e30 95% correctness
 // Ghidra 0x00464e30 Outfit_HasCloakShieldDropOnActivation.
 bool NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
                                                const Ship &ship) {
@@ -504,6 +509,7 @@ bool NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
          (static_cast<std::uint16_t>(effect->val) & 0x0004U) != 0U;
 }
 
+// @port 0x00464f60 100%
 // Ghidra 0x00464f60 Outfit_HasCloakDamageDeactivateFlag.
 bool NovaOutfit_HasCloakDamageDeactivateFlag(const GameState &state,
                                              const Ship &ship) {
@@ -520,6 +526,7 @@ bool NovaOutfit_HasCloakFastFade(const GameState &state, const Ship &ship) {
          (static_cast<std::uint16_t>(effect->val) & 0x0001U) != 0U;
 }
 
+// @port 0x004652a0 100%
 // Ghidra 0x004652a0 Outfit_HasCloakScannerRevealForSurface.
 bool NovaOutfit_HasCloakScannerRevealForSurface(const GameState &state,
                                                 const Ship &ship,
@@ -832,6 +839,7 @@ float NovaOutfit_GetIonizationIntensity(GameState &state, const Ship &ship) {
 // ---------------------------------------------------------------------------
 // Ownership limiting
 // ---------------------------------------------------------------------------
+// @port 0x004656a0 100% bugfix
 // Ghidra 0x004656a0 Outfit_ClampOutfitOwnedCountToCurrentLimits: resolve
 // the effective owned count and max-allowed for one outfit, honoring (in
 // order) ammo-backed weapon limits (primary ModType 3), ModType-27

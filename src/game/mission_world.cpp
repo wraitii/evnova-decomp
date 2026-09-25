@@ -23,6 +23,7 @@ namespace game {
 
 using mission_detail::kResourceIdBase;
 
+// @port 0x00466c40 95% correctness
 // Ghidra 0x00466c40 Mission_AdvanceGameDate.
 void Mission_AdvanceGameDate(GameDate &date) {
   std::int16_t month_days = 31;
@@ -65,6 +66,7 @@ GameDate Mission_ComputeDateAfterSteps(const GameState &state,
   return out;
 }
 
+// @port 0x00465550 85% gameplay
 // Ghidra 0x00465550 Stellar_ComputeHyperspaceTravelDays.
 int NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
                                             const Ship &ship) {
@@ -471,6 +473,7 @@ void System_UpdateDisasterStates(GameState &state) {
   }
 }
 
+// @port 0x00466cb0 92% gameplay
 // Ghidra 0x00466cb0 ShipClass_RerollShipClassAvailabilityChances (daily
 // world-update driver; see mission.hpp for the remaining skipped slices).
 void Mission_TickDailyWorldUpdate(GameState &state) {
