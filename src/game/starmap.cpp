@@ -626,11 +626,11 @@ void DrawLiveChrome(SdlPlatform &platform,
 // trade-class lanes packed into the stellar flags word, class i at bits
 // (28 - 4*i) .. (30 - 4*i); any nonzero lane means the class is traded.
 [[nodiscard]] bool StellarTradesClass(std::uint32_t flags, int class_index) {
-  const std::uint32_t lane = 0xE0000000UL >> (4 * class_index);
+  const std::uint32_t lane = 0x70000000UL >> (4 * class_index);
   return (flags & lane) != 0U;
 }
 
-// @port 0x00468210 70% gameplay
+// @port 0x00468210 100%
 // Ghidra 0x00468210 Stellar_HasAdjacentAccessibleStellarMatchingTravelFlags:
 // any usable nav stellar that trades `class_index` (flags bit 1 set + lane).
 [[nodiscard]] bool
@@ -652,7 +652,7 @@ SystemTradesClass(const GameState &state, const System &sys, int class_index) {
   return false;
 }
 
-// @port 0x004682d0 70% gameplay
+// @port 0x004682d0 100%
 // Ghidra 0x004682d0 Stellar_HasAdjacentAccessibleStellarForTravelMode:
 // any usable nav stellar with the mode's service bit (2 Trading, 4
 // Outfitting, 8 Shipyard).
@@ -1210,12 +1210,16 @@ RunStarmapSearchDialog(SdlPlatform &platform,
 
 } // namespace
 
-// @port 0x004AA980 80% gameplay
+// @port 0x004AA980 100% divergence
 // Ghidra 0x004aa980 Mission_RebuildMissionTargetSystemList. Per active mission
 // emits ONE arrow system: the TravelStel system, replaced by the ReturnStel
 // system once travel_stellar_reached is set and the two differ (an unavailable
 // ReturnStel leaves TravelStel in place). Bible Flags 0x0002 suppresses the
 // arrow; 0x0200 adds the resolved ShipSyst (current_system_id +0x10).
+// DIVERGENCE(original): the port dedupes target systems via append_unique; the
+// original raw-appends duplicates into its 32-slot global. Consumers
+// (0x004a8100 arrow draw, 0x004a3aa0 click gate) only test membership, so
+// output is identical.
 std::vector<std::int16_t> BuildMissionTargetSystems(const GameState &state) {
   std::vector<std::int16_t> out;
   const auto append_unique = [&out](std::int16_t system_id) {

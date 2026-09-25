@@ -412,8 +412,8 @@ address	name	impl_file	reimpl_pct	comment
 0x00467E80	Ship_CanMaintainCloakState	src/game/ship_ai.cpp	100%	bugfix
 0x004680D0	Ship_OnShipCloakStateEntered	src/game/ship_ai.cpp	100%	
 0x00468190	Ship_OnShipCloakStateCleared	src/game/ship_ai.cpp	100%	
-0x00468210	Stellar_HasAdjacentAccessibleStellarMatchingTravelFlags	src/game/starmap.cpp	70%	gameplay
-0x004682D0	Stellar_HasAdjacentAccessibleStellarForTravelMode	src/game/starmap.cpp	70%	gameplay
+0x00468210	Stellar_HasAdjacentAccessibleStellarMatchingTravelFlags	src/game/starmap.cpp	100%	
+0x004682D0	Stellar_HasAdjacentAccessibleStellarForTravelMode	src/game/starmap.cpp	100%	
 0x004683B0	NovaRandom_Range		0%	
 0x00468450	NovaText_FormatDateString	src/game/mission_text.cpp	100%	
 0x00468600	Stellar_FormatElapsedTravelTime	src/game/mission_text.cpp	70%	gameplay
@@ -732,7 +732,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004AA2DA	NovaUi_PaintStarmapDiscCellStep	src/game/starmap_render.cpp	60%	rendering,bugfix
 0x004AA2F3	NovaUi_BlendStarmapOverlayCell	src/game/starmap_render.cpp	70%	rendering,bugfix
 0x004AA620	NovaUi_DrawStarmapPoliticalOverlay	src/game/starmap_render.cpp	90%	rendering
-0x004AA980	Mission_RebuildMissionTargetSystemList	src/game/starmap.cpp	80%	gameplay
+0x004AA980	Mission_RebuildMissionTargetSystemList	src/game/starmap.cpp	100%	divergence
 0x004AAB30	NovaUi_RunStarmapSearchDialog	src/game/starmap.cpp	90%	audio
 0x004AAF60	NovaUi_PresentStartupSplashFrame	src/nova_app.cpp	100%	
 0x004AB070	NovaUi_PresentLoadingSplashFrame	src/nova_app.cpp	100%	
