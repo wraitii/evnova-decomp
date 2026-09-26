@@ -584,10 +584,13 @@ void DrawExtraArrow(SdlPlatform &platform,
   return lines;
 }
 
-// Draws a small wrapped tooltip near the cursor, clamped inside the dialog.
+// Draws a small wrapped tooltip near the cursor. It is drawn through a
+// full-window overlay placement at the dialog's effective scale, so it can
+// float past the dialog edges instead of being clipped by the dialog viewport
+// (which previously forced the clamp to push bottom-row tooltips back up over
+// the row labels). It is still clamped to the window.
 void DrawExtraTooltip(SdlPlatform &platform,
                       NovaFontCache &font_cache,
-                      const ExtraPrefsLayout &layout,
                       const SDL_FPoint &mouse,
                       std::string_view text) {
   constexpr float kPad = 6.0F;
@@ -608,17 +611,22 @@ void DrawExtraTooltip(SdlPlatform &platform,
   box_w += 2.0F * kPad;
   const float box_h =
       2.0F * kPad + kLineHeight * static_cast<float>(lines.size());
-  // Prefer below-right of the cursor, then clamp inside the window.
-  float x = mouse.x + 14.0F;
-  float y = mouse.y + 14.0F;
-  if (x + box_w > layout.window.w) {
-    x = layout.window.w - box_w - 2.0F;
-  }
-  if (y + box_h > layout.window.h) {
-    y = layout.window.h - box_h - 2.0F;
-  }
-  x = std::max(2.0F, x);
-  y = std::max(2.0F, y);
+  // Re-anchor into the overlay placement: convert the dialog-local cursor to
+  // window points, then to the overlay's authored space. The overlay authored
+  // extent is the whole window, so this also gives the clamp bounds.
+  const Placement &dialog = platform.current_placement();
+  const Placement overlay =
+      PlaceWindow(platform.logical_playfield_size(), dialog.scale);
+  const SDL_FPoint anchor = overlay.ToAuthored(dialog.ToWindow(mouse));
+  const SDL_FPoint limit = overlay.authored_size;
+  // Prefer below-right of the cursor, then keep the box on screen.
+  const float x = std::clamp(
+      anchor.x + 14.0F, 2.0F, std::max(2.0F, limit.x - box_w - 2.0F));
+  const float y = std::clamp(
+      anchor.y + 14.0F, 2.0F, std::max(2.0F, limit.y - box_h - 2.0F));
+  // Swap to the overlay for the tooltip draw; the guard restores the dialog
+  // placement (and its viewport) on scope exit.
+  const SdlPlatform::ScopedPlacement guard(platform, overlay);
   SDL_Renderer *const renderer = platform.renderer();
   const SDL_FRect box{x, y, box_w, box_h};
   SDL_SetRenderDrawColor(renderer, 255, 255, 225, 245);
@@ -792,7 +800,7 @@ void DrawExtraPrefsDialog(SdlPlatform &platform,
              "OK",
              hover == ExtraPrefsControl::ok);
   if (const char *tooltip = ExtraTooltip(hover); tooltip != nullptr) {
-    DrawExtraTooltip(platform, font_cache, layout, mouse, tooltip);
+    DrawExtraTooltip(platform, font_cache, mouse, tooltip);
   }
 }
 

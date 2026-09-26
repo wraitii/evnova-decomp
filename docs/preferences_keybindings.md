@@ -331,8 +331,9 @@ rule and an enlarged bold header. Three steppers edit the
 `[bugfixes]` policy: one `Safe bug fixes` master and four independent altering
 toggles. The checkboxes use the default Settings DITL's 22px row step, and an
 extra gap separates the safe row from the altering fixes. Hovering a row
-highlights it and shows a longer explanatory tooltip
-(the tooltip wraps and is clamped inside the window). Changes apply
+highlights it and shows a longer explanatory tooltip (it wraps, floats past the
+dialog edges in a full-window overlay at the dialog's scale, and is only
+clamped to the window). Changes apply
 to `SdlPlatform::SetPresentationScale` live, and closing never rolls an edit
 back: OK, Enter, Esc and a quit request all keep the scale and policy changes
 and persist `EV Nova Extra Prefs.ini`, matching the original Settings dialog.
