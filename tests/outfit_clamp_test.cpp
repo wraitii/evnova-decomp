@@ -163,7 +163,7 @@ TEST_CASE("gun and turret slot caps bound ownership", "[outfit][clamp]") {
 
 // BUGFIX(original): the executable added the first ModType-45/46 value once per
 // owning outfit definition, so multiple copies of one mount modifier did not
-// stack. kApplyOriginalBugFixes scales the bonus by the owned count instead.
+// stack. BugFixPolicy scales the bonus by the owned count instead.
 TEST_CASE("max-gun/turret bonuses scale with owned copies", "[outfit][clamp]") {
   GameState state;
   state.scenario.outfits.resize(2);
@@ -184,7 +184,7 @@ TEST_CASE("max-gun/turret bonuses scale with owned copies", "[outfit][clamp]") {
   state.scenario.outfits[1].flags = 0x0001; // gun
   state.inventory.outfit_owned_count[1] = 1;
 
-  const std::int16_t expected = kApplyOriginalBugFixes
+  const std::int16_t expected = state.bugfixes.outfit_slot_balance
                                     ? static_cast<std::int16_t>(1 + 2 * 3)
                                     : static_cast<std::int16_t>(1 + 2);
 

@@ -157,8 +157,9 @@ namespace {
 // - Last* mirror the check with the comparisons inverted.
 // Quirks preserved verbatim, including the month*0x20 composite comparison.
 [[nodiscard]] bool CronEventDateWindowAllows(const CronEventDef &def,
-                                             const GameDate &date) {
-  if (kApplyOriginalBugFixes) {
+                                             const GameDate &date,
+                                             bool apply_fix) {
+  if (apply_fix) {
     // BUGFIX(original): the original checks the year bounds and the month/day
     // bounds independently, so a range whose endpoints share a month/day
     // composite (1/1/1178-1/1/1179) collapses to that single day-of-year.
@@ -271,7 +272,7 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
 //   deactivation unless a post-holdoff wait keeps the slot busy).
 // Events with no TimeLimit (duration == -1, the absent-slot sentinel) are
 // never touched.
-// Under kApplyOriginalBugFixes four confirmed quirks are corrected (see
+// Under BugFixPolicy::cron_events four confirmed quirks are corrected (see
 // docs/known_original_bugs.md, crön entries): Random is a true 1..100 percent
 // roll (the original draws 0..100 and tests <=); a multi-year date range is
 // the contiguous interval the Bible describes (the original applies the
@@ -282,6 +283,7 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
 // counter at 0, so the slot re-runs OnStart/OnEnd after the wait and never
 // deactivates).
 void Mission_TickDailyCronEvents(GameState &state) {
+  const bool cron_fix = state.bugfixes.cron_events;
   const std::size_t count = std::min(state.scenario.cron_events.size(),
                                      state.cron_event_states.size());
   for (std::size_t index = 0; index < count; ++index) {
@@ -295,13 +297,12 @@ void Mission_TickDailyCronEvents(GameState &state) {
       // roll <= odds, so Random 0 still fires ~1/101 of eligible days.
       // BUGFIX(original): roll 1..100 so the fields are true percentages.
       const int odds_roll =
-          kApplyOriginalBugFixes
-              ? std::uniform_int_distribution<int>{1, 100}(state.rng)
-              : std::uniform_int_distribution<int>{0, 100}(state.rng);
+          cron_fix ? std::uniform_int_distribution<int>{1, 100}(state.rng)
+                   : std::uniform_int_distribution<int>{0, 100}(state.rng);
       if (odds_roll > def.trigger_odds) {
         continue;
       }
-      if (!CronEventDateWindowAllows(def, state.date) ||
+      if (!CronEventDateWindowAllows(def, state.date, cron_fix) ||
           !NovaOutfit_EvaluateRequireMask(
               state, def.require_lo, def.require_hi) ||
           !Mission_CheckReactionConditionSatisfied(state, def.enable_on)) {
@@ -317,7 +318,7 @@ void Mission_TickDailyCronEvents(GameState &state) {
           runtime.duration_counter = -1;
           if (def.post_holdoff > 0) {
             runtime.holdoff_counter = def.post_holdoff;
-          } else if (kApplyOriginalBugFixes) {
+          } else if (cron_fix) {
             // BUGFIX(original): the original leaves the slot active with a
             // zero holdoff, so the next daily tick runs OnEnd a second time.
             runtime.is_active = false;
@@ -330,7 +331,7 @@ void Mission_TickDailyCronEvents(GameState &state) {
       --runtime.duration_counter;
       if (runtime.duration_counter < 1) {
         Mission_TerminateCronEvent(state, static_cast<std::int16_t>(index));
-        if (kApplyOriginalBugFixes) {
+        if (cron_fix) {
           // BUGFIX(original): latch the event as ended, so the post-holdoff
           // arm deactivates it instead of re-running OnStart/OnEnd once the
           // wait expires.
@@ -344,7 +345,7 @@ void Mission_TickDailyCronEvents(GameState &state) {
           // PreHoldoff == 0 the slot never deactivates and re-runs OnEnd every
           // day. BUGFIX(original): use the Bible's PostHoldoff.
           runtime.holdoff_counter =
-              kApplyOriginalBugFixes ? def.post_holdoff : def.pre_holdoff;
+              cron_fix ? def.post_holdoff : def.pre_holdoff;
         }
       }
     } else {
@@ -356,7 +357,7 @@ void Mission_TickDailyCronEvents(GameState &state) {
           Mission_ActivateCronEvent(state, static_cast<std::int16_t>(index));
           if (runtime.duration_counter == 0) {
             Mission_TerminateCronEvent(state, static_cast<std::int16_t>(index));
-            if (kApplyOriginalBugFixes) {
+            if (cron_fix) {
               // BUGFIX(original): the zero-duration event has now run OnStart
               // and OnEnd; wait out PostHoldoff (or deactivate) instead of
               // re-running OnEnd on the next daily tick.

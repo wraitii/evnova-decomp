@@ -1458,7 +1458,7 @@ TEST_CASE("crön month-only start gate opens no earlier than FirstMonth") {
   CHECK(state.cron_event_states[2].is_active);
 }
 
-TEST_CASE("crön post-end wait follows kApplyOriginalBugFixes") {
+TEST_CASE("crön post-end wait follows BugFixPolicy") {
   GameState state;
   state.scenario.cron_events.resize(4);
   auto &def = state.scenario.cron_events[3];
@@ -1480,13 +1480,13 @@ TEST_CASE("crön post-end wait follows kApplyOriginalBugFixes") {
   Mission_TickDailyCronEvents(state); // duration expires: OnEnd, re-arm
   CHECK_FALSE(state.control.ControlBit(303));
   // Original 0x004395d9 reloads PreHoldoff here; the Bible documents
-  // PostHoldoff, which the port applies under kApplyOriginalBugFixes.
+  // PostHoldoff, which the port applies under BugFixPolicy.
   CHECK(state.cron_event_states[3].holdoff_counter ==
-        (kApplyOriginalBugFixes ? def.post_holdoff : def.pre_holdoff));
+        (state.bugfixes.cron_events ? def.post_holdoff : def.pre_holdoff));
 }
 
 TEST_CASE("crön multi-year date range is contiguous under "
-          "kApplyOriginalBugFixes") {
+          "BugFixPolicy") {
   GameState state;
   state.scenario.cron_events.resize(4);
   auto &def = state.scenario.cron_events[2];
@@ -1517,11 +1517,11 @@ TEST_CASE("crön multi-year date range is contiguous under "
   CHECK_FALSE(activates_on(2, 1, 1179));
   // The original collapses the range to 1 January (month*0x20+day equal at
   // both ends); the fix keeps it open through 1178 and up to 1/1/1179.
-  CHECK(activates_on(15, 6, 1178) == kApplyOriginalBugFixes);
+  CHECK(activates_on(15, 6, 1178) == state.bugfixes.cron_events);
   CHECK_FALSE(activates_on(15, 6, 1179));
 }
 
-TEST_CASE("crön Random 0 never activates under kApplyOriginalBugFixes") {
+TEST_CASE("crön Random 0 never activates under BugFixPolicy") {
   GameState state;
   state.scenario.cron_events.resize(4);
   auto &def = state.scenario.cron_events[2];
@@ -1532,7 +1532,7 @@ TEST_CASE("crön Random 0 never activates under kApplyOriginalBugFixes") {
 
   // With the original 0..100 roll, roll 0 matches Random 0 (~1/101 per
   // eligible day). The fix rolls 1..100, so 0 never fires.
-  for (int day = 0; day < 400 && kApplyOriginalBugFixes; ++day) {
+  for (int day = 0; day < 400 && state.bugfixes.cron_events; ++day) {
     state.date.day = static_cast<std::int16_t>(1 + day % 28);
     Mission_TickDailyCronEvents(state);
     REQUIRE_FALSE(state.cron_event_states[2].is_active);
@@ -1540,7 +1540,7 @@ TEST_CASE("crön Random 0 never activates under kApplyOriginalBugFixes") {
 }
 
 TEST_CASE("crön duration-0 event runs OnEnd once under "
-          "kApplyOriginalBugFixes") {
+          "BugFixPolicy") {
   GameState state;
   state.scenario.cron_events.resize(4);
   state.scenario.outfits.resize(1);
@@ -1559,7 +1559,7 @@ TEST_CASE("crön duration-0 event runs OnEnd once under "
   def.trigger_odds = 0;
   Mission_TickDailyCronEvents(state);
   CHECK(state.inventory.outfit_owned_count[0] ==
-        (kApplyOriginalBugFixes ? 1 : 2));
+        (state.bugfixes.cron_events ? 1 : 2));
 }
 
 TEST_CASE("disaster slots roll their per-day chance and count down",
@@ -1679,7 +1679,7 @@ TEST_CASE("mission loader reset clears interaction latches") {
 }
 
 // BUGFIX(original): Mission_ResolveMisnSlot (0x00447d90) never ran the
-// CompGovt/CompReward walk. Under kApplyOriginalBugFixes it applies the
+// CompGovt/CompReward walk. Under BugFixPolicy it applies the
 // success walk when the mission sets Flags2 0x0002 (pay on auto-abort), or the
 // manual-abort Flags 0x0040 -5x reversal
 // (NovaUi_RunMissionComputerWindow 0x00446150) when that flag is set. With the
@@ -1714,7 +1714,7 @@ TEST_CASE("auto-abort applies the competing-government reward under the fix "
          /*flags_primary=*/0x0001,
          /*flags_secondary=*/0x0002);
     Mission_ResolveMisnSlot(state, 0, 0);
-    CHECK(state.system_reputation[0] == (kApplyOriginalBugFixes ? 10 : 0));
+    CHECK(state.system_reputation[0] == (state.bugfixes.safe ? 10 : 0));
     CHECK(state.system_reputation[1] == 0);
   }
 
@@ -1728,7 +1728,7 @@ TEST_CASE("auto-abort applies the competing-government reward under the fix "
          /*flags_primary=*/0x0041,
          /*flags_secondary=*/0x0000);
     Mission_ResolveMisnSlot(state, 0, 0);
-    CHECK(state.system_reputation[0] == (kApplyOriginalBugFixes ? -50 : 0));
+    CHECK(state.system_reputation[0] == (state.bugfixes.safe ? -50 : 0));
     CHECK(state.system_reputation[1] == 0);
   }
 

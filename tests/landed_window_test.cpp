@@ -1279,7 +1279,7 @@ TEST_CASE("rank price scale folds allied active rank modifiers",
 // BUGFIX(original): the original outfit path calls
 // Outfit_ComputeScaledPurchasePrice with DAT_007d4bbc and discards the result
 // (0x0048ea70 buy/sell, 0x00490c70 display, 0x00491950 eligibility). With
-// kApplyOriginalBugFixes on, the port applies the allied rank PriceMod to
+// BugFixPolicy on, the port applies the allied rank PriceMod to
 // outfit prices instead of charging the unscaled base cost.
 TEST_CASE("outfit prices apply the allied rank discount",
           "[landed_store][rank][price]") {
@@ -1303,6 +1303,35 @@ TEST_CASE("outfit prices apply the allied rank discount",
 
   // Base cost 1000 -> rank scale 0.5 -> 500, high enough for the 10-credit
   // quantum to leave it unchanged.
+  CHECK(game::NovaLanded_OutfitPrice(state, 0x80, 0x80) == 500);
+}
+
+// Deliberate divergence (see NovaLanded_OutfitPrice): the outfit bugfix
+// restores only the allied-rank scale, not the tech-level markdown the shipyard
+// applies. Passing equal item/stellar techs to NovaLanded_ScaledStorePrice
+// skips it.
+TEST_CASE("outfit prices skip the shipyard tech-level markdown",
+          "[landed_store][rank][price]") {
+  game::GameState state;
+  state.scenario.stellars.resize(1);
+  state.scenario.governments.assign(2, {});
+  state.scenario.governments[0].classes = {5, -1, -1, -1};
+  state.scenario.governments[1].ally_classes = {5, -1, -1, -1};
+  state.scenario.stellars[0].government_id = 0;
+  state.scenario.stellars[0].tech_level = 5;
+  state.scenario.ships.resize(1);
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].cost = 1'000;
+  state.scenario.outfits[0].tech_level = 1; // would mark down to 880 if applied
+  state.scenario.ranks.assign(0x80, {});
+  state.scenario.ranks[0].defined = true;
+  state.scenario.ranks[0].active = true;
+  state.scenario.ranks[0].government_id = 1;
+  state.scenario.ranks[0].price_mod = 50; // 0.5x
+  state.player.ship_class_id = 0;         // ship resource id 0x80
+
+  // Base 1000 -> rank 0.5 -> 500. If the shipyard's markdown were applied the
+  // item tech 1 vs stellar tech 5 would give 880 first, then 440.
   CHECK(game::NovaLanded_OutfitPrice(state, 0x80, 0x80) == 500);
 }
 

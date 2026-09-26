@@ -4,7 +4,7 @@
 // port-only addition: the original always had its data beside the executable,
 // while the SDL port can be run from anywhere and lets the player point it at
 // an existing Community Edition install. The chosen folder is persisted by the
-// caller in the extended prefs (see extended_prefs.hpp).
+// caller in the extra prefs (see preferences_extra.hpp).
 
 #include <filesystem>
 #include <optional>

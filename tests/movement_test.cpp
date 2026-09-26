@@ -1363,7 +1363,7 @@ TEST_CASE(
 TEST_CASE("npc cloak shield drain no longer stops at the per-second rate") {
   // BUGFIX(original): the original compares the raw per-second drain rate to
   // the shield pool, so the last `shield_drain` shields persist forever. Under
-  // kApplyOriginalBugFixes the drain continues and clamps at zero. See
+  // BugFixPolicy the drain continues and clamps at zero. See
   // docs/known_original_bugs.md.
   game::GameState state;
   game::Ship ship;

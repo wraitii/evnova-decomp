@@ -395,15 +395,18 @@ void spaceflight_detail::NovaShip_UpdateIonizationCharge(
 // (bits 0x0100..0x0800) and kCloakDrainPerUnit is the original's 1/30 second
 // x87 double.
 void spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
-    Ship &ship, std::int16_t shield_drain, float elapsed_ticks) {
+    Ship &ship,
+    std::int16_t shield_drain,
+    float elapsed_ticks,
+    bool apply_fix) {
   if (shield_drain <= 0) {
     return;
   }
   // BUGFIX(original): the original only drains while the whole per-second rate
   // (1/2/4/8) is affordable, so the last `shield_drain` shields persist. Under
-  // the policy, drain normally and clamp at zero.
+  // the safe policy, drain normally and clamp at zero.
   bool drain = true;
-  if constexpr (!kApplyOriginalBugFixes) {
+  if (!apply_fix) {
     drain = static_cast<float>(shield_drain) <= ship.shield_points;
   }
   if (!drain) {
@@ -809,7 +812,10 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       }
     }
     spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
-        ship, NovaOutfit_GetCloakShieldDrainFlags(state, ship), elapsed_ticks);
+        ship,
+        NovaOutfit_GetCloakShieldDrainFlags(state, ship),
+        elapsed_ticks,
+        state.bugfixes.safe);
   }
 
   // --- Position integration + inertia-less special case. ---

@@ -1654,12 +1654,15 @@ bool Mission_ActivateAtSlot(GameState &state,
   // payload is observed (the original reads the global at this point). The
   // original compares the field raw, so an in-flight mode-2 target or a mode-3
   // adjacency slot could satisfy it before the player lands. BUGFIX(original),
-  // ungated: require an actual docked visit and compare the current landed
-  // stellar; a scripted no-window activation is unchanged. This is the
-  // TravelStel-leg latch, not a briefing flag.
+  // safe policy: require an actual docked visit and compare the current landed
+  // stellar; a scripted no-window activation is unchanged. With the safe
+  // policy off, the original's raw in-flight/adjacency compare is restored.
+  // This is the TravelStel-leg latch, not a briefing flag.
+  const bool docked_visit =
+      state.bugfixes.safe ? state.system_transition_active : true;
   runtime.travel_stellar_reached =
       active.travel_stellar_id == -1 ||
-      (state.system_transition_active && state.mission_offer_window_open &&
+      (docked_visit && state.mission_offer_window_open &&
        active.travel_stellar_id ==
            Mission_OriginalAiSecondaryTargetSlot(state));
   if (acceptance) {
@@ -2044,7 +2047,7 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
 }
 
 // Applies the Bible CompGovt/CompReward "competing government" reputation
-// delta shared by the success resolution and, under kApplyOriginalBugFixes,
+// delta shared by the success resolution and, under BugFixPolicy::safe,
 // the auto-abort resolution. Full `delta` is added to every system owned by
 // `govt`. When `include_relations` is set (Mission_ResolveMissionSuccess
 // 0x00440410), systems whose government is hostile/xenophobic to `govt` take
@@ -2341,7 +2344,7 @@ void Mission_ResolveMisnSlot(GameState &state,
   // docs/known_original_bugs.md.
   const bool reversal = (mission.flags_primary & 0x0040U) != 0U;
   const bool pay_on_auto_abort = (mission.flags_secondary & 0x0002U) != 0U;
-  if (kApplyOriginalBugFixes && (reversal || pay_on_auto_abort)) {
+  if (state.bugfixes.safe && (reversal || pay_on_auto_abort)) {
     ApplyCompetingGovernmentReputation(
         state,
         mission.comp_govt_id,

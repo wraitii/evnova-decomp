@@ -796,7 +796,7 @@ void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
   // undocumented artifact of the compiled index. The port substitutes each
   // side's own stock-armed reach for categories 1..3 and a fixed 382 px
   // reference for category-0 fighters. Because the whole reconstruction is a
-  // divergence it is not routed through kApplyOriginalBugFixes; that policy no
+  // divergence it is not routed through BugFixPolicy; that policy no
   // longer restores the literal index.
   //
   // Fixed category-0 fighter reference radius: the shipped wëap 0x81 envelope
@@ -1650,9 +1650,9 @@ bool NovaAiShip_CanMaintainCloakState(const GameState &state,
   // BUGFIX(original): the original reads these nibbles from the matched
   // ModType word (always 0x11) instead of ModVal, so its fuel gate is always
   // active (nibble 1) and its shield gate never fires (nibble 0). Under the
-  // policy, use the device's real ModVal nibbles.
+  // safe policy, use the device's real ModVal nibbles.
   std::uint16_t gate_val = mod_val;
-  if constexpr (!kApplyOriginalBugFixes) {
+  if (!state.bugfixes.safe) {
     gate_val = 0x11U;
   }
   if (((gate_val & 0x00f0U) != 0U) && ship.fuel_points <= 0.0F) {
@@ -2334,7 +2334,7 @@ void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
     // stellar-attached ship that is destroyed-but-not-disabled, or frames while
     // the player is destroyed. The port checks the ship being flipped; clearing
     // the compat flag restores the literal player-slot read.
-    const bool destroyed = kApplyOriginalBugFixes
+    const bool destroyed = state.bugfixes.safe
                                ? NovaAiShip_IsDestroyed(ship)
                                : NovaAiShip_IsDestroyed(state.player);
     if ((static_cast<std::uint16_t>(pers.flags_primary) & 0x10U) != 0U &&

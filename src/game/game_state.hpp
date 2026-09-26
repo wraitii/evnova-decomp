@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "compatibility.hpp"
 #include "scenario_data.hpp"
 #include "sdl_audio.hpp"
 #include "sprite_mask.hpp"
@@ -1389,6 +1390,10 @@ struct GameState {
   // .prf save points. The port's overlay is cheap, so it defaults ON (the
   // original defaulted OFF).
   bool starmap_show_borders = true;
+  // Runtime clean-room bug-fix policy (see compatibility.hpp). All flags
+  // default true, preserving the port's corrected behavior; the port-only
+  // Extra Prefs dialog edits the copy in NovaExtraPrefs and seeds it here.
+  BugFixPolicy bugfixes;
   IntroCinematicData intro_cinematic;
   // The transient HUD overlay message (see HudOverlayState). Kept on GameState
   // per AGENTS.md (no hidden globals) and rendered by the HudRenderer.

@@ -30,9 +30,11 @@ void NovaShip_UpdateIonizationCharge(GameState &state,
 // PlayerTick_InteractionCloakAndStatus (0x0044aa70). `shield_drain` is the
 // ModVal nibble (bits 0x0100..0x0800, values 1/2/4/8 per second). The original
 // stops draining once the per-second rate exceeds the pool, leaving that many
-// shields; the path under kApplyOriginalBugFixes drains and clamps at zero.
+// shields; the path with BugFixPolicy::safe drains and clamps at zero.
+// `apply_fix` carries that policy bit (the helper has no GameState).
 void NovaShip_ApplyCloakShieldDrain(Ship &ship,
                                     std::int16_t shield_drain,
-                                    float elapsed_ticks);
+                                    float elapsed_ticks,
+                                    bool apply_fix);
 
 } // namespace game::spaceflight_detail

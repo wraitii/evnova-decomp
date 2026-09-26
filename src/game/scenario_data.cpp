@@ -3,7 +3,6 @@
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../util/byte_reader.hpp"
-#include "compatibility.hpp"
 #include "nova_name_text.hpp"
 #include "ship_visual.hpp"
 
@@ -1638,13 +1637,13 @@ void FoldShipDefaultLoadoutMass(ScenarioData &data) {
   }
 }
 
-// @port 0x004BD3C0 68% gameplay,bugfix
+// @port 0x004BD3C0 68% gameplay
 // @port 0x004AEDA0 100%
 // Ghidra 0x004bd3c0 NovaData_LoadScenarioResourceTables and 0x004aeda0
 // NovaData_LoadAllShipClassVisualAndLaunchData: both scenario table loaders
 // run inline in LoadFromArchives (ship and ship-visual passes below).
-// Note: the DIVERGENCE(original)/BUGFIX(original)/TODO(decomp) markers later
-// in this large function belong to other tracker rows, not to these loaders.
+// Note: the decision and TODO markers later in this large function belong to
+// other tracker rows, not to these loaders.
 bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
                                     bool ship_animations) {
   // The original loader consumes eight NovaRandom draws for each present
@@ -2082,58 +2081,49 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
       link = static_cast<std::int16_t>(resolved + 0x80);
     }
   }
-  // Pass 3: implicit reciprocity. The original walks every surviving link
-  // A->B and, when B does not already link back to A's discovery slot,
-  // appends A to B's first empty link slot (0x004c08a7..0x004c0a0d inside
-  // NovaData_LoadScenarioResourceTables 0x004bd3c0), debug-logging
-  // "warning: assuming implicit reciprocal link from <A> to <B>". Every syst
-  // Con slot is documented as bidirectional, so this turns authoring a
-  // one-way link into two-way travel. The shipped scenario contains five
-  // genuinely one-way links, all in the Vell-os region: Yon'I'Res->Diy'I'Cor,
-  // Son'I'Dot->Fer'I'Jus, Sur'E'Qoru->Mes'E'Ruma,
-  // Ver'E'Liani->Hel'A'Forius and Allia->Pontoll.
-  //
-  // BUGFIX(original): a one-way link silently becoming reciprocal is a
-  // confirmed engine bug (docs/known_original_bugs.md). This pass is
-  // therefore only reproduced when original behavior is requested; by
-  // default kApplyOriginalBugFixes keeps the port's links directional, as
-  // pass 2 left them.
-  if (!kApplyOriginalBugFixes) {
-    for (std::size_t i = 0; i < system_table.size(); ++i) {
-      if (!system_table[i].has_explored_flag) {
+  // Pass 3: implicit reciprocity. The original unconditionally walks every
+  // surviving link A->B and, when B does not already link back to A's
+  // discovery slot, appends A to B's first empty link slot
+  // (0x004c08a7..0x004c0a0d inside NovaData_LoadScenarioResourceTables
+  // 0x004bd3c0), debug-logging "warning: assuming implicit reciprocal link
+  // from <A> to <B>". Every syst Con slot is treated as bidirectional, so the
+  // shipped scenario's few authored one-way links (all on story-clone copies;
+  // docs/known_original_bugs.md) are normalized to two-way travel. The port
+  // has no user-facing one-way-link capability, so this is reproduced
+  // unconditionally.
+  for (std::size_t i = 0; i < system_table.size(); ++i) {
+    if (!system_table[i].has_explored_flag) {
+      continue;
+    }
+    const std::int16_t self_slot = discovery_slot(static_cast<std::int16_t>(i));
+    for (const std::int16_t raw_link : system_table[i].links) {
+      if (raw_link < 0x80) {
         continue;
       }
-      const std::int16_t self_slot =
-          discovery_slot(static_cast<std::int16_t>(i));
-      for (const std::int16_t raw_link : system_table[i].links) {
-        if (raw_link < 0x80) {
-          continue;
+      const std::int16_t target =
+          discovery_slot(static_cast<std::int16_t>(raw_link - 0x80));
+      if (target < 0 ||
+          static_cast<std::size_t>(target) >= system_table.size() ||
+          target == static_cast<std::int16_t>(i)) {
+        continue;
+      }
+      bool links_back = false;
+      for (const std::int16_t back :
+           system_table[static_cast<std::size_t>(target)].links) {
+        if (back >= 0x80 && discovery_slot(static_cast<std::int16_t>(
+                                back - 0x80)) == self_slot) {
+          links_back = true;
+          break;
         }
-        const std::int16_t target =
-            discovery_slot(static_cast<std::int16_t>(raw_link - 0x80));
-        if (target < 0 ||
-            static_cast<std::size_t>(target) >= system_table.size() ||
-            target == static_cast<std::int16_t>(i)) {
-          continue;
-        }
-        bool links_back = false;
-        for (const std::int16_t back :
-             system_table[static_cast<std::size_t>(target)].links) {
-          if (back >= 0x80 && discovery_slot(static_cast<std::int16_t>(
-                                  back - 0x80)) == self_slot) {
-            links_back = true;
-            break;
-          }
-        }
-        if (links_back) {
-          continue;
-        }
-        for (std::int16_t &slot :
-             system_table[static_cast<std::size_t>(target)].links) {
-          if (slot < 0x80) {
-            slot = static_cast<std::int16_t>(self_slot + 0x80);
-            break;
-          }
+      }
+      if (links_back) {
+        continue;
+      }
+      for (std::int16_t &slot :
+           system_table[static_cast<std::size_t>(target)].links) {
+        if (slot < 0x80) {
+          slot = static_cast<std::int16_t>(self_slot + 0x80);
+          break;
         }
       }
     }

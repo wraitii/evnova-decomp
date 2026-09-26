@@ -88,7 +88,7 @@ instead controls category 0's order, gated on the target being in state 4
 and targeting the leader.
 
 The port diverges from this unconditionally. It is not routed through the
-shared `kApplyOriginalBugFixes` policy: the whole escort range decision is
+shared `BugFixPolicy` policy: the whole escort range decision is
 treated as a deliberate divergence, and disabling that policy no longer
 restores the literal-1 probes. (The old gate was misleading because only
 the non-fighter tiers honoured it.)
@@ -423,7 +423,7 @@ labels.
   engaging the leader). This is a deliberate, ungated divergence: the original
   threshold depended on the unrelated wëap `0x81`, so the value is pinned
   rather than read from the live weapon table. The non-fighter tiers keep the
-  reconstructed probe logic; neither tier is gated by `kApplyOriginalBugFixes`.
+  reconstructed probe logic; neither tier is gated by `BugFixPolicy`.
 
 ## Primary-target acquisition (`Ship_AcquirePrimaryTargetForShip` 0x0040e020)
 

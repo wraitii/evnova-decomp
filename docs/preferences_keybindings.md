@@ -250,13 +250,16 @@ platforms and creates it when necessary. Loading occurs after SDL platform
 initialization; the normalized block is written at startup and at the original
 Preferences and Key Settings commit points. Decomp-only settings that have no
 slot in the original payload live in a sibling `EV Nova Extra Prefs.ini`
-(`game::NovaExtraPrefs`, `src/game/extended_prefs.cpp`) so the `.prf` stays
+(`game::NovaExtraPrefs`, `src/game/preferences_extra.cpp`) so the `.prf` stays
 byte-compatible and the shipped game never reads them. It stores
 `[paths] install_root`, the player-selected EV Nova install root written by the
-startup locate-data screen (see `docs/scenario_data_loading.md`), plus a
+startup locate-data screen (see `docs/scenario_data_loading.md`); a
 `[display]` section with the port-only presentation multipliers (`ui_scale`,
-`flight_scene_scale`, `mission_scale`). The INI is
-rewritten wholesale on save, so every field is re-emitted.
+`flight_scene_scale`, `mission_scale`); and a `[bugfixes]` section with the
+runtime clean-room bug-fix policy (`safe` plus the independent
+`outfit_slot_balance`, `outfit_prices`, `cron_events` and `particle_fog`
+toggles; every fix is marked `BUGFIX(original)` in `src/`).
+The INI is rewritten wholesale on save, so every field is re-emitted.
 
 ## `ddraw.ini` settings outside the `.prf` preferences
 
@@ -316,20 +319,34 @@ push button (`Extra Prefs`) that is not in DITL 0xfa3 — there is no spare item
 so the port draws it over the empty bottom band (DITL item 2) and routes it
 through the same `SettingsLayout`/`HitTestControl` path as the real controls.
 It opens `NovaMenu_RunExtraPrefsDialog` (`0x00488650` has no counterpart: the
-original exposes no scale UI), a port-only modal that reuses DLOG 0xfa3's
-window chrome and title band plus the native slider-arrow PICTs `0x86`/`0x87`.
-Three steppers edit the `[display]` multipliers (`ui_scale`,
-`mission_scale`, `flight_scene_scale`) in 0.05 steps within
-`[0.5, 4.0]`; the mission row sits next to UI with a "(multiplied by UI
-scale)" subline, matching `PresentationScale::mission_dialog()`. Changes apply
-to `SdlPlatform::SetPresentationScale` live, OK
-saves `EV Nova Extra Prefs.ini`, and Esc/Cancel restores the entry scale. The
-dialog applies its own edited values directly rather than through
+original exposes no scale UI) in `src/game/preferences_extra.cpp`, a port-only
+modal that reuses DLOG 0xfa3's window chrome and title band plus the native
+slider-arrow PICTs `0x86`/`0x87`. The window is extended below the authored
+336x296 height to fit a `Bug Fixes` section, separated from the sliders by a
+rule and an enlarged bold header. Three steppers edit the
+`[display]` multipliers (`ui_scale`, `mission_scale`, `flight_scene_scale`) in
+0.05 steps within `[0.5, 4.0]`; the mission row sits next to UI with a
+"(multiplied by UI scale)" subline, matching
+`PresentationScale::mission_dialog()`. Below them, five checkboxes edit the
+`[bugfixes]` policy: one `Safe bug fixes` master and four independent altering
+toggles. The checkboxes use the default Settings DITL's 22px row step, and an
+extra gap separates the safe row from the altering fixes. Hovering a row
+highlights it and shows a longer explanatory tooltip
+(the tooltip wraps and is clamped inside the window). Changes apply
+to `SdlPlatform::SetPresentationScale` live, and closing never rolls an edit
+back: OK, Enter, Esc and a quit request all keep the scale and policy changes
+and persist `EV Nova Extra Prefs.ini`, matching the original Settings dialog.
+It applies its own edited values directly rather than through
 `NovaExtraPrefs_ResolvePresentationScale`: if the `EVN_*_SCALE` debug overrides
 were allowed to win, editing the dialog would leave the resolved scale pinned
 to the env value and appear to do nothing. Env overrides still take effect on
 the next startup. The `install_root` path is still managed by the startup
 locate-data screen, not this dialog.
+
+The bug-fix policy edits a `working` copy of `NovaExtraPrefs`; the caller
+(`NovaProgramEntry`) copies `extra_prefs.bugfixes` into `GameState::bugfixes`
+after the modal closes. Every flag is read at its call site, so it applies
+immediately.
 
 Brightness and Engine/Running-Lights/Weapon layer gates are the
 remaining fidelity gaps: the original applies these through

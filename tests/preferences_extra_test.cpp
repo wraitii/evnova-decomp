@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "game/extended_prefs.hpp"
+#include "game/preferences_extra.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -50,10 +50,31 @@ TEST_CASE("extra prefs parse the display section and fall back on bad values") {
   REQUIRE(prefs.scale.mission == 1.0F); // invalid -> fallback
 }
 
+TEST_CASE("extra prefs parse the bug-fix flags and fall back on bad values") {
+  std::istringstream in("[bugfixes]\n"
+                        "safe=0\n"
+                        "outfit_slot_balance=FALSE\n"
+                        "outfit_prices=yes\n"
+                        "cron_events=nonsense\n"
+                        "particle_fog=1\n");
+  NovaExtraPrefs prefs;
+  game::NovaExtraPrefs_Parse(in, prefs, "<test>");
+  REQUIRE_FALSE(prefs.bugfixes.safe);
+  REQUIRE_FALSE(prefs.bugfixes.outfit_slot_balance);
+  REQUIRE(prefs.bugfixes.outfit_prices);
+  REQUIRE(prefs.bugfixes.cron_events); // invalid -> default kept
+  REQUIRE(prefs.bugfixes.particle_fog);
+}
+
 TEST_CASE("extra prefs write and reparse every field") {
   NovaExtraPrefs prefs;
   prefs.install_root = std::filesystem::path{"/tmp/EV Nova"};
   prefs.scale = {1.25F, 2.0F, 0.75F};
+  prefs.bugfixes.safe = false;
+  prefs.bugfixes.outfit_slot_balance = false;
+  prefs.bugfixes.outfit_prices = true;
+  prefs.bugfixes.cron_events = false;
+  prefs.bugfixes.particle_fog = true;
 
   std::ostringstream out;
   game::NovaExtraPrefs_Write(out, prefs);
@@ -65,6 +86,12 @@ TEST_CASE("extra prefs write and reparse every field") {
   REQUIRE(parsed.scale.ui == 1.25F);
   REQUIRE(parsed.scale.flight_scene == 2.0F);
   REQUIRE(parsed.scale.mission == 0.75F);
+  REQUIRE(parsed.bugfixes.safe == prefs.bugfixes.safe);
+  REQUIRE(parsed.bugfixes.outfit_slot_balance ==
+          prefs.bugfixes.outfit_slot_balance);
+  REQUIRE(parsed.bugfixes.outfit_prices == prefs.bugfixes.outfit_prices);
+  REQUIRE(parsed.bugfixes.cron_events == prefs.bugfixes.cron_events);
+  REQUIRE(parsed.bugfixes.particle_fog == prefs.bugfixes.particle_fog);
 }
 
 TEST_CASE("extra prefs write omits an unset install root") {

@@ -789,10 +789,10 @@ struct ShipyardInfoLayout {
 // another weapon's ammo outfit leaves its loaded rounds in the total
 // (FreeMass + loaded ammo). BUGFIX(original): show the advertised payload
 // FreeMass instead. The faithful (buggy) recompute is kept for
-// kApplyOriginalBugFixes == false.
+// BugFixPolicy::safe == false.
 [[nodiscard]] std::int32_t ShipyardDisplayFreeMass(const GameState &state,
                                                    const ShipClass &ship) {
-  if (kApplyOriginalBugFixes) {
+  if (state.bugfixes.safe) {
     return std::max(0, static_cast<std::int32_t>(ship.advertised_free_mass));
   }
   std::int32_t free_mass = ship.free_mass;

@@ -1701,7 +1701,7 @@ void ResolveAsteroidDestructionPackage(GameState &state,
     const int roll =
         std::uniform_int_distribution<int>{0, def->frag_count - 1}(state.rng);
     int baseline = def->frag_count / 2;
-    if (kApplyOriginalBugFixes && def->frag_count == 1) {
+    if (state.bugfixes.safe && def->frag_count == 1) {
       baseline = 1;
     }
     const int count = roll + baseline;

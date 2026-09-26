@@ -1249,7 +1249,7 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
   // Meters refill. 0x0044d83f: the original calls
   // Ship_ComputeShipMaxShieldPoints (0x00463550) for the ARMOR refill too, so
   // the player returns with armor equal to the max SHIELD value. With
-  // kApplyOriginalBugFixes on, use the armor max instead: a respawn class whose
+  // BugFixPolicy::safe on, use the armor max instead: a respawn class whose
   // max shield is 0 (e.g. a modded shuttle with no shield) otherwise returns
   // with 0 armor and the fresh hull is destroyed on the next tick.
   state.InvalidateDerivedStatCaches();
@@ -1257,8 +1257,8 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
   p.fuel_points = refill.fuel_capacity;
   p.shield_points = refill.max_shield_points;
   // BUGFIX(original): the armor refill used the max-shield value.
-  p.armor_points = kApplyOriginalBugFixes ? refill.max_armor_points
-                                          : refill.max_shield_points;
+  p.armor_points =
+      state.bugfixes.safe ? refill.max_armor_points : refill.max_shield_points;
   state.cached_stats = refill;
   state.stat_cache_valid = true;
 

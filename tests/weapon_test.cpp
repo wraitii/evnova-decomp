@@ -158,7 +158,7 @@ void ArmNpcDirectFireBank(GameState &state,
 } // namespace
 
 TEST_CASE("burst initialization includes the player and follows the live "
-          "mounted count under kApplyOriginalBugFixes",
+          "mounted count under BugFixPolicy",
           "[weapon]") {
   GameState state;
   state.scenario.ships.resize(1);
@@ -177,14 +177,14 @@ TEST_CASE("burst initialization includes the player and follows the live "
   CHECK(state.player.weapon_banks[0].cooldown == 7.0F);
 
   // A burst bank absent from the class stock: the original skips it because it
-  // tests the class table; under kApplyOriginalBugFixes the live mounted count
+  // tests the class table; under BugFixPolicy the live mounted count
   // is what gates the reset.
   state.scenario.weapons[1].burst_cycle_ticks = 2;
   state.scenario.weapons[1].burst_reset_cooldown = 9;
   state.player.weapon_banks[1].mounted = 1;
   NovaWeapon_InitShipWeaponBursts(state, state.player);
   CHECK(state.player.weapon_banks[1].cooldown ==
-        (kApplyOriginalBugFixes ? 9.0F : 0.0F));
+        (state.bugfixes.safe ? 9.0F : 0.0F));
 }
 
 TEST_CASE("shot guidance preserves the shared bomb and rocket post-pass",

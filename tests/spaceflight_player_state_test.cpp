@@ -153,13 +153,13 @@ TEST_CASE("cloak shield drain no longer stops at the per-second rate",
           "[player][cloak]") {
   // BUGFIX(original): the original compares the raw per-second drain rate to
   // the shield pool, so the last `shield_drain` shields persist forever. Under
-  // kApplyOriginalBugFixes the drain continues and clamps at zero. See
+  // BugFixPolicy the drain continues and clamps at zero. See
   // docs/known_original_bugs.md.
   Ship ship;
   ship.shield_points = 0.1F; // below the 4/sec rate
 
   spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
-      ship, /*shield_drain=*/4, 1.0F);
+      ship, /*shield_drain=*/4, 1.0F, /*apply_fix=*/true);
 
   CHECK(ship.shield_points == 0.0F);
 }

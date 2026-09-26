@@ -1175,7 +1175,7 @@ TEST_CASE("cloak traits enter and clear the NPC cloak transition") {
 TEST_CASE("cloak maintain gate honors the device ModVal drain bits") {
   // BUGFIX(original): the original reads the fuel/shield gate nibbles from the
   // matched ModType word (always 0x11), so every cloak demands fuel and none is
-  // gated on shields. Under kApplyOriginalBugFixes the real ModVal nibbles are
+  // gated on shields. Under BugFixPolicy the real ModVal nibbles are
   // used; see docs/known_original_bugs.md.
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
