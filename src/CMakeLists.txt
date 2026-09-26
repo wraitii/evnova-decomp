@@ -81,6 +81,7 @@ add_library(evnova_runtime
     game/weapon.cpp
     game/weapon_banks.cpp
     game/weapon_shots.cpp
+    game/world_wrap.cpp
     log.cpp
     nova_app.cpp
     nova_paths.cpp

@@ -308,8 +308,8 @@ address	name	impl_file	reimpl_pct	comment
 0x00457580	Stellar_HandleStellarEntryAndExit	src/game/landed_window.cpp	50%	gameplay,cadence,rendering
 0x00459950	NovaUi_UpdateTravelEngagementProgress	src/game/travel.cpp	90%	gameplay,ui
 0x0045A3D0	Player_HandleBoardTargetCommand	src/game/boarding_plunder.cpp	92%	cadence
-0x0045BAA0	Ship_RecenterSpaceObjectsForWorldWrap		0%	
-0x0045C6D0	Ship_WorldWrapPositionRelativeToPlayer		0%	
+0x0045BAA0	Ship_RecenterSpaceObjectsForWorldWrap	src/game/world_wrap.cpp	100%	
+0x0045C6D0	Ship_WorldWrapPositionRelativeToPlayer	src/game/world_wrap.cpp	100%	
 0x0045C7A0	NovaUi_MarkTravelAndStatusPanelsDirty	src/game/spaceflight.cpp	100%	divergence
 0x0045C880	Ship_CommandPlayerEscortGroup	src/game/escort_commands.cpp	85%	audio
 0x0045CFC0	NovaUi_SetupGameplayPanelColors		0%	
