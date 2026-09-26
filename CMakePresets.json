@@ -61,6 +61,19 @@
       "configurePreset": "debug",
       "output": {
         "outputOnFailure": true
+      },
+      "environment": {
+        "CTEST_PARALLEL_LEVEL": " "
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "CTEST_PARALLEL_LEVEL": " "
       }
     }
   ]
