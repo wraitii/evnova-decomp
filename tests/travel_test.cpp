@@ -1750,6 +1750,73 @@ TEST_CASE("jump onset guard scales with the class jump multiplier",
   CHECK_FALSE(game::NovaTravel_PlayerPastJumpOnset(state));
 }
 
+// The original jump ramp reads the wall-clock 60 Hz counter, which x2 mode
+// never scales. The accelerated probe scales the whole gameplay clock, so
+// NovaTravel_JumpWallClockScale recovers wall time and x2 shifts the onset by
+// the 1.5 offset scale while using the shorter noengine cue.
+TEST_CASE("x2 jump ramp recovers wall clock and shifts onset", "[travel]") {
+  GameState state;
+  state.scenario.ships.resize(1);
+  state.player.ship_class_id = 0;
+  state.scenario.ships[0].jump_duration_multiplier = 1.0F;
+  state.jump_duration_engine_60hz = 364;
+  state.jump_duration_noengine_60hz = 252;
+
+  // x1: progress = E/3.64 - 35; onset at E = 127.4. The player ramp reads the
+  // engage-time latch, not the live GameState fields.
+  state.x2_mode_active = false;
+  state.gameplay_speed_multiplier = 1;
+  state.travel.jump_x2_mode = false;
+  state.travel.jump_speed_multiplier = 1;
+  CHECK(game::NovaTravel_JumpWallClockScale(state) == Catch::Approx(1.0F));
+  state.travel.tunnel_elapsed_60hz = 127.0F;
+  CHECK_FALSE(game::NovaTravel_PlayerPastJumpOnset(state));
+  state.travel.tunnel_elapsed_60hz = 128.0F;
+  CHECK(game::NovaTravel_PlayerPastJumpOnset(state));
+
+  // x2: the probe clock is virtual (2x), so wall recovery halves E and the
+  // ramp offset scales to 52.5; onset = 52.5 * (252*0.01) * 2 = 264.6 virtual
+  // ticks (132.3 wall-equivalent).
+  state.x2_mode_active = true;
+  state.gameplay_speed_multiplier = 2;
+  state.travel.jump_x2_mode = true;
+  state.travel.jump_speed_multiplier = 2;
+  CHECK(game::NovaTravel_JumpWallClockScale(state) == Catch::Approx(0.5F));
+  state.travel.tunnel_elapsed_60hz = 264.0F;
+  CHECK_FALSE(game::NovaTravel_PlayerPastJumpOnset(state));
+  state.travel.tunnel_elapsed_60hz = 266.0F;
+  CHECK(game::NovaTravel_PlayerPastJumpOnset(state));
+}
+
+// The x2 scheduler state is latched at engage: toggling the probe multiplier
+// mid-jump must not swap the cue or change the wall-clock ramp schedule.
+TEST_CASE("jump latches the x2 scheduler state at engage", "[travel]") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F; // beyond the no-jump radius
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  state.gameplay_speed_multiplier = 2;
+  state.x2_mode_active = true;
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.engaging);
+  CHECK(state.travel.jump_x2_mode);
+  CHECK(state.travel.jump_speed_multiplier == 2);
+
+  // The live scheduler reverts, but the engaged jump keeps its latch.
+  state.gameplay_speed_multiplier = 1;
+  state.x2_mode_active = false;
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  CHECK(state.travel.jump_x2_mode);
+  CHECK(state.travel.jump_speed_multiplier == 2);
+}
+
 // Ghidra 0x0046c250 System_GetEffectiveMurkPercent: raw SystemDef.murk (clamped
 // >= 0) plus every owned ModType 0x1c (MurkMod) outfit's owned_count * ModVal
 // across all four mod slots, clamped to [0, 100].

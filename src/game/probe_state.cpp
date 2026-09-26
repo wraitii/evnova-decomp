@@ -157,6 +157,13 @@ std::string ProbeState_Snapshot(const GameState &state,
     // tests/scenarios/tutorial_to_combat_rating.toml.
     j.num("combat_rating", state.player_combat_rating_points);
     j.boolean("travel_engaging", state.travel.engaging);
+    // Accelerated scheduler state: `x2_mode_active` is the port's stand-in for
+    // the original g_x2_mode_active, set from the accelerated speed multiplier
+    // (probe HTTP acceleration or the x2 key).
+    j.boolean("x2_mode_active", state.x2_mode_active);
+    j.num("gameplay_speed_multiplier", state.gameplay_speed_multiplier);
+    j.boolean("jump_x2_mode", state.travel.jump_x2_mode);
+    j.num("jump_speed_multiplier", state.travel.jump_speed_multiplier);
     return j.done();
   }
 
@@ -183,6 +190,10 @@ std::string ProbeState_Snapshot(const GameState &state,
     j.num("primary_target_ship_slot", state.player.primary_target_ship_slot);
     j.num("combat_rating", state.player_combat_rating_points);
     j.num("current_system_id", system_id);
+    j.boolean("x2_mode_active", state.x2_mode_active);
+    j.num("gameplay_speed_multiplier", state.gameplay_speed_multiplier);
+    j.boolean("jump_x2_mode", state.travel.jump_x2_mode);
+    j.num("jump_speed_multiplier", state.travel.jump_speed_multiplier);
     return j.done();
   }
 

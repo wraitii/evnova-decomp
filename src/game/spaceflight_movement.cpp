@@ -1063,7 +1063,10 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       // jump_duration_multiplier / (duration_60hz * 0.01) - offset /
       // multiplier, where the class multiplier scales both the clock and the
       // offset. x2 mode halves the unled clock (0.5) and scales the
-      // player-led clock by 0.667.
+      // player-led clock by 0.667. The elapsed is wall-clock in the original
+      // (NovaTime_GetTickCount60Hz); recover it from the accelerated virtual
+      // clock via NovaTravel_JumpWallClockScale.
+      const float wall_clock_scale = NovaTravel_JumpWallClockScale(state);
       const float duration_60hz = NovaTravel_JumpSequenceDuration60Hz(state);
       float jump_progress = 0.0F;
       if (ship.squad_leader_ship_slot == 0) {
@@ -1071,8 +1074,10 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         if (kUnitFloat < leader.ai_station_hold_timer) {
           const float player_multiplier =
               NovaTravel_PlayerJumpDurationMultiplier(state);
-          const float elapsed_jump_60hz = static_cast<float>(
-              state.tick_60hz - leader.ai_mode_start_time_ms);
+          const float elapsed_jump_60hz =
+              static_cast<float>(state.tick_60hz -
+                                 leader.ai_mode_start_time_ms) *
+              wall_clock_scale;
           const float scale = state.x2_mode_active ? kX2PlayerLedScale : 1.0F;
           jump_progress = elapsed_jump_60hz * scale * player_multiplier /
                               (duration_60hz * kJumpDurationScale) -
@@ -1081,7 +1086,8 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       } else {
         const float class_multiplier = ship_class.jump_duration_multiplier;
         const float elapsed_jump_60hz =
-            static_cast<float>(state.tick_60hz - ship.ai_mode_start_time_ms);
+            static_cast<float>(state.tick_60hz - ship.ai_mode_start_time_ms) *
+            wall_clock_scale;
         const float scale = state.x2_mode_active ? kX2UnledScale : 1.0F;
         jump_progress = elapsed_jump_60hz * scale * class_multiplier /
                             (duration_60hz * kJumpDurationScale) -

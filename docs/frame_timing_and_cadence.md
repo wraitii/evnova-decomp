@@ -56,6 +56,28 @@ gameplay tick.
 The gameplay update body currently runs entirely inside the selected outer
 quantum; continuous operations are not yet moved to the host/render cadence.
 
+The original's `g_x2_mode_active` behavior is not fully reconstructed. The x2
+key (Caps Lock by default) is live in ordinary play as well as under the probe:
+it scales the whole gameplay clock through the accelerated path but keeps the
+normal presentation pacing and VSync. The hyperspace jump path compensates for
+that scaled clock: the original ramp and jump-departure deadlines read the
+wall-clock `NovaTime_GetTickCount60Hz`, so the port recovers wall time from its
+virtual 60 Hz elapsed (`NovaTravel_JumpWallClockScale`), maps multiplier >= 2
+onto `g_x2_mode_active` (shorter snd 129 cue, 1.5 ramp offset) and plays the
+matching cue. The player jump latches the multiplier/x2 mode at engage, so a
+mid-jump toggle cannot swap the cue or change the schedule. Multipliers other
+than 1 and 2 share x2's cue/offset but not its wall-time cadence.
+
+Because this scales the whole clock, x2 also doubles every other consumer of
+`GameState::tick_60hz`: weapon fire cooldowns (`Ship_UpdateVisualState`), mission
+interaction rechecks, route-map dismiss timers and velocity-match timers all run
+at 2x. The original's `NovaTime_GetTickCount60Hz` is bumped by an independent
+input thread and is *not* scaled by x2, so those intervals keep their wall-clock
+duration there. The port also has no reduced-tick pass yet: every x2 outer step
+runs the full `Frame_TickSystems(1)` body, whereas the original runs one full
+plus one reduced `Frame_TickSystems(0)` per drawn frame. Both are deliberate
+simplifications of the x2 stand-in, not faithful reconstructions.
+
 The raw-call conversion is a deliberate clean-room policy. The original raw
 behavior still varied below its maximum rate; the port targets the original at
 47.62 Hz while remaining stable at modern display rates. Probabilities and

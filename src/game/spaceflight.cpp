@@ -1801,6 +1801,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Port stand-in for NovaTime_GetTickCount60Hz's g_frame_tick_count_60hz
     // (see GameState::tick_60hz): re-derived from the wall clock each frame.
     state.tick_60hz = static_cast<std::uint32_t>(host_now_ms * 60ULL / 1000ULL);
+    // Probe acceleration scales the whole gameplay clock; the original x2 mode
+    // is a different scheduler (see docs/frame_timing_and_cadence.md). Map the
+    // accelerated multiplier onto x2 semantics so the hyperspace jump selects
+    // the shorter noengine cue and the 1.5 ramp offset, and recover the
+    // original wall-clock ramp via NovaTravel_JumpWallClockScale.
+    state.gameplay_speed_multiplier = platform.speed_multiplier();
+    state.x2_mode_active = state.gameplay_speed_multiplier >= 2;
     // A mission-script C/E/H class swap raises gameplay_interface_dirty in
     // place of the original's direct Ui_InstallGameplayInterfaceLayout call
     // (0x004cda50); resolve the new government interface/cockpit art before
@@ -2437,15 +2444,24 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // the duration scale (65536/multiplier) is folded into the SDL playback
       // rate at the play call instead.
       if (state.warp_up_sound_pending) {
-        if (state.warp_up_sound.has_value()) {
+        // x2 mode stages the noengine 'Warp up.x2' cue pair (HoldTimerRamp
+        // 0x0044c5e5 selects _g_hyperspace_sound_handle_warp_up_x2 when
+        // g_x2_mode_active). Use the engage-time latch so toggling x2 mid-jump
+        // cannot swap the cue out from under the already-running one. Both
+        // cues share the fire-gate voice key.
+        const auto &warp_up_cue = state.travel.jump_x2_mode
+                                      ? state.warp_up_x2_sound
+                                      : state.warp_up_sound;
+        if (warp_up_cue.has_value()) {
           // The fire gate in NovaTravel_Tick waits for this voice to finish,
           // and the tunnel ramp schedule is cue-relative, so this rate sets the
           // whole jump cadence. The original descriptor stores the reciprocal
           // as a duration scale (0x0046ab00: 65536/multiplier fixed-point),
           // while SDL's playback_rate is a speed multiplier. Pass the chassis
           // multiplier directly (0.91..2.08), giving cue duration
-          // base_duration / multiplier.
-          audio.Play(*state.warp_up_sound,
+          // base_duration / multiplier. x2 uses the same multiplier on the
+          // shorter snd 129.
+          audio.Play(*warp_up_cue,
                      1.0F,
                      game::NovaTravel_PlayerJumpDurationMultiplier(state),
                      game::kHyperspaceWarpUpSoundKey,

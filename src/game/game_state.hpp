@@ -885,6 +885,13 @@ struct TravelState {
   // zoom thrust, and the arrival spawn is hurled 1350 px from the in-system
   // origin (0,0) along the reverse bearing.
   float jump_heading_rad = 0.0F;
+  // The accelerated scheduler speed multiplier latched at engage, and whether
+  // it selected the original x2 cue/offset semantics. Once a jump is engaged,
+  // toggling x2 (or the probe multiplier) mid-sequence must not change the
+  // wall-clock schedule or the physical cue that is already playing, so the
+  // player jump reads these instead of the live GameState fields.
+  std::uint32_t jump_speed_multiplier = 1;
+  bool jump_x2_mode = false;
 };
 
 // The outfit-driven effective ship stats (mirrors the cached outputs of the
@@ -1997,11 +2004,22 @@ struct GameState {
   // snd 128) and 252 (noengine, snd 129).
   std::int16_t jump_duration_engine_60hz = 350;
   std::int16_t jump_duration_noengine_60hz = 350;
-  // Ghidra g_x2_mode_active (0x00596d34): selects the noengine cue and the x2
-  // ramp clock scales. The port has not reconstructed the original's x2
-  // scheduler yet, so this stays false (ramp scale 1.0); the probe x2 key
-  // divergence (SdlPlatform::ServiceX2SpeedDivergence) scales the whole clock
-  // instead and must not set this flag, or the x2 scale would apply twice.
+  // Accelerated-scheduler speed multiplier (SdlPlatform::speed_multiplier),
+  // 1 in ordinary play. The probe scales the entire gameplay clock, including
+  // tick_60hz and TravelState::tunnel_elapsed_60hz. The original's hyperspace
+  // ramp and jump-departure deadlines read NovaTime_GetTickCount60Hz, a
+  // wall-clock counter that x2 mode never scales, so jump code multiplies its
+  // virtual 60 Hz elapsed by 1/multiplier to recover wall time
+  // (NovaTravel_JumpWallClockScale). Only multipliers 1 and 2 are calibrated;
+  // other probes share x2's cue/offset but not its cadence.
+  std::uint32_t gameplay_speed_multiplier = 1;
+  // Ghidra g_x2_mode_active (0x00596d34): selects the noengine cue (snd 129)
+  // and shifts the player ramp onset (35 * 1.5). The port has not
+  // reconstructed the original's x2 scheduler; the accelerated probe
+  // (gameplay_speed_multiplier >= 2) stands in for it and sets this each frame
+  // from the platform. The x2 clock scales themselves are not folded in here:
+  // the original x2 ramp reads the wall clock, and
+  // NovaTravel_JumpWallClockScale removes the probe's clock scaling instead.
   bool x2_mode_active = false;
 };
 

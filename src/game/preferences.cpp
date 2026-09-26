@@ -642,7 +642,7 @@ void NovaPreferences::ResetToDefaults() {
   sound_volume = 5;
   brightness = 3;
   share_processor_time = true;
-  quicktime_movies = false;
+  quicktime_movies = true; // inverted: 1 = movies off (playback unsupported)
   smoke_trails = false;
   run_in_window = true;
   ship_animations = true;
@@ -662,8 +662,10 @@ void NovaPreferences::ResetToDefaults() {
 // defaults cannot drift apart (see the header contract).
 void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs) {
   prefs.share_processor_time = true;
-  prefs.quicktime_movies = false; // inverted: false = movies "on"
-  prefs.smoke_trails = false;     // inverted: false = trails on
+  // Inverted flag (1 = movies off). The port does not play QuickTime movies,
+  // so this is forced off rather than the original's default of on.
+  prefs.quicktime_movies = true;
+  prefs.smoke_trails = false; // inverted: false = trails on
   prefs.ship_animations = true;
   prefs.engine_glows = true;
   prefs.running_lights = true;

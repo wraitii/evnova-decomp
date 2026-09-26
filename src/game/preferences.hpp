@@ -72,8 +72,10 @@ struct NovaPreferences {
 
   // Ghidra g_pref_share_processor_time.
   bool share_processor_time = true;
-  // Ghidra g_pref_quicktime_movies (inverted flag: 0 = QuickTime on).
-  bool quicktime_movies = false;
+  // Ghidra g_pref_quicktime_movies (inverted flag: 0 = QuickTime on). Locked
+  // to 1 ("off") by NovaPrefs_ApplyLockedPreferences: the port has no
+  // QuickTime movie playback, so a legacy .prf cannot enable it.
+  bool quicktime_movies = true;
   // Ghidra g_pref_smoke_trails (inverted flag: 0 = smoke trails on).
   bool smoke_trails = false;
   // Ghidra DAT_00bec178 (run in a window), toggled live via the window mode.
@@ -115,8 +117,9 @@ struct NovaPreferences {
 // Forces the quality/graphics preferences the SDL port always renders. The
 // Settings dialog shows them disabled and a legacy .prf cannot turn them off;
 // call this after NovaPrefs_LoadFromFile (and it is applied by
-// ResetToDefaults). Locked: share_processor_time=true, quicktime_movies=false,
-// smoke_trails=false, ship_animations=true,
+// ResetToDefaults). Locked: share_processor_time=true, quicktime_movies=true
+// (inverted: 1 = movies off; playback unsupported), smoke_trails=false,
+// ship_animations=true,
 // engine_glows=true, running_lights=true, weapon_effects=true,
 // parallax_starfield=true, hyperspace_effects=false, check_for_updates=true,
 // brightness=3.

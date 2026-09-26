@@ -102,6 +102,13 @@ private:
   std::unique_ptr<SdlTexture> cockpit_;
   int cockpit_w_ = 0;
   int cockpit_h_ = 0;
+  // The x2 speed indicator (cicn 20000, a native-size 32x16 icon). The
+  // original builds it as a gameplay sprite in FUN_004ad960 and, while
+  // g_x2_mode_active is set, Frame_AnchorX2IndicatorSprite (0x0042cbb0)
+  // shows it anchored at screen (0,0). Null when the cicn cannot be decoded.
+  std::unique_ptr<SdlTexture> x2_indicator_;
+  int x2_indicator_w_ = 0;
+  int x2_indicator_h_ = 0;
   // The screen-font cache used for the HUD readouts, kept for this renderer's
   // lifetime so font handles are decoded once (not reloaded every frame).
   std::unique_ptr<NovaFontCache> font_cache_;

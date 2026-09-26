@@ -453,6 +453,15 @@ void NovaTravel_UpdateEngagementProgress(GameState &state);
 [[nodiscard]] float
 NovaTravel_PlayerJumpDurationMultiplier(const GameState &state);
 
+// The original's jump ramp and departure deadlines read
+// NovaTime_GetTickCount60Hz, a wall-clock 60 Hz counter that x2 mode never
+// scales. The accelerated probe scales the whole gameplay clock (see
+// GameState::gameplay_speed_multiplier), so jump code multiplies its virtual
+// 60 Hz elapsed by this to recover the original wall time. Ordinary play
+// (multiplier 1) is unaffected; only 1 and 2 are calibrated, and other
+// multipliers are deliberately approximate.
+[[nodiscard]] float NovaTravel_JumpWallClockScale(const GameState &state);
+
 // Ghidra 0x00401800's hyperspace-committed guard: true once the player's jump
 // tunnel ramp has passed its onset, using the same schedule as the tunnel
 // movement block (progress = elapsed60hz * multiplier / (duration * 0.01) -
