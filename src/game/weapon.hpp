@@ -127,10 +127,18 @@ NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,
 // Ghidra 0x0046f2c0 Weapon_GetWeaponBurstAttempts: shots per trigger pull.
 // Non-burst weapons (flags_primary 0x40 clear) fire exactly one; burst banks
 // start from the mounted ammo count capped by the cost bank's loaded
-// secondary (or fuel_points / per-shot fuel for ammo_type < -999).
+// secondary (the firing bank's own counter for mode-99 bays) or, for
+// ammo_type < -1000, by fuel_points / per-shot fuel. Note the fuel threshold
+// is one lower than Weapon_CanFireWeaponBank's < -999.
 [[nodiscard]] int NovaWeapon_GetWeaponBurstAttempts(const GameState &state,
                                                     const Ship &ship,
                                                     std::int16_t weapon_bank);
+
+// Ghidra 0x0046f270 Weapon_GetWeaponFireIntervalTicks: the burst-cycle wrap
+// threshold. flags_primary 0x40 banks wrap at burst_cycle_ticks; every other
+// burst weapon scales by the mount count.
+[[nodiscard]] std::int16_t NovaWeapon_GetWeaponFireIntervalTicks(
+    const GameState &state, std::int16_t weapon_bank, std::int16_t burst_count);
 
 // Ghidra 0x00464670 Weapon_HasLoadedLaunchBayAmmo: true when the ship's
 // class has a KeyCarried fighter (ShipClass.key_carried_ship_class) and one
@@ -296,13 +304,19 @@ void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
                                               float elapsed_ticks);
 
 // Ghidra Weapon_FireShipWeapons (0x00414550): fire the selected NPC bank for
-// one volley. This slice covers projectile modes -1, 1, 4, 6, 7, and 8;
-// beams, turrets, and carrier-bay branches remain deferred. A successful
+// one volley. Covers the original's mode dispatch (beams 0/3, projectiles
+// -1/1/4/6, quadrant turrets 7/8 incl. mode-7 blind fire), per-pass ammo/fuel
+// cost, kickback, linked-fire cooldown lift, burst wrap, combat-rating
+// cooldown scaling, and the flags_secondary 0x200 muzzle flash. A successful
 // dispatch queues the weapon's fire sound (spatial, sourced at this ship) via
 // GameState.pending_fire_sounds, mirroring the original's sVar9 > 0 gate
 // around NovaAudio_PlaySpatialByDistance. Ship_HandleShip's handoff semantics
 // are included: flags_primary 0x2 banks retain their active-bank/trigger latch;
-// ordinary banks consume both fields after one handoff.
+// ordinary banks consume both fields after one handoff. Remaining gaps: the
+// original's g_gameplay_time_frozen early return (structurally handled by the
+// reduced-tick scheduler), the queued rather than positional fire-sound
+// playback, and the combat-rating base pinned per the game_state.hpp
+// divergence.
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship);
 
 // Ghidra 0x0043a310 Weapon_SelectTurretTargetWithinArc: automatically fires

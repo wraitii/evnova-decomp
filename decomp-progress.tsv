@@ -82,7 +82,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00413B60	Ship_SetEscortLaunchOffsetVelocity	src/game/escort_formation.cpp	100%	
 0x00414390	Ship_MoveShipTowardFormationOffset	src/game/escort_formation.cpp	100%	
 0x00414530	Ship_IsShipInAiState0x11	src/game/collision.cpp	100%	
-0x00414550	Weapon_FireShipWeapons	src/game/weapon.cpp	68%	gameplay,moddata
+0x00414550	Weapon_FireShipWeapons	src/game/weapon.cpp	90%	gameplay,audio,moddata
 0x004152E0	Ship_IssueEscortOrders	src/game/ship_ai.cpp	100%	moddata
 0x004156A0	Ship_ReacquireSquadLeader	src/game/escort_formation.cpp	100%	moddata
 0x004159A0	Ship_IsShipInAiControlMode0x17		0%	
@@ -522,8 +522,8 @@ address	name	impl_file	reimpl_pct	comment
 0x0046F100	Government_IsShipGovernmentDerelict	src/game/government.cpp	100%	
 0x0046F140	Ship_HasAnyCargoLootOrActiveMission	src/game/mission.cpp	100%	
 0x0046F1E0	Frame_AddCombatRatingPoints	src/game/collision.cpp	100%	
-0x0046F270	Weapon_GetWeaponFireIntervalTicks	src/game/weapon.cpp	90%	gameplay
-0x0046F2C0	Weapon_GetWeaponBurstAttempts	src/game/weapon_banks.cpp	90%	gameplay
+0x0046F270	Weapon_GetWeaponFireIntervalTicks	src/game/weapon.cpp	100%	
+0x0046F2C0	Weapon_GetWeaponBurstAttempts	src/game/weapon_banks.cpp	100%	
 0x0046F3F0	Weapon_ApplyWeaponOnHitEffects	src/game/collision.cpp	65%	gameplay
 0x0046F500	ResourceArchive_OpenNamedSearchingPaths	src/brgr_archive.cpp	80%	correctness
 0x0046F690	Resource_CountFilesByExtInFolder		0%	

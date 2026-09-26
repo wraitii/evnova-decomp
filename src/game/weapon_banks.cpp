@@ -902,15 +902,21 @@ void NovaWeapon_TickNpcWeaponBanks(GameState &state,
   }
 }
 
-// @port 0x0046f2c0 90% gameplay
-// TODO(decomp): NPC path fuel capping is deferred (inline copy in
-// NovaWeapon_FireNpcWeaponBank).
+// @port 0x0046f2c0 100%
 // Ghidra 0x0046f2c0 Weapon_GetWeaponBurstAttempts: how many shots one trigger
 // pull fires. Non-burst weapons (flags_primary 0x40 clear) get exactly one; a
 // burst bank starts from the mounted count, capped by the loaded ammo of its
-// cost bank (the firing bank's own counter for mode-99 bays)
-// or, for fuel-drawn weapons (ammo_type < -999), by fuel_points divided by
-// the per-shot fuel ((|cost| - 1000) * 0.1).
+// cost bank (the firing bank's own counter for mode-99 bays) or, for
+// fuel-drawn weapons (ammo_type < -1000), by fuel_points divided by the
+// per-shot fuel ((|cost| - 1000) * 0.1).
+//
+// Quirk preserved: unlike Weapon_CanFireWeaponBank (which reads the COST bank
+// for the player but the FIRING bank for an NPC), this function reads the
+// COST bank's counter for every ship (disasm 0x0046f33a indexes
+// ship + cost * 200 + 0xd0 with no ship_instance_id branch). The fuel
+// threshold is also one lower here than everywhere else: cost < -1000 draws
+// fuel, so cost == -1000 is treated as free and leaves the mounted count
+// uncapped.
 [[nodiscard]] int NovaWeapon_GetWeaponBurstAttempts(const GameState &state,
                                                     const Ship &ship,
                                                     std::int16_t weapon_bank) {
@@ -918,7 +924,6 @@ void NovaWeapon_TickNpcWeaponBanks(GameState &state,
   if (w == nullptr) {
     return 0;
   }
-  const bool is_player = ship.ship_instance_id == 0;
   auto bank_at = [&](std::int16_t slot) -> const WeaponBanks & {
     return ship.weapon_banks[static_cast<std::size_t>(slot)];
   };
@@ -935,10 +940,8 @@ void NovaWeapon_TickNpcWeaponBanks(GameState &state,
   } else {
     const int cost = w->ammo_type;
     if (cost >= 0 && cost <= 0xff) {
-      const std::int16_t ammo_bank =
-          is_player ? static_cast<std::int16_t>(cost) : weapon_bank;
-      cap = bank_at(ammo_bank).ammo;
-    } else if (cost < -999) {
+      cap = bank_at(static_cast<std::int16_t>(cost)).ammo;
+    } else if (cost < -1000) {
       if (ship.fuel_points <= 0.0F) {
         return 0;
       }

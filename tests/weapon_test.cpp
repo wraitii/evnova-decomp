@@ -149,6 +149,10 @@ void ArmNpcDirectFireBank(GameState &state,
   weapon.blast_radius = blast_radius;
   weapon.beam_length_px = 0;
   weapon.flags_secondary = 0;
+  // Give the synthetic weapon a live projectile envelope so the fire path can
+  // spawn it; selection-only tests ignore these.
+  weapon.projectile_speed = 100.0F;
+  weapon.lifetime_ticks = 30;
   state.ShipAt(1).weapon_banks[index].mounted = 1;
 }
 } // namespace
@@ -671,6 +675,190 @@ TEST_CASE("NPC energy weapons do not need a loaded-ammo counter",
   NovaWeapon_FireNpcWeaponBank(state, npc);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(npc.weapon_banks[0].ammo == 0);
+}
+
+// Ghidra Weapon_FireShipWeapons (0x00414550): the per-pass cost block sits
+// inside the Weapon_CanFireWeaponBank gate, so a pass that holds fire still
+// spends a round, and mode 7 with no primary target blind-fires at target -1.
+TEST_CASE("NPC fire spends cost on a held pass and blind-fires mode 7",
+          "[weapon][npc]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  Ship &npc = state.ShipAt(1);
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.pers_def_slot = -1;
+
+  SECTION("mode 7 with no target launches a targetless shot") {
+    ArmNpcDirectFireBank(state, 0, 7, 10, 10, 500.0F);
+    npc.primary_target_ship_slot = -1;
+    npc.active_weapon_bank_slot = 0;
+    npc.ai_fire_trigger_latch = 1;
+    NovaWeapon_FireNpcWeaponBank(state, npc);
+    REQUIRE(state.active_shots.size() == 1);
+    CHECK(state.active_shots[0].weapon_id == 0);
+    CHECK(state.active_shots[0].target_ship_slot == -1);
+  }
+
+  SECTION("a targetless mode-1 pass still spends a round") {
+    ArmNpcDirectFireBank(state, 0, 1, 10, 10, 500.0F);
+    state.scenario.weapons[0].ammo_type = 0;
+    npc.weapon_banks[0].ammo = 1;
+    npc.primary_target_ship_slot = -1;
+    npc.active_weapon_bank_slot = 0;
+    npc.ai_fire_trigger_latch = 1;
+    NovaWeapon_FireNpcWeaponBank(state, npc);
+    CHECK(state.active_shots.empty());
+    CHECK(npc.weapon_banks[0].ammo == 0);
+  }
+
+  SECTION("fuel-cost weapons draw fuel per pass") {
+    ArmNpcDirectFireBank(state, 0, -1, 10, 10, 500.0F);
+    state.scenario.weapons[0].ammo_type = -1005; // (|cost| - 1000) * 0.1 = 0.5
+    npc.fuel_points = 10.0F;
+    npc.active_weapon_bank_slot = 0;
+    npc.ai_fire_trigger_latch = 1;
+    NovaWeapon_FireNpcWeaponBank(state, npc);
+    REQUIRE(state.active_shots.size() == 1);
+    CHECK(npc.fuel_points == Catch::Approx(9.5F));
+  }
+}
+
+TEST_CASE("NPC kickback applies a rearward clamped impulse", "[weapon][npc]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  Ship &npc = state.ShipAt(1);
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.pers_def_slot = -1;
+  npc.heading = 0.0F;
+  npc.vel_x = 0.0F;
+  npc.vel_y = 0.0F;
+  state.scenario.ships[0].mass_tons = 10;
+  state.scenario.ships[0].speed = 100.0F;
+  ArmNpcDirectFireBank(state, 0, -1, 10, 10, 500.0F);
+  state.scenario.weapons[0].kickback_impulse = 100;
+  npc.active_weapon_bank_slot = 0;
+  npc.ai_fire_trigger_latch = 1;
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+  REQUIRE(state.active_shots.size() == 1);
+  // Rearward of heading 0 is 180 deg: the impulse moves +Y by
+  // kickback / mass_tons = 100 / 10. sin(pi) leaves ~1e-6 noise on X.
+  CHECK(std::abs(npc.vel_x) < 0.001F);
+  CHECK(npc.vel_y == Catch::Approx(10.0F));
+}
+
+TEST_CASE("NPC linked fire raises every other bank cooldown", "[weapon][npc]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  Ship &npc = state.ShipAt(1);
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.pers_def_slot = -1;
+  ArmNpcDirectFireBank(state, 0, -1, 10, 10, 500.0F);
+  ArmNpcDirectFireBank(state, 1, -1, 10, 10, 500.0F);
+  state.scenario.weapons[0].flags_tertiary = 0x20;
+  state.scenario.weapons[0].reload_ticks = 10;
+  npc.weapon_banks[1].cooldown = 0.0F;
+  npc.primary_target_ship_slot = -1;
+  npc.active_weapon_bank_slot = 0;
+  npc.ai_fire_trigger_latch = 1;
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+  REQUIRE(state.active_shots.size() == 1);
+  const float bank0 = npc.weapon_banks[0].cooldown;
+  CHECK(bank0 == Catch::Approx(10.0F));
+  CHECK(npc.weapon_banks[1].cooldown == Catch::Approx(bank0 + 2.0F));
+}
+
+// Ghidra 0x0046f2c0 Weapon_GetWeaponBurstAttempts and 0x0046f270
+// Weapon_GetWeaponFireIntervalTicks.
+TEST_CASE("burst attempts cap by the cost bank, mode 99, and fuel",
+          "[weapon]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  Ship &ship = state.ShipAt(1);
+
+  auto set_burst_weapon = [&](std::int16_t bank,
+                              std::int16_t mode,
+                              std::int16_t cost,
+                              std::uint32_t tertiary) {
+    const auto index = static_cast<std::size_t>(bank);
+    if (state.scenario.weapons.size() <= index) {
+      state.scenario.weapons.resize(index + 1);
+    }
+    Weapon &w = state.scenario.weapons[index];
+    w.flags = 0x0040; // burst
+    w.flags_tertiary = tertiary;
+    w.weapon_mode_code = mode;
+    w.ammo_type = cost;
+    w.burst_cycle_ticks = 10;
+    ship.weapon_banks[index].mounted = 3;
+    ship.weapon_banks[index].ammo = 0;
+  };
+
+  SECTION("non-burst weapons fire exactly once") {
+    set_burst_weapon(0, -1, -1, 0);
+    state.scenario.weapons[0].flags = 0;
+    CHECK(NovaWeapon_GetWeaponBurstAttempts(state, ship, 0) == 1);
+  }
+
+  SECTION("a burst without flags_tertiary 0x1 uses the mounted count") {
+    set_burst_weapon(0, -1, -1, 0);
+    CHECK(NovaWeapon_GetWeaponBurstAttempts(state, ship, 0) == 3);
+  }
+
+  SECTION("the cost bank caps the volley for an NPC too") {
+    set_burst_weapon(0, -1, 1, 1);
+    ship.weapon_banks[1].mounted = 1;
+    ship.weapon_banks[1].ammo = 2;
+    // The original reads the COST bank for every ship; the NPC's own bank 0
+    // holds no ammo.
+    CHECK(NovaWeapon_GetWeaponBurstAttempts(state, ship, 0) == 2);
+  }
+
+  SECTION("mode 99 caps on the firing bank's own counter") {
+    set_burst_weapon(0, 99, 1, 1);
+    ship.weapon_banks[0].ammo = 1;
+    ship.weapon_banks[1].ammo = 3;
+    CHECK(NovaWeapon_GetWeaponBurstAttempts(state, ship, 0) == 1);
+  }
+
+  SECTION("fuel-drawn bursts cap on affordable fuel") {
+    set_burst_weapon(0, -1, -1005, 1); // 0.5 fuel per shot
+    ship.fuel_points = 1.2F;           // affords 2 shots
+    CHECK(NovaWeapon_GetWeaponBurstAttempts(state, ship, 0) == 2);
+  }
+
+  SECTION("empty fuel tanks fire nothing") {
+    set_burst_weapon(0, -1, -1005, 1);
+    ship.fuel_points = 0.0F;
+    CHECK(NovaWeapon_GetWeaponBurstAttempts(state, ship, 0) == 0);
+  }
+
+  SECTION("cost -1000 and -999 leave the volley uncapped") {
+    // The original's fuel threshold here is < -1000 (one lower than
+    // Weapon_CanFireWeaponBank's < -999), and -1000 divides by zero fuel.
+    set_burst_weapon(0, -1, -1000, 1);
+    ship.fuel_points = 0.0F;
+    CHECK(NovaWeapon_GetWeaponBurstAttempts(state, ship, 0) == 3);
+    set_burst_weapon(0, -1, -999, 1);
+    CHECK(NovaWeapon_GetWeaponBurstAttempts(state, ship, 0) == 3);
+  }
+}
+
+TEST_CASE("burst interval scales by mount count unless Flags1 0x40",
+          "[weapon]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  state.scenario.weapons.resize(1);
+  Weapon &w = state.scenario.weapons[0];
+  w.burst_cycle_ticks = 10;
+  w.flags = 0;
+  // flags_primary 0x40 clear: burst_count * burst_cycle_ticks.
+  CHECK(NovaWeapon_GetWeaponFireIntervalTicks(state, 0, 4) == 40);
+  // flags_primary 0x40 set: the raw burst_cycle_ticks.
+  w.flags = 0x0040;
+  CHECK(NovaWeapon_GetWeaponFireIntervalTicks(state, 0, 4) == 10);
 }
 
 TEST_CASE("direct-fire selector picks energy for shielded targets and mass "
