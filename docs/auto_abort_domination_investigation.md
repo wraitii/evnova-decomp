@@ -232,7 +232,7 @@ reversal (exact-government systems); otherwise the normal success walk runs.
 That covers every stock auto-abort `CompReward`: the Refuel Trader missions
 (+2 Civvies) and Eamon (−200 Wild Geese) via `Flags2 0x0002`, and the 16 Avoid
 missions via `Flags 0x0040`. It leaves the Thunderforge cron step (747, neither
-flag) inert. Gated by `kApplyOriginalBugFixes`; with it off the original
+flag) inert. Gated by `BugFixPolicy`; with it off the original
 omission is reproduced. The observation that `0x0040` alone did not grant the
 reward (it only fed the manual mission-computer abort) is what makes the
 omission a bug rather than a deliberate "manual-only" feature.

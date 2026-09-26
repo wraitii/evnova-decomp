@@ -778,12 +778,13 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
         // BUGFIX(original): see Outfit_ClampOwnedCountToLimits. The
         // executable added the value once per owning outfit definition; the
         // Bible's "add to max guns" is per item, so count copies here too.
-        s.max_guns += kApplyOriginalBugFixes ? static_cast<int>(owned) * e.val
-                                             : static_cast<int>(e.val);
+        s.max_guns += state.bugfixes.outfit_slot_balance
+                          ? static_cast<int>(owned) * e.val
+                          : static_cast<int>(e.val);
         break;
       case OutfitEffect::kModifyMaxTurrets: // opcode 46
         // BUGFIX(original): as kModifyMaxGuns above.
-        s.max_turrets += kApplyOriginalBugFixes
+        s.max_turrets += state.bugfixes.outfit_slot_balance
                              ? static_cast<int>(owned) * e.val
                              : static_cast<int>(e.val);
         break;
@@ -1008,9 +1009,8 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
           // outfit still gave only +2 (the loader's default-outfit check at
           // 0x004c2450 shares the omission). The Bible's "add to max guns" is
           // per item -- cf. ModType 27, where per-copy counting is spelled out
-          // -- so scale by the owned count. Faithful when the compat policy is
-          // off.
-          const int delta = kApplyOriginalBugFixes
+          // -- so scale by the owned count. Faithful when the policy is off.
+          const int delta = state.bugfixes.outfit_slot_balance
                                 ? static_cast<int>(e.val) * gowned
                                 : static_cast<int>(e.val);
           gun_cap = static_cast<std::int16_t>(gun_cap + delta);
@@ -1044,7 +1044,7 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
         if (e.type ==
             static_cast<std::int16_t>(OutfitEffect::kModifyMaxTurrets)) {
           // BUGFIX(original): as the gun arm above; per-owned-copy scaling.
-          const int delta = kApplyOriginalBugFixes
+          const int delta = state.bugfixes.outfit_slot_balance
                                 ? static_cast<int>(e.val) * gowned
                                 : static_cast<int>(e.val);
           turret_cap = static_cast<std::int16_t>(turret_cap + delta);

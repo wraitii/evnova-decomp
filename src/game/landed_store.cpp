@@ -478,9 +478,10 @@ std::int32_t NovaLanded_ScaledStorePrice(std::int32_t base_price,
   //
   // POSSIBLE-BUG(original): the `<= 5` bound also disables this markdown at
   // every shipped stellar whose base TechLevel is 6 or 7 (Earth, Spacedock
-  // I-V, New England, Rebel I/II, Harbor) and for the whole 6-7 ship band (in
-  // Nova this function only prices ships/trade-ins; outfits never reach it --
-  // see the BUGFIX in NovaLanded_OutfitPrice), and it is not the check one
+  // I-V, New England, Rebel I/II, Harbor) and for the whole 6-7 ship band. The
+  // original only prices ships/trade-ins here; the outfit bugfix path also
+  // calls this function, but with a hardcoded item tech of 6 that skips this
+  // markdown (see NovaLanded_OutfitPrice). The bound is also not the check one
   // would use merely to exclude the sentinel techs (999/9999/32767).
   // Confirmed in the disassembly: 0x0049d65a CMP AX,5 and 0x0049d662 CMP BX,5
   // are both signed JG, with no clamping of param_4.
@@ -533,15 +534,21 @@ std::int32_t NovaLanded_OutfitPrice(const GameState &state,
   // markdown. Losing it in Nova is a regression, not a deliberate design
   // change, which is what makes this BUGFIX a restore rather than an invention.
   //
-  // BUGFIX(original): apply the intended scaled price (rank scale, plus the
-  // same tech rule the shipyard already uses). The faithful unscaled value is
-  // kept for kApplyOriginalBugFixes == false.
-  if (!kApplyOriginalBugFixes) {
+  // BUGFIX(original): restore the intended allied-rank scale on outfit prices.
+  // The tech-level markdown is deliberately left off outfits for now (unlike
+  // EV 1.0.5 / EV Override): NovaLanded_ScaledStorePrice applies it only when
+  // `item_tech < stellar_tech` and both techs are `< 6`, so a hardcoded item
+  // tech of 6 skips the markdown while the rank scale and the price quanta
+  // still apply. Restore the markdown by passing `outfit->tech_level` as the
+  // item tech. The faithful unscaled value is kept for
+  // BugFixPolicy::outfit_prices == false.
+  if (!state.bugfixes.outfit_prices) {
     return outfit->PurchasePrice(ship->mass_tons);
   }
+  constexpr std::int16_t kOutfitPriceTechNoMarkdown = 6;
   return NovaLanded_ScaledStorePrice(
       outfit->PurchasePrice(ship->mass_tons),
-      outfit->tech_level,
+      kOutfitPriceTechNoMarkdown,
       stellar->tech_level,
       NovaLanded_RankPriceScale(state, stellar_id));
 }

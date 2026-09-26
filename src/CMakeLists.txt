@@ -42,7 +42,7 @@ add_library(evnova_runtime
     game/docked_trade_dialog.cpp
     game/escort_commands.cpp
     game/escort_formation.cpp
-    game/extended_prefs.cpp
+    game/preferences_extra.cpp
     game/freeflight_objects.cpp
     game/flight_automation.cpp
     game/negotiation_dialog.cpp

@@ -243,14 +243,14 @@ void NovaShip_TickDestroyedShipVisualStateRawCall(GameState &state,
   // case: the per-call decrement lands the timer on zero before the check, so
   // the original's `fVar1 <= 0` branch retakes every call and neither the
   // > 2.0 debris window nor the finale ever runs. Keep reseeding -- and stay
-  // alive -- when kApplyOriginalBugFixes is off; run the finale immediately
+  // alive -- when the safe policy is off; run the finale immediately
   // when it is on. A larger delay resolves (next check sees 1..2) so the latch
   // owns it after the first seed.
   const bool ghost_reseed = reseed <= 1.0F;
   if (ship.death_timer_active <= 0.0F && (!was_seeded || ghost_reseed)) {
     ship.death_timer_active = reseed;
     if (ghost_reseed) {
-      if (!kApplyOriginalBugFixes) {
+      if (!state.bugfixes.safe) {
         ship.death_timer_seeded = false;
         return;
       }
@@ -764,10 +764,10 @@ void NovaShip_TickCloakFadeState(GameState &state,
     // exhibits swarming behavior" -- not the cloaking outfit's ModType 17
     // ModVal 0x0001 "Faster fading". The shipped data inverts the intent (the
     // fast-fading Polaris organ ships are non-swarming; swarming Wraiths carry
-    // a non-fast-fade device). BUGFIX(original): under the compatibility
-    // policy, gate the fade on the actual device bit instead.
+    // a non-fast-fade device). BUGFIX(original): under the safe policy, gate
+    // the fade on the actual device bit instead.
     float fade_rate;
-    if constexpr (kApplyOriginalBugFixes) {
+    if (state.bugfixes.safe) {
       fade_rate = NovaOutfit_HasCloakFastFade(state, ship) ? 1.5F : 0.75F;
     } else {
       const ShipClass *cls = state.scenario.Ship(

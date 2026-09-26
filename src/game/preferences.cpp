@@ -9,8 +9,9 @@
 #include "../sdl_platform.hpp"
 #include "../util/geometry.hpp"
 #include "control_bevel.hpp"
-#include "extended_prefs.hpp"
 #include "nova_font.hpp"
+#include "preferences_extra.hpp"
+#include "preferences_ui.hpp"
 #include "ui_dialog.hpp"
 
 #include <SDL3/SDL_render.h>
@@ -32,11 +33,11 @@
 namespace game {
 
 using evnova::util::Contains;
+using namespace preferences_detail;
 
 namespace {
 
 // ---------------------------------------------------------------------------
-constexpr std::uint16_t kSettingsDialogId = 0xfa3;
 constexpr std::uint16_t kKeySettingsDialogId = 0xfa2;
 constexpr std::uint16_t kKeySettingsBackdropPict = 0x008b;
 // STR# holding the nine sound-volume words, indexed by volume+1 (index 0..8).
@@ -76,31 +77,9 @@ ReadLe16(const std::array<std::uint8_t, kPrefsFileSize> &bytes,
   return *directory / kPrefsFileName;
 }
 
-// The preferences DLOG has no full-window PICT:
-// UiWindow_CreateFromDialogResource allocates a plain surface, and
-// UiWindow_Draw fills it with the current fill colour then frames it with the
-// current RGB colour. At startup those globals are white
-// (g_hud_overlay_text_color) and black (DAT_00733b74), respectively. The
-// control bevel constants are the RGBColor triples at 0x0056f118, 0x0056f11e,
-// 0x0056f124, and 0x0056f12a, converted from 16-bit channels.
-constexpr SDL_Color kWindowFrame{0, 0, 0, 255};
-constexpr SDL_Color kWindowFill{255, 255, 255, 255};
-constexpr SDL_Color kControlHighlight{195, 195, 195, 255};
-constexpr SDL_Color kControlFill{136, 136, 136, 255};
-constexpr SDL_Color kControlShadow{58, 58, 58, 255};
-constexpr SDL_Color kControlText{0, 0, 0, 255};
-constexpr SDL_Color kControlSelectedText{255, 255, 255, 255};
-// Locked controls are drawn light grey (a port addition: the original has no
-// disabled state because these preferences were live toggles).
-constexpr SDL_Color kControlDisabledFill{205, 205, 205, 255};
-constexpr SDL_Color kControlDisabledHighlight{222, 222, 222, 255};
-constexpr SDL_Color kControlDisabledShadow{150, 150, 150, 255};
-constexpr SDL_Color kControlDisabledText{160, 160, 160, 255};
-// Tint applied to the PICT slider arrows when their control is locked.
+// The locked-control arrow tint (the shared colours live in
+// preferences_ui.hpp).
 constexpr std::uint8_t kDisabledArrowTint = 150;
-
-constexpr std::uint16_t kSoundArrowDownPict = 0x0087;
-constexpr std::uint16_t kSoundArrowUpPict = 0x0086;
 
 // Port-only "Extra Prefs" button appended to the Settings DITL layout (the
 // original 25 items have no free slot). The index is deliberately far outside
@@ -110,36 +89,8 @@ constexpr std::size_t kExtraPrefsButtonIndex = 1000;
 // y=263..283), left-aligned with it, on the empty bottom band (DITL item 2).
 constexpr SDL_FRect kExtraPrefsButtonRect{49.0F, 242.0F, 135.0F, 20.0F};
 
-// Extra Prefs dialog geometry, in the same 336x296 authored space as DLOG
-// 0xfa3. The title band is read from the real DITL so the chrome matches; the
-// three scale steppers and buttons are port-authored.
-constexpr std::array<float, 3> kExtraScaleRowY{52.0F, 96.0F, 140.0F};
-constexpr float kExtraLabelX = 24.0F;
-constexpr float kExtraArrowX = 214.0F;
-constexpr float kExtraValueX = 232.0F;
-constexpr float kExtraValueWidth = 84.0F;
-// Native PICT arrows are only 11x9, so pad the click target around them; the
-// up and down targets meet but never overlap.
-constexpr float kExtraArrowHitPadX = 8.0F;
-constexpr float kExtraArrowHitPadY = 5.0F;
-constexpr SDL_FRect kExtraCancelButton{140.0F, 263.0F, 70.0F, 20.0F};
-constexpr SDL_FRect kExtraOkButton{225.0F, 263.0F, 70.0F, 20.0F};
-
-// DIVERGENCE: the original retains the owner surface and blits every modal
-// surface from bottom to top. The SDL port conveniently redraws the owner each
-// frame, then preserves the same bottom-to-top modal ordering. There is no
-// separate full-screen scrim pass in the original.
-void DrawOwningScreen(SdlPlatform &platform,
-                      const std::function<void()> &render_background) {
-  SDL_Renderer *const renderer = platform.renderer();
-  if (render_background) {
-    render_background();
-  } else {
-    platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(renderer);
-  }
-}
+// Extra Prefs dialog geometry lives in preferences_extra.cpp; only the button
+// that opens it stays in the original Settings DITL layout below.
 
 // Returns the STR# 0x88 sound-volume word for the given volume index, or the
 // original's fallback string DAT_0056cf0c (" ") when out of range. The value
@@ -173,132 +124,6 @@ void DrawOwningScreen(SdlPlatform &platform,
   return " ";
 }
 
-// Centre a window box (def->right-left x def->bottom-top) on the playfield,
-// truncating the half-offset toward zero to match Dialog_CreateFromDlog
-// (FUN_008730a1) integer arithmetic.
-[[nodiscard]] SDL_FRect
-CenterWindowOnPanel(const SDL_FRect &panel, float win_w, float win_h) {
-  (void)panel;
-  return SDL_FRect{0.0F, 0.0F, win_w, win_h};
-}
-
-// Draws the 17x17 checkbox and label used by UiWindow_Draw. The original uses
-// the same four grayscale RGBColor triples as its push buttons.
-void DrawCheckBox(SdlPlatform &platform,
-                  NovaFontCache &font_cache,
-                  const SDL_FRect &box,
-                  std::string_view label,
-                  bool checked,
-                  bool disabled) {
-  SDL_Renderer *renderer = platform.renderer();
-  const SDL_Color fill = disabled ? kControlDisabledFill : kControlFill;
-  const SDL_Color highlight =
-      disabled ? kControlDisabledHighlight : kControlHighlight;
-  const SDL_Color shadow = disabled ? kControlDisabledShadow : kControlShadow;
-  const SDL_Color text = disabled ? kControlDisabledText : kControlText;
-  const SDL_Color check = disabled ? kControlDisabledText : kWindowFill;
-  const SDL_FRect glyph{box.x, box.y, 17.0F, 17.0F};
-  // Checked state inverts the bevel (dark top/left, light bottom/right),
-  // exactly as UiWindow_Draw 0x004d0d00 does for DITL control types 5/6.
-  const SDL_Color bevel_highlight = checked ? shadow : highlight;
-  const SDL_Color bevel_shadow = checked ? highlight : shadow;
-  DrawControlBevel(renderer, glyph, fill, bevel_highlight, bevel_shadow);
-  SDL_SetRenderDrawColor(renderer,
-                         kWindowFrame.r,
-                         kWindowFrame.g,
-                         kWindowFrame.b,
-                         SDL_ALPHA_OPAQUE);
-  SDL_RenderRect(renderer, &glyph);
-  if (checked) {
-    // Checked mark is an X across the glyph square, inset by 3 on each side
-    // (both diagonals; UiWindow_Draw 0x004d0d00).
-    SDL_SetRenderDrawColor(
-        renderer, check.r, check.g, check.b, SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(renderer,
-                   glyph.x + 3.0F,
-                   glyph.y + 3.0F,
-                   glyph.x + 14.0F,
-                   glyph.y + 14.0F);
-    SDL_RenderLine(renderer,
-                   glyph.x + 14.0F,
-                   glyph.y + 3.0F,
-                   glyph.x + 3.0F,
-                   glyph.y + 14.0F);
-  }
-  const float baseline = box.y + box.h / 2.0F + 5.0F;
-  NovaText_Draw(platform,
-                font_cache,
-                NovaFontFamily::kGeneva,
-                12.0F,
-                kNovaFontStyleRegular,
-                text,
-                box.x + 20.0F,
-                baseline,
-                label);
-}
-
-// Draws one of the small slider arrows (pointing up in the upper cell, down in
-// the lower), as a small filled triangle to keep it font-independent.
-void DrawSliderArrow(SdlPlatform &platform,
-                     NovaFontCache &,
-                     const SDL_FRect &box,
-                     bool up,
-                     bool disabled) {
-  const float cx = box.x + box.w / 2.0F;
-  const float cy = box.y + box.h / 2.0F;
-  const float base = 4.0F; // halfwidth of the triangle base
-  const float h = 6.0F;    // triangle height
-  const float top_y = up ? cy - h / 2.0F : cy + h / 2.0F;
-  // Fill the triangle as horizontal strips, thinnest at the tip, widest at the
-  // base.
-  const SDL_Color arrow = disabled ? kControlDisabledText : kControlText;
-  SDL_SetRenderDrawColor(
-      platform.renderer(), arrow.r, arrow.g, arrow.b, SDL_ALPHA_OPAQUE);
-  const int rows = 4;
-  for (int i = 0; i < rows; ++i) {
-    const float t =
-        (up ? static_cast<float>(i) : static_cast<float>(rows - 1 - i)) /
-        static_cast<float>(rows - 1);
-    const float yy =
-        up ? top_y + static_cast<float>(i) : top_y - static_cast<float>(i);
-    const float half = base * t;
-    const float x0 = std::max(cx - half, box.x);
-    const float x1 = std::min(cx + half, box.x + box.w);
-    if (x1 > x0) {
-      const SDL_FRect strip{x0, yy, x1 - x0, 1.0F};
-      SDL_RenderFillRect(platform.renderer(), &strip);
-    }
-  }
-}
-
-// Draws a bordered push button with its centred label.
-void DrawButton(SdlPlatform &platform,
-                NovaFontCache &font_cache,
-                const SDL_FRect &box,
-                std::string_view label,
-                bool highlighted) {
-  SDL_Renderer *renderer = platform.renderer();
-  const SDL_Color highlight = highlighted ? kControlShadow : kControlHighlight;
-  const SDL_Color shadow = highlighted ? kControlHighlight : kControlShadow;
-  DrawControlBevel(renderer, box, kControlFill, highlight, shadow);
-  SDL_SetRenderDrawColor(renderer,
-                         kWindowFrame.r,
-                         kWindowFrame.g,
-                         kWindowFrame.b,
-                         SDL_ALPHA_OPAQUE);
-  SDL_RenderRect(renderer, &box);
-  NovaText_DrawCentered(platform,
-                        font_cache,
-                        NovaFontFamily::kGeneva,
-                        12.0F,
-                        kNovaFontStyleRegular,
-                        highlighted ? kControlSelectedText : kControlText,
-                        box.x + 4.0F,
-                        box.x + box.w - 4.0F,
-                        box.y + box.h / 2.0F + 4.0F,
-                        label);
-}
-
 [[nodiscard]] std::unique_ptr<SdlTexture>
 LoadSettingsPictTexture(SdlPlatform &platform, std::uint16_t pict_id) {
   const auto data = NovaResource_LoadPictData(pict_id);
@@ -312,18 +137,6 @@ LoadSettingsPictTexture(SdlPlatform &platform, std::uint16_t pict_id) {
   }
   return SdlTexture::Create(
       platform.renderer(), image->width, image->height, image->rgba_pixels);
-}
-
-struct SettingsArtwork {
-  std::unique_ptr<SdlTexture> arrow_up;
-  std::unique_ptr<SdlTexture> arrow_down;
-};
-
-[[nodiscard]] SettingsArtwork LoadSettingsArtwork(SdlPlatform &platform) {
-  return SettingsArtwork{
-      .arrow_up = LoadSettingsPictTexture(platform, kSoundArrowUpPict),
-      .arrow_down = LoadSettingsPictTexture(platform, kSoundArrowDownPict),
-  };
 }
 
 // Fills `items` with the DITL item list sized to its window origin (a fresh
@@ -777,6 +590,14 @@ void DrawKeySettingsDialog(SdlPlatform &platform,
 }
 
 } // namespace
+
+[[nodiscard]] SettingsArtwork
+preferences_detail::LoadSettingsArtwork(SdlPlatform &platform) {
+  return SettingsArtwork{
+      .arrow_up = LoadSettingsPictTexture(platform, kSoundArrowUpPict),
+      .arrow_down = LoadSettingsPictTexture(platform, kSoundArrowDownPict),
+  };
+}
 
 // Ghidra String_ExpandControlCode (0x004f1990): expose the anonymous-namespace
 // KeyCodeName lookup for the flight-tutorial hint composition.
@@ -1263,271 +1084,6 @@ void DrawSettingsDialog(SdlPlatform &platform,
   }
 }
 
-// ---------------------------------------------------------------------------
-// Port-only Extra Prefs modal. It has no original counterpart: it exposes the
-// presentation multipliers that were previously editable only by hand in
-// 'EV Nova Extra Prefs.ini'. The window chrome, title band and native arrow art
-// are reused from the Settings dialog (DLOG 0xfa3) so it reads as the same
-// window; the three scale steppers and buttons are port-authored.
-
-struct ExtraPrefsLayout {
-  SDL_FRect window{};
-  SDL_FRect title_band{};
-  bool from_ditl = false;
-};
-
-[[nodiscard]] ExtraPrefsLayout BuildExtraPrefsLayout(const SDL_FRect &panel) {
-  ExtraPrefsLayout out;
-  const auto def = NovaResource_LoadDialogDefinition(kSettingsDialogId);
-  const auto items = NovaResource_LoadDialogItems(kSettingsDialogId);
-  if (!def || !items) {
-    NovaLog::Todo("Extra Prefs: Settings DLOG/DITL 0x{:04x} unavailable",
-                  kSettingsDialogId);
-    return out;
-  }
-  const float win_w = static_cast<float>(def->right - def->left);
-  const float win_h = static_cast<float>(def->bottom - def->top);
-  out.window = CenterWindowOnPanel(panel, win_w, win_h);
-  // Reuse the normal Settings title band (DITL item index 18) verbatim.
-  for (const auto &item : *items) {
-    if (item.index == 18) {
-      out.title_band = ItemRect(item, out.window);
-      break;
-    }
-  }
-  out.from_ditl = true;
-  return out;
-}
-
-enum class ExtraPrefsControl {
-  none,
-  ok,
-  cancel,
-  ui_up,
-  ui_down,
-  flight_up,
-  flight_down,
-  mission_up,
-  mission_down,
-};
-
-// Dialog-local rects for one scale row's stacked arrow images. The drawn art is
-// the native 11x9 PICT; the hit targets are padded so the tiny arrows are still
-// easy to click.
-[[nodiscard]] SDL_FRect ExtraUpRect(std::size_t row) {
-  return SDL_FRect{kExtraArrowX, kExtraScaleRowY[row], 11.0F, 9.0F};
-}
-
-[[nodiscard]] SDL_FRect ExtraDownRect(std::size_t row) {
-  return SDL_FRect{kExtraArrowX, kExtraScaleRowY[row] + 9.0F, 11.0F, 9.0F};
-}
-
-[[nodiscard]] SDL_FRect ExtraUpHitRect(std::size_t row) {
-  return SDL_FRect{kExtraArrowX - kExtraArrowHitPadX,
-                   kExtraScaleRowY[row] - kExtraArrowHitPadY,
-                   11.0F + 2.0F * kExtraArrowHitPadX,
-                   9.0F + kExtraArrowHitPadY};
-}
-
-[[nodiscard]] SDL_FRect ExtraDownHitRect(std::size_t row) {
-  return SDL_FRect{kExtraArrowX - kExtraArrowHitPadX,
-                   kExtraScaleRowY[row] + 9.0F,
-                   11.0F + 2.0F * kExtraArrowHitPadX,
-                   9.0F + kExtraArrowHitPadY};
-}
-
-// The port-only rects are dialog-local; shift them to playfield space.
-[[nodiscard]] SDL_FRect OffsetRect(const SDL_FRect &rect,
-                                   const SDL_FRect &window) {
-  return SDL_FRect{window.x + rect.x, window.y + rect.y, rect.w, rect.h};
-}
-
-[[nodiscard]] ExtraPrefsControl
-HitTestExtraPrefs(const ExtraPrefsLayout &layout, float x, float y) {
-  auto hit = [&](const SDL_FRect &local) {
-    return Contains(OffsetRect(local, layout.window), x, y);
-  };
-  if (hit(kExtraOkButton)) {
-    return ExtraPrefsControl::ok;
-  }
-  if (hit(kExtraCancelButton)) {
-    return ExtraPrefsControl::cancel;
-  }
-  constexpr std::array<ExtraPrefsControl, 3> kUpControl{
-      ExtraPrefsControl::ui_up,
-      ExtraPrefsControl::mission_up,
-      ExtraPrefsControl::flight_up};
-  constexpr std::array<ExtraPrefsControl, 3> kDownControl{
-      ExtraPrefsControl::ui_down,
-      ExtraPrefsControl::mission_down,
-      ExtraPrefsControl::flight_down};
-  for (std::size_t row = 0; row < kExtraScaleRowY.size(); ++row) {
-    if (hit(ExtraUpHitRect(row))) {
-      return kUpControl[row];
-    }
-    if (hit(ExtraDownHitRect(row))) {
-      return kDownControl[row];
-    }
-  }
-  return ExtraPrefsControl::none;
-}
-
-void DrawExtraArrow(SdlPlatform &platform,
-                    NovaFontCache &font_cache,
-                    const SettingsArtwork &artwork,
-                    const SDL_FRect &rect,
-                    bool up) {
-  SdlTexture *const texture =
-      (up ? artwork.arrow_up : artwork.arrow_down).get();
-  if (texture != nullptr) {
-    SDL_RenderTexture(platform.renderer(), texture->get(), nullptr, &rect);
-  } else {
-    DrawSliderArrow(platform, font_cache, rect, up, false);
-  }
-}
-
-void DrawExtraPrefsDialog(SdlPlatform &platform,
-                          NovaFontCache &font_cache,
-                          const ExtraPrefsLayout &layout,
-                          const PresentationScale &scale,
-                          const SettingsArtwork &artwork,
-                          ExtraPrefsControl hover,
-                          const std::function<void()> &render_background) {
-  SDL_Renderer *const renderer = platform.renderer();
-  DrawOwningScreen(platform, render_background);
-  platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
-                                       platform.logical_playfield_size(),
-                                       platform.ui_scale()));
-  if (!layout.from_ditl) {
-    return;
-  }
-
-  const SDL_FRect &win = layout.window;
-  SDL_SetRenderDrawColor(
-      renderer, kWindowFill.r, kWindowFill.g, kWindowFill.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderFillRect(renderer, &win);
-  SDL_SetRenderDrawColor(renderer,
-                         kWindowFrame.r,
-                         kWindowFrame.g,
-                         kWindowFrame.b,
-                         SDL_ALPHA_OPAQUE);
-  SDL_RenderRect(renderer, &win);
-
-  // Title band, identical chrome to DrawSettingsDialog but with the port-only
-  // title.
-  const SDL_FRect &band = layout.title_band;
-  if (band.w > 0.0F) {
-    SDL_SetRenderDrawColor(renderer,
-                           kWindowFill.r,
-                           kWindowFill.g,
-                           kWindowFill.b,
-                           SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &band);
-    SDL_SetRenderDrawColor(renderer,
-                           kWindowFrame.r,
-                           kWindowFrame.g,
-                           kWindowFrame.b,
-                           SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(renderer,
-                   band.x,
-                   band.y + band.h - 1.0F,
-                   band.x + band.w,
-                   band.y + band.h - 1.0F);
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          NovaFontFamily::kChicago,
-                          18.0F,
-                          kNovaFontStyleRegular,
-                          kControlText,
-                          band.x,
-                          band.x + band.w,
-                          band.y + 17.0F,
-                          "Extra Prefs");
-  }
-
-  constexpr std::array<const char *, 3> kLabels{
-      "UI Scale", "Mission Scale", "Flight Scene Scale"};
-  // Mission is composed on top of UI (see PresentationScale::mission_dialog),
-  // so it sits next to UI with a clarifying subline.
-  const std::array<float, 3> values{
-      scale.ui, scale.mission, scale.flight_scene};
-  for (std::size_t row = 0; row < values.size(); ++row) {
-    const float top = win.y + kExtraScaleRowY[row];
-    NovaText_Draw(platform,
-                  font_cache,
-                  NovaFontFamily::kGeneva,
-                  12.0F,
-                  kNovaFontStyleRegular,
-                  kControlText,
-                  win.x + kExtraLabelX,
-                  top + 14.0F,
-                  kLabels[row]);
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleRegular,
-                          kControlText,
-                          win.x + kExtraValueX,
-                          win.x + kExtraValueX + kExtraValueWidth,
-                          top + 14.0F,
-                          fmt::format("{:.2f}x", values[row]));
-    DrawExtraArrow(
-        platform, font_cache, artwork, OffsetRect(ExtraUpRect(row), win), true);
-    DrawExtraArrow(platform,
-                   font_cache,
-                   artwork,
-                   OffsetRect(ExtraDownRect(row), win),
-                   false);
-    if (row == 1) {
-      // Mission multiplier is applied on top of the UI multiplier, matching
-      // PresentationScale::mission_dialog().
-      NovaText_Draw(platform,
-                    font_cache,
-                    NovaFontFamily::kGeneva,
-                    10.0F,
-                    kNovaFontStyleRegular,
-                    kControlDisabledText,
-                    win.x + kExtraLabelX,
-                    top + 30.0F,
-                    "(multiplied by UI scale)");
-    }
-  }
-
-  DrawButton(platform,
-             font_cache,
-             OffsetRect(kExtraCancelButton, win),
-             "Cancel",
-             hover == ExtraPrefsControl::cancel);
-  DrawButton(platform,
-             font_cache,
-             OffsetRect(kExtraOkButton, win),
-             "OK",
-             hover == ExtraPrefsControl::ok);
-}
-
-constexpr float kExtraScaleStep = 0.05F;
-
-// Step values stay on the 0.05 grid so repeated clicks cannot accumulate
-// float noise (the display shows two decimals).
-[[nodiscard]] float SnapScaleToStep(float value) {
-  return std::round(value / kExtraScaleStep) * kExtraScaleStep;
-}
-
-// The three stepper rows edit working.scale fields in this order
-// (UI, Mission, Flight) to match the dialog layout.
-[[nodiscard]] float *ExtraScaleField(PresentationScale &scale,
-                                     std::size_t row) {
-  switch (row) {
-  case 0:
-    return &scale.ui;
-  case 1:
-    return &scale.mission;
-  default:
-    return &scale.flight_scene;
-  }
-}
-
 } // namespace
 
 // Ghidra: 0x00488650 Menu_RunSettingsDialog
@@ -1678,122 +1234,6 @@ bool NovaMenu_RunSettingsDialog(
       default:
         break;
       }
-    }
-    platform.PaceFrame();
-  }
-  return false;
-}
-
-// Port-only Extra Prefs modal. No Ghidra counterpart: the original has no such
-// dialog and no user-facing scale controls. Reuses DLOG 0xfa3's window chrome
-// and the native slider-arrow PICTs 0x86/0x87. The three steppers edit the
-// port-only presentation multipliers in 'EV Nova Extra Prefs.ini' and apply
-// them to `platform` live; Esc/Cancel restores the entry scale.
-bool NovaMenu_RunExtraPrefsDialog(
-    SdlPlatform &platform,
-    NovaFontCache &font_cache,
-    NovaExtraPrefs &extra_prefs,
-    const std::function<void()> &render_background) {
-  SdlPlatform::ScopedPlacement placement_guard(platform,
-                                               platform.current_placement());
-  const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
-  const ExtraPrefsLayout layout = BuildExtraPrefsLayout(panel);
-  if (!layout.from_ditl) {
-    NovaLog::Todo("cancelled: Extra Prefs dialog chrome unavailable");
-    return false;
-  }
-  const SettingsArtwork artwork = LoadSettingsArtwork(platform);
-  const PresentationScale original_scale = platform.presentation_scale();
-  NovaExtraPrefs working = extra_prefs;
-  // Apply the edited values directly, not the env-resolved scale. The
-  // EVN_UI_SCALE / EVN_FLIGHT_SCENE_SCALE / EVN_MISSION_SCALE overrides are a
-  // startup iteration aid; if they won here, editing the dialog would appear to
-  // do nothing (the resolved scale would stay pinned to the env value). Env
-  // overrides still apply on the next startup.
-  auto apply_scale = [&] { platform.SetPresentationScale(working.scale); };
-  apply_scale();
-  NovaLog::Info("opening Extra Prefs dialog (port-only)");
-
-  while (!platform.quit_requested()) {
-    platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
-                                         platform.logical_playfield_size(),
-                                         platform.ui_scale()));
-    const SDL_FPoint mouse = platform.mouse_position();
-    const ExtraPrefsControl hover = HitTestExtraPrefs(layout, mouse.x, mouse.y);
-    DrawExtraPrefsDialog(platform,
-                         font_cache,
-                         layout,
-                         working.scale,
-                         artwork,
-                         hover,
-                         render_background);
-    platform.Present();
-
-    for (auto in = platform.PollTextEvent(); in;
-         in = platform.PollTextEvent()) {
-      if (in->key == TextKey::escape) {
-        platform.SetPresentationScale(original_scale);
-        return false; // Cancel (revert the live scale).
-      }
-      if (in->key == TextKey::enter) {
-        extra_prefs = working;
-        (void)NovaExtraPrefs_SaveToSystemStore(extra_prefs);
-        return true; // Enter acts as OK.
-      }
-      if (in->key != TextKey::primary) {
-        continue;
-      }
-      const SDL_FPoint click = platform.mouse_position();
-      const ExtraPrefsControl hit = HitTestExtraPrefs(layout, click.x, click.y);
-      if (hit == ExtraPrefsControl::ok) {
-        extra_prefs = working;
-        (void)NovaExtraPrefs_SaveToSystemStore(extra_prefs);
-        return true;
-      }
-      if (hit == ExtraPrefsControl::cancel) {
-        platform.SetPresentationScale(original_scale);
-        return false;
-      }
-      std::size_t row = 0;
-      float delta = 0.0F;
-      switch (hit) {
-      case ExtraPrefsControl::ui_up:
-        row = 0;
-        delta = kExtraScaleStep;
-        break;
-      case ExtraPrefsControl::ui_down:
-        row = 0;
-        delta = -kExtraScaleStep;
-        break;
-      case ExtraPrefsControl::mission_up:
-        row = 1;
-        delta = kExtraScaleStep;
-        break;
-      case ExtraPrefsControl::mission_down:
-        row = 1;
-        delta = -kExtraScaleStep;
-        break;
-      case ExtraPrefsControl::flight_up:
-        row = 2;
-        delta = kExtraScaleStep;
-        break;
-      case ExtraPrefsControl::flight_down:
-        row = 2;
-        delta = -kExtraScaleStep;
-        break;
-      default:
-        continue;
-      }
-      float *value = ExtraScaleField(working.scale, row);
-      *value = std::clamp(SnapScaleToStep(*value + delta),
-                          kPresentationScaleMin,
-                          kPresentationScaleMax);
-      apply_scale();
-      NovaLog::Info("extra prefs: applied ui={:.2f} flight={:.2f} "
-                    "mission={:.2f}",
-                    platform.ui_scale(),
-                    platform.flight_scene_scale(),
-                    platform.mission_scale());
     }
     platform.PaceFrame();
   }

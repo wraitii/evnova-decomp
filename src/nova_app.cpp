@@ -3,7 +3,6 @@
 #include "brgr_archive.hpp"
 #include "game/about_dialog.hpp"
 #include "game/command_input.hpp"
-#include "game/extended_prefs.hpp"
 #include "game/hud_overlay.hpp"
 #include "game/locate_data_dialog.hpp"
 #include "game/mission.hpp"
@@ -12,6 +11,7 @@
 #include "game/nova_font.hpp"
 #include "game/pilot_file.hpp"
 #include "game/player_info_window.hpp"
+#include "game/preferences_extra.hpp"
 #include "game/probe_state.hpp"
 #include "game/ship_ai.hpp"
 #include "game/ship_spawn.hpp"
@@ -1136,6 +1136,10 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   // Resource and QuickTime startup are not reconstructed yet. Licence checks
   // are deliberately skipped.
   runtime.game_active = false;
+  // Seed the runtime clean-room bug-fix policy from the loaded extra prefs.
+  // GameState owns the live copy the gameplay paths read; NovaExtraPrefs owns
+  // the persisted copy the Extra Prefs dialog edits.
+  runtime.game.bugfixes = runtime.extra_prefs.bugfixes;
   // Ghidra 0x00416100 loads the scenario tables before
   // PilotData_AutoresumeLastPilot. Without that ordering a restored class id
   // has no definition, so the effective-stat pass gives it zero armor and the
@@ -1870,6 +1874,9 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
         runtime.extra_prefs,
         [&runtime] { NovaRender_RedrawAndPresentFrame(runtime, 0); });
     NovaLog::Info("preferences {}", saved ? "saved" : "cancelled");
+    // The Extra Prefs dialog may have edited the bug-fix policy; keep the
+    // live GameState copy in sync with the persisted NovaExtraPrefs copy.
+    runtime.game.bugfixes = runtime.extra_prefs.bugfixes;
     // Force a redraw so the menu backdrop (and any brightness change) is seen.
     NovaRender_RedrawAndPresentFrame(runtime, 1);
     break;

@@ -125,7 +125,7 @@ space). The port's 8-bit pipeline would otherwise leave a ~1/32 residual, so
 **Approximation.** The exact 5-bit `>> 5` per-channel truncation is not
 reproduced (SDL_Renderer exposes no custom shader); the port does the mix in
 8-bit, so mid-range fog is at most one 5-bit step brighter than the original.
-The endpoint is exact via the snap. `kApplyOriginalBugFixes` does not apply to
+The endpoint is exact via the snap. `BugFixPolicy` does not apply to
 any of this (ordinary SDL/platform divergences); it only gates the particle
 `BUGFIX(original)` in `docs/weapon_impact_particles.md`.
 

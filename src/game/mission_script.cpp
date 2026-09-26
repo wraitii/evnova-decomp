@@ -206,7 +206,7 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
       placed = true;
       break;
     }
-    if (!placed && kApplyOriginalBugFixes && !state.system_transition_active) {
+    if (!placed && state.bugfixes.safe && !state.system_transition_active) {
       // BUGFIX(original): see the function comment -- no nav stellar left the
       // executable with no reposition, so patch that residual here.
       state.player.pos_x = 0.0F;
@@ -637,7 +637,7 @@ void Mission_ExecuteScript(GameState &state,
 //
 // TODO(decomp): neither the shared mutable buffer nor the engine's per-byte
 // length re-read is reproduced, and there is deliberately no
-// kApplyOriginalBugFixes gate for the broken path yet; reproducing it would
+// BugFixPolicy gate for the broken path yet; reproducing it would
 // need both.
 // @port 0x00448020 100% divergence
 // DIVERGENCE(original): the engine receives an explicit std::string_view rather

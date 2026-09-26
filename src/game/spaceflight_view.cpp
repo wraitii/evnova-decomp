@@ -1525,7 +1525,7 @@ void SpaceflightView::DrawAsteroids(SdlPlatform &platform,
 // faithfully reproduced. BUGFIX(original): the port therefore does not exhibit
 // the defect (docs/known_original_bugs.md), but this is a renderer-structural
 // divergence -- there is no per-record Sprite to gate -- so it is not routed
-// through kApplyOriginalBugFixes. Plausibly identified; not a faithful port.
+// through BugFixPolicy. Plausibly identified; not a faithful port.
 void SpaceflightView::WrapAsteroids(SdlPlatform &platform, GameState &state) {
   // Ghidra 0x00436910 Asteroid_UpdateSprites culls a record that left the
   // play area against g_viewport_center_x/y; use the synced half-size rather
@@ -1993,9 +1993,9 @@ void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
     // full-bright at any range even in a murky system. Dim them with the same
     // distance_brightness the sprite layers use; alpha-only fading is enough
     // here because particles composite over whatever is behind them (unlike
-    // the opaque ship silhouette, there is nothing to occlude). Gated by
-    // kApplyOriginalBugFixes; see docs/system_murk_rendering.md.
-    if (kApplyOriginalBugFixes && fog_murk_ > 0) {
+    // the opaque ship silhouette, there is nothing to occlude). Gated by the
+    // particle_fog policy; see docs/system_murk_rendering.md.
+    if (state.bugfixes.particle_fog && fog_murk_ > 0) {
       const int distance_brightness = Sprite_DistanceBrightness(
           fog_murk_, camera_x, camera_y, world_x, world_y);
       // d >= 0x1f is fully fogged (matches the sprite fog's ceiling snap).

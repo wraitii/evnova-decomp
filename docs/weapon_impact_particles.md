@@ -92,7 +92,7 @@ behavior; otherwise the common 8-10-tick weapon particles remain fully bright
 until they disappear. The dirty-pixel save/restore pass (`SWParticles_UpdateDirtyPixels`
 0x0047c3a0 / `SWParticles_RestoreSavedPixels` 0x0047bb30) is not reproduced.
 
-`BUGFIX(original)` (gated on `kApplyOriginalBugFixes`): the original gives
+`BUGFIX(original)` (gated on `BugFixPolicy`): the original gives
 `SWParticle`s no murk treatment at all — no `Frame_UpdateSpriteDistanceIntensity`
 call and no tint — so weapon sparks and asteroid debris stay full-bright in a
 murk 100 system. `SpaceflightView::DrawSwParticles` scales each particle's life

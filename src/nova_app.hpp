@@ -1,10 +1,10 @@
 #pragma once
 
 #include "brgr_archive.hpp"
-#include "game/extended_prefs.hpp"
 #include "game/game_state.hpp"
 #include "game/nova_font.hpp"
 #include "game/preferences.hpp"
+#include "game/preferences_extra.hpp"
 #include "rle_sprite_sheet.hpp"
 #include "sdl_audio.hpp"
 #include "sdl_music.hpp"

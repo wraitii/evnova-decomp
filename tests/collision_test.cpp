@@ -1181,7 +1181,7 @@ TEST_CASE("NPC destruction seeds the class DeathDelay timer once",
   CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(10.0F));
 }
 
-TEST_CASE("DeathDelay 0/1 reseed loop follows kApplyOriginalBugFixes",
+TEST_CASE("DeathDelay 0/1 reseed loop follows BugFixPolicy",
           "[collision][ship_visual]") {
   for (const std::int16_t delay : {0, 1}) {
     GameState state;
@@ -1195,7 +1195,7 @@ TEST_CASE("DeathDelay 0/1 reseed loop follows kApplyOriginalBugFixes",
     for (int tick = 0; tick < 4; ++tick) {
       NovaShip_TickDestroyedShipVisualState(state, state.ShipAt(1), 0.63F);
     }
-    if (kApplyOriginalBugFixes) {
+    if (state.bugfixes.safe) {
       CHECK(!state.ShipAt(1).is_active);
     } else {
       // Faithful reproduction: neither delay clears the (0, 2] finale window.

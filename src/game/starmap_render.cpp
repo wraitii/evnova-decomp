@@ -398,7 +398,7 @@ void DrawReticle(SDL_Renderer *renderer,
 // that map area has its government territory clipped. Confirmed engine bug
 // (docs/known_original_bugs.md). The port allocates the buffer to the actual
 // starmap panel instead, so custom layouts are not clipped. Not routed
-// through kApplyOriginalBugFixes: the fixed buffer is a software-surface
+// through BugFixPolicy: the fixed buffer is a software-surface
 // artifact of the original renderer, not reproducible gameplay state.
 PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
                                        const MapView &view,

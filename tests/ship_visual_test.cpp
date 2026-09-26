@@ -437,7 +437,7 @@ TEST_CASE("cloak fade rate reads the device fast-fade bit under the bug fix",
           "[ship][visual][cloak]") {
   // BUGFIX(original): the original gates 1.5/0.75 on ShipClass.flags_secondary
   // bit 0x0001 (swarming), not the ModType-17 device's ModVal 0x0001 ("Faster
-  // fading"); the shipped data inverts the intent. Under kApplyOriginalBugFixes
+  // fading"); the shipped data inverts the intent. Under BugFixPolicy
   // the rate follows the device bit. See docs/known_original_bugs.md.
   GameState state;
   ShipClass cls;

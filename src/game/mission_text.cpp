@@ -544,7 +544,7 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
   ReplaceMissionToken(result, "<REG>", "EV Nova Community");
   // BUGFIX(original): the original's crossed pre-scan buffers break shipped
   // <PRKnnn>/<SRKnnn> text. See ReplacePerGovernmentRankTokens.
-  if (kApplyOriginalBugFixes) {
+  if (state.bugfixes.safe) {
     ReplacePerGovernmentRankTokens(
         state, result, "<PRK", /*use_short_name=*/false);
     ReplacePerGovernmentRankTokens(

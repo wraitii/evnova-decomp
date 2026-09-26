@@ -203,7 +203,7 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data);
 // deactivation. Reseeding when the timer has run out (DeathDelay) matches the
 // original; the player's seed is tripled by g_player_death_timer_scale
 // (0x00575378). Hulls with DeathDelay 0/1 destruct immediately when
-// kApplyOriginalBugFixes is on; with it off they reproduce the original's
+// BugFixPolicy::safe is on; with it off they reproduce the original's
 // immortal-ghost reseed loop.
 void NovaShip_TickDestroyedShipVisualState(GameState &state,
                                            Ship &ship,
@@ -280,7 +280,7 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
 // ticks/frame, or 1.5 when the ship class carries Flags2 0x1
 // (g_cloak_fade_rate_slow 0x0057530c vs g_cloak_fade_rate_fast 0x00575308).
 // The original reads the ship-class swarming bit rather than the cloaking
-// outfit's ModVal 0x0001; under kApplyOriginalBugFixes the fade gates on the
+// outfit's ModVal 0x0001; under BugFixPolicy::safe the fade gates on the
 // device bit instead. A still-visible wreck (progress > 0) latches -2 so the
 // fade continues to clear through the lower 8.0 visibility threshold. While
 // 0 < progress < 32 the per-frame jitter offsets shared by every composite

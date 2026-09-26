@@ -1326,7 +1326,7 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
       // sized by their longest dimension and over-hit edge-on. Nearest-center
       // selection also ignores occlusion. Kept faithful for fidelity; see
       // "Beam collision detection has holes" in docs/known_original_bugs.md.
-      // Deliberately not gated by kApplyOriginalBugFixes.
+      // Deliberately not gated by BugFixPolicy.
       constexpr double kBeamReachFrameScale = 0.66;
       constexpr double kBeamTruncateFrameScale = 0.2;
       float bearing_deg = static_cast<float>(beam.firing_bearing_deg);

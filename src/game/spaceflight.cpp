@@ -1596,7 +1596,10 @@ void PlayerTick_InteractionCloakAndStatus(GameState &state,
       p.shield_points = 0.0F;
     } else {
       spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
-          p, NovaOutfit_GetCloakShieldDrainFlags(state, p), elapsed_ticks);
+          p,
+          NovaOutfit_GetCloakShieldDrainFlags(state, p),
+          elapsed_ticks,
+          state.bugfixes.safe);
     }
   }
 }

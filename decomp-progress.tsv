@@ -860,7 +860,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004BD090	FUN_004bd090		0%	
 0x004BD0C0	Prefs_SetPilotsPathPrefix		0%	Builds the "Pilots:" prefix from EVNova.ini [130] S3. Former Ghidra name Prefs_SetNovaFilesPathPrefix was wrong. Unported; the port resolves a "Pilots" child of the per-user support folder (src/nova_paths.cpp, used by src/game/pilot_file.cpp PilotFileSaveDirectory).
 0x004BD160	Resource_ValidateInstallFolders	src/brgr_archive.cpp	40%	correctness
-0x004BD3C0	NovaData_LoadScenarioResourceTables	src/game/scenario_data.cpp	68%	gameplay,bugfix
+0x004BD3C0	NovaData_LoadScenarioResourceTables	src/game/scenario_data.cpp	68%	gameplay
 0x004C6D50	Ui_LoadSelectionDialogResource		0%	
 0x004C7040	NovaData_LoadDisplayNamePstringTables	src/game/hud_overlay.cpp	95%	ui
 0x004C73B0	NovaResources_CopyStringResource	src/game/hud_overlay.cpp	100%	

@@ -35,7 +35,7 @@ using weapon_detail::WeaponAt;
 // (g_ship_class_defs[ship->ship_class_id].default_weapon_ammo), not the ship's
 // live mounted count, so a bank armed only by a personality delta, capture or
 // purchase never gets its burst counter cleared and reset cooldown preloaded.
-// Under kApplyOriginalBugFixes use the live mounted count; the class-stock
+// Under BugFixPolicy::safe use the live mounted count; the class-stock
 // test is kept when the policy is off.
 void NovaWeapon_InitShipWeaponBursts(GameState &state, Ship &ship) {
   const ShipClass *cls = ShipClassFor(state, ship);
@@ -43,7 +43,7 @@ void NovaWeapon_InitShipWeaponBursts(GameState &state, Ship &ship) {
     return;
   }
   std::array<std::int16_t, kWeaponBankCount> class_mounted{};
-  if constexpr (!kApplyOriginalBugFixes) {
+  if (!state.bugfixes.safe) {
     for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
       if (stock.weapon_id >= 0x80 && stock.weapon_id < 0x180) {
         class_mounted[static_cast<std::size_t>(stock.weapon_id - 0x80)] =
@@ -52,7 +52,7 @@ void NovaWeapon_InitShipWeaponBursts(GameState &state, Ship &ship) {
     }
   }
   for (std::size_t bank = 0; bank < kWeaponBankCount; ++bank) {
-    const std::int16_t mounted = kApplyOriginalBugFixes
+    const std::int16_t mounted = state.bugfixes.safe
                                      ? ship.weapon_banks[bank].mounted
                                      : class_mounted[bank];
     const Weapon *w =
@@ -251,17 +251,19 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
     if (stock.ammo_load > 0) {
       // The original seeds the ammo counter at the mounted weapon's
       // ammo_or_energy_cost_code (out-of-range codes fall back to the bank);
-      // see Menu_RunNewGameFlow 0x00489d70. BUGFIX(original), currently
-      // ungated: for a mode-99 carried-ship bay AmmoType is the carried ship
-      // class id, and the original writes the count into that class slot even
-      // though every read/spend path reads the bay's own counter, leaving the
-      // bay empty. See docs/known_original_bugs.md ("Hxxx/Exxx ship changes
-      // omit carried fighters"). The same fix is applied in
+      // see Menu_RunNewGameFlow 0x00489d70. BUGFIX(original): for a mode-99
+      // carried-ship bay AmmoType is the carried ship class id, and the
+      // original writes the count into that class slot even though every
+      // read/spend path reads the bay's own counter, leaving the bay empty.
+      // Under the safe policy keep the count in the bay's own counter instead.
+      // See docs/known_original_bugs.md ("Hxxx/Exxx ship changes omit carried
+      // fighters"). The same fix is applied in
       // NovaWeapon_AddShipClassStockBanks for the C/E/H mission operators.
       std::size_t ammo_bank = bank;
       const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
-      if (weapon != nullptr && weapon->weapon_mode_code != 99 &&
-          weapon->ammo_type >= 0 &&
+      const bool mode99_bay = state.bugfixes.safe && weapon != nullptr &&
+                              weapon->weapon_mode_code == 99;
+      if (weapon != nullptr && !mode99_bay && weapon->ammo_type >= 0 &&
           weapon->ammo_type < static_cast<std::int16_t>(kWeaponBankCount)) {
         ammo_bank = static_cast<std::size_t>(weapon->ammo_type);
       }
@@ -275,9 +277,9 @@ void NovaWeapon_AddShipClassStockBanks(GameState &state,
   // Ghidra 0x00449370 'C'/'E'/'H': add the new class's mounted stock weapons
   // on top of the retained loadout. Like NovaWeapon_SeedBanksFromShipStock it
   // keeps a mode-99 carried-ship count in the bay's own counter instead of the
-  // class slot the original writes: BUGFIX(original), currently ungated (see
-  // the sibling helper and docs/known_original_bugs.md "Hxxx/Exxx ship changes
-  // omit carried fighters").
+  // class slot the original writes: BUGFIX(original), gated on the safe
+  // policy (see the sibling helper and docs/known_original_bugs.md
+  // "Hxxx/Exxx ship changes omit carried fighters").
   const ShipClass *ship =
       state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80));
   if (ship == nullptr) {
@@ -294,8 +296,9 @@ void NovaWeapon_AddShipClassStockBanks(GameState &state,
     if (stock.ammo_load > 0) {
       std::int16_t ammo_bank = bank;
       const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
-      if (weapon != nullptr && weapon->weapon_mode_code != 99 &&
-          weapon->ammo_type >= 0 &&
+      const bool mode99_bay = state.bugfixes.safe && weapon != nullptr &&
+                              weapon->weapon_mode_code == 99;
+      if (weapon != nullptr && !mode99_bay && weapon->ammo_type >= 0 &&
           weapon->ammo_type < static_cast<std::int16_t>(kWeaponBankCount)) {
         ammo_bank = weapon->ammo_type;
       }
