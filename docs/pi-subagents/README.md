@@ -44,14 +44,19 @@ git status --short > "$run_dir/base-status.txt"
 git diff --binary > "$run_dir/base-unstaged.patch"
 git diff --cached --binary > "$run_dir/base-staged.patch"
 # Write your prompt to "$run_dir/task.md", then:
-node tools/pi_session.mjs start --run "$run_dir" \
+node tools/pi_session.mjs start --detach --run "$run_dir" \
   --task "$run_dir/task.md" --budget 0.50
 ```
 
-Keep `start` running as a managed process. Use the absolute run path in later
-calls; shell variables may not persist. If credential/configuration lock access
-is blocked, use host approval; don't print credentials or bypass a rejection.
-Approval may explicitly need to cover sending repository contents to the provider.
+`--detach` re-execs the supervisor as a session-leader daemon, logs to
+`$run_dir/daemon.log`, writes `$run_dir/launcher.pid`, and returns as soon as
+`status.json` exists, so a harness that runs each command in a fresh shell keeps
+the session across calls. Without `--detach` the supervisor runs in the
+foreground and must be backgrounded by the caller. Use the absolute run path in
+later calls; shell variables may not persist. If credential/configuration lock
+access is blocked, use host approval; don't print credentials or bypass a
+rejection. Approval may explicitly need to cover sending repository contents to
+the provider.
 
 ## Monitor and guide
 
@@ -99,4 +104,7 @@ node tools/pi_session.mjs abort --run /absolute/run/dir
 ```
 
 `close` requires an idle session; `abort` stops the current turn and returns to
-idle. Inspect partial edits and unfinished checks before resuming.
+idle. Inspect partial edits and unfinished checks before resuming. Sending
+`SIGTERM` (or `SIGINT`) to the supervisor aborts the current turn, records
+`exitSignal` in `status.json`, and shuts down; `close` waits for an orderly
+exit before forcing it.
