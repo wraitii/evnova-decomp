@@ -64,8 +64,15 @@ constexpr float kTurnRadiusScale50 = 50.0F;
 constexpr float kAssistTurnRadiusScale =
     30.0F; // FLOAT_005750c0 (state 0xc outer band)
 // FLOAT_005750d0 = 60.0: state-0xc inner band (mode 9 beyond it, mode 0xb
-// between outer and inner). 15.0 (FLOAT_005750d4) belongs to state 9's range.
+// between outer and inner).
 constexpr float kAssistInnerTurnRadiusScale = 60.0F;
+// State-9 energy-transfer service: keep range = (kTurnRadiusBase - class_turn)
+// * 15.0 (FLOAT_005750d4), truncated toward zero. The service adds up to
+// kRefuelTransferRate fuel per tick until the customer passes
+// kRefuelCompleteFuel.
+constexpr float kAssistServiceRangeScale = 15.0F;
+constexpr float kRefuelTransferRate = 1.0F;
+constexpr float kRefuelCompleteFuel = 100.0F;
 constexpr float kCombatStationRange = 251.0F;
 // State-4 standoff weapon-range scale (0x5750b8 double, aliased at 0x575850);
 // the reach is multiplied in x87 and the result truncated toward zero.
@@ -76,7 +83,7 @@ constexpr double kStandoffDisabledScale = 0.5;
 
 } // namespace
 
-// @port 0x00405590 70% gameplay,ui,license
+// @port 0x00405590 75% gameplay,ui,license
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame state machine. This
 // is a substantial function; the reconstruction below covers the core
 // movement/control-mode decision for the states the reimplementation drives
@@ -563,6 +570,60 @@ void NovaAi_UpdateShipState(GameState &state,
   if (ship.ai_state_code == 8) {
     ship.ai_station_hold_timer = -999.0F;
     ship.ai_control_mode = 10;
+    return;
+  }
+
+  // ---- Energy-transfer service (state 9). The service ship holds station at
+  // trunc((10 - class_turn) * 15.0) px; farther out it keeps the 0xb approach
+  // mode, while moving it brakes. Once stopped it feeds 1.0 fuel per tick to
+  // the customer until it passes 100.0, then clears the state. A player
+  // customer also gets the completion voice line and overlay; the original's
+  // status/fuel-panel dirty latches have no equivalent here because the HUD
+  // recomputes each panel every frame.
+  if (ship.ai_state_code == 9) {
+    if (ship.primary_target_ship_slot == -1) {
+      return;
+    }
+    const auto target_slot =
+        static_cast<std::size_t>(ship.primary_target_ship_slot);
+    Ship &target = state.ShipAt(target_slot);
+    ship.ai_control_mode = 0xb;
+    const auto *cls = ShipClassFor(state, ship);
+    const float turn = cls != nullptr ? cls->turn_rate * 0.1F : 0.0F;
+    // Truncate toward zero (x87 FIST + residual/sign correction).
+    const float keeping_range = static_cast<float>(
+        static_cast<int>((kTurnRadiusBase - turn) * kAssistServiceRangeScale));
+    if (keeping_range < std::abs(ship.pos_x - target.pos_x) ||
+        keeping_range < std::abs(ship.pos_y - target.pos_y)) {
+      ship.ai_control_mode = 0xb;
+    } else if (std::abs(ship.vel_x) >= kVerySlowSpeed ||
+               std::abs(ship.vel_y) >= kVerySlowSpeed) {
+      ship.ai_control_mode = 1;
+    } else {
+      ship.vel_y = 0.0F;
+      ship.vel_x = 0.0F;
+      if (target.fuel_points > kRefuelCompleteFuel) {
+        if (target_slot == 0) {
+          // NovaAudio_FillVoiceSlotDescriptor(transition_sounds[1], 1, ...).
+          state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
+          std::string message = cls != nullptr ? cls->display_name : "";
+          message += ":  ";
+          message += NovaHud_LoadStringEntry(0x7d2, 3).value_or(
+              "Energy transfer complete");
+          message += ", ";
+          message += state.player.ship_name;
+          message += '.';
+          NovaHud_ShowOverlayMessage(
+              state, std::move(message), static_cast<std::uint64_t>(0xf0));
+        }
+        ship.ai_state_code = 0;
+        ship.ai_control_mode = 0;
+        ship.primary_target_ship_slot = -1;
+        ship.ai_secondary_target_slot = -1;
+      } else {
+        target.fuel_points += kRefuelTransferRate;
+      }
+    }
     return;
   }
 
