@@ -23,6 +23,16 @@ constexpr std::uint32_t kAppleSingleMagic = 0x00051600;
 constexpr std::uint32_t kAppleDoubleMagic = 0x00051607;
 constexpr std::uint32_t kAppleSingleVersion = 0x00020000;
 constexpr std::uint32_t kAppleResourceForkEntry = 2;
+// MacBinary header offsets for the fork lengths. The reader deliberately does
+// not look at the CRC at 124 (see IsMacBinaryHeader).
+constexpr std::size_t kMacBinaryDataLengthOffset = 83;
+constexpr std::size_t kMacBinaryResourceLengthOffset = 87;
+constexpr std::size_t kMacBinaryForkAlignment = 128;
+
+[[nodiscard]] std::size_t RoundUpToForkAlignment(std::size_t value) {
+  const auto remainder = value % kMacBinaryForkAlignment;
+  return remainder == 0 ? value : value + (kMacBinaryForkAlignment - remainder);
+}
 
 [[nodiscard]] bool
 InBounds(std::size_t offset, std::size_t length, std::size_t size) {
@@ -107,6 +117,58 @@ bool IsAppleSingleOrDoubleHeader(std::span<const std::byte> header) {
   const auto magic = ReadBe32(header, 0);
   return (magic == kAppleSingleMagic || magic == kAppleDoubleMagic) &&
          ReadBe32(header, 4) == kAppleSingleVersion;
+}
+
+bool IsMacBinaryHeader(std::span<const std::byte> header,
+                       std::size_t file_size) {
+  if (header.size() < kMacBinaryHeaderSize ||
+      file_size < kMacBinaryHeaderSize) {
+    return false;
+  }
+  // A MacBinary header always begins with a zero version byte and a Pascal
+  // filename of at most 63 non-NUL bytes.
+  if (header[0] != std::byte{0}) {
+    return false;
+  }
+  const auto name_length = std::to_integer<std::uint8_t>(header[1]);
+  if (name_length == 0 || name_length > 63) {
+    return false;
+  }
+  for (std::size_t index = 0; index < name_length; ++index) {
+    if (header[2 + index] == std::byte{0}) {
+      return false;
+    }
+  }
+  // Bytes reserved by the MacBinary I/II specs must be zero; a non-zero value
+  // means this is some other container (e.g. a raw StuffIt archive).
+  if (header[74] != std::byte{0} || header[82] != std::byte{0}) {
+    return false;
+  }
+  const auto data_length =
+      static_cast<std::size_t>(ReadBe32(header, kMacBinaryDataLengthOffset));
+  const auto resource_length = static_cast<std::size_t>(
+      ReadBe32(header, kMacBinaryResourceLengthOffset));
+  // Only images that actually carry a resource fork are useful to this reader.
+  if (resource_length == 0) {
+    return false;
+  }
+  const auto resource_offset =
+      kMacBinaryHeaderSize + RoundUpToForkAlignment(data_length);
+  return InBounds(resource_offset, resource_length, file_size);
+}
+
+std::optional<ResourceFork> ParseMacBinary(std::span<const std::byte> data) {
+  if (!IsMacBinaryHeader(data, data.size())) {
+    return std::nullopt;
+  }
+  const auto data_length =
+      static_cast<std::size_t>(ReadBe32(data, kMacBinaryDataLengthOffset));
+  const auto resource_length =
+      static_cast<std::size_t>(ReadBe32(data, kMacBinaryResourceLengthOffset));
+  // The data fork is padded to a 128-byte boundary before the resource fork.
+  const auto resource_offset =
+      kMacBinaryHeaderSize + RoundUpToForkAlignment(data_length);
+  return ParseResourceFork(data.subspan(resource_offset, resource_length));
 }
 
 std::optional<ResourceFork>

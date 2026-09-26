@@ -30,6 +30,12 @@
 // A resource whose attribute bit 0x01 is set is stored compressed with a
 // 'dcmp' decompressor; this reader reports the attribute but does not
 // decompress (the caller decides how to handle it).
+//
+// Besides the raw fork, the reader accepts the two ways a Mac file flattened
+// its fork into a data fork: AppleSingle/AppleDouble (magic 0x00051600/
+// 0x00051607, fork as a named entry) and MacBinary (a 128-byte header followed
+// by the data fork, then the resource fork, each padded to a 128-byte
+// boundary).
 
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +49,11 @@ namespace evnova::rez {
 
 // Attribute bit for a 'dcmp'-compressed payload (resCompressed).
 constexpr std::uint8_t kResourceAttributeCompressed = 0x01;
+
+// MacBinary wraps a whole classic Mac file (128-byte header, data fork, then
+// resource fork) in one flat file. This reader only needs the header and the
+// embedded resource fork.
+constexpr std::size_t kMacBinaryHeaderSize = 128;
 
 struct ResourceForkResource {
   std::uint32_t type_code = 0;
@@ -78,6 +89,21 @@ ReadFilePrefix(const std::filesystem::path &path, std::size_t max_bytes);
                                         std::size_t file_size);
 [[nodiscard]] bool
 IsAppleSingleOrDoubleHeader(std::span<const std::byte> header);
+
+// Cheap pre-filter for a MacBinary image whose embedded resource fork is
+// declared non-empty and fits within `file_size` bytes. Both MacBinary I (no
+// signature) and MacBinary II/III (signature at offset 102, version at 122)
+// are accepted. The header CRC at offset 124 is deliberately not required:
+// Mac-era files often ship a stale or zeroed one (the embedded fork's own map
+// is the real validation), so rejecting on it would drop valid plug-ins.
+[[nodiscard]] bool IsMacBinaryHeader(std::span<const std::byte> header,
+                                     std::size_t file_size);
+
+// Extracts and parses the resource fork embedded in a MacBinary image. Returns
+// nullopt when `data` is not MacBinary, declares no resource fork (a
+// data-fork-only image such as a StuffIt archive), or the fork is malformed.
+[[nodiscard]] std::optional<ResourceFork>
+ParseMacBinary(std::span<const std::byte> data);
 
 // Parses a complete resource-fork image. Returns nullopt when the header or
 // map is malformed; individual out-of-bounds resources are skipped.

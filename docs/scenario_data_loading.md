@@ -26,9 +26,12 @@ Archive files come in two interchangeable containers, both consumed by
   [u16 res_id][name]`).
 - **Classic Macintosh resource fork** — the original Mac form, parsed by
   `src/mac_resource_fork.cpp` and consumed unchanged. On macOS it is read from
-  the `..namedfork/rsrc` pseudo-file; an AppleSingle/AppleDouble image in the
-  data fork (`._name` sidecar) is also accepted, so unpacked Mac data works
-  elsewhere. The two forms are losslessly equivalent: the `sh\x95p` /
+  the `..namedfork/rsrc` pseudo-file; a fork flattened into the data fork is
+  also accepted, so unpacked Mac data works elsewhere: an AppleSingle/
+  AppleDouble image (magic `0x00051600`/`0x00051607`, `._name` sidecar) or a
+  MacBinary image (128-byte header + data fork + resource fork, the `.bin`
+  form Mac plug-ins were distributed in). The two forms are losslessly
+  equivalent: the `sh\x95p` /
   `o\x9ftf` / ... resources and names ResForge carries over are byte-identical,
   only the container and the resource ordering differ.
 

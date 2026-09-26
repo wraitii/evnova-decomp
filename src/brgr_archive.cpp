@@ -254,8 +254,9 @@ ParseBrgrArchive(std::vector<std::byte> bytes,
 // @port 0x004CE4D0 80% correctness
 // Ghidra 0x004ce4d0 ResourceArchive_OpenRez: dispatches on the container. The
 // original CE executable only knows the flat 'BRGR' form (ParseBrgrArchive
-// above); the Mac resource-fork branch is a port extension so original Mac
-// data and plug-ins load unchanged. TODO(decomp(0x004ce4d0)): the original
+// above); the Mac resource-fork branch (raw fork, AppleSingle/AppleDouble, or
+// MacBinary image) is a port extension so original Mac data and plug-ins load
+// unchanged. TODO(decomp(0x004ce4d0)): the original
 // locates resource.map by name via FUN_00501710("resource.map"); the port
 // scans entries for a plausible map header. Verify the scan accepts every
 // shipped map variant and cannot select a wrong region.
@@ -263,7 +264,12 @@ ParseBrgrArchive(std::vector<std::byte> bytes,
 ParseArchive(const std::filesystem::path &path) {
   std::error_code size_ec;
   const auto file_size = std::filesystem::file_size(path, size_ec);
-  const auto prefix = evnova::rez::ReadFilePrefix(path, 16);
+  const auto file_size_value =
+      size_ec ? std::size_t{0} : static_cast<std::size_t>(file_size);
+  // A MacBinary image needs the full 128-byte header to read its fork lengths;
+  // other containers are recognizable from a shorter prefix.
+  const auto prefix =
+      evnova::rez::ReadFilePrefix(path, evnova::rez::kMacBinaryHeaderSize);
   // Sniff the container from a short prefix first: the data folders also hold
   // large media (Nova Music.mp3, Race *.mov) that must not be read wholesale
   // only to be rejected.
@@ -274,16 +280,21 @@ ParseArchive(const std::filesystem::path &path) {
     NovaLog::Warn("archive is unreadable: {}", path.string());
     return std::nullopt;
   }
-  // A resource fork can live in the data fork (AppleSingle/AppleDouble, or a
-  // fork flattened into the file) rather than beside it.
+  // A resource fork can live in the data fork (a raw fork, an
+  // AppleSingle/AppleDouble image, or a MacBinary image) rather than beside
+  // the file.
+  const bool is_mac_binary =
+      prefix && evnova::rez::IsMacBinaryHeader(*prefix, file_size_value);
   const bool data_fork_is_fork =
       prefix &&
-      (evnova::rez::IsAppleSingleOrDoubleHeader(*prefix) ||
-       evnova::rez::IsResourceForkHeader(
-           *prefix, size_ec ? 0 : static_cast<std::size_t>(file_size)));
+      (is_mac_binary || evnova::rez::IsAppleSingleOrDoubleHeader(*prefix) ||
+       evnova::rez::IsResourceForkHeader(*prefix, file_size_value));
   if (data_fork_is_fork) {
     if (auto bytes = evnova::rez::ReadFileBytes(path)) {
-      if (auto fork = evnova::rez::ParseResourceForkOrAppleDouble(*bytes)) {
+      auto fork = is_mac_binary
+                      ? evnova::rez::ParseMacBinary(*bytes)
+                      : evnova::rez::ParseResourceForkOrAppleDouble(*bytes);
+      if (fork) {
         return LoadedFromResourceFork(std::move(*fork), path);
       }
     }
