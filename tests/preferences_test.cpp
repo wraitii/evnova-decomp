@@ -218,7 +218,7 @@ TEST_CASE("Locked quality preferences force the render values") {
   CHECK(prefs.running_lights == true);
   CHECK(prefs.weapon_effects == true);
   CHECK(prefs.parallax_starfield == true);
-  CHECK(prefs.hyperspace_effects == false); // inverted: 0 = effects on
+  CHECK(prefs.hyperspace_effects == true); // NOT locked: live effect toggle
   CHECK(prefs.check_for_updates == true);
   CHECK(prefs.brightness == 3);
   // starmap_show_borders is NOT locked: the map owns it.
@@ -239,6 +239,9 @@ TEST_CASE("Original preference file round-trips modeled settings and keys") {
   written.sound_volume = 8;
   // starmap_show_borders is not locked, so its stored value round-trips.
   written.starmap_show_borders = false;
+  // hyperspace_effects is not locked either, so a stored non-zero byte (effects
+  // off -> black flash) round-trips instead of being forced back to white.
+  written.hyperspace_effects = true;
   written.bindings.cmd_to_key[0x15] = 0x20;
   // Locked fields are written but forced to the render values on load.
   written.brightness = 6;
@@ -254,6 +257,7 @@ TEST_CASE("Original preference file round-trips modeled settings and keys") {
   CHECK(loaded.intro_music == false);
   CHECK(loaded.sound_volume == 8);
   CHECK(loaded.starmap_show_borders == false);
+  CHECK(loaded.hyperspace_effects == true);
   CHECK(loaded.bindings.cmd_to_key[0x15] == 0x20);
   // Locked fields ignore whatever the file held.
   CHECK(loaded.brightness == 3);

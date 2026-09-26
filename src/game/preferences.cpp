@@ -671,7 +671,6 @@ void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs) {
   prefs.running_lights = true;
   prefs.weapon_effects = true;
   prefs.parallax_starfield = true;
-  prefs.hyperspace_effects = false; // inverted: false = effects on
   prefs.check_for_updates = true;
   prefs.brightness = 3;
 }
@@ -681,8 +680,9 @@ void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs) {
 // little-endian 0x8c-byte version-0x69 payload from the per-user support
 // folder (NovaPaths::SupportDirectory), resets bindings before applying the 34
 // persisted display rows, and forces the locked quality/graphics fields via
-// NovaPrefs_ApplyLockedPreferences while starmap_show_borders (+0x76) is read
-// normally. Legacy flags, sensitivity, and two opaque control shorts remain
+// NovaPrefs_ApplyLockedPreferences while starmap_show_borders (+0x76) and
+// hyperspace_effects (+0x78) are read normally. Legacy flags, sensitivity, and
+// two opaque control shorts remain
 // unmodeled. DIVERGENCE(original): preferences live under the SDL per-user
 // support path instead of the original @: volume-relative path; a separate
 // "EV Nova Extra Prefs" INI for decomp-only settings is planned there.
@@ -808,7 +808,6 @@ namespace {
   case 13: // Running Lights
   case 14: // Weapon Effects
   case 17: // Parallax Starfield
-  case 20: // Hyperspace Effects
   case 21: // Check For Updates
     return true;
   default:

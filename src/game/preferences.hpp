@@ -96,9 +96,10 @@ struct NovaPreferences {
   bool ambient_sounds = true;
   // Ghidra g_hyperspace_effects (inverted flag: 0 = effects on). Used by the
   // hyperspace flash as the CE colour gate: non-zero forces black, otherwise
-  // the requested white is applied (0x00872384). The CE build also uses this
-  // byte as a raw-input lock; the clean-room keeps it as a pure effect toggle
-  // (documented divergence).
+  // the requested white is applied (0x00872384). The Settings checkbox reads
+  // inverted(hyperspace_effects), so the default (false) is effects-on white.
+  // The CE build also uses this byte as a raw-input lock; the clean-room keeps
+  // it as a pure effect toggle (documented divergence).
   bool hyperspace_effects = false;
   // Ghidra g_pref_check_for_updates (inverted flag: 0 = check for updates).
   bool check_for_updates = true;
@@ -121,10 +122,10 @@ struct NovaPreferences {
 // (inverted: 1 = movies off; playback unsupported), smoke_trails=false,
 // ship_animations=true,
 // engine_glows=true, running_lights=true, weapon_effects=true,
-// parallax_starfield=true, hyperspace_effects=false, check_for_updates=true,
-// brightness=3.
-// starmap_show_borders is NOT locked (the map toggles it), and neither is
-// run_in_window: it defaults ON and the Settings checkbox applies it live.
+// parallax_starfield=true, check_for_updates=true, brightness=3.
+// hyperspace_effects, starmap_show_borders and run_in_window are NOT locked:
+// the first is a live effect toggle, the map owns the second, and the third
+// defaults ON with the Settings checkbox applying it live.
 void NovaPrefs_ApplyLockedPreferences(NovaPreferences &prefs);
 
 // @port 0x00872384 100%
