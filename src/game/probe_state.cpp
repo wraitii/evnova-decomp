@@ -285,6 +285,19 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("ai_station_hold_timer", ship.ai_station_hold_timer);
       row.num("ai_maneuver_timer", ship.ai_maneuver_timer_ms);
       row.num("primary_target_ship_slot", ship.primary_target_ship_slot);
+      // Escort-order investigation: the command selected by the squad
+      // supervisor, the polymorphic travel/ship target slot, and the AI's
+      // resolved leader. Along with the +0xC0..+0xC2 leader flags below they
+      // discriminate "orders never issued" from "faithful defensive hold".
+      row.num("escort_command_code", ship.escort_command_code);
+      row.num("escort_command_pending", ship.escort_command_pending);
+      row.num("ai_secondary_target_slot", ship.ai_secondary_target_slot);
+      row.num("resolved_squad_leader_ship_slot",
+              ship.resolved_squad_leader_ship_slot);
+      row.boolean("is_any_ships_squad_leader", ship.is_any_ships_squad_leader);
+      row.boolean("ai_followed_as_leader", ship.ai_followed_as_leader);
+      row.boolean("ai_selected_as_resolved_target",
+                  ship.ai_selected_as_resolved_target);
       row.num("active_weapon_bank_slot", ship.active_weapon_bank_slot);
       row.num("ai_fire_trigger_latch", ship.ai_fire_trigger_latch);
       row.num("inbound_weapon_threat", ship.inbound_weapon_threat);
