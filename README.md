@@ -2,7 +2,7 @@
 
 C++23 reimplementation project for the *Escape Velocity Nova* engine. The original game data and reverse-engineering artefacts remain local and are intentionally not versioned.
 
-The reimplementation is based on the [Windows Community Edition](https://escape-velocity.games), since that's the latest patch for Nova.  
+The reimplementation is based on the [Windows Community Edition](https://escape-velocity.games), since that's the "latest patch" for Nova.  
 One exception: the hyperjump animation mimics the original Mac behaviour with fade-in/out.
 
 ## Scope
@@ -16,7 +16,32 @@ Relation to:
 
 ## Current status
 
-80-90% of the way there on vibes. There are missing pieces in a number of places like ship buying, escort management, some mission functionalities. Ship paints. Shield bubbles. Probably a number of other things. The fidelity is a little spiky, so large parts are completed with odd warts here and there too.
+Untested, but original nova should be 100% playable with essentially no noticeable differences to a regular player.
+Remaining missing pieces are small, e.g. ship paints, shield bubbles, stellar domination, and a few highly specific behaviours that stock nova didn't test but plug-ins might.
+However, many parts are not deterministically reproducible, so there will be minor differences in AI tick rate & the like that lead to a technically different gameplay experience.
+
+## Extra features / divergences
+
+The reimplementation exposes "extra preferences" in the prefs dialog. You can set scaling independently for all UI/HUD, the in-game flight scene, and the mission dialog specifically because 9pt geneva will damage your eyesight.
+The port also fixes a number of known bugs, some of which can be toggled on/off. I maintain a full list of known bugs/quirks [here](docs/known_original_bugs.md).
+Finally, it's rendering on Hi-DPI properly by default. For now, the simulation speed is capped like the original Nova (mostly 30/48fps depending), though I plan to unlock that later.
+
+## Game data
+
+The reimplementation runs on an installed copy of the Windows CE data. That data is not versioned here.
+The game asks for the Community Edition .exe when starting so it can locate the data, unles it can find it automatically. It checks:
+- the directory next to the executable,
+- `EV Nova/` relative to the working directory,
+- `../../../EV Nova` relative to the working directory (for tests).
+
+User files are stored at `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`: on macOS `~/Library/Application Support/Ambrosia Software/EV Nova/`.
+
+### Plug-ins
+
+The reimplementation loads windows & mac-os plug-ins, so there's technically no need to convert. (Note: macos dcmp-compressed data is unsupported but I really doubt this affects any plug-in). You can put them in the regular CE plugin folder or in your user-specific folder.
+
+Total conversions are currently not particularly supported (you'd have to replace files manually), I plan to implement some sort of mod manager at some point here.
+
 
 ## AI slop disclaimer
 
@@ -89,34 +114,3 @@ build\release\src\evnova.exe        # Windows
 ```
 
 The optional probe/control harness ([docs/probe_harness.md](docs/probe_harness.md)) is built by default on macOS/Linux and off on Windows, since its transport is a POSIX socket server. Toggle it with `-DEVNOVA_ENABLE_PROBE=ON|OFF` when configuring.
-
-Logging always goes to stderr. Launchers that detach the console (for example a Windows bottle under Wine/CrossOver) drop that output, so set `EVNOVA_LOG_FILE=<path>` to additionally mirror the log to that file (truncated each run).
-
-### Game data
-
-The reimplementation runs on an installed copy of the Windows CE data. That
-data (the `.rez` archives, `Nova Files/`, `Nova Plug-ins/` and the
-`Charcoal.ttf`/`Geneva.ttf` fonts) is kept locally and is not versioned here.
-
-It resolves two directories:
-
-- **Install root** — the read-only shipped data. The first candidate that
-  contains `Nova.rez` or a `Nova Files/` directory wins:
-  1. the directory next to the executable,
-  2. `EV Nova/` relative to the working directory,
-  3. `../../../EV Nova` relative to the working directory.
-- **Support folder** — per-user writable state (`Pilots/`, user plug-ins),
-  from `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`: on macOS
-  `~/Library/Application Support/Ambrosia Software/EV Nova/`.
-
-`.rez` archives load from weakest to strongest, so later ones override earlier
-ones: `Nova.rez` → `Nova Files/*.rez` → `Nova Plug-ins/*.rez` → support-folder
-`Nova Plug-ins/*.rez`. (A bare `Plug-ins/` is used when the CE-style
-`Nova Plug-ins/` folder is absent.)
-
-If none of that finds the data, the game shows a **Locate EV Nova.exe** screen
-on a black background. Pick `EV Nova.exe` from your Community Edition folder;
-the chosen folder is validated and remembered as `install_root` in
-`EV Nova Extra Prefs.ini` under the support folder, and is used on later runs.
-The usual way to avoid seeing this screen is to run from inside the install
-folder, or from the repo root (which holds the gitignored `EV Nova/` folder).
