@@ -1,0 +1,302 @@
+name: Distribute nightly
+
+on:
+  workflow_run:
+    # During rollout, distribute successful main builds. Move this trigger to
+    # published releases when nightly notarization is no longer wanted.
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful main CI run ID to distribute
+        required: true
+        type: string
+      resume_run_id:
+        description: Distribution run ID holding macos-notary-state (blank for a new submission)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+# A newer successful CI build supersedes the previous distribution run.
+# Its signed archive and submission receipt are saved before the long wait.
+concurrency:
+  group: distribute-nightly
+  cancel-in-progress: true
+
+jobs:
+  source:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    outputs:
+      ci_run: ${{ steps.validate.outputs.ci_run }}
+      sha: ${{ steps.validate.outputs.sha }}
+      resume: ${{ steps.validate.outputs.resume }}
+    steps:
+      # workflow_run has access to secrets: validate provenance through GitHub's
+      # API before downloading artifacts or running any repository code.
+      - name: Validate source and resume runs
+        id: validate
+        uses: actions/github-script@v7
+        env:
+          CI_RUN: ${{ inputs.ci_run_id || github.event.workflow_run.id }}
+          RESUME_RUN: ${{ inputs.resume_run_id }}
+        with:
+          script: |
+            const repo = context.repo;
+            async function getRun(id) {
+              if (!/^[0-9]+$/.test(id)) throw new Error('Expected a numeric workflow run ID');
+              return (await github.rest.actions.getWorkflowRun({...repo, run_id: id})).data;
+            }
+            function trusted(run, path, events) {
+              if (run.path !== path || run.head_branch !== 'main' ||
+                  run.head_repository?.full_name !== `${repo.owner}/${repo.repo}` ||
+                  !events.includes(run.event)) {
+                throw new Error(`Untrusted source workflow run ${run.id}`);
+              }
+            }
+            const ci = await getRun(process.env.CI_RUN);
+            trusted(ci, '.github/workflows/ci.yml', ['push', 'workflow_dispatch']);
+            if (ci.conclusion !== 'success') throw new Error('CI must have succeeded');
+            const resume = process.env.RESUME_RUN;
+            if (resume) {
+              const previous = await getRun(resume);
+              trusted(previous, '.github/workflows/distribute.yml', ['workflow_run', 'workflow_dispatch']);
+            }
+            core.setOutput('ci_run', String(ci.id));
+            core.setOutput('sha', ci.head_sha);
+            core.setOutput('resume', resume);
+
+  notarize:
+    needs: source
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      ready: ${{ steps.finish.outputs.ready }}
+    env:
+      SOURCE_RUN: ${{ needs.source.outputs.ci_run }}
+      SOURCE_SHA: ${{ needs.source.outputs.sha }}
+    steps:
+      - name: Check out trusted distribution tools
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # This check lives in the job (not only source), so "re-run failed
+      # jobs" also reuses the receipt from the previous attempt.
+      - name: Reuse submission from an earlier attempt
+        id: resume
+        uses: actions/github-script@v7
+        env:
+          RESUME_RUN: ${{ needs.source.outputs.resume }}
+        with:
+          script: |
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts,
+              {...context.repo, run_id: context.runId});
+            const saved = artifacts.some(a => a.name === 'macos-notary-state' && !a.expired);
+            core.setOutput('run', saved ? String(context.runId) : process.env.RESUME_RUN);
+
+      - name: Download app from successful CI
+        if: steps.resume.outputs.run == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: evnova-macos-arm64
+          path: input
+          run-id: ${{ needs.source.outputs.ci_run }}
+          github-token: ${{ github.token }}
+
+      - name: Restore signed app and submission ID
+        if: steps.resume.outputs.run != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-notary-state
+          path: notary-state
+          run-id: ${{ steps.resume.outputs.run }}
+          github-token: ${{ github.token }}
+
+      - name: Prepare temporary notarization keychain
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+          keychain="$RUNNER_TEMP/evnova-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$keychain_password"
+          echo "KEYCHAIN_PASSWORD=$keychain_password" >> "$GITHUB_ENV"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          xcrun notarytool store-credentials evnova-notary --keychain "$keychain" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+
+      - name: Sign preserved CI app with Developer ID
+        if: steps.resume.outputs.run == ''
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          for name in MACOS_CERTIFICATE_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGNING_IDENTITY; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+          keychain="$RUNNER_TEMP/evnova-signing.keychain-db"
+          certificate="$RUNNER_TEMP/evnova-signing.p12"
+          printf '%s' "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$certificate"
+          security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$KEYCHAIN_PASSWORD" "$keychain" >/dev/null
+          rm -f "$certificate"
+          ditto -x -k input/evnova-macos-arm64.zip staging
+          codesign --force --sign "$MACOS_SIGNING_IDENTITY" --options runtime --timestamp \
+            --keychain "$keychain" 'staging/EV Nova.app'
+          codesign --verify --deep --strict --verbose=2 'staging/EV Nova.app'
+          mkdir -p notary-state
+          ditto -c -k --keepParent --sequesterRsrc 'staging/EV Nova.app' notary-state/signed.zip
+
+      - name: Submit to Apple and save submission ID
+        if: steps.resume.outputs.run == ''
+        run: >-
+          python3 tools/notarize_macos.py submit
+          --archive notary-state/signed.zip --state-dir notary-state
+          --profile evnova-notary --keychain "$RUNNER_TEMP/evnova-signing.keychain-db"
+          --source-run "$SOURCE_RUN" --source-sha "$SOURCE_SHA"
+
+      # Save BEFORE waiting, so a timeout, failed stapling or cancelled runner
+      # does not lose the exact signed bytes Apple is analysing.
+      - name: Preserve resumable submission for 90 days
+        if: always() && hashFiles('notary-state/submission.json') != '' && steps.resume.outputs.run != github.run_id
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-notary-state
+          path: |
+            notary-state/signed.zip
+            notary-state/submission.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Check Apple status and staple when accepted
+        id: finish
+        run: >-
+          python3 tools/notarize_macos.py finish
+          --state-dir notary-state --output dist/evnova-macos-arm64.zip
+          --profile evnova-notary --keychain "$RUNNER_TEMP/evnova-signing.keychain-db"
+          --source-run "$SOURCE_RUN" --source-sha "$SOURCE_SHA" --wait-seconds 2700
+
+      - name: Upload notarized distribution
+        if: steps.finish.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evnova-macos-arm64-notarized
+          path: dist/evnova-macos-arm64.zip
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+      - name: Record result and resume command
+        if: always() && hashFiles('notary-state/submission.json') != ''
+        env:
+          READY: ${{ steps.finish.outputs.ready }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          receipt = json.loads(Path('notary-state/submission.json').read_text())
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write(f"Apple submission: `{receipt['id']}`\n\n")
+              summary.write(f"Source CI: `{receipt['source_run']}` / `{receipt['source_sha']}`\n\n")
+              if os.environ['READY'] == 'true':
+                  summary.write('Accepted, stapled, and verified.\n')
+              else:
+                  summary.write('Not published. If Apple is still processing, resume later without rebuilding or resubmitting:\n\n')
+                  summary.write('```sh\ngh workflow run distribute.yml --ref main '
+                                f"-f ci_run_id={receipt['source_run']} "
+                                f"-f resume_run_id={os.environ['GITHUB_RUN_ID']}\n```\n")
+          PY
+
+      - name: Clean up signing credentials
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/evnova-signing.p12"
+          if [[ -f "$RUNNER_TEMP/evnova-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/evnova-signing.keychain-db"
+          fi
+
+  publish:
+    needs: [source, notarize]
+    if: needs.notarize.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Skip obsolete builds
+        id: current
+        uses: actions/github-script@v7
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        with:
+          script: |
+            const {data} = await github.rest.repos.getBranch({...context.repo, branch: 'main'});
+            const current = data.commit.sha === process.env.SOURCE_SHA;
+            core.setOutput('current', String(current));
+            if (!current) await core.summary.addRaw('Notarization succeeded; skipped nightly publishing because main has advanced. The notarized artifact remains downloadable.').write();
+
+      - name: Download notarized app
+        if: steps.current.outputs.current == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: evnova-macos-arm64-notarized
+          path: dist
+
+      - name: Download Windows package from matching CI run
+        if: steps.current.outputs.current == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: evnova-windows-x64
+          path: dist
+          run-id: ${{ needs.source.outputs.ci_run }}
+          github-token: ${{ github.token }}
+
+      - name: Publish latest-nightly
+        if: steps.current.outputs.current == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-nightly
+          target_commitish: ${{ needs.source.outputs.sha }}
+          name: Latest nightly
+          prerelease: true
+          body: |
+            Automated snapshot of main, published after successful CI and Apple notarization.
+
+            **macOS:** Developer ID signed and notarized, for Apple Silicon only.
+            Extract the ZIP, move `EV Nova.app` to Applications, and open it.
+            Select your original EV Nova game-data folder when prompted.
+            Game data is not included. Windows builds are unsigned.
+
+            **Linux:** build from source using the release CMake preset.
+
+            Assets:
+            - `evnova-macos-arm64.zip`
+            - `evnova-windows-x64.zip`
+          files: |
+            dist/evnova-macos-arm64.zip
+            dist/evnova-windows-x64.zip
+          fail_on_unmatched_files: true

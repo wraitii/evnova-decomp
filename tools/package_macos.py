@@ -2,7 +2,6 @@
 """Package an existing static macOS build; optionally sign and notarize it."""
 
 import argparse
-import json
 import plistlib
 import re
 import shutil
@@ -14,9 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(*args, capture=False, check=True):
+def run(*args, capture=False):
     return subprocess.run(
-        [str(arg) for arg in args], check=check, text=True,
+        [str(arg) for arg in args], check=True, text=True,
         stdout=subprocess.PIPE if capture else None,
     ).stdout
 
@@ -39,6 +38,8 @@ def main():
         parser.error('notarization requires a Developer ID Application --identity')
     if not args.binary.is_file():
         parser.error(f'build the executable first: {args.binary}')
+    if args.notary_profile and (args.output.with_suffix('.notary') / 'submission.json').exists():
+        parser.error('a submission already exists for this output; use notarize_macos.py finish to resume')
     if args.output.suffix != '.zip':
         parser.error('--output must end in .zip')
     if args.icon and (not args.icon.is_file() or args.icon.suffix != '.icns'):
@@ -109,31 +110,23 @@ def main():
         run('codesign', '--verify', '--deep', '--strict', '--verbose=2', app)
         archive = stage / 'package.zip'
         run('ditto', '-c', '-k', '--keepParent', '--sequesterRsrc', app, archive)
-        if args.notary_profile:
-            auth = ['--keychain-profile', args.notary_profile]
-            if args.keychain:
-                auth.extend(['--keychain', args.keychain])
-            result = json.loads(run(
-                'xcrun', 'notarytool', 'submit', archive, *auth,
-                '--wait', '--timeout', '30m', '--output-format', 'json', capture=True, check=False,
-            ))
-            print(json.dumps(result, indent=2))
-            if result.get('status') != 'Accepted':
-                if result.get('id'):
-                    run('xcrun', 'notarytool', 'log', result['id'], *auth)
-                raise RuntimeError('Apple did not accept the notarization submission')
-            run('xcrun', 'stapler', 'staple', app)
-            run('xcrun', 'stapler', 'validate', app)
-            run('codesign', '--verify', '--deep', '--strict', '--verbose=2', app)
-            run('spctl', '--assess', '--type', 'execute', '--verbose=2', app)
-            archive.unlink()
-            run('ditto', '-c', '-k', '--keepParent', '--sequesterRsrc', app, archive)
         archive.replace(args.output)
+    if args.notary_profile:
+        from notarize_macos import finish, submit
+
+        auth = ['--keychain-profile', args.notary_profile]
+        if args.keychain:
+            auth.extend(['--keychain', args.keychain])
+        state = args.output.with_suffix('.notary')
+        submit(state, args.output, auth)
+        if not finish(state, args.output, auth):
+            print(f'Signed (not yet notarized) ZIP: {args.output}; resume state: {state}')
+            return
     print(f'Created {args.output}')
 
 
 if __name__ == '__main__':
     try:
         main()
-    except (subprocess.CalledProcessError, RuntimeError, json.JSONDecodeError) as error:
+    except (subprocess.CalledProcessError, RuntimeError, ValueError, OSError, KeyError) as error:
         sys.exit(str(error))

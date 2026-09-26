@@ -19,7 +19,7 @@ jobs:
   release:
     name: Release (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 75
+    timeout-minutes: 45
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-binary-cache
@@ -47,6 +47,10 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Test resumable notarization logic
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s tools -p 'test_notarize_macos.py'
 
       - name: Set up the MSVC environment
         if: runner.os == 'Windows'
@@ -165,67 +169,16 @@ jobs:
           cp build/release/src/evnova.exe "dist/${{ matrix.package_name }}/"
           (cd dist && 7z a "${{ matrix.package_name }}.zip" "${{ matrix.package_name }}" >/dev/null)
 
-      # Only trusted main builds receive signing credentials. Missing credentials
-      # fail the release instead of silently publishing an unsigned nightly.
-      - name: Sign and notarize macOS app
-        if: runner.os == 'macOS' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        shell: bash
-        env:
-          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          MACOS_BUNDLE_ID: ${{ vars.MACOS_BUNDLE_ID || 'io.github.wraitii.evnova-decomp' }}
-        run: |
-          set -euo pipefail
-          for name in MACOS_CERTIFICATE_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
-            if [[ -z "${!name}" ]]; then
-              echo "::error::Missing GitHub Actions secret: $name"
-              exit 1
-            fi
-          done
-          keychain="$RUNNER_TEMP/evnova-signing.keychain-db"
-          certificate="$RUNNER_TEMP/evnova-signing.p12"
-          cleanup() {
-            rm -f "$certificate"
-            security delete-keychain "$keychain" || true
-          }
-          trap cleanup EXIT
-          keychain_password="$(openssl rand -hex 32)"
-          echo "::add-mask::$keychain_password"
-          printf '%s' "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$certificate"
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$keychain_password" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" login.keychain-db
-          xcrun notarytool store-credentials evnova-notary --keychain "$keychain" \
-            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
-          python3 tools/package_macos.py \
-            --identity "$MACOS_SIGNING_IDENTITY" --keychain "$keychain" \
-            --notary-profile evnova-notary --bundle-id "$MACOS_BUNDLE_ID" \
-            --build-number "$GITHUB_RUN_NUMBER" --output "dist/${{ matrix.package_name }}.zip"
-
+      # Build CI produces an ad hoc signed app. The separate distribution
+      # workflow signs trusted main artifacts and handles Apple's queue.
       - name: Package macOS app for testing (ad hoc signature)
-        if: runner.os == 'macOS' && (github.event_name == 'pull_request' || github.ref != 'refs/heads/main')
+        if: runner.os == 'macOS'
         env:
           MACOS_BUNDLE_ID: ${{ vars.MACOS_BUNDLE_ID || 'io.github.wraitii.evnova-decomp' }}
         run: >-
           python3 tools/package_macos.py
           --bundle-id "$MACOS_BUNDLE_ID" --build-number "$GITHUB_RUN_NUMBER"
           --output "dist/${{ matrix.package_name }}.zip"
-
-      - name: Clean up macOS signing credentials
-        if: always() && runner.os == 'macOS'
-        shell: bash
-        run: |
-          rm -f "$RUNNER_TEMP/evnova-signing.p12"
-          if [[ -f "$RUNNER_TEMP/evnova-signing.keychain-db" ]]; then
-            security delete-keychain "$RUNNER_TEMP/evnova-signing.keychain-db"
-          fi
 
       - name: Upload package
         if: runner.os != 'Linux'
@@ -234,45 +187,5 @@ jobs:
           name: ${{ matrix.package_name }}
           path: dist/${{ matrix.package_name }}.*
           if-no-files-found: error
-          retention-days: 14
-
-  publish-nightly:
-    name: Publish latest-nightly
-    needs: release
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download packages
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Publish latest-nightly release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest-nightly
-          name: Latest nightly
-          prerelease: true
-          body: |
-            Automated nightly build of `main`, refreshed on every green CI run.
-
-            These builds are untested snapshots of an in-progress reimplementation.
-
-            **macOS:** Developer ID signed and notarized, for Apple Silicon only.
-            Extract the ZIP, move `EV Nova.app` to Applications, and open it.
-            Select your original EV Nova game-data folder when prompted.
-            Game data is not included. Windows builds are unsigned.
-
-            **Linux:** no prebuilt binary is provided. Clone the repository and
-            build from source (the `release` CMake preset installs dependencies via
-            vcpkg).
-
-            Assets:
-            - `evnova-macos-arm64.zip`
-            - `evnova-windows-x64.zip`
-          files: dist/*
-          fail_on_unmatched_files: true
+          # Match the resumable notarization retention (Windows is needed to publish).
+          retention-days: 90
