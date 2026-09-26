@@ -130,17 +130,19 @@ std::int16_t CurrentSystemLinkSpriteWidth(const GameState &state,
 
 } // namespace
 
-// @port 0x00405590 78% gameplay,ui,license
+// @port 0x00405590 80% gameplay,ui,license
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame state machine. This
 // is a substantial function; the reconstruction below covers the core
 // movement/control-mode decision for the states the reimplementation drives
 // (travel, wander, escort-follow, hold, drift, disengage, defunct) and writes
 // Ship.ai_control_mode accordingly. The high-level attack states now enter
-// pursuit/engagement control modes using the reconstructed target slots. The
-// state-7 escort/follow arm reconstructs the 100 px arrival range, the
-// g_ai_misc_event_flag write, and the pers_def_slot 0x3ff Shareware Enforcer
-// split (licence nag skipped, expired-trial attack). Weapon selection, other
-// cloak engagement rules, and HUD/mission flavor remain deferred.
+// pursuit/engagement control modes using the reconstructed target slots, and
+// state 4's prologue reconstructs the allied-government disengage and the
+// two-hop squad-leader stand-down hierarchy in addition to the destroyed
+// target clear. The state-7 escort/follow arm reconstructs the 100 px arrival
+// range, the g_ai_misc_event_flag write, and the pers_def_slot 0x3ff Shareware
+// Enforcer split (licence nag skipped, expired-trial attack). Weapon selection,
+// other cloak engagement rules, and HUD/mission flavor remain deferred.
 // TODO(decomp(0x00405590)): weapon selection, cloak engagement rules, the
 // state-7 Shareware Enforcer licence nag text, and the HUD/mission flavor arms
 // of the per-frame state machine are unported.
@@ -177,17 +179,15 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // Clear a dead primary target.
-  if (ship.primary_target_ship_slot != -1 &&
-      !state.SlotInRange(
-          static_cast<std::size_t>(ship.primary_target_ship_slot))) {
-    ship.primary_target_ship_slot = -1;
-  } else if (ship.primary_target_ship_slot != -1 &&
-             !NovaAiShip_IsDestroyed(state.ShipAt(
-                 static_cast<std::size_t>(ship.primary_target_ship_slot)))) {
-    // keep
-  } else if (ship.primary_target_ship_slot != -1) {
-    ship.primary_target_ship_slot = -1;
+  // Clear a primary target whose slot is out of range or inactive (Ghidra
+  // 0x00405613). The original tests only is_active here, not
+  // Ship_IsShipDestroyed: state 4 owns that check, and state 3 relies on this
+  // clear alone.
+  if (ship.primary_target_ship_slot != -1) {
+    const auto slot = static_cast<std::size_t>(ship.primary_target_ship_slot);
+    if (!state.SlotInRange(slot) || !state.ShipAt(slot).is_active) {
+      ship.primary_target_ship_slot = -1;
+    }
   }
 
   // The station-hold timer (states 0xb/2/3) is the only one that persists it.
@@ -794,28 +794,28 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Attack / engagement states (3/4). ----
   if (ship.ai_state_code == 3 || ship.ai_state_code == 4) {
+    const std::int16_t entry_state = ship.ai_state_code;
     if (ship.primary_target_ship_slot == -1 ||
         !state.SlotInRange(
             static_cast<std::size_t>(ship.primary_target_ship_slot))) {
+      // State 3 also clears control and hostility (0x0040649f); state 4 clears
+      // only the state code and rejoins the dispatch, where the state-0 arm
+      // zeroes the control mode (0x00406d00 -> 0x00406255). The original does
+      // NOT touch ai_secondary_target_slot in either state, and the combat
+      // modes read the primary slot first (0x00408150).
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
-      ship.ai_hostility_accumulator = 0;
+      if (entry_state == 3) {
+        ship.ai_hostility_accumulator = 0;
+      }
       return;
     }
     const Ship &target =
         state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
-    if (!target.is_active || NovaAiShip_IsDestroyed(target)) {
-      ship.primary_target_ship_slot = -1;
-      ship.ai_state_code = 0;
-      ship.ai_control_mode = 0;
-      ship.ai_hostility_accumulator = 0;
-      return;
-    }
 
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
-    ship.ai_secondary_target_slot = ship.primary_target_ship_slot;
-    if (ship.ai_state_code == 3) {
+    if (entry_state == 3) {
       if (ship.ai_station_hold_timer > 0.0F) {
         if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <=
             kCentreRangeSq) {
@@ -855,16 +855,64 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_control_mode = 1;
       }
     } else {
-      if (ship.ai_maneuver_timer_ms > 0.0F) {
+      // State-4 prologue (Ghidra 0x00406780). The original's maneuver-timer
+      // gate here is unreachable: a positive timer already returned at the top
+      // of the function (state 4 is neither 0xa nor 0xe).
+      //
+      // Allied-government disengage (0x004067b5): a ship with a squad leader
+      // whose target also has a squad leader and whose governments are allied
+      // breaks off, clearing the control mode but KEEPING the primary target.
+      if (ship.faction_or_government_id != -1 &&
+          ship.squad_leader_ship_slot != 0 &&
+          target.faction_or_government_id != -1 &&
+          NovaGovernment_AreGovtsAllied(state.scenario,
+                                        ship.faction_or_government_id,
+                                        target.faction_or_government_id) &&
+          target.squad_leader_ship_slot != 0) {
         ship.ai_state_code = 0;
         ship.ai_control_mode = 0;
         return;
       }
-      if (ship.squad_leader_ship_slot != -1 &&
-          ship.squad_leader_ship_slot == ship.primary_target_ship_slot) {
+      // Squad-leader hierarchy (0x00406830). An attacker stands down when the
+      // target is its own leader, shares its leader, or is linked through a
+      // two-hop grand-leader chain. Every arm clears state, control mode, and
+      // primary target. Reads through the null-or-out-of-range guard the
+      // original omits (it indexes g_ship_states directly).
+      auto leader_of = [&](std::int16_t slot) -> std::int16_t {
+        if (slot < 0 || !state.SlotInRange(static_cast<std::size_t>(slot))) {
+          return -1;
+        }
+        return state.ShipAt(static_cast<std::size_t>(slot))
+            .squad_leader_ship_slot;
+      };
+      const std::int16_t leader = ship.squad_leader_ship_slot;
+      if (leader != -1) {
+        const std::int16_t target_leader = target.squad_leader_ship_slot;
+        const std::int16_t grand = leader_of(target_leader);
+        const std::int16_t up2 = leader_of(leader);
+        const bool direct = ship.primary_target_ship_slot == leader;
+        const bool shared = leader == target_leader;
+        // The original's first nested test compares the target's own leader
+        // slot against grand (0x004068a4), i.e. it fires only when
+        // target_leader leads itself; the second walks this ship's leader
+        // chain two hops (0x004068de).
+        const bool grand_match =
+            grand != -1 && (target_leader == grand || leader_of(up2) == grand);
+        if (direct || shared || grand_match) {
+          ship.ai_state_code = 0;
+          ship.ai_control_mode = 0;
+          ship.primary_target_ship_slot = -1;
+          return;
+        }
+      }
+      // The original's `leader == primary && defense_fleet_home == -1` arm
+      // (0x00406910) is dead: the direct check above already returned, and
+      // `leader == -1` cannot equal a live primary.
+      if (!target.is_active || NovaAiShip_IsDestroyed(target)) {
+        ship.primary_target_ship_slot = -1;
+        ship.ai_hostility_accumulator = 0;
         ship.ai_state_code = 0;
         ship.ai_control_mode = 0;
-        ship.primary_target_ship_slot = -1;
         return;
       }
       // Flags2 0x0002 (Bible "prefers standoff attacks"; carriers carry 0x82)
