@@ -11,7 +11,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004048A0	Ship_UpdateEscortAI	src/game/ship_ai.cpp	70%	audio
 0x00405120	Ship_DefenseFleetPrioritizePlayerThreat	src/game/ship_ai_behaviors.cpp	100%	moddata
 0x004053C0	Mission_UpdateShipMissionStellarAttackDirective	src/game/ship_ai.cpp	100%	
-0x00405590	Ship_UpdateShipAiState	src/game/ship_ai_state.cpp	70%	gameplay,ui,license
+0x00405590	Ship_UpdateShipAiState	src/game/ship_ai_state.cpp	75%	gameplay,ui,license
 0x00408150	Ship_ApplyShipAiControls	src/game/ship_ai_controls.cpp	93%	gameplay
 0x0040C790	Stellar_SelectRandomAdjacentTravelStellar	src/game/ship_ai_behaviors.cpp	100%	moddata
 0x0040CC10	Stellar_FindNearestAdjacentTravelStellar	src/game/ship_ai_behaviors.cpp	100%	

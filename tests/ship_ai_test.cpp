@@ -772,6 +772,60 @@ TEST_CASE(
   CHECK(ship.ai_control_mode == 9);
 }
 
+TEST_CASE("state 9 assist service approaches, brakes, and transfers fuel") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = 0;
+  ship.ai_state_code = 9;
+  ship.primary_target_ship_slot = 0;
+  ship.ai_maneuver_timer_ms = 0.0F;
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.armor_points = 100.0F;
+  state.player.fuel_points = 50.0F;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+
+  // Far outside the trunc((10 - turn) * 15) keep range: hold the approach.
+  ship.pos_x = 20000.0F;
+  ship.pos_y = 20000.0F;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 0xb);
+
+  // Within range but still moving: brake.
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+  ship.vel_x = 1.0F;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 1);
+
+  // Stopped below 100 fuel: zero the velocity and add one unit per tick.
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_state_code == 9);
+  CHECK(ship.vel_x == 0.0F);
+  CHECK(ship.vel_y == 0.0F);
+  CHECK(state.player.fuel_points == 51.0F);
+
+  // Above 100 fuel the transfer completes: clear state and both targets.
+  state.player.fuel_points = 101.0F;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_state_code == 0);
+  CHECK(ship.ai_control_mode == 0);
+  CHECK(ship.primary_target_ship_slot == -1);
+  CHECK(ship.ai_secondary_target_slot == -1);
+  CHECK(state.hud_overlay.active);
+  REQUIRE(!state.pending_ui_sounds.empty());
+  CHECK(state.pending_ui_sounds.back().transition_index == 1);
+}
+
 TEST_CASE("hidden combat ship brakes with a finite engagement patience timer") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
