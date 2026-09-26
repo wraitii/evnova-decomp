@@ -14,7 +14,6 @@
 #include <array>
 #include <cctype>
 #include <cmath>
-#include <cstdlib>
 #include <fstream>
 #include <istream>
 #include <ostream>
@@ -144,27 +143,6 @@ void ParseBoolOrDefault(std::string_view value,
 
 // Writes a boolean bug-fix flag as 1/0 so the file stays trivially parseable.
 [[nodiscard]] const char *BoolFlag(bool value) { return value ? "1" : "0"; }
-
-// Reads a valid presentation multiplier from an environment variable, or
-// nullopt when the variable is unset/empty. Invalid values warn and are
-// ignored.
-[[nodiscard]] std::optional<float> EnvScale(const char *name) {
-  const char *raw = std::getenv(name);
-  if (raw == nullptr || *raw == '\0') {
-    return std::nullopt;
-  }
-  const std::string_view text = Trim(std::string_view{raw});
-  if (const auto parsed = PresentationScale_Parse(text)) {
-    return parsed;
-  }
-  NovaLog::Warn("extra prefs: ignoring invalid {}='{}' (expected a finite "
-                "value in [{}, {}])",
-                name,
-                raw,
-                kPresentationScaleMin,
-                kPresentationScaleMax);
-  return std::nullopt;
-}
 
 } // namespace
 
@@ -302,21 +280,6 @@ bool NovaExtraPrefs_SaveToSystemStore(const NovaExtraPrefs &prefs) {
   }
   NovaLog::Info("extra prefs: saved '{}'", path->string());
   return true;
-}
-
-PresentationScale
-NovaExtraPrefs_ResolvePresentationScale(const NovaExtraPrefs &prefs) {
-  PresentationScale scale = prefs.scale;
-  if (const auto value = EnvScale("EVN_UI_SCALE")) {
-    scale.ui = *value;
-  }
-  if (const auto value = EnvScale("EVN_FLIGHT_SCENE_SCALE")) {
-    scale.flight_scene = *value;
-  }
-  if (const auto value = EnvScale("EVN_MISSION_SCALE")) {
-    scale.mission = *value;
-  }
-  return scale;
 }
 
 namespace {
@@ -853,11 +816,6 @@ bool NovaMenu_RunExtraPrefsDialog(
     extra_prefs = working;
     (void)NovaExtraPrefs_SaveToSystemStore(extra_prefs);
   };
-  // Apply the edited values directly, not the env-resolved scale. The
-  // EVN_UI_SCALE / EVN_FLIGHT_SCENE_SCALE / EVN_MISSION_SCALE overrides are a
-  // startup iteration aid; if they won here, editing the dialog would appear to
-  // do nothing (the resolved scale would stay pinned to the env value). Env
-  // overrides still apply on the next startup.
   auto apply_scale = [&] { platform.SetPresentationScale(working.scale); };
   apply_scale();
   NovaLog::Info("opening Extra Prefs dialog (port-only)");

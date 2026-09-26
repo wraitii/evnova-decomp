@@ -1092,8 +1092,7 @@ int NovaApp_Run(NovaRuntime &runtime) {
   // `ui_scale` at the authored UI/HUD sites, `flight_scene_scale` on the
   // free-flight world, and `mission_scale` composed on top of `ui_scale` at the
   // two mission dialogs.
-  const game::PresentationScale presentation =
-      game::NovaExtraPrefs_ResolvePresentationScale(extra_prefs);
+  const game::PresentationScale presentation = extra_prefs.scale;
   runtime.platform.SetPresentationScale(presentation);
   NovaLog::Info("presentation scale: ui={:.3g} flight={:.3g} mission={:.3g}",
                 presentation.ui,
