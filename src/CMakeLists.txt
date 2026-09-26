@@ -83,6 +83,7 @@ add_library(evnova_runtime
     game/weapon_shots.cpp
     game/world_wrap.cpp
     log.cpp
+    mac_resource_fork.cpp
     nova_app.cpp
     nova_paths.cpp
     pict_image.cpp

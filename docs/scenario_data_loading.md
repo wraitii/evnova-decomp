@@ -17,9 +17,21 @@ resources, `DLOG`/`DITL`, documented separately in
 
 ## Where the data lives
 
-The `.rez` archives are `BRGR` containers parsed by `src/brgr_archive.cpp`. Each
-holds a big-endian `resource.map` (type dir of `[type_code][records_offset]
-[count]`, then `0x10a`-byte records of `[index][type_code][u16 res_id][name]`).
+Archive files come in two interchangeable containers, both consumed by
+`src/brgr_archive.cpp` (the fork parser is `src/mac_resource_fork.cpp`):
+
+- **`BRGR`** — the flat container of the Windows/CE build (and of the ResForge
+  export). Each holds a big-endian `resource.map` (type dir of `[type_code]
+  [records_offset][count]`, then `0x10a`-byte records of `[index][type_code]
+  [u16 res_id][name]`).
+- **Classic Macintosh resource fork** — the original Mac form, parsed by
+  `src/mac_resource_fork.cpp` and consumed unchanged. On macOS it is read from
+  the `..namedfork/rsrc` pseudo-file; an AppleSingle/AppleDouble image in the
+  data fork (`._name` sidecar) is also accepted, so unpacked Mac data works
+  elsewhere. The two forms are losslessly equivalent: the `sh\x95p` /
+  `o\x9ftf` / ... resources and names ResForge carries over are byte-identical,
+  only the container and the resource ordering differ.
+
 The scenario families are spread across the `Nova Data *.rez` archives:
 
 | type | FourCC | family | archive | count |
@@ -32,7 +44,7 @@ The scenario families are spread across the `Nova Data *.rez` archives:
 | `0x679a7674` | `g\x9avt`  | governments| Nova Data 1 | 68 |
 | `0x666c9174` | `fl\x91t`  | fleets     | Nova Data 1 | 128 |
 
-`brgr_archive.cpp`'s `kArchiveFileNames` lists the Data archives alongside the
+The Data archives are enumerated from `Nova Files/` alongside the
 menu/splash archives. A robustness fix to `ParseArchive` was required: some
 containers (Nova Data 4) carry an early bogus region whose first bytes read as a
 plausible map header but whose record table overflows the region; the parse now
@@ -58,9 +70,13 @@ port-only `EV Nova Extra Prefs.ini` (`game::NovaExtraPrefs`);
 candidate search on later runs.
 
 Archive precedence, weakest to strongest (later archives shadow earlier ones):
-`Nova.rez` -> install `Nova Files/*.rez` -> install `Nova Plug-ins/*.rez`
+`Nova.rez` -> install `Nova Files/*` -> install `Nova Plug-ins/*`
 (bare `Plug-ins/` when the former is absent, the CE Mac-compat fallback) ->
-support `Nova Plug-ins/*.rez`. `NovaResource_LocateFile` searches the same
+support `Nova Plug-ins/*`. The data folders are scanned extension-agnostically
+(hidden names skipped), so Mac-era files with no `.rez` extension and their
+resource forks load alongside the CE `.rez` set; a short header sniff keeps
+large media in `Nova Files` (music, movies) from being read wholesale.
+`NovaResource_LocateFile` searches the same
 order reversed for media. The support-plugins layer is a port extension (the
 original only had one support folder); total-conversion folder selection via
 argv/`.nplay` is not yet ported. The persisted `install_root` override is a

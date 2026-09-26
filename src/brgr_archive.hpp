@@ -18,7 +18,9 @@
 // packed (offset, size, name) table) and the big-endian resource.map, then
 // resolves (type, id) pairs to archive regions. This replaces the previous
 // hardcoded region indices, which mis-assigned the odd sp\x95n resources
-// (601/603/605/606) and the splash PICTs.
+// (601/603/605/606) and the splash PICTs. Classic Mac resource forks are read
+// by src/mac_resource_fork.cpp and normalized into the same entry/record view,
+// so callers see one interface for either container.
 
 // Resource type codes as stored in resource.map records (big-endian FourCCs).
 constexpr std::uint32_t kResourceTypeSprites = 0x7370956e; // "sp\x95n"
