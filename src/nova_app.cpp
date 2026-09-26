@@ -1234,6 +1234,15 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   // set up here, matching NovaAudio_Initialize(8,0) running before the splash
   // frames in the original; Play() is deferred until the second splash becomes
   // active, then the same stream carries through into the main menu.
+  //
+  // Ghidra 0x004ab5d0 FUN_004ab5d0. The original resolves the 'Nova Music'
+  // default filename through the Nova Plug-ins/Nova Files search with up to
+  // three retries, returns immediately when Intro Music is off, and starts
+  // playback inline; the port loads the shipped MP3 in one look-up and gates
+  // Play on intro_music at the splash transition below.
+  // @port 0x004ab5d0 50% audio
+  // TODO(decomp): port the plug-in/Nova Files 'Nova Music' search and retries
+  // and the inline (pre-splash) start cadence.
   if (!runtime.music.Initialize()) {
     NovaLog::Warn("continuing without background music (menu bass is silent)");
   } else if (const auto music_path =
@@ -1406,11 +1415,15 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
 
   // The menu bass begins with the second (Nova title) splash and is
   // deliberately not restarted at main-menu entry, so playback carries across
-  // the boundary.
+  // the boundary. The original loads and starts it in FUN_004ab5d0, which
+  // returns immediately when Intro Music is off, so the menu stays silent
+  // until the preference is re-enabled.
   if (runtime.startup_phase != StartupPhase::loading_splash &&
       !runtime.menu_music_started) {
     runtime.menu_music_started = true;
-    runtime.music.Play();
+    if (runtime.prefs.intro_music) {
+      runtime.music.Play();
+    }
   }
 
   if (runtime.startup_phase == StartupPhase::main_menu) {

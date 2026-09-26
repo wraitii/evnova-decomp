@@ -741,7 +741,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004AB3A0	NovaUi_ProgressCallbackNoOp	src/nova_app.cpp	100%	
 0x004AB3B0	NovaUi_AddProgressAndRedraw	src/nova_app.cpp	100%	
 0x004AB3D0	NovaUi_RedrawProgressBar	src/nova_app.cpp	85%	rendering
-0x004AB5D0	FUN_004ab5d0		0%	
+0x004AB5D0	FUN_004ab5d0	src/nova_app.cpp	50%	audio
 0x004AB820	FUN_004ab820		0%	
 0x004AB8D0	NovaPlatform_PumpWindowEventsThrottled		0%	
 0x004AB970	NovaRandom_Reseed	src/game/ship_spawn.cpp	40%	rng
