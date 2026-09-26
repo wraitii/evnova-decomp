@@ -1083,7 +1083,7 @@ int NovaApp_Run(NovaRuntime &runtime) {
   // shipped its data beside the executable; the port can be launched from
   // anywhere, so it cannot silently fall back to a mock menu (see
   // game::NovaUi_RunLocateDataDialog).
-  game::NovaExtraPrefs extra_prefs;
+  game::NovaExtraPrefs &extra_prefs = runtime.extra_prefs;
   if (!game::NovaExtraPrefs_LoadFromSystemStore(extra_prefs)) {
     NovaLog::Info("extra prefs: no 'EV Nova Extra Prefs.ini' yet");
   }
@@ -1867,6 +1867,7 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
         runtime.music,
         font_cache,
         runtime.prefs,
+        runtime.extra_prefs,
         [&runtime] { NovaRender_RedrawAndPresentFrame(runtime, 0); });
     NovaLog::Info("preferences {}", saved ? "saved" : "cancelled");
     // Force a redraw so the menu backdrop (and any brightness change) is seen.
