@@ -39,7 +39,7 @@
 
 namespace game {
 
-// @port 0x00457580 50% gameplay,cadence,rendering
+// @port 0x00457580 60% gameplay,cadence,rendering
 // ---------------------------------------------------------------------------
 // Stellar_HandleStellarEntryAndExit (0x00457580) normal-arrival gate.
 // ---------------------------------------------------------------------------

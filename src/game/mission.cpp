@@ -1445,8 +1445,8 @@ bool Mission_PopulateActiveSlot(GameState &state,
   } else {
     active.mission_ship_count_active = active.mission_ship_count_max;
   }
-  active.mission_fleet_metric_b = definition->mission_fleet_metric;
-  active.mission_fleet_metric_c = 0;
+  active.aux_ship_system_locator = definition->aux_ship_syst;
+  active.aux_ships_spawned = 0;
   // Full original RNG order (0x0043f8c0): Dude_SelectShipTypeIndexFromDudeDef
   // (special-ship type) runs before comp_govt, then the 70..139 aux rearm clock
   // (0x46), the spawn/rearm timer, the ShipSyst current-system resolution
@@ -1706,8 +1706,9 @@ std::int16_t Misn_ResolveVisibleSystemForTravel(const GameState &state,
 
 // @port 0x00447A30 95% gameplay
 // Ghidra 0x00447a30 Mission_DoesSystemMatchMissionLocator. Tests a system
-// against an active mission's spawn locator (MisnActive +0x65, the m\xefsn
-// mission-fleet locator copied from payload +0x4a):
+// against an active mission's auxiliary-fleet system locator (AuxShipSyst,
+// MisnActive +0x65, copied at accept from m\xefsn +0x4c; clean-room name
+// aux_ship_system_locator):
 //   -1 / -6      the player's current system
 //   -2           the system containing the resolved TravelStel
 //   -3           the system containing the resolved ReturnStel
@@ -1730,7 +1731,7 @@ bool Mission_DoesSystemMatchMissionLocator(const GameState &state,
     return false;
   }
   const ActiveMission &mission = state.active_missions[mission_slot];
-  const std::int16_t locator = mission.mission_fleet_metric_b;
+  const std::int16_t locator = mission.aux_ship_system_locator;
   const System &system =
       state.scenario.systems[static_cast<std::size_t>(system_id)];
   const std::int16_t govt = system.government_id;
@@ -1822,7 +1823,7 @@ static void RearmMissionTimers(GameState &state, ActiveMission &mission) {
   }
   mission.rearm_roll_clock =
       static_cast<std::int16_t>(RandomBelow(state, 0x46) + 0x46);
-  mission.mission_fleet_metric_c = 0;
+  mission.aux_ships_spawned = 0;
 }
 
 // @port 0x00448910 100%
@@ -1854,6 +1855,76 @@ void Mission_RefreshActiveMissionSpawnState(GameState &state) {
       mission.goal_count_remaining = 0;
     }
     RearmMissionTimers(state, mission);
+  }
+}
+
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, restricted-travel
+// follow-player fleet rearm seeding (disassembly 0x004588c0-0x00458a15); runs
+// inline in Stellar_HandleStellarEntryAndExit's restricted-travel path at
+// PlayerTick_LandCommandDispatch. For every active -6 follow-player mission
+// with a positive target count:
+//   * ShipBehav 1 (friendly escort) is forced onto the immediate restore path
+//     (spawn_rearm_timer = -1, goal_count_remaining = 0) so
+//     NovaSystem_RestoreMissionFleets tops the fleet up at once.
+//   * ShipBehav 0 (hostile) is staged at spawn_rearm_timer = 0x7fff with
+//     goal_count_remaining = target_ship_count. Its government's
+//     flags_secondary then decides whether the fleet instead arrives at once
+//     (both set to 0), so System_TickNpcSpawnMaintenance spawns it this tick
+//     and NovaTravel_EmergeFollowFleetsFromGate flies it out of the gate:
+//       - on a wormhole: bit 0x80, or 1-in-4;
+//       - on a hypergate: bit 0x40, or 1-in-2, unless bit 0x20 routes the
+//         check to the (absent) wormhole arm.
+//   * Every active mission whose auxiliary-fleet system locator is -1 gets
+//     rearm_roll_clock = 0x7fff, disabling the aux top-up on this pass.
+void Mission_RearmFollowPlayerFleetsForRestrictedTravel(
+    GameState &state, bool hypergate_transfer) {
+  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
+    }
+    ActiveMission &mission = state.active_missions[slot];
+    if (mission.current_system_id == -6 && mission.target_ship_count > 0) {
+      if (mission.ship_behavior == 1) {
+        mission.spawn_rearm_timer = -1;
+        mission.goal_count_remaining = 0;
+      } else {
+        mission.spawn_rearm_timer = 0x7fff;
+        mission.goal_count_remaining = mission.target_ship_count;
+        if (mission.ship_behavior == 0 && mission.dude_def_index >= 0) {
+          const DudeDef *dude = state.scenario.Dude(
+              static_cast<std::int16_t>(mission.dude_def_index + 0x80));
+          const Government *govt =
+              (dude != nullptr && dude->government_id >= 0)
+                  ? state.scenario.GovernmentByIndex(dude->government_id)
+                  : nullptr;
+          if (govt != nullptr) {
+            bool immediate = false;
+            // The original's hypergate arm runs only when the transfer is a
+            // hypergate and the government is not routed to the wormhole arm
+            // by flags_secondary bit 0x20; the wormhole arm runs on a wormhole
+            // transfer. Only one of the two destinations exists, so a hypergate
+            // routed to the wormhole arm makes no roll and does nothing.
+            if (!hypergate_transfer) {
+              if ((govt->flags_secondary & 0x80U) != 0U ||
+                  RandomBelow(state, 4) == 0) {
+                immediate = true;
+              }
+            } else if ((govt->flags_secondary & 0x20U) == 0U &&
+                       ((govt->flags_secondary & 0x40U) != 0U ||
+                        RandomBelow(state, 2) == 0)) {
+              immediate = true;
+            }
+            if (immediate) {
+              mission.spawn_rearm_timer = 0;
+              mission.goal_count_remaining = 0;
+            }
+          }
+        }
+      }
+    }
+    if (mission.aux_ship_system_locator == -1) {
+      mission.rearm_roll_clock = 0x7fff;
+    }
   }
 }
 

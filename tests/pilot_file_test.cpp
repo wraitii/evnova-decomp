@@ -111,8 +111,8 @@ struct TemporaryDirectory {
   p.active_missions[2].goal_count_remaining = 12;
   p.active_missions[2].goal_counter_e = 13;
   p.active_missions[2].mission_target_count = 14;
-  p.active_missions[2].mission_fleet_metric_b = 15;
-  p.active_missions[2].mission_fleet_metric_c = 16;
+  p.active_missions[2].aux_ship_system_locator = 15;
+  p.active_missions[2].aux_ships_spawned = 16;
   p.active_missions[2].rearm_roll_clock = 17;
   p.active_missions[2].on_accept_text[0] = std::byte{'A'};
   p.active_missions[2].on_refuse_text[1] = std::byte{'R'};
@@ -235,8 +235,8 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.active_missions[2].goal_count_remaining == 12);
   CHECK(out.active_missions[2].goal_counter_e == 13);
   CHECK(out.active_missions[2].mission_target_count == 14);
-  CHECK(out.active_missions[2].mission_fleet_metric_b == 15);
-  CHECK(out.active_missions[2].mission_fleet_metric_c == 16);
+  CHECK(out.active_missions[2].aux_ship_system_locator == 15);
+  CHECK(out.active_missions[2].aux_ships_spawned == 16);
   CHECK(out.active_missions[2].rearm_roll_clock == 17);
   CHECK(out.active_missions[2].on_accept_text[0] == std::byte{'A'});
   CHECK(out.active_missions[2].on_refuse_text[1] == std::byte{'R'});
@@ -506,7 +506,7 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   CHECK_FALSE(loaded_state.active_missions[0].mission_fleet_name.empty());
   CHECK_FALSE(loaded_state.active_missions[0].mission_text_name_b.empty());
   CHECK(loaded_state.active_missions[0].mission_ship_count_active == 7);
-  CHECK(loaded_state.active_missions[0].mission_fleet_metric_c == 0);
+  CHECK(loaded_state.active_missions[0].aux_ships_spawned == 0);
   CHECK(loaded_state.active_missions[0].rearm_roll_clock >= 0x46);
   CHECK(loaded_state.active_missions[0].rearm_roll_clock <= 0x8b);
 

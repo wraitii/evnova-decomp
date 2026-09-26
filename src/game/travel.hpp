@@ -64,6 +64,15 @@ namespace game {
 
 enum class RestrictedTravelKind { kHypergate, kWormhole };
 
+// A completed hypergate/wormhole transfer: where the player arrived and which
+// gate kind delivered them there. `kind` selects the original's hypergate vs
+// wormhole arm of the 0x00457580 arrival finalization (the follow-player
+// fleet rearm and the gate-emergence passes).
+struct RestrictedTravelArrival {
+  std::int16_t destination_stellar_id = -1;
+  RestrictedTravelKind kind = RestrictedTravelKind::kHypergate;
+};
+
 // Ghidra 0x00456ca0 Stellar_EnterWormhole destination selection. Returns
 // a destination stellar resource id, or -1 when none is reachable. A source
 // with defined HyperLink1-8 entries chooses uniformly among links whose
@@ -90,6 +99,27 @@ NovaTravel_ResolveHypergateDestination(const GameState &state,
 NovaTravel_CompleteRestrictedTravel(GameState &state,
                                     std::int16_t destination_stellar_id,
                                     RestrictedTravelKind kind);
+
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, restricted-travel gate
+// emergence (disassembly 0x00458a83-0x00458bff and 0x00458422-0x00458509).
+// After the population rebuild and the per-tick maintenance pass, every
+// follow-player ShipBehav 0 mission fleet just spawned (spawn_rearm_timer ==
+// -1) is placed at the destination stellar and put into AI state 0x15
+// (NovaAi_EnterState15EmergeFromHypergate), facing the player's heading, with
+// velocity/speed/ai_hostility_accumulator cleared and
+// ai_maneuver_timer_ms = rand(0x32)+100. Runs inline at
+// PlayerTick_LandCommandDispatch's restricted branch, before the shared
+// display/ambush tail.
+void NovaTravel_EmergeFollowFleetsFromGate(GameState &state,
+                                           std::int16_t destination_stellar_id);
+
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, restricted-travel gate
+// emergence for every attached non-mission ship (squad_leader_ship_slot == 0,
+// i.e. behavior-6 escorts and deployed fighters): same state-0x15 placement as
+// above with ai_maneuver_timer_ms = rand(0x14)+0xf. Runs after
+// Mission_TrySpawnMissionShipAmbush.
+void NovaTravel_EmergeAttachedShipsFromGate(
+    GameState &state, std::int16_t destination_stellar_id);
 
 // Number of fuel points a single jump burns. From the Bible "Fuel (100 = 1
 // jump)" and the diagnostic jump gate Stellar_CanShipInitiateJumpSequence

@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <random>
 #include <string>
 
@@ -921,11 +922,13 @@ void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
 // entering-system arrival message and the escort travel-day daily tick
 // (0x0044fb2d) of the original slice remain TODO(decomp) inside; the
 // stat-modifier jitter/reroll pair now runs here (0x0044fa10/0x0044fa15).
-void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
-                                 SpaceflightView &view,
-                                 HudRenderer &hud,
-                                 GameState &state,
-                                 std::uint64_t now_ms) {
+void PlayerTick_JumpArrivalBlock(
+    SdlPlatform &platform,
+    SpaceflightView &view,
+    HudRenderer &hud,
+    GameState &state,
+    std::uint64_t now_ms,
+    std::optional<RestrictedTravelArrival> restricted_arrival = std::nullopt) {
   // When a jump completed this frame, re-spawn the starfield for the new
   // system (the original's jump completion re-runs
   // NovaEffects_QueuedAmbientStarParticles).
@@ -967,6 +970,12 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   // Ghidra 0x0044fa1a: after the travel-day/stat refresh and before population
   // restoration, arm ShipStart-1 mission fleets for their delayed jump-in.
   Mission_RefreshActiveMissionSpawnState(state);
+  if (restricted_arrival.has_value()) {
+    // Restricted-travel rearm seeding (0x00457580 first loop) runs after the
+    // refresh and before the population rebuild.
+    Mission_RearmFollowPlayerFleetsForRestrictedTravel(
+        state, restricted_arrival->kind == RestrictedTravelKind::kHypergate);
+  }
   NovaSystem_RestorePlayerEscorts(state, /*refill=*/false, now_ms);
   NovaSystem_RestoreMissionFleets(state,
                                   state.player.current_system_id,
@@ -984,12 +993,28 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
       static_cast<std::int16_t>(RandomBelow(state, 0x1e) + 0x1e);
   Mission_RerollOfferingRolls(state);
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
-  // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of
-  // Stellar_HandleStellarEntryAndExit's system-transition slice, after the
-  // population rebuild. TODO(decomp): the follow-player ShipBehav 0 fleet
-  // jump-in arm of that slice is not reconstructed yet; the refresh/rearm
-  // pass above is live.
+  if (restricted_arrival.has_value()) {
+    // The restricted-travel slice runs the per-tick maintenance before the
+    // gate emergence so immediate-rearm ShipBehav 0 follow fleets spawn this
+    // tick and are then flown out of the destination gate.
+    NovaSystem_TickNpcSpawnMaintenance(state,
+                                       state.player.current_system_id,
+                                       static_cast<std::uint32_t>(now_ms));
+    NovaTravel_EmergeFollowFleetsFromGate(
+        state, restricted_arrival->destination_stellar_id);
+  }
+  // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs in both arrival
+  // paths. The hyperspace jump block (0x0044fa72) has no follow-player
+  // gate-emergence arm; on restricted travel (hypergate/wormhole) the
+  // restricted_arrival branch above additionally seeds the -6 fleet
+  // rearm, runs the per-tick maintenance, and flies the follow fleet and the
+  // player's attached ships out of the destination gate (AI state 0x15),
+  // matching Stellar_HandleStellarEntryAndExit 0x00457580.
   Mission_TrySpawnMissionShipAmbush(state);
+  if (restricted_arrival.has_value()) {
+    NovaTravel_EmergeAttachedShipsFromGate(
+        state, restricted_arrival->destination_stellar_id);
+  }
   // 0x0044faa2: the -999 hold-timer window closes right after the
   // rebuild returns.
   state.player.ai_station_hold_timer = 0.0F;
@@ -1223,8 +1248,17 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
                     destination);
       return LandCommandResult::kContinue;
     }
-    PlayerTick_JumpArrivalBlock(
-        platform, view, hud, state, platform.gameplay_ticks_ms());
+    // Restricted travel runs the original's 0x00457580 system-transition
+    // slice: the jump block plus the follow-player rearm gate-emergence steps.
+    // TODO(decomp): the jump block still applies its hyperspace-only steps here
+    // (stat-modifier jitter/reroll and the offering rerolls); 0x00457580 runs
+    // the offering reseed at gate selection, not at the destination.
+    PlayerTick_JumpArrivalBlock(platform,
+                                view,
+                                hud,
+                                state,
+                                platform.gameplay_ticks_ms(),
+                                RestrictedTravelArrival{destination, kind});
     return LandCommandResult::kBlockedFrame;
   }
   LandedContext ctx;
