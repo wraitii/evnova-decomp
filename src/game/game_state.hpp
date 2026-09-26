@@ -1813,6 +1813,13 @@ struct GameState {
   // integer countdowns and the shared RNG stream do not follow display Hz.
   float npc_maintenance_raw_tick_accumulator = 0.0F;
 
+  // Ghidra g_ai_misc_event_flag (0x00591100). A global one-bit event latch set
+  // by Ship_UpdateShipAiState state 7 when a ship following the player reaches
+  // the arrival range (0x004073fa) and cleared at the end of Frame_TickSystems
+  // scope 0xb (0x00418df7). No reader was found in the executable, so it has
+  // no modelled gameplay effect; the port keeps the lifecycle for fidelity.
+  bool ai_misc_event_flag = false;
+
   std::array<BeamHit, 0x40> beam_hit_queue{};
   std::array<WeaponSmokePuff, 0x40> weapon_smoke_puffs{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};

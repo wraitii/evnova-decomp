@@ -344,9 +344,11 @@ void NovaAi_SelectUnguidedWeaponBank(GameState &state, Ship &ship);
 // as enumerated in the plate comment in ship_ai.cpp. Most states are faithful;
 // the HUD/mission flavor side-effects (extortion messages, carrier-bay launch,
 // fuel-transfer chatter) are documented no-ops until those systems are
-// reconstructed. TODO(decomp(0x00405590)): the state-7 player-controlled
-// (pers_def_slot 0x3ff) shareware/licence nag arm and the g_ai_misc_event_flag
-// write are not reconstructed.
+// reconstructed. The state-7 player-controlled (pers_def_slot 0x3ff)
+// Shareware Enforcer split and the g_ai_misc_event_flag write are
+// reconstructed; only the licence nag text itself is skipped.
+// TODO(decomp(0x00405590)): the state-7 Shareware Enforcer licence nag voice
+// and STR# 30000 overlay are not reconstructed.
 void NovaAi_UpdateShipState(GameState &state,
                             Ship &ship,
                             std::uint32_t now_ms,
