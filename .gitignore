@@ -26,3 +26,6 @@ pi-session-*.html
 /ghidra/
 
 /docs/assets/**
+
+# Distribution packages
+/dist/

@@ -19,7 +19,7 @@ jobs:
   release:
     name: Release (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-binary-cache
@@ -157,27 +157,75 @@ jobs:
             '[#collision_test],[#command_input_test],[#flight_automation_test],[#impact_effects_test],[#mission_script_test]~"mission payload context expands Q message text tags",[#movement_test],[#nova_command_test],[#nova_font_test],[#outfit_clamp_test],[#outfit_ionization_test],[#placement_test],[#render_clip_scope_test],[#sdl_audio_test],[#services_buttons_test],[#ship_visual_test],[#spaceflight_player_state_test],[#sprite_test]' \
             --reporter console --verbosity quiet
 
-      # Windows uses the static triplet, so the executable is self-contained
-      # with no vcpkg runtime DLLs to bundle. macOS links statically. Linux ships
-      # no binary: the glibc floor of the runner would exclude older distros, so
-      # Linux users build from source instead.
-      - name: Package
-        if: runner.os != 'Linux'
+      - name: Package Windows
+        if: runner.os == 'Windows'
         shell: bash
         run: |
+          mkdir -p "dist/${{ matrix.package_name }}"
+          cp build/release/src/evnova.exe "dist/${{ matrix.package_name }}/"
+          (cd dist && 7z a "${{ matrix.package_name }}.zip" "${{ matrix.package_name }}" >/dev/null)
+
+      # Only trusted main builds receive signing credentials. Missing credentials
+      # fail the release instead of silently publishing an unsigned nightly.
+      - name: Sign and notarize macOS app
+        if: runner.os == 'macOS' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          MACOS_BUNDLE_ID: ${{ vars.MACOS_BUNDLE_ID || 'io.github.wraitii.evnova-decomp' }}
+        run: |
           set -euo pipefail
-          pkg="${{ matrix.package_name }}"
-          rm -rf dist
-          mkdir -p "dist/$pkg"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp build/release/src/evnova.exe "dist/$pkg/"
-            (cd dist && 7z a "$pkg.zip" "$pkg" >/dev/null)
-          else
-            cp build/release/src/evnova "dist/$pkg/"
-            chmod +x "dist/$pkg/evnova"
-            (cd dist && tar -czf "$pkg.tar.gz" "$pkg")
+          for name in MACOS_CERTIFICATE_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+          keychain="$RUNNER_TEMP/evnova-signing.keychain-db"
+          certificate="$RUNNER_TEMP/evnova-signing.p12"
+          cleanup() {
+            rm -f "$certificate"
+            security delete-keychain "$keychain" || true
+          }
+          trap cleanup EXIT
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          xcrun notarytool store-credentials evnova-notary --keychain "$keychain" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+          python3 tools/package_macos.py \
+            --identity "$MACOS_SIGNING_IDENTITY" --keychain "$keychain" \
+            --notary-profile evnova-notary --bundle-id "$MACOS_BUNDLE_ID" \
+            --build-number "$GITHUB_RUN_NUMBER" --output "dist/${{ matrix.package_name }}.zip"
+
+      - name: Package macOS app for testing (ad hoc signature)
+        if: runner.os == 'macOS' && (github.event_name == 'pull_request' || github.ref != 'refs/heads/main')
+        env:
+          MACOS_BUNDLE_ID: ${{ vars.MACOS_BUNDLE_ID || 'io.github.wraitii.evnova-decomp' }}
+        run: >-
+          python3 tools/package_macos.py
+          --bundle-id "$MACOS_BUNDLE_ID" --build-number "$GITHUB_RUN_NUMBER"
+          --output "dist/${{ matrix.package_name }}.zip"
+
+      - name: Clean up macOS signing credentials
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/evnova-signing.p12"
+          if [[ -f "$RUNNER_TEMP/evnova-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/evnova-signing.keychain-db"
           fi
-          ls -l dist
 
       - name: Upload package
         if: runner.os != 'Linux'
@@ -212,22 +260,19 @@ jobs:
           body: |
             Automated nightly build of `main`, refreshed on every green CI run.
 
-            These builds are untested snapshots of an in-progress reimplementation
-            and are not signed.
+            These builds are untested snapshots of an in-progress reimplementation.
 
-            **macOS:** the build is unsigned and targets Apple Silicon only. After
-            extracting, clear the quarantine flag before running:
-
-            ```
-            xattr -dr com.apple.quarantine evnova-macos-arm64
-            ```
+            **macOS:** Developer ID signed and notarized, for Apple Silicon only.
+            Extract the ZIP, move `EV Nova.app` to Applications, and open it.
+            Select your original EV Nova game-data folder when prompted.
+            Game data is not included. Windows builds are unsigned.
 
             **Linux:** no prebuilt binary is provided. Clone the repository and
             build from source (the `release` CMake preset installs dependencies via
             vcpkg).
 
             Assets:
-            - `evnova-macos-arm64.tar.gz`
+            - `evnova-macos-arm64.zip`
             - `evnova-windows-x64.zip`
           files: dist/*
           fail_on_unmatched_files: true
