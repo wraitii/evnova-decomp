@@ -55,24 +55,37 @@ Approval may explicitly need to cover sending repository contents to the provide
 
 ## Monitor and guide
 
+Every request is acknowledged in `status.json` under `lastRequest`, so a caller
+that only sees files can confirm delivery without reading the supervisor's
+stdout. Commands exit `0` accepted, `1` refused/usage error, `2` no
+acknowledgement, `3` budget reached, `4` failed, `5` launcher gone. Add `--json`
+for one machine-readable object on stdout (human output otherwise; chatter goes
+to stderr).
+
 ```sh
-node tools/pi_session.mjs status --run /absolute/run/dir
-node tools/pi_session.mjs steer --run /absolute/run/dir --task /absolute/message.md
-node tools/pi_session.mjs prompt --run /absolute/run/dir --task /absolute/follow-up.md
+node tools/pi_session.mjs status --run /absolute/run/dir --json
+node tools/pi_session.mjs talk   --run /absolute/run/dir --message 'prefer the monotonic clock'
+node tools/pi_session.mjs wait   --run /absolute/run/dir --timeout 300
 ```
 
-Use `steer` while working, `prompt` while idle. Both read a plain-text message
-from a file; check that the queued command was accepted. Check milestones and
-small diffs where useful, without replaying the full transcript.
+`talk` is the usual way to speak to the session: it prompts when idle and
+steers when a turn is running, decided atomically against the live state.
+`steer` alone is refused unless running; `prompt` (or `talk`) is refused unless
+idle. Messages can come from `--message TEXT`, `--task FILE`, or `--task -`
+(stdin). `--ack-timeout 0` queues and returns immediately.
 
-Status reports cost, context use, last tool, and the latest `result-N.md` path.
-Raw events are in `events.jsonl`; session transcripts are under `sessions/`.
-The launcher polls usage every 30 seconds and prints a heartbeat each minute.
+`wait` blocks until the session settles (`agent_settled`) or the timeout
+expires, then prints the result path and cost; it is the single-call alternative
+to polling `status`. `status` reports state, cost, context, last tool, the
+latest `result-N.md`, and the last request's acceptance. It exits `5` when the
+launcher is gone but the state still says running. Raw events are in
+`events.jsonl`; session transcripts are under `sessions/`. The launcher polls
+usage every 30 seconds and prints a heartbeat each minute.
 
 Cost is cumulative per session: don't add successive status snapshots. It reminds
 at $0.375 and stops inference at the reported $0.50 boundary, allowing a detected
 build/test to finish. Usage can arrive late, so this isn't a hard provider cap.
-It reminds at 20% context and rejects follow-ups at 30%; aim to wrap up earlier.
+It reminds at 20% context and rejects new turns at 30%; aim to wrap up earlier.
 
 ## Review and close
 
@@ -85,5 +98,5 @@ node tools/pi_session.mjs close --run /absolute/run/dir
 node tools/pi_session.mjs abort --run /absolute/run/dir
 ```
 
-`close` requires an idle session. `abort` interrupts work; inspect partial edits
-and unfinished checks before resuming.
+`close` requires an idle session; `abort` stops the current turn and returns to
+idle. Inspect partial edits and unfinished checks before resuming.
