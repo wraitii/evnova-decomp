@@ -754,12 +754,16 @@ void NovaAi_UpdateShipState(GameState &state,
             NovaGovernment_AreGovtsAllied(state.scenario,
                                           ship.faction_or_government_id,
                                           target.faction_or_government_id) &&
-            target.squad_leader_ship_slot == 0) {
+            target.squad_leader_ship_slot != 0) {
           ship.ai_state_code = 0;
           ship.ai_control_mode = 0;
           ship.primary_target_ship_slot = -1;
           return;
         }
+        // 0x00413610 runs after the mode-5 selection each frame the ship is
+        // close enough to engage (mode != 4).
+        (void)NovaGovernment_TryTriggerAssistanceEncounter(
+            state, ship, /*force=*/false);
       } else if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <=
                      kCentreRangeSq ||
                  !NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
