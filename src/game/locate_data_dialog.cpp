@@ -227,7 +227,8 @@ NovaUi_RunLocateDataDialog(SdlPlatform &platform) {
   };
 
   platform.SetPlacement(PlaceContained({kCanvasWidth, kCanvasHeight},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   // Present once before opening a native dialog so the window is mapped.
   draw_frame();
 

@@ -32,7 +32,9 @@ void DrawContainedPict(SdlPlatform &platform, SDL_Texture *texture) {
   }
   const SdlPlatform::ScopedPlacement placement(
       platform,
-      PlaceContained({width, height}, platform.logical_playfield_size()));
+      PlaceContained({width, height},
+                     platform.logical_playfield_size(),
+                     platform.ui_scale()));
   const SDL_FRect destination{0.0F, 0.0F, width, height};
   SDL_RenderTexture(platform.renderer(), texture, nullptr, &destination);
 }
@@ -94,8 +96,9 @@ void DrawSubWindowDialog(SdlPlatform &platform,
     SDL_RenderClear(renderer);
   }
   if (render_background == nullptr && backdrop != nullptr) {
-    platform.SetPlacement(
-        PlaceContained({618.0F, 517.0F}, platform.logical_playfield_size()));
+    platform.SetPlacement(PlaceContained({618.0F, 517.0F},
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
     constexpr SDL_FRect background_rect{0.0F, 0.0F, 618.0F, 517.0F};
     SDL_RenderTexture(renderer, backdrop, nullptr, &background_rect);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -103,8 +106,9 @@ void DrawSubWindowDialog(SdlPlatform &platform,
     SDL_RenderFillRect(renderer, &background_rect);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
   }
-  platform.SetPlacement(
-      PlaceContained({panel.w, panel.h}, platform.logical_playfield_size()));
+  platform.SetPlacement(PlaceContained({panel.w, panel.h},
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
 
   if (frame == nullptr) {
     // No frame art: draw a bordered placeholder panel centred on the playfield
@@ -282,8 +286,9 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
     panel.w = std::max(panel.w, frame_w);
     panel.h = std::max(panel.h, frame_h + 96.0F);
   }
-  platform.SetPlacement(
-      PlaceContained({panel.w, panel.h}, platform.logical_playfield_size()));
+  platform.SetPlacement(PlaceContained({panel.w, panel.h},
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
 
   while (!platform.quit_requested()) {
     // Draw the dialog frame over the re-layered docked backdrop.

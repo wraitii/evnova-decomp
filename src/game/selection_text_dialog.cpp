@@ -421,9 +421,13 @@ void NovaUi_RunTextReaderDialog(SdlPlatform &platform,
                                 const std::string &text,
                                 bool allow_starmap,
                                 const std::function<void()> &render_background,
-                                std::int16_t dialog_variant) {
+                                std::int16_t dialog_variant,
+                                bool mission_dialog) {
   const SdlPlatform::ScopedPlacement restore_placement(
       platform, platform.current_placement());
+  // Mission desc readers compose `U * M`; all other readers use `U`.
+  const float requested_scale =
+      mission_dialog ? platform.mission_dialog_scale() : platform.ui_scale();
   ReaderLayout layout = LoadReaderLayout(dialog_variant);
   if (layout.window.w <= 0.0F) {
     return;
@@ -490,8 +494,8 @@ void NovaUi_RunTextReaderDialog(SdlPlatform &platform,
       SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(platform.renderer());
     }
-    platform.SetPlacement(
-        PlaceContained(authored_size, platform.logical_playfield_size()));
+    platform.SetPlacement(PlaceContained(
+        authored_size, platform.logical_playfield_size(), requested_scale));
     const Placement &placement = platform.current_placement();
     platform.PublishProbeUi(
         "text_reader",

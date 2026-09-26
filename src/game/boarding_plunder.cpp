@@ -714,7 +714,8 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                 message.text,
                 false,
                 [&] { view.DrawGameFrame(platform, state, hud); },
-                message.dialog_variant);
+                message.dialog_variant,
+                /*mission_dialog=*/true);
           }
         };
         if (!Mission_TryConsumeMissionInteractionResources(
@@ -1345,7 +1346,8 @@ void DrawBoardWindow(SdlPlatform &platform,
   // message rect (loot / "Oops!" text) stays visible below the window.
   view.DrawGameFrame(platform, state, hud);
   platform.SetPlacement(PlaceContained({kBoardWindowW, kBoardWindowH},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
 
   const SDL_FRect window{
       kBoardWindowX, kBoardWindowY, kBoardWindowW, kBoardWindowH};
@@ -1605,7 +1607,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
   bool close = false;
   while (!platform.quit_requested() && !close) {
     platform.SetPlacement(PlaceContained({kCaptureWindowW, kCaptureWindowH},
-                                         platform.logical_playfield_size()));
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
     int hovered = -1;
     const SDL_FPoint mouse = platform.mouse_position();
     for (std::size_t i = 0; i < buttons.size(); ++i) {
@@ -1620,7 +1623,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
     // this dialog over the still-open boarding window).
     view.DrawGameFrame(platform, state, hud);
     platform.SetPlacement(PlaceContained({kBoardWindowW, kBoardWindowH},
-                                         platform.logical_playfield_size()));
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
     DrawBoardWindow(platform,
                     font_cache,
                     art,
@@ -1632,7 +1636,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
                     board_backdrop,
                     -1);
     platform.SetPlacement(PlaceContained({kCaptureWindowW, kCaptureWindowH},
-                                         platform.logical_playfield_size()));
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
 
     const SDL_FRect window{
         kCaptureWindowX, kCaptureWindowY, kCaptureWindowW, kCaptureWindowH};
@@ -1822,7 +1827,8 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
   }
   NovaFontCache font_cache;
   platform.SetPlacement(PlaceContained({kBoardWindowW, kBoardWindowH},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   const std::array<BoardButton, 6> buttons = BuildBoardButtons();
 
   // NovaInputQueue_FlushAllCommands: the original discards pending input when
@@ -2189,7 +2195,8 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
                 view.DrawGameFrame(platform, state, hud);
                 platform.SetPlacement(
                     PlaceContained({kBoardWindowW, kBoardWindowH},
-                                   platform.logical_playfield_size()));
+                                   platform.logical_playfield_size(),
+                                   platform.ui_scale()));
                 DrawBoardWindow(platform,
                                 font_cache,
                                 art,

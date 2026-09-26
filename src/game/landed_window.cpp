@@ -857,8 +857,9 @@ void DrawLandedMenu(SdlPlatform &platform,
   // The Spaceport DLOG is authored at 618x517. Keep the flight HUD in
   // window-space, then contain only the fixed docked composition so it stays
   // native-sized on large windows and shrinks coherently on small ones.
-  platform.SetPlacement(
-      PlaceContained({panel.w, panel.h}, platform.logical_playfield_size()));
+  platform.SetPlacement(PlaceContained({panel.w, panel.h},
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   if (destination_art != nullptr) {
     const SDL_FRect backdrop_rect = layout.from_ditl ? layout.window : panel;
     SDL_RenderTexture(renderer, destination_art, nullptr, &backdrop_rect);
@@ -1273,8 +1274,9 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   // The docked panel is the native 618x517 Spaceport dialog, centred in the
   // unrestricted window coordinate space. Set the presentation before asking
   // for the window dimensions used by the DLOG/DITL layout.
-  platform.SetPlacement(
-      PlaceContained({618.0F, 517.0F}, platform.logical_playfield_size()));
+  platform.SetPlacement(PlaceContained({618.0F, 517.0F},
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   const SDL_FRect panel = DockedPanel(platform);
 
   // Lay out the docked screen from the real Spaceport DLOG/DITL 0x3e8
@@ -1320,7 +1322,9 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                                     "bar"};
   const auto publish_probe_controls = [&] {
     const Placement placement =
-        PlaceContained({panel.w, panel.h}, platform.logical_playfield_size());
+        PlaceContained({panel.w, panel.h},
+                       platform.logical_playfield_size(),
+                       platform.ui_scale());
     const auto window_rect = [&placement](SDL_FRect rect) {
       return placement.ToWindowRect(rect);
     };
@@ -1421,8 +1425,9 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
 
   // Keep mouse coordinates in the same unrestricted window space as the
   // native-size DLOG/DITL geometry, even if the previous context was flight.
-  platform.SetPlacement(
-      PlaceContained({618.0F, 517.0F}, platform.logical_playfield_size()));
+  platform.SetPlacement(PlaceContained({618.0F, 517.0F},
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
 
   // Mission offers with AvailLoc 3 pop as the player docks: the Spaceport
   // loop (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30) sets
@@ -1464,7 +1469,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                    message.text,
                                    false,
                                    render_background,
-                                   message.dialog_variant);
+                                   message.dialog_variant,
+                                   /*mission_dialog=*/true);
       });
   (void)Mission_RunAvailLocOffers(
       state,
@@ -1511,8 +1517,9 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                    hovered);
     // DrawLandedMenu temporarily restores window-space for the HUD. Input and
     // semantic hit rectangles resume the native Spaceport placement.
-    platform.SetPlacement(
-        PlaceContained({panel.w, panel.h}, platform.logical_playfield_size()));
+    platform.SetPlacement(PlaceContained({panel.w, panel.h},
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
     platform.Present();
 
     // Poll discrete raw keys for the modal (dedicated channel, so it never

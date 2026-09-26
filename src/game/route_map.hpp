@@ -27,6 +27,7 @@
 #include "game_state.hpp"
 #include "nova_font.hpp"
 #include "starmap.hpp"
+#include "util/placement.hpp"
 
 namespace game {
 
@@ -77,16 +78,27 @@ void RouteMap_Tick(GameState &state, const RouteMapZoomInput &input);
 // PlayerTick_RouteMapClickBranch at 0x0044E027. While the overlay is up and
 // ai_station_hold_timer <= 0, clicks inside the overlay rect select an adjacent
 // system as travel destination or clear the selection at the chart centre;
-// everything else keeps normal click-to-target.
+// everything else keeps normal click-to-target. `window_x`/`window_y` are raw
+// window points; the shared overlay placement maps them into the authored
+// chart rect (see RouteMap_OverlayPlacement).
 RouteMapClickResult RouteMap_HandleClick(GameState &state,
                                          SdlPlatform &platform,
-                                         float click_x,
-                                         float click_y);
+                                         float window_x,
+                                         float window_y);
 
 // Ghidra FUN_004ab9d4 rect derivation: top-left square of the view, side
 // round(view_width * DAT_00575a80) clamped to min 200, where DAT_00575a80 is
-// the double 0.25 and the width is the live render-owner width.
+// the double 0.25 and the width is the live render-owner width. Returned in
+// authored chart units (the overlay placement maps it to the window).
 [[nodiscard]] SDL_FRect RouteMap_OverlayRect(class SdlPlatform &platform);
+
+// The route-map overlay's placement, shared by Draw and the click hit-test so
+// they cannot disagree (docs/display_scaling.md): top-left anchored, authored
+// square (0,0,b,b) mapped by s_map = min(U, W/b, H/b). DIVERGENCE(original):
+// the responsive b = max(200, round(W*0.25)) matches the original's live-width
+// derivation rather than the authored-UI model; at U = 1 it reproduces today's
+// window-proportional square.
+[[nodiscard]] Placement RouteMap_OverlayPlacement(class SdlPlatform &platform);
 
 // Fade of the chart for the current tick (Ghidra 0x00439bd0 blit tint):
 // solid until +118 ticks after the last interaction, fades out over the next

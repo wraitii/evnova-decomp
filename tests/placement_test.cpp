@@ -122,3 +122,74 @@ TEST_CASE("placement scopes restore through background replacement and early "
   REQUIRE(platform.current_placement().dst.w == 1024.0F);
   REQUIRE(platform.current_placement().dst.x == 288.0F);
 }
+
+TEST_CASE("requested scale defaults to neutral one") {
+  REQUIRE(
+      PlaceContained({100.0F, 100.0F}, {1000.0F, 1000.0F}).requested_scale ==
+      1.0F);
+  REQUIRE(PlaceWindow({800.0F, 600.0F}).requested_scale == 1.0F);
+  REQUIRE(
+      PlaceCenteredIn(SDL_FRect{0.0F, 0.0F, 800.0F, 600.0F}, {200.0F, 200.0F})
+          .requested_scale == 1.0F);
+}
+
+TEST_CASE("requested scale composes once with the window fit") {
+  const Placement up =
+      PlaceContained({100.0F, 100.0F}, {1000.0F, 1000.0F}, 2.0F);
+  REQUIRE(up.scale == 2.0F);
+  REQUIRE(up.dst.x == 400.0F);
+  REQUIRE(up.dst.y == 400.0F);
+  REQUIRE(up.dst.w == 200.0F);
+
+  const Placement down =
+      PlaceContained({100.0F, 100.0F}, {1000.0F, 1000.0F}, 0.5F);
+  REQUIRE(down.scale == 0.5F);
+  REQUIRE(down.dst.x == 475.0F);
+  REQUIRE(down.dst.w == 50.0F);
+
+  // The fit clamp still wins when the request exceeds the window.
+  const Placement clamped =
+      PlaceContained({100.0F, 100.0F}, {150.0F, 150.0F}, 4.0F);
+  REQUIRE(clamped.scale == 1.5F);
+}
+
+TEST_CASE("window-rule requested scale sets the authored extent") {
+  const Placement scene = PlaceWindow({800.0F, 600.0F}, 2.0F);
+  REQUIRE(scene.scale == 2.0F);
+  REQUIRE(scene.dst.w == 800.0F);
+  REQUIRE(scene.dst.h == 600.0F);
+  REQUIRE(scene.authored_size.x == 400.0F);
+  REQUIRE(scene.authored_size.y == 300.0F);
+  // The authored viewport maps back to the full window.
+  const SDL_FPoint window = scene.ToWindow({400.0F, 300.0F});
+  REQUIRE(window.x == 800.0F);
+  REQUIRE(window.y == 600.0F);
+  const Placement resized = scene.Reflow({1024.0F, 768.0F});
+  REQUIRE(resized.scale == 2.0F);
+  REQUIRE(resized.dst.w == 1024.0F);
+  REQUIRE(resized.authored_size.x == 512.0F);
+}
+
+TEST_CASE("requested scale persists through a contained reflow") {
+  const Placement screen =
+      PlaceContained({400.0F, 300.0F}, {1000.0F, 800.0F}, 2.0F);
+  const Placement resized = screen.Reflow({1200.0F, 900.0F});
+  REQUIRE(resized.requested_scale == 2.0F);
+  REQUIRE(resized.scale == 2.0F);
+}
+
+TEST_CASE("requested scales survive a nested modal reflow") {
+  const Placement screen =
+      PlaceContained({640.0F, 480.0F}, {1600.0F, 1000.0F}, 2.0F);
+  REQUIRE(screen.scale == 2.0F);
+  const Placement dialog = PlaceCenteredIn(screen, {320.0F, 240.0F}, 1.5F);
+  REQUIRE(dialog.scale == 1.5F);
+  REQUIRE(dialog.anchor_requested_scale == 2.0F);
+  const Placement resized = dialog.Reflow({1600.0F, 1200.0F});
+  REQUIRE(resized.requested_scale == 1.5F);
+  REQUIRE(resized.scale == 1.5F);
+  REQUIRE(resized.dst.x == 560.0F);
+  REQUIRE(resized.dst.y == 420.0F);
+  REQUIRE(resized.dst.w == 480.0F);
+  REQUIRE(resized.dst.h == 360.0F);
+}

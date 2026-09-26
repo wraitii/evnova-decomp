@@ -271,7 +271,9 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
     while (!platform.quit_requested() && !input_state.skip_all) {
       SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(renderer);
-      // The intro cinematic uses the native 1024x768 authored composition.
+      // The intro cinematic uses the native 1024x768 authored composition and
+      // is deliberately excluded from the UI scale: it is timed media, not an
+      // interactive composition.
       SdlPlatform::ScopedPlacement placement(
           platform,
           PlaceContained({1024.0F, 768.0F}, platform.logical_playfield_size()));

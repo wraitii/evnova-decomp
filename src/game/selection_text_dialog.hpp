@@ -184,12 +184,19 @@ void NovaUi_DrawScrollArrow(SdlPlatform &platform,
 // TODO(decomp) skipped: the desc status-string movie (Ui_PlayMovieFileModal
 // 0x0049db00, recorded as a `qt` platform skip in decomp-skipped.tsv) and
 // g_selection_dialog_over_static_surface redraw variants.
+//
+// `mission_dialog` selects the requested presentation scale: mission desc
+// readers (Brief/QuickBrief/LoadCarg/DumpCargo/Comp/Fail/ShipDone and the
+// mission-cargo denial texts) request `mission_dialog_scale()` (`U * M`);
+// every other reader (about, intro, store/bar notices, escort payroll) uses
+// `ui_scale()` (`U`). The DLOG is shared, so the flag is the only difference.
 void NovaUi_RunTextReaderDialog(
     SdlPlatform &platform,
     GameState &state,
     const std::string &text,
     bool allow_starmap,
     const std::function<void()> &render_background = {},
-    std::int16_t dialog_variant = 0);
+    std::int16_t dialog_variant = 0,
+    bool mission_dialog = false);
 
 } // namespace game

@@ -251,10 +251,12 @@ initialization; the normalized block is written at startup and at the original
 Preferences and Key Settings commit points. Decomp-only settings that have no
 slot in the original payload live in a sibling `EV Nova Extra Prefs.ini`
 (`game::NovaExtraPrefs`, `src/game/extended_prefs.cpp`) so the `.prf` stays
-byte-compatible and the shipped game never reads them. It currently stores only
+byte-compatible and the shipped game never reads them. It stores
 `[paths] install_root`, the player-selected EV Nova install root written by the
-startup locate-data screen (see `docs/scenario_data_loading.md`); display scale
-options are another candidate named in `docs/display_scaling.md`.
+startup locate-data screen (see `docs/scenario_data_loading.md`), plus a
+`[display]` section with the port-only presentation multipliers (`ui_scale`,
+`flight_scene_scale`, `mission_scale`; `docs/display_scaling.md`). The INI is
+rewritten wholesale on save, so every field is re-emitted.
 
 ## `ddraw.ini` settings outside the `.prf` preferences
 

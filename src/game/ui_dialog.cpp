@@ -586,7 +586,8 @@ void UiWindow_RunInteractionLoop(
   const SdlPlatform::ScopedPlacement dialog_placement(
       platform,
       PlaceCenteredIn(background,
-                      {window.window_rect.w, window.window_rect.h}));
+                      {window.window_rect.w, window.window_rect.h},
+                      platform.ui_scale()));
 
   // Publish the dialog's buttons to the probe harness (window-point rects,
   // named by their Pascal titles: "ok", "cancel", ...). Single generic site

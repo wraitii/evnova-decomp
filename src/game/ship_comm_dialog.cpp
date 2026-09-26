@@ -416,7 +416,8 @@ void DrawShipCommDialog(SdlPlatform &platform,
   // over the unmodified gameplay surface.
   view.DrawGameFrame(platform, state, hud);
   platform.SetPlacement(PlaceContained({kCommFrameWidth, kCommFrameHeight},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   (void)panel;
 
   // The comm window frame is the DITL 0x3ef window (the 423x215 PICT 0x213f
@@ -995,7 +996,8 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
                                 const EscortManagementLayout &layout) {
   view.DrawGameFrame(platform, state, hud);
   platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   SDL_Renderer *renderer = platform.renderer();
   constexpr float kScreenFontSize = 9.0F;
   if (backdrop != nullptr) {
@@ -1468,7 +1470,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   NovaFontCache font_cache;
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
 
   // Item-11 info block contents (0x0047e470 + 0x0047fb70): the class's Bible
   // CommName (DAT_006bd2cc table), the pers 0x3ff "Ambrosia Mascot"

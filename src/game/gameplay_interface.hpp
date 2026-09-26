@@ -171,6 +171,9 @@ HudBar_FuelReserveFill(const HudPanelRect &panel, float fuel, float capacity);
 // The original uses DAT_0088c020 (0xc2) as the width of the top-right cockpit
 // strip. Each panel rect is translated horizontally by render_right - 0xc2.
 constexpr std::int16_t kGameplayHudStripWidth = 0xc2;
+// Stock cockpit art height (194x767). Used to cap the port's optional UI
+// scaling so the strip art fits the window instead of clipping vertically.
+constexpr std::int16_t kGameplayHudStripHeight = 0x2ff;
 
 [[nodiscard]] HudPanelRect HudPanel_AnchorTopRight(const HudPanelRect &panel,
                                                    std::int16_t render_right);

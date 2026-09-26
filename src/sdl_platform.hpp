@@ -16,6 +16,8 @@
 #include "probe_server.hpp"
 #include "util/placement.hpp"
 
+#include "game/presentation_scale.hpp"
+
 void ApplyPlacementToRenderer(SDL_Renderer *renderer,
                               const Placement &placement,
                               float pixel_density);
@@ -190,8 +192,18 @@ struct FlightInput {
   // click-to-target ship picking. The flight-exit/cancel command is polled
   // through the persisted binding table (slot 0x17), not a raw Escape latch.
   bool primary_clicked = false;
+  // mouse_x/y are in the active placement's authored space (mapped at poll
+  // time). Consumers that own a different target placement must use the raw
+  // window-point snapshot below instead: input is polled before DrawGameFrame
+  // installs the scene placement, and RefreshPlacementAfterResize can change
+  // the active placement mid-drain, so the placement that produced mouse_x/y
+  // is not necessarily the one a target was drawn with.
   float mouse_x = 0.0F;
   float mouse_y = 0.0F;
+  // Raw window-point cursor position, captured beside mouse_x/y. Map it
+  // directly through each consumer's own placement via ToAuthored.
+  float window_mouse_x = 0.0F;
+  float window_mouse_y = 0.0F;
 };
 
 class SdlTexture {
@@ -350,6 +362,39 @@ public:
     return placement_;
   }
 
+  // Port-only presentation multipliers (docs/display_scaling.md), set once at
+  // startup from the resolved extra prefs. Authored UI compositions request
+  // `ui_scale()`; the flight scene and mission dialogs use the other factors.
+  void SetPresentationScale(const game::PresentationScale &scale) {
+    presentation_scale_ = scale;
+  }
+
+  [[nodiscard]] const game::PresentationScale &presentation_scale() const {
+    return presentation_scale_;
+  }
+
+  [[nodiscard]] float ui_scale() const { return presentation_scale_.ui; }
+
+  // The HUD chrome (cockpit strip, radar, panels, overlays) follows the
+  // general UI scale. Kept as its own accessor so a dedicated HUD factor can
+  // be added later without touching call sites.
+  [[nodiscard]] float hud_scale() const { return presentation_scale_.ui; }
+
+  [[nodiscard]] float flight_scene_scale() const {
+    return presentation_scale_.flight_scene;
+  }
+
+  [[nodiscard]] float mission_scale() const {
+    return presentation_scale_.mission;
+  }
+
+  // Mission offer/variant and mission info dialogs compose the two: they are
+  // authored UI (so they follow `U`) with an extra mission-dialog multiplier.
+  // Composed before the single fit clamp in PlaceContained/PlaceCenteredIn.
+  [[nodiscard]] float mission_dialog_scale() const {
+    return presentation_scale_.mission_dialog();
+  }
+
   void SetPlacement(Placement placement);
   void PushPlacement(const Placement &placement);
   void PopPlacement();
@@ -425,6 +470,7 @@ private:
   bool quit_requested_ = false;
   ProbeServer probe_;
   Placement placement_{};
+  game::PresentationScale presentation_scale_{};
   std::vector<Placement> placement_stack_;
   SDL_FPoint mouse_position_{};
   SDL_FPoint mouse_window_point_{};

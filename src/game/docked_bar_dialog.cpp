@@ -213,7 +213,8 @@ void RunBarNewsWindow(SdlPlatform &platform,
       DrawContainedPict(platform, backdrop->get());
     }
     platform.SetPlacement(PlaceContained({window.w, window.h},
-                                         platform.logical_playfield_size()));
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
     const SDL_FRect probe_window =
         platform.current_placement().ToWindowRect(window);
     platform.PublishProbeUi(
@@ -398,7 +399,8 @@ LandedExit RunBarDialog(SdlPlatform &platform,
       DrawContainedPict(platform, backdrop->get());
     }
     platform.SetPlacement(PlaceContained({window.w, window.h},
-                                         platform.logical_playfield_size()));
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
     // Window fill + backdrop PICT (0x0047cfe0).
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(platform.renderer(), &window);
@@ -454,7 +456,9 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   ProbeUiAutoClear probe_ui_guard(platform);
   const auto publish_probe_controls = [&]() {
     const Placement bar_placement =
-        PlaceContained({window.w, window.h}, platform.logical_playfield_size())
+        PlaceContained({window.w, window.h},
+                       platform.logical_playfield_size(),
+                       platform.ui_scale())
             .Canonicalized();
     const auto probe_rect = [&bar_placement](SDL_FRect rect) {
       return bar_placement.ToWindowRect(rect);

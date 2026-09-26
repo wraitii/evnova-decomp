@@ -872,7 +872,9 @@ namespace {
 // PlayerTick_MouseTargetAndControlCommands 0x0044E019. Route-map clicks first
 // enter the clean multi-exit subregion 0x0044E035 ->
 // [0x0044BC1E, 0x0044E490]; unconsumed clicks then follow the original
-// self/ship/stellar hit-test order.
+// self/ship/stellar hit-test order. The raw window-point cursor is mapped per
+// consumer (the route-map overlay vs the scene placement) so a scaled scene `F`
+// or a modal placement cannot skew picking.
 void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
                                               SpaceflightView &view,
                                               GameState &state,
@@ -880,22 +882,28 @@ void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
   if (!input.primary_clicked) {
     return;
   }
+  // Raw window-point cursor snapshot. The route-map handler maps it through
+  // the shared overlay placement; the scene picks map it through the scene
+  // placement, because the active placement at poll time may be a modal or the
+  // previous frame's overlay (docs/display_scaling.md).
+  const float window_x = input.window_mouse_x;
+  const float window_y = input.window_mouse_y;
   const RouteMapClickResult route_map_click =
-      RouteMap_HandleClick(state,
-                           platform,
-                           static_cast<float>(input.mouse_x),
-                           static_cast<float>(input.mouse_y));
+      RouteMap_HandleClick(state, platform, window_x, window_y);
   if (route_map_click != RouteMapClickResult::kNotHandled &&
       route_map_click != RouteMapClickResult::kOutside) {
     return;
   }
+  const SDL_FPoint cursor =
+      FlightSceneGeometryFor(platform).placement.ToAuthored(
+          {window_x, window_y});
 
   const std::int16_t pre_click_target = state.player.primary_target_ship_slot;
-  if (view.ClickInPlayerSprite(platform, state, input.mouse_x, input.mouse_y)) {
+  if (view.ClickInPlayerSprite(platform, state, cursor.x, cursor.y)) {
     state.player.primary_target_ship_slot = -1;
   }
   const std::int16_t picked =
-      view.PickShipAt(platform, state, input.mouse_x, input.mouse_y);
+      view.PickShipAt(platform, state, cursor.x, cursor.y);
   if (picked != -1) {
     state.player.primary_target_ship_slot = picked;
     state.ship_reticle_pulse = 256.0F;
@@ -904,7 +912,7 @@ void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
     return;
   }
   const std::int16_t stellar =
-      view.PickStellarAt(platform, state, input.mouse_x, input.mouse_y);
+      view.PickStellarAt(platform, state, cursor.x, cursor.y);
   if (stellar >= 0x80) {
     const bool changed = stellar != state.travel.selected_stellar_id;
     state.travel.selected_stellar_id = stellar;
@@ -1727,7 +1735,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                               message.text,
                               false,
                               [&] { view.DrawGameFrame(platform, state, hud); },
-                              message.dialog_variant);
+                              message.dialog_variant,
+                              /*mission_dialog=*/true);
                         });
   view.DrawGameFrame(platform, state, hud);
   platform.Present();
@@ -1811,6 +1820,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // while the simulation stubs do not, and the same snapshot feeds the
     // travel/jump channel. Movement integrates into PlayerShip.
     FlightInput frame_input = platform.PollFlightInput();
+    // A resize consumed inside the drain rebuilds the active placement; refresh
+    // the cached gameplay viewport half-size before any consumer (the mouse
+    // picks compute it directly, but asteroid scatter and spawn bounds read the
+    // cached center).
+    view.SyncGameplayViewport(platform, state);
     // Persisted key lookups go through the shared command service so the
     // flight loop and the modal dialogs resolve rebinds identically.
     const auto binding_held = [&platform](std::size_t command) {
@@ -2874,7 +2888,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                 message.text,
                 false,
                 [&] { view.DrawGameFrame(platform, state, hud); },
-                message.dialog_variant);
+                message.dialog_variant,
+                /*mission_dialog=*/true);
           });
     }
 

@@ -84,12 +84,12 @@ bool IsHypergateAnimationEngaged(const GameState &state,
   return false;
 }
 
-// The current space-viewport size, in logical (1:1) pixels. In resolution-
-// extension mode the world "extends": a larger window shows more of the system,
-// so the camera, the star-field simulation and the culling all track the full
-// window size (the HUD is a placeholder overlay drawn over the bottom band). In
-// scale-to-window mode the viewport is the fixed 640x400 playfield above the
-// HUD reserve.
+// The current space-viewport size, in authored world units (docs/
+// display_scaling.md): the world "extends" with the window, so a larger window
+// shows more of the system, but the flight-scene scale `F` shrinks the authored
+// extent so `F > 1` shows less world at a larger scale. The camera, asteroid
+// scatter and culling all track it; the HUD is drawn over the right-hand strip.
+// Derived from `FlightSceneGeometryFor` so the world draw and picking agree.
 struct Viewport {
   int w = kViewportWidth;
   int h = kViewportHeight;
@@ -107,19 +107,9 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
 // viewport + radar redraw is expressed structurally: SpaceflightView::Draw
 // rebuilds the world each frame and HudRenderer::DrawRadarPanel redraws the
 // radar; the SDL port has no saved-backdrop offscreen surface.
-// The flight world's camera viewport, in window points: the render owner minus
-// the right-hand cockpit strip. The original's play area is
-// `[RenderOwner.left, RenderOwner.right - DAT_0088c020]` (see
-// NovaUi_RedrawGameplayViewportAndRadar 0x0046a870), so the ship-centred camera
-// (g_viewport_center_x/y, set by Ship_InitializeMainInterface 0x004ac380) sits
-// at half this width. Using the full window here would push the world and the
-// asteroid field kGameplayHudStripWidth/2 too far right.
 [[nodiscard]] Viewport CurrentViewport(const SdlPlatform &platform) {
-  const auto sz = platform.logical_playfield_size();
-  const int window_w = std::max(kViewportWidth, static_cast<int>(sz.x));
-  const int w = window_w - kGameplayHudStripWidth;
-  const int h = std::max(kViewportHeight, static_cast<int>(sz.y));
-  return {w, h};
+  const FlightSceneGeometry geometry = FlightSceneGeometryFor(platform);
+  return {geometry.viewport_w, geometry.viewport_h};
 }
 
 // Ghidra Ship_UpdateVisualState (0x00428340) frame composition: the displayed
@@ -595,6 +585,43 @@ void DrawShipEffectLayer(SDL_Renderer *renderer,
 }
 
 } // namespace
+
+// The flight world's camera viewport, in authored world units: the render
+// owner minus the right-hand cockpit strip, divided by the flight-scene scale
+// `F` (docs/display_scaling.md). The original's play area is
+// `[RenderOwner.left, RenderOwner.right - DAT_0088c020]` (see
+// NovaUi_RedrawGameplayViewportAndRadar 0x0046a870), so the ship-centred camera
+// (g_viewport_center_x/y, set by Ship_InitializeMainInterface 0x004ac380) sits
+// at half this width. The window reserve is in window points; the scene
+// placement (`PlaceWindow(window, F)`) maps the authored viewport back to
+// `play_w` window points, leaving the strip over the right edge. At F = 1 this
+// is exactly the old window-point viewport. Defined outside the anonymous
+// namespace because the flight-input path maps raw window points through the
+// same placement (declared in spaceflight_view.hpp).
+FlightSceneGeometry FlightSceneGeometryFor(const SdlPlatform &platform) {
+  const auto sz = platform.logical_playfield_size();
+  const int window_w = std::max(kViewportWidth, static_cast<int>(sz.x));
+  const int window_h = std::max(kViewportHeight, static_cast<int>(sz.y));
+  // Reserve exactly the drawn cockpit strip width. The stock strip is
+  // 194x767; HudRenderer::Draw caps the UI scale the same way, so this tracks
+  // the drawn strip at any scale (a one-frame lag on resize).
+  const float strip_scale = std::min(
+      platform.hud_scale(),
+      std::min(static_cast<float>(window_w) / kGameplayHudStripWidth,
+               static_cast<float>(window_h) / kGameplayHudStripHeight));
+  const float reserve =
+      static_cast<float>(std::lround(kGameplayHudStripWidth * strip_scale));
+  const float scene_scale = platform.flight_scene_scale() > 0.0F
+                                ? platform.flight_scene_scale()
+                                : 1.0F;
+  FlightSceneGeometry geometry;
+  geometry.placement = PlaceWindow(sz, scene_scale);
+  geometry.viewport_w =
+      static_cast<int>((static_cast<float>(window_w) - reserve) / scene_scale);
+  geometry.viewport_h =
+      static_cast<int>(static_cast<float>(window_h) / scene_scale);
+  return geometry;
+}
 
 void NovaStellar_AdvanceAnimationFrame(GameState &state,
                                        const Stellar &stellar,
@@ -1267,13 +1294,10 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
 // @port 0x004AC380 90% gameplay
 // Ghidra 0x004ac380 Ship_InitializeMainInterface (viewport half-size half). The
 // original sets g_viewport_center_x/y to half the play area:
-// round((RenderOwner.right - RenderOwner.left - DAT_0088c020) * 0.5) and
-// round((RenderOwner.bottom - RenderOwner.top) * 0.5). CurrentViewport already
-// excludes the DAT_0088c020 cockpit strip, so the plain halves match (integer
-// truncation vs the original's round differs by at most 1px on odd widths).
-// TODO(decomp): DAT_0088c020 is the ui_scale-scaled HUD strip width (0xc2 at
-// scale 1.0); the port pins 194 because ui_scale plumbing is not modelled yet
-// (docs/display_scaling.md WP3).
+// round((RenderOwner.right - RenderOwner.left - DAT_0088c020) * 0.5).
+// CurrentViewport already excludes the DAT_0088c020 cockpit strip and divides
+// by the scene `F`, so the plain halves match (integer truncation vs the
+// original's round differs by at most 1px on odd widths).
 void SpaceflightView::SyncGameplayViewport(SdlPlatform &platform,
                                            GameState &state) {
   const Viewport vp = CurrentViewport(platform);
@@ -2503,21 +2527,25 @@ bool SpaceflightView::ClickInPlayerSprite(SdlPlatform &platform,
 void SpaceflightView::DrawGameFrame(SdlPlatform &platform,
                                     const GameState &state,
                                     HudRenderer &hud) {
-  // The free-flight world extends: draw 1:1 across the whole (possibly larger)
-  // window with no centre-clipping. Modal windows re-assert their own
-  // presentation after this, so set the fullscreen viewport here every frame.
-  platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
+  // The free-flight world fills the whole (possibly larger) window, scaled by
+  // the flight-scene factor `F` (docs/display_scaling.md). At F = 1 this is
+  // the historical 1:1 window; at F > 1 the authored viewport shrinks and
+  // shows less system. Modal windows re-assert their own presentation after
+  // this, so set the scene placement here every frame.
+  platform.SetPlacement(FlightSceneGeometryFor(platform).placement);
   Draw(platform, state);
-  // HUD overlays the extending world at fixed, unscaled size (the project's
-  // resolution policy: more window = more system shown, NOT a bigger HUD).
+  // HUD overlays the world. The chrome scales with the port UI scale (capped
+  // so the stock strip art fits the window) and is independent of `F`.
   hud.Draw(platform, state);
   // Hyperspace flash: a full-screen frame at the jump moment (the original's
   // centered effect 0x32 queued at engage, the 'boom' flash) plus the Mac
   // progressive fade-in during the hold. White by default; the CE build forces
   // black when `hyperspace_effects` is off (0x00872384). Drawn topmost so it
   // also whites/blacks out the HUD, then fades as the loop decays
-  // screen_flash_intensity.
+  // screen_flash_intensity. A neutral full-window placement keeps it covering
+  // HUD and UI independent of the scene `F` scale.
   if (state.screen_flash_intensity > 0.0F) {
+    platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
     SDL_Renderer *const renderer = platform.renderer();
     const std::uint8_t a = static_cast<std::uint8_t>(
         std::clamp(state.screen_flash_intensity, 0.0F, 1.0F) * 255.0F);
