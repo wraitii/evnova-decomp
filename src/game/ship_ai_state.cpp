@@ -130,7 +130,7 @@ std::int16_t CurrentSystemLinkSpriteWidth(const GameState &state,
 
 } // namespace
 
-// @port 0x00405590 80% gameplay,ui,license
+// @port 0x00405590 85% gameplay,ui,license
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame state machine. This
 // is a substantial function; the reconstruction below covers the core
 // movement/control-mode decision for the states the reimplementation drives
@@ -141,8 +141,10 @@ std::int16_t CurrentSystemLinkSpriteWidth(const GameState &state,
 // two-hop squad-leader stand-down hierarchy in addition to the destroyed
 // target clear. The state-7 escort/follow arm reconstructs the 100 px arrival
 // range, the g_ai_misc_event_flag write, and the pers_def_slot 0x3ff Shareware
-// Enforcer split (licence nag skipped, expired-trial attack). Weapon selection,
-// other cloak engagement rules, and HUD/mission flavor remain deferred.
+// Enforcer split (licence nag skipped, expired-trial attack). The
+// mission-fleet ShipBehav-0 hostility staging arm is reconstructed, including
+// the player-disabled/unarmed-ship departure fallback. Weapon selection, other
+// cloak engagement rules, and HUD/mission flavor remain deferred.
 // TODO(decomp(0x00405590)): weapon selection, cloak engagement rules, the
 // state-7 Shareware Enforcer licence nag text, and the HUD/mission flavor arms
 // of the per-frame state machine are unported.
@@ -215,6 +217,34 @@ void NovaAi_UpdateShipState(GameState &state,
       ship.ai_state_code = 5;
       ship.primary_target_ship_slot = -1;
       ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
+    }
+  }
+
+  // Mission-fleet hostility staging (Ghidra 0x00405703). A mission ship whose
+  // active mission is ShipBehav 0 ("special ships will always attack the
+  // player") is forced into attack state with the player as primary target
+  // once under way; states 0xb (hold/follow), 8 (arrival slowdown) and 0x15
+  // (hypergate/wormhole emergence) are exempt. The disabled test is on the
+  // PLAYER (g_ship_states[0]): a disabled player plus no fireable
+  // non-secondary weapon makes the ship give up and stage a departure (state
+  // 0x02); otherwise it engages when the player is engageable under the cloak
+  // rules. The mission-slot bounds guard is a port-side addition (the
+  // original indexes unchecked).
+  if (ship.mission_fleet_slot != -1) {
+    const auto fleet_slot = static_cast<std::size_t>(ship.mission_fleet_slot);
+    const std::int16_t state_code = ship.ai_state_code;
+    if (state_code != 0xb && state_code != 8 && state_code != 0x15 &&
+        fleet_slot < state.active_missions.size() &&
+        state.active_missions[fleet_slot].ship_behavior == 0) {
+      if (!NovaAiShip_IsDisabled(state, state.player) ||
+          NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship)) {
+        if (NovaAiShip_CanEngageTargetUnderCloakRules(
+                state, state.player, ship)) {
+          NovaAi_SetShipHostileToPlayer(state, ship);
+        }
+      } else {
+        NovaAi_EnterState2ClearPrimaryTarget(state, ship);
+      }
     }
   }
 
@@ -798,7 +828,7 @@ void NovaAi_UpdateShipState(GameState &state,
     if (ship.primary_target_ship_slot == -1 ||
         !state.SlotInRange(
             static_cast<std::size_t>(ship.primary_target_ship_slot))) {
-      // State 3 also clears control and hostility (0x0040649f); state 4 clears
+      // State 3 also clears control and hostility (0x0040622a); state 4 clears
       // only the state code and rejoins the dispatch, where the state-0 arm
       // zeroes the control mode (0x00406d00 -> 0x00406255). The original does
       // NOT touch ai_secondary_target_slot in either state, and the combat
@@ -888,16 +918,17 @@ void NovaAi_UpdateShipState(GameState &state,
       const std::int16_t leader = ship.squad_leader_ship_slot;
       if (leader != -1) {
         const std::int16_t target_leader = target.squad_leader_ship_slot;
-        const std::int16_t grand = leader_of(target_leader);
-        const std::int16_t up2 = leader_of(leader);
+        const std::int16_t target_grand_leader = leader_of(target_leader);
+        const std::int16_t ship_leader_leader = leader_of(leader);
         const bool direct = ship.primary_target_ship_slot == leader;
         const bool shared = leader == target_leader;
-        // The original's first nested test compares the target's own leader
-        // slot against grand (0x004068a4), i.e. it fires only when
-        // target_leader leads itself; the second walks this ship's leader
-        // chain two hops (0x004068de).
+        // The original's first nested test fires only when the target's own
+        // leader is the target's grand-leader (0x004068a4); the second walks
+        // this ship's leader chain two hops (0x004068de).
         const bool grand_match =
-            grand != -1 && (target_leader == grand || leader_of(up2) == grand);
+            target_grand_leader != -1 &&
+            (target_leader == target_grand_leader ||
+             leader_of(ship_leader_leader) == target_grand_leader);
         if (direct || shared || grand_match) {
           ship.ai_state_code = 0;
           ship.ai_control_mode = 0;

@@ -774,8 +774,7 @@ TEST_CASE(
 
 // State-4 prologue (0x00406780): the allied-government disengage and the
 // squad-leader hierarchy stand-down run before the destroyed-target clear and
-// the combat-mode selection. The port previously collapsed them to a single
-// `squad_leader == primary` test.
+// the combat-mode selection.
 TEST_CASE("state-4 prologue disengages allied and shared-leader targets") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
@@ -862,6 +861,102 @@ TEST_CASE("state-4 prologue disengages allied and shared-leader targets") {
     game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
     CHECK(ship.ai_state_code == 4);
     CHECK(ship.primary_target_ship_slot == 3);
+  }
+}
+
+// Mission-fleet ShipBehav-0 hostility staging (Ghidra 0x00405703). A special
+// mission ship is forced into attack state with the player (slot 0) as primary
+// target once it is flying free. The disabled operand is the PLAYER
+// (g_ship_states[0]), not the mission ship: when the player is disabled and
+// the mission ship has no fireable non-secondary weapon, it clears its target
+// and stages a departure (state 2). States 0xb/8/0x15 are exempt.
+TEST_CASE("mission-fleet ShipBehav-0 ships attack the player or depart") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.current_system_id = 0;
+  state.player.armor_points = 1000.0F; // not disabled
+  state.player.shield_points = 1000.0F;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.player.cloak_fade_progress = 0.0F;
+
+  state.active_mission_runtime_flags[0].is_active = true;
+  state.active_missions[0].ship_behavior = 0; // Bible: always attack player
+
+  const auto prepare = [&]() -> game::Ship & {
+    game::Ship &s = state.ShipAt(1);
+    s.is_active = true;
+    s.ship_instance_id = 1;
+    s.ship_class_id = 0;
+    s.current_system_id = 0;
+    s.mission_fleet_slot = 0;
+    s.pers_def_slot = -1;
+    s.defense_fleet_home_stellar_id = -1;
+    s.ai_state_code = 0;
+    s.ai_maneuver_timer_ms = 0.0F;
+    s.ai_control_mode = -1;
+    s.primary_target_ship_slot = -1;
+    s.ai_secondary_target_slot = -1;
+    s.armor_points = 1000.0F;
+    s.shield_points = 1000.0F;
+    s.cloak_fade_progress = 0.0F;
+    s.weapon_banks.fill({});
+    return s;
+  };
+
+  SECTION("a non-disabled player is attacked regardless of the ship's arms") {
+    game::Ship &ship = prepare();
+    REQUIRE_FALSE(
+        game::NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship));
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 4);
+    CHECK(ship.primary_target_ship_slot == 0);
+    CHECK(ship.ai_secondary_target_slot == -1);
+  }
+
+  SECTION("a disabled player with an armed ship is still attacked") {
+    // Below the 1/3-armor disabled threshold but above zero, so the player is
+    // disabled yet not destroyed.
+    state.player.armor_points = 1.0F;
+    game::Ship &ship = prepare();
+    // Bank 0 maps to weapon resource 0x80; make it a fireable direct-fire bank.
+    state.scenario.weapons[0].mass_damage = 10;
+    state.scenario.weapons[0].weapon_mode_code = 0;
+    state.scenario.weapons[0].flags_secondary = 0;
+    state.scenario.weapons[0].ammo_type = -1; // free energy, no ammo check
+    ship.weapon_banks[0].mounted = 1;
+    REQUIRE(game::NovaAiShip_IsDisabled(state, state.player));
+    REQUIRE_FALSE(game::NovaAiShip_IsDestroyed(state.player));
+    REQUIRE(game::NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship));
+
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 4);
+    CHECK(ship.primary_target_ship_slot == 0);
+  }
+
+  SECTION("a disabled player and an unarmed ship stage a departure") {
+    state.player.armor_points = 1.0F; // disabled but not destroyed
+    game::Ship &ship = prepare();
+    REQUIRE(game::NovaAiShip_IsDisabled(state, state.player));
+    REQUIRE_FALSE(
+        game::NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship));
+
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 2);
+    CHECK(ship.primary_target_ship_slot == -1);
+  }
+
+  SECTION("an exempt state is not forced hostile") {
+    game::Ship &ship = prepare();
+    ship.ai_state_code = 8; // arrival slowdown
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 8);
+    CHECK(ship.primary_target_ship_slot == -1);
   }
 }
 
