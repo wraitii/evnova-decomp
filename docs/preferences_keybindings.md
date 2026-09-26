@@ -343,12 +343,9 @@ clamped to the window). Changes apply
 to `SdlPlatform::SetPresentationScale` live, and closing never rolls an edit
 back: OK, Enter, Esc and a quit request all keep the scale and policy changes
 and persist `EV Nova Extra Prefs.ini`, matching the original Settings dialog.
-It applies its own edited values directly rather than through
-`NovaExtraPrefs_ResolvePresentationScale`: if the `EVN_*_SCALE` debug overrides
-were allowed to win, editing the dialog would leave the resolved scale pinned
-to the env value and appear to do nothing. Env overrides still take effect on
-the next startup. The `install_root` path is still managed by the startup
-locate-data screen, not this dialog.
+The edited values are applied directly through
+`SdlPlatform::SetPresentationScale`. The `install_root` path is still managed
+by the startup locate-data screen, not this dialog.
 
 The bug-fix policy edits a `working` copy of `NovaExtraPrefs`; the caller
 (`NovaProgramEntry`) copies `extra_prefs.bugfixes` into `GameState::bugfixes`

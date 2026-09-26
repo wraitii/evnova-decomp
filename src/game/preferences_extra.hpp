@@ -52,11 +52,6 @@ void NovaExtraPrefs_Parse(std::istream &in,
 // be emitted or it is lost.
 void NovaExtraPrefs_Write(std::ostream &out, const NovaExtraPrefs &prefs);
 
-// Resolves the presentation scale from the prefs, then any `EVN_*_SCALE`
-// environment override (a debug aid; invalid values warn and are ignored).
-[[nodiscard]] PresentationScale
-NovaExtraPrefs_ResolvePresentationScale(const NovaExtraPrefs &prefs);
-
 // Runs the port-only Extra Prefs modal. Reuses the Settings dialog chrome
 // (DLOG 0xfa3) and native arrow art; the steppers, checkboxes and OK button
 // are port-authored. Edits `extra_prefs` in place and never rolls an edit back

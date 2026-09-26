@@ -2,7 +2,6 @@
 
 #include "game/preferences_extra.hpp"
 
-#include <cstdlib>
 #include <filesystem>
 #include <sstream>
 #include <string>
@@ -120,18 +119,4 @@ TEST_CASE("mission dialogs compose ui and mission on top of each other") {
   // Mission dialogs are authored UI, so the flight factor never enters.
   const PresentationScale flight_only{1.0F, 3.0F, 1.0F};
   REQUIRE(flight_only.mission_dialog() == 1.0F);
-}
-
-TEST_CASE("presentation scale resolution honours loaded values without env") {
-  if (std::getenv("EVN_UI_SCALE") != nullptr ||
-      std::getenv("EVN_FLIGHT_SCENE_SCALE") != nullptr ||
-      std::getenv("EVN_MISSION_SCALE") != nullptr) {
-    SKIP("environment override set; resolution test skipped");
-  }
-  NovaExtraPrefs prefs;
-  prefs.scale = {1.25F, 2.0F, 0.75F};
-  const auto resolved = game::NovaExtraPrefs_ResolvePresentationScale(prefs);
-  REQUIRE(resolved.ui == 1.25F);
-  REQUIRE(resolved.flight_scene == 2.0F);
-  REQUIRE(resolved.mission == 0.75F);
 }
