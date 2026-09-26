@@ -4,8 +4,8 @@
 #include "game/spaceflight_view.hpp"
 #include "sdl_platform.hpp"
 
-// docs/display_scaling.md: the flight scene is a full-window placement at the
-// flight-scene scale `F`; the authored gameplay viewport is the window minus
+// The flight scene is a full-window placement at the flight-scene scale `F`;
+// the authored gameplay viewport is the window minus
 // the drawn cockpit-strip reserve, divided by `F`. The same helper feeds the
 // world draw and the raw-window-point click mapping, so these checks pin the
 // neutral-at-1 regression and the `F` behaviour together.

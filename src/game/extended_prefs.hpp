@@ -6,7 +6,7 @@
 // NovaPaths. Keeping them separate means the original save format stays
 // byte-faithful while the port can still persist its own settings: the
 // user-selected EV Nova install root and the presentation multipliers
-// (see docs/preferences_keybindings.md and docs/display_scaling.md).
+// (see docs/preferences_keybindings.md).
 
 #include "presentation_scale.hpp"
 

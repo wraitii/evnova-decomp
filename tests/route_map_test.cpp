@@ -20,9 +20,9 @@ TEST_CASE("route map overlay is a top-left square scaled from the view width",
   CHECK(rect.h == 256.0F);
 }
 
-// The overlay placement is shared by the draw and the click hit-test
-// (docs/display_scaling.md): top-left anchored, authored square `(0,0,b,b)`
-// mapped by `s_map = min(U, W/b, H/b)`. At U = 1 it must reproduce the old
+// The overlay placement is shared by the draw and the click hit-test:
+// top-left anchored, authored square `(0,0,b,b)` mapped by
+// `s_map = min(U, W/b, H/b)`. At U = 1 it must reproduce the old
 // window-point rect exactly; a larger U enlarges it within the window fit.
 TEST_CASE("route map overlay placement is top-left and honours the UI scale",
           "[routemap]") {

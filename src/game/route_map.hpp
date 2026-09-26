@@ -93,8 +93,8 @@ RouteMapClickResult RouteMap_HandleClick(GameState &state,
 [[nodiscard]] SDL_FRect RouteMap_OverlayRect(class SdlPlatform &platform);
 
 // The route-map overlay's placement, shared by Draw and the click hit-test so
-// they cannot disagree (docs/display_scaling.md): top-left anchored, authored
-// square (0,0,b,b) mapped by s_map = min(U, W/b, H/b). DIVERGENCE(original):
+// they cannot disagree: top-left anchored, authored square `(0,0,b,b)` mapped
+// by `s_map = min(U, W/b, H/b)`. DIVERGENCE(original):
 // the responsive b = max(200, round(W*0.25)) matches the original's live-width
 // derivation rather than the authored-UI model; at U = 1 it reproduces today's
 // window-proportional square.

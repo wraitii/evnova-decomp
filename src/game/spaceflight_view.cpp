@@ -84,12 +84,12 @@ bool IsHypergateAnimationEngaged(const GameState &state,
   return false;
 }
 
-// The current space-viewport size, in authored world units (docs/
-// display_scaling.md): the world "extends" with the window, so a larger window
-// shows more of the system, but the flight-scene scale `F` shrinks the authored
-// extent so `F > 1` shows less world at a larger scale. The camera, asteroid
-// scatter and culling all track it; the HUD is drawn over the right-hand strip.
-// Derived from `FlightSceneGeometryFor` so the world draw and picking agree.
+// The current space-viewport size, in authored world units: the world
+// "extends" with the window, so a larger window shows more of the system, but
+// the flight-scene scale `F` shrinks the authored extent so `F > 1` shows less
+// world at a larger scale. The camera, asteroid scatter and culling all track
+// it; the HUD is drawn over the right-hand strip. Derived from
+// `FlightSceneGeometryFor` so the world draw and picking agree.
 struct Viewport {
   int w = kViewportWidth;
   int h = kViewportHeight;
@@ -588,8 +588,8 @@ void DrawShipEffectLayer(SDL_Renderer *renderer,
 
 // The flight world's camera viewport, in authored world units: the render
 // owner minus the right-hand cockpit strip, divided by the flight-scene scale
-// `F` (docs/display_scaling.md). The original's play area is
-// `[RenderOwner.left, RenderOwner.right - DAT_0088c020]` (see
+// `F`. The original's play area is `[RenderOwner.left,
+// RenderOwner.right - DAT_0088c020]` (see
 // NovaUi_RedrawGameplayViewportAndRadar 0x0046a870), so the ship-centred camera
 // (g_viewport_center_x/y, set by Ship_InitializeMainInterface 0x004ac380) sits
 // at half this width. The window reserve is in window points; the scene
@@ -2528,10 +2528,10 @@ void SpaceflightView::DrawGameFrame(SdlPlatform &platform,
                                     const GameState &state,
                                     HudRenderer &hud) {
   // The free-flight world fills the whole (possibly larger) window, scaled by
-  // the flight-scene factor `F` (docs/display_scaling.md). At F = 1 this is
-  // the historical 1:1 window; at F > 1 the authored viewport shrinks and
-  // shows less system. Modal windows re-assert their own presentation after
-  // this, so set the scene placement here every frame.
+  // the flight-scene factor `F`. At F = 1 this is the historical 1:1 window;
+  // at F > 1 the authored viewport shrinks and shows less system. Modal
+  // windows re-assert their own presentation after this, so set the scene
+  // placement here every frame.
   platform.SetPlacement(FlightSceneGeometryFor(platform).placement);
   Draw(platform, state);
   // HUD overlays the world. The chrome scales with the port UI scale (capped

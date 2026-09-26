@@ -885,7 +885,7 @@ void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
   // Raw window-point cursor snapshot. The route-map handler maps it through
   // the shared overlay placement; the scene picks map it through the scene
   // placement, because the active placement at poll time may be a modal or the
-  // previous frame's overlay (docs/display_scaling.md).
+  // previous frame's overlay.
   const float window_x = input.window_mouse_x;
   const float window_y = input.window_mouse_y;
   const RouteMapClickResult route_map_click =
