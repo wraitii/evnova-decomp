@@ -205,7 +205,7 @@ struct MissionDef {
   std::int16_t random_text_string_id = -1;       // +0x32
   std::int16_t mission_ship_count_max = 0;       // +0x48
   std::int16_t auxiliary_ship_dude = -1;         // +0x4a
-  std::int16_t mission_fleet_metric = 0;         // +0x4c
+  std::int16_t aux_ship_syst = 0;                // +0x4c
   std::int16_t start_system_locator = -1;        // +0x22, resolved at accept
   // Bible CanAbort (0 = player cannot abort, 1 = can); Ghidra MisnActive
   // +0x32 can_abort.

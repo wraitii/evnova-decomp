@@ -122,8 +122,8 @@ struct ActiveMission {
   std::int16_t mission_template_id = -1;      // +0x4d
   std::int16_t mission_ship_count_max = 0;    // +0x61
   std::int16_t aux_ships_dude_def_index = -1; // +0x63
-  std::int16_t mission_fleet_metric_b = 0;    // +0x65
-  std::int16_t mission_fleet_metric_c = 0;    // +0x67
+  std::int16_t aux_ship_system_locator = 0;   // +0x65
+  std::int16_t aux_ships_spawned = 0;         // +0x67
   std::int16_t rearm_roll_clock = 0;          // +0x69
   std::int16_t mission_ship_count_active = 0; // +0x6b
   // Rebuilt after loading from the two saved STR# references. These buffers

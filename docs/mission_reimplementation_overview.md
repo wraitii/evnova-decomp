@@ -220,6 +220,20 @@ failure, `0x00440750` `Government_ApplyReputationCreditDelta` (PayVal), and
   previous system, ShipState +0x94).
 - `0x0047a30` `Mission_DoesSystemMatchMissionLocator`: full locator decode
   including the 10000..31999 government codes.
+- `0x00457580` restricted-travel (hypergate/wormhole) system-transition slice,
+  after the transfer: `Mission_RefreshActiveMissionSpawnState`, the follow-player
+  fleet rearm seeding (`Mission_RearmFollowPlayerFleetsForRestrictedTravel`:
+  ShipBehav 1 forced to `spawn_rearm_timer = -1`/`goal_count_remaining = 0`,
+  ShipBehav 0 staged at `0x7fff` or `0` by the government
+  flags_secondary/random gate-arrival arms, a `-1` aux locator disabling the aux
+  top-up clock), `System_RebuildInitialNpcAndMissionPopulation(cur, 0)`,
+  `System_TickNpcSpawnMaintenance`, then the two AI state 0x15 gate-emergence
+  passes (`NovaTravel_EmergeFollowFleetsFromGate` before the ambush,
+  `NovaTravel_EmergeAttachedShipsFromGate` after it). Ported in
+  `mission.cpp`/`travel.cpp`/`spaceflight.cpp`.
+- `Mission_FollowPlayerFleet` field naming: `MisnActive +0x65` is **AuxShipSyst**
+  (`aux_ship_system_locator`, clean-room) and `+0x67` is the aux spawn counter
+  (`aux_ships_spawned`); the old `mission_fleet_metric_b/c` names were misleading.
 - `0x0041ad50` deactivation tally credits the aux respawn budget.
 - `g_active_misn` is typed `MisnActive *`, `g_active_misn_runtime_flags`
   `MisnRuntimeFlags *`; ShipState +0x94 is `jump_destination_system_id` (system
@@ -300,14 +314,18 @@ Other decoded facts from the 0x004192d0 read:
   `mission_target_count` (the untouched total): destroy `total <= a`, disable
   `total <= c` (any destroy fails), board/rescue `total <= b`, escort = fleet
   survivors with a/c == 0.
-- **Arrival mission-fleet slice** of `Stellar_HandleStellarEntryAndExit`
-  0x00457580: seeds follow-player fleet rearm state (`spawn_rearm_timer`
-  0x7fff/−1, `goal_count_remaining` from the alive aux count, scan-mask random
-  immediate re-arm), jumps out ShipBehav 0 follow fleets via AI state 0x15, and
-  calls `Mission_TrySpawnMissionShipAmbush` on landing.
+- **Restricted-travel mission-fleet slice** of
+  `Stellar_HandleStellarEntryAndExit` 0x00457580 (hypergate/wormhole only; a
+  normal landing goes straight from `System_RebuildInitialNpcAndMissionPopulation
+  (cur, 1)` to the shared display/ambush tail): seeds follow-player fleet rearm
+  state (`spawn_rearm_timer` 0x7fff/−1, `goal_count_remaining` 0 or
+  `target_ship_count`, government flags_secondary/random immediate re-arm), runs
+  the per-tick maintenance, jumps out ShipBehav 0 follow fleets and the
+  player's attached ships via AI state 0x15, and calls
+  `Mission_TrySpawnMissionShipAmbush` in between the two emergence passes.
 
 Ghidra field comments: MisnActive
-`target_ship_count`/`goal_counter_a/b/c`/`mission_fleet_metric_c`/
+`target_ship_count`/`goal_counter_a/b/c`/`aux_ships_spawned`/
 `mission_ship_count_active`/`spawn_rearm_timer`, and ShipState +0xB9
 `boarded_target_latch`. Renamed/retyped constants:
 `g_destroyed_finale_threshold_f32` (0x0057531c, 2.0), puff-roll thresholds 20/40/60

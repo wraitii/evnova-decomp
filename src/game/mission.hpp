@@ -145,7 +145,8 @@ Misn_ResolveVisibleSystemForTravel(const GameState &state,
                                    std::int16_t system_id);
 
 // Ghidra 0x00447a30 Mission_DoesSystemMatchMissionLocator. Tests a system
-// against an active mission's spawn locator (MisnActive +0x65): the -1/-6
+// against an active mission's auxiliary-fleet system locator (AuxShipSyst,
+// MisnActive +0x65): the -1/-6
 // player-system sentinels, -2/-3 TravelStel/ReturnStel containment, plain
 // system ids, the 5000-adjacency and 10000..31999 government codes. Feeds
 // the mission-fleet respawn dispatch (System_TickNpcSpawnMaintenance
@@ -159,6 +160,16 @@ Misn_ResolveVisibleSystemForTravel(const GameState &state,
 // Called on system/stellar entry and from two mission-script command branches;
 // it is not an ordinary per-frame tick.
 void Mission_RefreshActiveMissionSpawnState(GameState &state);
+
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, restricted-travel
+// follow-player fleet rearm seeding (disassembly 0x004588c0-0x00458a15). Runs
+// after Mission_RefreshActiveMissionSpawnState and before
+// System_RebuildInitialNpcAndMissionPopulation on a hypergate/wormhole
+// transfer. `hypergate_transfer` selects the original's hypergate arm
+// (local_120 != -1) over the wormhole arm; see the .cpp for the exact
+// flags_secondary/random rules.
+void Mission_RearmFollowPlayerFleetsForRestrictedTravel(
+    GameState &state, bool hypergate_transfer);
 
 // Tail of 0x00448910 (the per-mission blocks from the flags-0x10 live-count
 // latch onward), which Stellar_RunDockAndLaunchSequence inlines verbatim at

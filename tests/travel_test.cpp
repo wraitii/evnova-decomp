@@ -24,6 +24,8 @@ using game::GameState;
 using game::NovaSystem_OnSystemEntered;
 using game::NovaTravel_CompleteRestrictedTravel;
 using game::NovaTravel_CycleDestinationSystem;
+using game::NovaTravel_EmergeAttachedShipsFromGate;
+using game::NovaTravel_EmergeFollowFleetsFromGate;
 using game::NovaTravel_PlayerInJumpRange;
 using game::NovaTravel_PlotStarmapDestination;
 using game::NovaTravel_ResolveHypergateDestination;
@@ -1818,4 +1820,97 @@ TEST_CASE("flight tutorial range hints advance the hint state",
   game::NovaHud_ClearOverlayMessage(state);
   game::PlayerTick_FlightTutorialHints(state, prefs);
   CHECK_FALSE(state.hud_overlay.active);
+}
+
+// Restricted travel (hypergate/wormhole) flies a follow-player ShipBehav 0
+// fleet out of the destination gate after the population rebuild: the fleet
+// the per-tick maintenance just spawned is placed at the destination stellar
+// and put into AI state 0x15 (Ghidra 0x00458a83-0x00458bff).
+TEST_CASE("restricted-travel follow fleet emerges from the destination gate") {
+  GameState state;
+  state.scenario.stellars.resize(1);
+  auto &destination = state.scenario.stellars[0];
+  destination.is_defined = true;
+  destination.pos_x = 300.0F;
+  destination.pos_y = -120.0F;
+  destination.emergence_angle_deg = 0;
+  state.player.heading = 1.25F;
+
+  state.active_mission_runtime_flags[0].is_active = true;
+  auto &mission = state.active_missions[0];
+  mission.current_system_id = -6;
+  mission.target_ship_count = 1;
+  mission.ship_behavior = 0;
+  mission.spawn_rearm_timer = -1;
+
+  game::Ship &fleet = state.ShipAt(1);
+  fleet.is_active = true;
+  fleet.mission_fleet_slot = 0;
+  fleet.pos_x = 10.0F;
+  fleet.pos_y = 20.0F;
+  fleet.vel_x = 5.0F;
+  fleet.vel_y = -3.0F;
+  fleet.speed = 7.0F;
+  fleet.ai_hostility_accumulator = 9;
+
+  NovaTravel_EmergeFollowFleetsFromGate(state, 0x80);
+
+  CHECK(fleet.pos_x == 300.0F);
+  CHECK(fleet.pos_y == -120.0F);
+  CHECK(fleet.vel_x == 0.0F);
+  CHECK(fleet.vel_y == 0.0F);
+  CHECK(fleet.speed == 0.0F);
+  CHECK(fleet.ai_hostility_accumulator == -1);
+  CHECK(fleet.ai_state_code == 0x15);
+  CHECK(fleet.ai_secondary_target_slot == 0x80);
+  CHECK(fleet.heading == Catch::Approx(1.25F));
+  REQUIRE(fleet.ai_maneuver_timer_ms >= 100.0F);
+  CHECK(fleet.ai_maneuver_timer_ms <= 149.0F);
+
+  // A ShipBehav 1 (escort) fleet is not part of this pass.
+  mission.ship_behavior = 1;
+  fleet.pos_x = 1.0F;
+  NovaTravel_EmergeFollowFleetsFromGate(state, 0x80);
+  CHECK(fleet.pos_x == 1.0F);
+}
+
+// The second restricted-travel emergence pass moves every active attached
+// non-mission ship (behavior-6 escorts and deployed fighters) to the
+// destination gate and leaves ambient (unattached) ships alone
+// (Ghidra 0x00458422-0x00458509).
+TEST_CASE("restricted-travel attached ships emerge from the destination gate") {
+  GameState state;
+  state.scenario.stellars.resize(1);
+  auto &destination = state.scenario.stellars[0];
+  destination.is_defined = true;
+  destination.pos_x = -45.0F;
+  destination.pos_y = 210.0F;
+  destination.emergence_angle_deg = 0;
+  state.player.heading = 2.5F;
+
+  game::Ship &escort = state.ShipAt(1);
+  escort.is_active = true;
+  escort.squad_leader_ship_slot = 0;
+  escort.pos_x = 5.0F;
+  escort.pos_y = 6.0F;
+
+  game::Ship &ambient = state.ShipAt(2);
+  ambient.is_active = true;
+  ambient.squad_leader_ship_slot = -1;
+  ambient.pos_x = 42.0F;
+  ambient.pos_y = 43.0F;
+
+  NovaTravel_EmergeAttachedShipsFromGate(state, 0x80);
+
+  CHECK(escort.pos_x == -45.0F);
+  CHECK(escort.pos_y == 210.0F);
+  CHECK(escort.ai_state_code == 0x15);
+  CHECK(escort.ai_secondary_target_slot == 0x80);
+  CHECK(escort.heading == Catch::Approx(2.5F));
+  REQUIRE(escort.ai_maneuver_timer_ms >= 15.0F);
+  CHECK(escort.ai_maneuver_timer_ms <= 34.0F);
+
+  CHECK(ambient.pos_x == 42.0F);
+  CHECK(ambient.pos_y == 43.0F);
+  CHECK(ambient.ai_state_code == 0);
 }

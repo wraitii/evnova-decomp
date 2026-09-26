@@ -771,8 +771,8 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     WriteU16(block1, offset + 0x57, mission.flags_secondary);
     put_i16(0x61, mission.mission_ship_count_max);
     put_i16(0x63, mission.aux_ships_dude_def_index);
-    put_i16(0x65, mission.mission_fleet_metric_b);
-    put_i16(0x67, mission.mission_fleet_metric_c);
+    put_i16(0x65, mission.aux_ship_system_locator);
+    put_i16(0x67, mission.aux_ships_spawned);
     put_i16(0x69, mission.rearm_roll_clock);
     put_i16(0x6b, mission.mission_ship_count_active);
     const auto copy_payload = [&](std::size_t field, const auto &payload) {
@@ -1102,8 +1102,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.flags_secondary = ReadU16(block1, offset + 0x57, big_endian);
       mission.mission_ship_count_max = get_i16(0x61);
       mission.aux_ships_dude_def_index = get_i16(0x63);
-      mission.mission_fleet_metric_b = get_i16(0x65);
-      mission.mission_fleet_metric_c = get_i16(0x67);
+      mission.aux_ship_system_locator = get_i16(0x65);
+      mission.aux_ships_spawned = get_i16(0x67);
       mission.rearm_roll_clock = get_i16(0x69);
       mission.mission_ship_count_active = get_i16(0x6b);
       const auto copy_payload = [&](auto &payload, std::size_t field) {
@@ -1523,7 +1523,7 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
     }
     mission.rearm_roll_clock = static_cast<std::int16_t>(
         std::uniform_int_distribution<int>{0x46, 0x8b}(state.rng));
-    mission.mission_fleet_metric_c = 0;
+    mission.aux_ships_spawned = 0;
   }
   NovaOutfit_RecomputeOutfitDerivedState(state);
   const auto effective = Outfit_ComputePlayerEffectiveStats(state);

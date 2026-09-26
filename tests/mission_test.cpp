@@ -572,7 +572,7 @@ TEST_CASE("mission spawn refresh gives friendly escort arrivals short delay") {
   mission.flags_primary = 0x10;
   mission.mission_ship_count_max = 5;
   mission.mission_ship_count_active = 1;
-  mission.mission_fleet_metric_c = 4;
+  mission.aux_ships_spawned = 4;
 
   Mission_RefreshActiveMissionSpawnState(state);
 
@@ -581,7 +581,7 @@ TEST_CASE("mission spawn refresh gives friendly escort arrivals short delay") {
   CHECK(mission.mission_ship_count_active == 5);
   CHECK(mission.rearm_roll_clock >= 70);
   CHECK(mission.rearm_roll_clock <= 139);
-  CHECK(mission.mission_fleet_metric_c == 0);
+  CHECK(mission.aux_ships_spawned == 0);
 
   // ShipBehav 0 is the hostile/pursuing case and retains the longer random
   // hyperspace-arrival delay.
@@ -589,6 +589,65 @@ TEST_CASE("mission spawn refresh gives friendly escort arrivals short delay") {
   Mission_RefreshActiveMissionSpawnState(state);
   CHECK(mission.spawn_rearm_timer >= 100);
   CHECK(mission.spawn_rearm_timer <= 199);
+}
+
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit restricted-travel slice:
+// the follow-player rearm seeding forces ShipBehav 1 into the immediate
+// restore path and stages ShipBehav 0 at 0x7fff (or 0 for the government's
+// immediate gate-arrival arm).
+TEST_CASE("restricted travel rearm seeds follow-player fleets") {
+  GameState state;
+  state.scenario.dudes.resize(1);
+  state.scenario.dudes[0].government_id = 0;
+  state.scenario.governments.resize(1);
+  state.player.current_system_id = 4;
+
+  auto &mission = state.active_missions[0];
+  state.active_mission_runtime_flags[0].is_active = true;
+  mission.current_system_id = -6;
+  mission.target_ship_count = 3;
+  mission.ship_start = 0;
+  mission.aux_ship_system_locator = 5;
+  mission.rearm_roll_clock = 100;
+
+  // ShipBehav 1: forced immediate (spawn_rearm_timer = -1, goal = 0).
+  mission.ship_behavior = 1;
+  mission.spawn_rearm_timer = 77;
+  mission.goal_count_remaining = 3;
+  Mission_RearmFollowPlayerFleetsForRestrictedTravel(state,
+                                                     /*hypergate=*/true);
+  CHECK(mission.spawn_rearm_timer == -1);
+  CHECK(mission.goal_count_remaining == 0);
+  CHECK(mission.rearm_roll_clock == 100);
+
+  // ShipBehav 0 on a hypergate whose government routes to the wormhole arm
+  // (flags_secondary 0x20): no immediate rearm, staged at 0x7fff/goal=target,
+  // and the -1 aux locator disables the aux top-up clock.
+  mission.ship_behavior = 0;
+  mission.dude_def_index = 0;
+  mission.aux_ship_system_locator = -1;
+  state.scenario.governments[0].flags_secondary = 0x20;
+  Mission_RearmFollowPlayerFleetsForRestrictedTravel(state,
+                                                     /*hypergate=*/true);
+  CHECK(mission.spawn_rearm_timer == 0x7fff);
+  CHECK(mission.goal_count_remaining == 3);
+  CHECK(mission.rearm_roll_clock == 0x7fff);
+
+  // The 0x80 government flag takes the wormhole immediate arm.
+  state.scenario.governments[0].flags_secondary = 0x80;
+  Mission_RearmFollowPlayerFleetsForRestrictedTravel(state,
+                                                     /*hypergate=*/false);
+  CHECK(mission.spawn_rearm_timer == 0);
+  CHECK(mission.goal_count_remaining == 0);
+
+  // A non-follow mission is untouched.
+  mission.current_system_id = 4;
+  mission.spawn_rearm_timer = 55;
+  mission.goal_count_remaining = 7;
+  Mission_RearmFollowPlayerFleetsForRestrictedTravel(state,
+                                                     /*hypergate=*/true);
+  CHECK(mission.spawn_rearm_timer == 55);
+  CHECK(mission.goal_count_remaining == 7);
 }
 
 TEST_CASE("random mission locator -2 selects ordinary travel stellars") {

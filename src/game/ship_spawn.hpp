@@ -178,7 +178,7 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
 //  1. Mission-fleet stepper over the 16 active-mission slots:
 //     * aux-fleet arm: when the acceptance roll clock (+0x69) has expired and
 //       the aux dude def is set, top the aux fleet up to its remaining
-//       budget (mission_ship_count_active - mission_fleet_metric_c) when the
+//       budget (mission_ship_count_active - aux_ships_spawned) when the
 //       mission's spawn locator matches this system; flags 0x0010 fleets
 //       never drain their budget (indefinite respawns).
 //     * main-fleet arm: missions whose spawn system matches (or -6 follow)

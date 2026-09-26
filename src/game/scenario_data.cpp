@@ -108,7 +108,7 @@ using evnova::util::ReadCString;
   mission.mission_ship_count_max = ReadBeI16(bytes, 0x48);
   // Bible aux-ship fields: AuxShipDude (+0x4a) and AuxShipSyst (+0x4c); the
   // prior reads were swapped relative to populate (0x0043f8c0).
-  mission.mission_fleet_metric = ReadBeI16(bytes, 0x4c);
+  mission.aux_ship_syst = ReadBeI16(bytes, 0x4c);
   mission.auxiliary_ship_dude = ReadBeI16(bytes, 0x4a);
   mission.can_abort = ReadBeI16(bytes, 0x42) != 0;
   for (std::size_t i = 0; i < mission.text_description_ids.size(); ++i) {

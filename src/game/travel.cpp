@@ -8,6 +8,7 @@
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "mission_trace.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight.hpp"
@@ -710,6 +711,73 @@ bool NovaTravel_CompleteRestrictedTravel(GameState &state,
   player.primary_target_ship_slot = -1;
   state.arrival_command_grace_frames = 15;
   return true;
+}
+
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, restricted-travel
+// follow-fleet gate emergence (disassembly 0x00458a83-0x00458bff); runs inline
+// in the restricted-travel path before the shared display/ambush tail.
+void NovaTravel_EmergeFollowFleetsFromGate(
+    GameState &state, std::int16_t destination_stellar_id) {
+  const Stellar *destination = state.scenario.Stellar(destination_stellar_id);
+  if (destination == nullptr) {
+    return;
+  }
+  const float dest_x = static_cast<float>(destination->pos_x);
+  const float dest_y = static_cast<float>(destination->pos_y);
+  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
+    }
+    const ActiveMission &mission = state.active_missions[slot];
+    if (mission.current_system_id != -6 || mission.target_ship_count <= 0 ||
+        mission.ship_behavior != 0 || mission.spawn_rearm_timer != -1) {
+      continue;
+    }
+    for (std::size_t index = 1; index < GameState::kMaxShips; ++index) {
+      Ship &ship = state.ShipAt(index);
+      if (!ship.is_active ||
+          ship.mission_fleet_slot != static_cast<std::int16_t>(slot)) {
+        continue;
+      }
+      ship.vel_x = 0.0F;
+      ship.vel_y = 0.0F;
+      ship.speed = 0.0F;
+      ship.ai_hostility_accumulator = -1;
+      NovaAi_EnterState15EmergeFromHypergate(
+          state, ship, destination_stellar_id);
+      ship.pos_x = dest_x;
+      ship.pos_y = dest_y;
+      ship.heading = state.player.heading;
+      ship.ai_maneuver_timer_ms =
+          static_cast<float>(RandomBelow(state, 0x32) + 100);
+    }
+  }
+}
+
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, restricted-travel
+// attached-ship gate emergence (disassembly 0x00458422-0x00458509); runs
+// inline in the restricted-travel path after Mission_TrySpawnMissionShipAmbush.
+void NovaTravel_EmergeAttachedShipsFromGate(
+    GameState &state, std::int16_t destination_stellar_id) {
+  const Stellar *destination = state.scenario.Stellar(destination_stellar_id);
+  if (destination == nullptr) {
+    return;
+  }
+  const float dest_x = static_cast<float>(destination->pos_x);
+  const float dest_y = static_cast<float>(destination->pos_y);
+  // Attached non-mission ships (behavior-6 escorts, deployed fighters).
+  for (std::size_t index = 1; index < GameState::kMaxShips; ++index) {
+    Ship &ship = state.ShipAt(index);
+    if (!ship.is_active || ship.squad_leader_ship_slot != 0) {
+      continue;
+    }
+    NovaAi_EnterState15EmergeFromHypergate(state, ship, destination_stellar_id);
+    ship.pos_x = dest_x;
+    ship.pos_y = dest_y;
+    ship.heading = state.player.heading;
+    ship.ai_maneuver_timer_ms =
+        static_cast<float>(RandomBelow(state, 0x14) + 0xf);
+  }
 }
 
 // Ghidra 0x0044aa70 Ship_HandlePlayerShipCore, payroll tail at 0x0044fef8.

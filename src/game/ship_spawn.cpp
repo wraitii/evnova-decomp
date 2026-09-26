@@ -1832,9 +1832,9 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
     // budget, so dead aux ships keep getting replaced.
     if (mission.rearm_roll_clock < 1 &&
         mission.aux_ships_dude_def_index != -1 &&
-        mission.mission_fleet_metric_c < mission.mission_ship_count_active) {
+        mission.aux_ships_spawned < mission.mission_ship_count_active) {
       const std::int16_t deficit = static_cast<std::int16_t>(
-          mission.mission_ship_count_active - mission.mission_fleet_metric_c);
+          mission.mission_ship_count_active - mission.aux_ships_spawned);
       if (deficit > 0 &&
           Mission_DoesSystemMatchMissionLocator(state, system_id, slot)) {
         const float bearing = static_cast<float>(RandomBelow(state, 0x168)) *
@@ -1851,7 +1851,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
           }
           Ship &ship = state.ShipAt(static_cast<std::size_t>(spawned));
           ship.mission_owner_slot = slot;
-          ++mission.mission_fleet_metric_c;
+          ++mission.aux_ships_spawned;
           if ((mission.flags_primary & 0x0010U) == 0U) {
             --mission.mission_ship_count_active;
           }
