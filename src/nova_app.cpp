@@ -260,15 +260,17 @@ void PublishMainMenuProbeUi(NovaRuntime &runtime) {
   return alpha != 0;
 }
 
-// Presents fixed artwork at native authored size, centred in a placement whose
-// authored dimensions match the resource. PlaceContained caps the scale at 1x
-// and supplies black margins when the window is larger than the artwork.
+// Presents fixed artwork at its authored size, centred in a placement whose
+// authored dimensions match the resource. PlaceContained composes the UI scale
+// with the fit and supplies black margins when the window is larger.
 void PresentSplashTexture(NovaRuntime &runtime, SDL_Texture *texture) {
   float width = 0.0F;
   float height = 0.0F;
   SDL_GetTextureSize(texture, &width, &height);
-  const auto placement = PlaceContained(
-      {width, height}, runtime.platform.logical_playfield_size());
+  const auto placement =
+      PlaceContained({width, height},
+                     runtime.platform.logical_playfield_size(),
+                     runtime.platform.ui_scale());
   SdlPlatform::ScopedPlacement scope(runtime.platform, placement);
   const SDL_FRect destination{0.0F, 0.0F, width, height};
   SDL_RenderTexture(
@@ -1085,6 +1087,18 @@ int NovaApp_Run(NovaRuntime &runtime) {
   if (!game::NovaExtraPrefs_LoadFromSystemStore(extra_prefs)) {
     NovaLog::Info("extra prefs: no 'EV Nova Extra Prefs.ini' yet");
   }
+  // Resolve the presentation multipliers once at startup and hand them to the
+  // platform, which owns the placement builders. All three are live:
+  // `ui_scale` at the authored UI/HUD sites, `flight_scene_scale` on the
+  // free-flight world, and `mission_scale` composed on top of `ui_scale` at the
+  // two mission dialogs (docs/display_scaling.md).
+  const game::PresentationScale presentation =
+      game::NovaExtraPrefs_ResolvePresentationScale(extra_prefs);
+  runtime.platform.SetPresentationScale(presentation);
+  NovaLog::Info("presentation scale: ui={:.3g} flight={:.3g} mission={:.3g}",
+                presentation.ui,
+                presentation.flight_scene,
+                presentation.mission);
   if (extra_prefs.install_root) {
     NovaPaths::SetInstallRootOverride(extra_prefs.install_root);
   }
@@ -1241,8 +1255,10 @@ void NovaMainLoop_Run(NovaRuntime &runtime) {
 // Ghidra: 0x00488080 NovaMainLoop_UpdateFrame
 // @port 0x00488080 90% ui
 void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
-  runtime.platform.SetPlacement(PlaceContained(
-      {1024.0F, 768.0F}, runtime.platform.logical_playfield_size()));
+  runtime.platform.SetPlacement(
+      PlaceContained({1024.0F, 768.0F},
+                     runtime.platform.logical_playfield_size(),
+                     runtime.platform.ui_scale()));
 
   if (auto selection = runtime.platform.PollOpenFileDialogResult()) {
     if (!selection->error.empty()) {
@@ -1444,10 +1460,12 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
 // @port 0x004873b0 100%
 void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   SDL_Renderer *const renderer = runtime.platform.renderer();
-  // Main-menu art is authored for the 1024x768 canvas and is contained at
-  // native scale, with black margins in larger windows.
-  runtime.platform.SetPlacement(PlaceContained(
-      {1024.0F, 768.0F}, runtime.platform.logical_playfield_size()));
+  // Main-menu art is authored for the 1024x768 canvas and is contained at the
+  // active UI scale, with black margins in larger windows.
+  runtime.platform.SetPlacement(
+      PlaceContained({1024.0F, 768.0F},
+                     runtime.platform.logical_playfield_size(),
+                     runtime.platform.ui_scale()));
   if (runtime.startup_phase == StartupPhase::loading_splash) {
     NovaUi_PresentLoadingSplashFrame(runtime);
     runtime.platform.Present();
@@ -1684,7 +1702,8 @@ void NovaUi_RedrawProgressBar(NovaRuntime &runtime) {
   const SdlPlatform::ScopedPlacement placement(
       runtime.platform,
       PlaceContained(StartupAuthoredSize(runtime),
-                     runtime.platform.logical_playfield_size()));
+                     runtime.platform.logical_playfield_size(),
+                     runtime.platform.ui_scale()));
   const ProgressBarPalette colors = ProgressBarColors(runtime);
   ProgressBarReferenceRect outer = ProgressBarOutline(runtime);
   outer.top += runtime.loading_progress_reveal_inset;

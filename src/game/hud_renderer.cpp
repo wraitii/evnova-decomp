@@ -401,8 +401,11 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
 // the 194px cockpit strip width).
 [[nodiscard]] HudPanelRect AnchoredPanel(const HudPanelRect &panel,
                                          SdlPlatform &platform) {
-  const auto playfield = platform.logical_playfield_size();
-  return HudPanel_AnchorTopRight(panel, static_cast<std::int16_t>(playfield.x));
+  // Drawn inside the scaled HUD placement, so the anchor is the authored
+  // render-owner right edge (window/hud_scale), not the window-point width.
+  const float render_right = platform.current_placement().authored_size.x;
+  return HudPanel_AnchorTopRight(
+      panel, static_cast<std::int16_t>(std::lround(render_right)));
 }
 
 [[nodiscard]] const PersDef *PersAt(const ScenarioData &scenario,
@@ -443,12 +446,18 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
 // tests system visibility and the ship-to-system-centre distance.
 // TODO(decomp): re-derive the exact table/endpoint once SystemDef adjacency
 // typing is settled.
-// @port 0x004AF020 85% rendering
+// @port 0x004AF020 85% rendering,divergence
 // Ghidra 0x004af020 SpriteWorld_RebuildSessionSpritePools (sprite-pool rebuild
 // replaced structurally); its HUD overlay-message-band tail runs inline in the
 // overlay-message block below.
-// Note: the DIVERGENCE(original) at the 0x0045E9C0 panel-restore slice belongs
-// to that row, not to this message-band slice.
+// DIVERGENCE(original): the HUD art-fit cap has no original counterpart. The
+// original strip width is DAT_0088c020 = 194 * ui_scale with no window cap, so
+// at large `U` this clamp (and its reserve copy in
+// FlightSceneGeometryFor/CurrentViewport) diverges from it (e.g. U = 4 at
+// 1024px: original play width 248 vs port 830). The cap is a deliberate
+// robustness choice; the final fallback with zero-sized art is the stock
+// 194x767. The separate panel-restore decision at the 0x0045E9C0 slice is its
+// own row.
 void HudRenderer::Draw(SdlPlatform &platform,
                        const GameState &state,
                        bool force_empty_radar) {
@@ -466,8 +475,25 @@ void HudRenderer::Draw(SdlPlatform &platform,
   // current render owner's right edge and translates every panel by the same
   // amount (RenderOwner.right - DAT_0088c020), keeping this UI top-right
   // anchored while the flight viewport expands.
+  //
+  // Port HUD scale: the whole HUD chrome (strip, radar, panels, escort panel,
+  // overlay text) is drawn in a full-window placement scaled by the UI scale,
+  // capped so the stock 194x767 strip fits the window instead of clipping
+  // vertically (the art is nearly the 768 minimum height). Authored coordinates
+  // below are therefore render_right = window/hud_scale, not window points.
   const auto playfield = platform.logical_playfield_size();
-  const auto render_right = static_cast<std::int16_t>(playfield.x);
+  const float art_w = cockpit_w_ > 0
+                          ? static_cast<float>(cockpit_w_)
+                          : static_cast<float>(kGameplayHudStripWidth);
+  const float art_h = cockpit_h_ > 0
+                          ? static_cast<float>(cockpit_h_)
+                          : static_cast<float>(kGameplayHudStripHeight);
+  const float hud_scale = std::min(
+      platform.hud_scale(), std::min(playfield.x / art_w, playfield.y / art_h));
+  const SdlPlatform::ScopedPlacement hud_placement(
+      platform, PlaceWindow(playfield, hud_scale));
+  const auto render_right =
+      static_cast<std::int16_t>(std::lround(playfield.x / hud_scale));
   const std::int16_t hud_left =
       static_cast<std::int16_t>(render_right - kGameplayHudStripWidth);
   const auto anchor_panel = [render_right](const HudPanelRect &panel) {
@@ -545,6 +571,17 @@ void HudRenderer::Draw(SdlPlatform &platform,
   DrawWeaponPanel(platform, state, value_color, label_color);
   DrawTargetPanel(platform, state, value_color, label_color);
   DrawCargoPanel(platform, state, value_color, label_color);
+  DrawOverlayAndEscort(platform, state);
+}
+
+void HudRenderer::DrawOverlayAndEscort(SdlPlatform &platform,
+                                       const GameState &state) {
+  // Escort Commands panel and the transient overlay message are UI overlays,
+  // not strip chrome: draw them in a full-window placement at the general UI
+  // scale so the cockpit art-fit cap on a small window does not shrink them.
+  const SdlPlatform::ScopedPlacement overlay_placement(
+      platform,
+      PlaceWindow(platform.logical_playfield_size(), platform.ui_scale()));
   DrawEscortCommandsPanel(platform, state);
   // Transient HUD overlay message (NovaHud_ShowOverlayMessage / the landing &
   // negotiation feedback text). Mirrors the original's shared message rect
@@ -561,9 +598,11 @@ void HudRenderer::Draw(SdlPlatform &platform,
        platform.gameplay_ticks_ms() < state.hud_overlay.expiry_ms)) {
     const auto &msg = state.hud_overlay;
     constexpr float kOverlayFontSize = 12.0F;
-    const auto logical = platform.logical_playfield_size();
+    // Authored overlay-placement coordinates (the placement maps them to the
+    // window).
+    const auto authored = platform.current_placement().authored_size;
     const float left = 25.0F;
-    const float baseline = logical.y - 5.0F - 26.0F + 12.0F;
+    const float baseline = authored.y - 5.0F - 26.0F + 12.0F;
     NovaText_Draw(platform,
                   *font_cache_,
                   NovaFontFamily::kChicago,
@@ -1483,9 +1522,10 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
     return;
   }
   SDL_Renderer *renderer = platform.renderer();
-  const auto playfield = platform.logical_playfield_size();
+  const float render_right = platform.current_placement().authored_size.x;
   const HudPanelRect radar = HudPanel_AnchorTopRight(
-      layout_.radar_panel, static_cast<std::int16_t>(playfield.x));
+      layout_.radar_panel,
+      static_cast<std::int16_t>(std::lround(render_right)));
 
   // @port 0x0045D320 40% ui
   // Target-status poll (NovaUi_RefreshGameplayPanels 0x0045d320): toggles the

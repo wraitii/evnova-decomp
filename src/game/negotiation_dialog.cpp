@@ -412,7 +412,8 @@ void DrawNegotiationDialog(SdlPlatform &platform,
   // over the unmodified gameplay surface.
   view.DrawGameFrame(platform, state, hud);
   platform.SetPlacement(PlaceContained({frame.window.w, frame.window.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
 
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &frame.window);
@@ -600,7 +601,8 @@ void DrawPaymentWindow(SdlPlatform &platform,
                        int hovered_slot) {
   SDL_Renderer *renderer = platform.renderer();
   platform.SetPlacement(PlaceContained({frame.window.w, frame.window.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &frame.window);
   } else {
@@ -683,7 +685,8 @@ RunBribePaymentWindow(SdlPlatform &platform,
 
   while (!platform.quit_requested()) {
     platform.SetPlacement(PlaceContained({frame.window.w, frame.window.h},
-                                         platform.logical_playfield_size()));
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
     int hovered = -1;
     const SDL_FPoint mouse = platform.mouse_position();
     for (int slot = 0; slot < 2; ++slot) {
@@ -1029,7 +1032,8 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   NovaFontCache font_cache;
   platform.SetPlacement(
       PlaceContained({kNegotiationFrameWidth, kNegotiationFrameHeight},
-                     platform.logical_playfield_size()));
+                     platform.logical_playfield_size(),
+                     platform.ui_scale()));
 
   std::vector<ServiceButton> buttons;
   buttons.reserve(3);

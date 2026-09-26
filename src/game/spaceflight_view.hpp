@@ -29,6 +29,7 @@ struct SDL_Renderer;
 
 #include "scenario_data.hpp"
 #include "sprite_world.hpp"
+#include "util/placement.hpp"
 
 namespace game {
 struct GameState;
@@ -61,6 +62,20 @@ struct ShipEmergencePresentation {
 // opaque normal colour.
 [[nodiscard]] ShipEmergencePresentation
 NovaShip_EmergencePresentation(const Ship &ship);
+
+// The flight scene's presentation geometry (docs/display_scaling.md): the
+// full-window scene placement at the flight-scene scale `F`, plus the authored
+// gameplay viewport (window minus the drawn cockpit-strip reserve, divided by
+// `F`). Both the world draw and the raw-window-point click mapping build it
+// through this one function so they cannot disagree.
+struct FlightSceneGeometry {
+  Placement placement;
+  int viewport_w = 0;
+  int viewport_h = 0;
+};
+
+[[nodiscard]] FlightSceneGeometry
+FlightSceneGeometryFor(const SdlPlatform &platform);
 
 class SpaceflightView {
 public:

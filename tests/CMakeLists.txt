@@ -9,7 +9,9 @@ add_executable(evnova_tests
     docked_dialog_test.cpp
     escort_commands_test.cpp
     escort_fleet_test.cpp
+    extended_prefs_test.cpp
     flight_automation_test.cpp
+    flight_scene_geometry_test.cpp
     format_util_test.cpp
     gameplay_interface_test.cpp
     geometry_util_test.cpp

@@ -173,6 +173,10 @@ private:
   // target blip, the far-from-origin direction arrow, and sensor static while
   // a proximity scan is detected.
   void DrawEscortCommandsPanel(SdlPlatform &platform, const GameState &state);
+  // Escort Commands panel + transient overlay message, drawn in their own
+  // full-window placement at the general UI scale (independent of the strip's
+  // art-fit cap).
+  void DrawOverlayAndEscort(SdlPlatform &platform, const GameState &state);
   void DrawRadarPanel(SdlPlatform &platform,
                       const GameState &state,
                       bool force_empty);

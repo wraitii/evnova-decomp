@@ -98,14 +98,20 @@ void RouteMap_Tick(GameState &state, const RouteMapZoomInput &input) {
 
 RouteMapClickResult RouteMap_HandleClick(GameState &state,
                                          SdlPlatform &platform,
-                                         float click_x,
-                                         float click_y) {
+                                         float window_x,
+                                         float window_y) {
   auto &rm = state.route_map;
   // 0x0044e027 gate: overlay up and the player not station-held (the x87
   // chain proceeds only when ai_station_hold_timer <= 0.0).
   if (!rm.overlay_visible || state.player.ai_station_hold_timer > 0.0F) {
     return RouteMapClickResult::kNotHandled;
   }
+  // Map the raw window point through the same placement the chart is drawn
+  // with, then hit-test in authored chart units.
+  const SDL_FPoint click =
+      RouteMap_OverlayPlacement(platform).ToAuthored({window_x, window_y});
+  const float click_x = click.x;
+  const float click_y = click.y;
   const SDL_FRect rect = RouteMap_OverlayRect(platform);
   const bool inside = click_x >= rect.x && click_x < rect.x + rect.w &&
                       click_y >= rect.y && click_y < rect.y + rect.h;
@@ -192,14 +198,35 @@ SDL_FRect RouteMap_OverlayRect(SdlPlatform &platform) {
   // DAT_00575a80 is the double 0.25 (see kRouteMapViewScale) and the width is
   // the live render-owner width. The flight view tracks the window
   // (SpaceflightView::DrawGameFrame uses PlaceWindow), so the logical
-  // playfield width is that view width. Clicks and draws share window-point
-  // coordinates in the fullscreen flight presentation.
+  // playfield width is that view width. The returned rect is in authored chart
+  // units; "RouteMap_OverlayPlacement" is the single mapping shared by the draw
+  // and the raw-window-point click hit-test.
   float side =
       std::round(platform.logical_playfield_size().x * kRouteMapViewScale);
   if (side < 200.0F) {
     side = 200.0F;
   }
   return SDL_FRect{0.0F, 0.0F, side, side};
+}
+
+Placement RouteMap_OverlayPlacement(SdlPlatform &platform) {
+  const SDL_FRect authored = RouteMap_OverlayRect(platform);
+  const SDL_FPoint window = platform.logical_playfield_size();
+  const float requested = platform.ui_scale();
+  const float s_map =
+      (authored.w > 0.0F && authored.h > 0.0F && window.x > 0.0F &&
+       window.y > 0.0F)
+          ? std::min(requested,
+                     std::min(window.x / authored.w, window.y / authored.h))
+          : requested;
+  Placement placement;
+  placement.dst = {0.0F, 0.0F, authored.w * s_map, authored.h * s_map};
+  placement.scale = s_map;
+  placement.requested_scale = requested;
+  placement.authored_size = {authored.w, authored.h};
+  placement.containing_size = window;
+  placement.rule = Placement::Rule::explicit_rect;
+  return placement;
 }
 
 float RouteMap_FadeAlpha(const GameState &state) {
@@ -258,6 +285,11 @@ void RouteMapView::Draw(SdlPlatform &platform, const GameState &state) {
                                     0x80));
     }
   }
+  // Draw into the shared overlay placement (top-left, s_map = min(U, W/b,
+  // H/b)); the scoped restore leaves the scene placement for the next frame's
+  // probe geometry. The internal chart zoom is independent of `F`.
+  const SdlPlatform::ScopedPlacement overlay_scope(
+      platform, RouteMap_OverlayPlacement(platform));
   NovaStarmap_DrawRouteMapChart(platform,
                                 font_cache_,
                                 state,
@@ -268,5 +300,4 @@ void RouteMapView::Draw(SdlPlatform &platform, const GameState &state) {
                                 icons_,
                                 border_color_);
 }
-
 } // namespace game

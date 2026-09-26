@@ -753,7 +753,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004ACAC0	FUN_004acac0		0%	
 0x004AD960	FUN_004ad960		0%	
 0x004AEDA0	NovaData_LoadAllShipClassVisualAndLaunchData	src/game/scenario_data.cpp	100%	
-0x004AF020	SpriteWorld_RebuildSessionSpritePools	src/game/hud_renderer.cpp	85%	rendering
+0x004AF020	SpriteWorld_RebuildSessionSpritePools	src/game/hud_renderer.cpp	85%	rendering,divergence
 0x004B0740	NovaAudio_PreloadGameplayData	src/game/weapon.cpp	25%	audio
 0x004B0A30	FUN_004b0a30		0%	
 0x004B3350	Ship_ResetPlayerShipState	src/game/new_pilot_flow.cpp	75%	gameplay

@@ -1027,7 +1027,8 @@ NovaPlayerInfo_RunWindow(SdlPlatform &platform,
     }
     platform.SetPlacement(
         PlaceContained({window_rect_final.w, window_rect_final.h},
-                       platform.logical_playfield_size()));
+                       platform.logical_playfield_size(),
+                       platform.ui_scale()));
     SDL_Renderer *renderer = platform.renderer();
 
     // Window plate + backdrop slices.

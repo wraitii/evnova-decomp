@@ -455,8 +455,9 @@ void DrawChrome(SdlPlatform &platform,
   SDL_SetRenderDrawColor(
       renderer, kColorBlack.r, kColorBlack.g, kColorBlack.b, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
-  platform.SetPlacement(
-      PlaceContained({601.0F, 513.0F}, platform.logical_playfield_size()));
+  platform.SetPlacement(PlaceContained({601.0F, 513.0F},
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
 
   // The original fills the window with the background colour, then blits the
   // starfield PICT across the whole frame (0x004a5240).
@@ -496,8 +497,9 @@ void DrawLiveChrome(SdlPlatform &platform,
                     HudRenderer &hud) {
   SDL_Renderer *renderer = platform.renderer();
   view.DrawGameFrame(platform, state, hud);
-  platform.SetPlacement(
-      PlaceContained({601.0F, 513.0F}, platform.logical_playfield_size()));
+  platform.SetPlacement(PlaceContained({601.0F, 513.0F},
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &geometry.window);
   }

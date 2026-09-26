@@ -1,11 +1,73 @@
 # Display and UI scaling (implementation design)
 
-Status: **architecture agreed; not yet implemented.** The port today has a
-per-screen `Placement` model and a working extra-preferences file, but no
-user-visible scale controls. This is the implementation task: it fixes
-coordinate ownership and equations, maps the integration sites, and sequences
-the work. Fit caps, numeric limits and the settings UI described below are
-selected implementation proposals, not previously agreed facts.
+Status: **implemented; Stages 0-5 are done (doc resolution,
+`requested_scale`, prefs + `PresentationScale`, `U` at the authored UI sites,
+HUD chrome/overlay scaling, the mission `M` multiplier at the two mission
+entrypoints, and the flight-scene `F` world/input/route-map work). Stage 6
+(preferences widgets / optional dedicated `hud_scale`) is optional and not
+done.** The port scales authored UI and the in-flight HUD chrome by `U`, the
+two mission dialogs by `U * M`, and the free-flight world by `F`. This
+document records the coordinate ownership and equations, the integration
+sites, and the work sequencing. Fit caps, numeric limits and the settings UI
+described below are selected implementation proposals, not previously agreed
+facts.
+
+Resolved during Stage 0:
+
+- **Ancestor scale.** A centred modal stores the background's request as
+  `Placement::anchor_requested_scale`, so `Reflow` rebuilds the whole ancestor
+  chain at its own request (one `requested_scale` field was insufficient).
+- **Centred-modal equation.** The anchored case fits against the background's
+  `containing_size` and centres on the background `dst` centre (see §2), not
+  the plain window-centred `dst` formula.
+- **Scene placement is `Rule::window`.** `PlaceWindow(window, F)` gives
+  `dst = (0,0,W,H)` with `authored_size = window/F`, so `Reflow` rebuilds it on
+  resize; it is not an `explicit_rect` placement.
+- **Declared divergences.** The HUD fit cap and the route map's live-width
+  responsiveness are deliberate; see the notes in §2.
+- **Settings plumbing (Stage 2).** `ui_scale` / `flight_scene_scale` /
+  `mission_scale` are parsed from `EV Nova Extra Prefs.ini`, validated to a
+  finite `[0.5, 4.0]` with a `1.0` fallback, and re-emitted on every save.
+  `PresentationScale` is resolved once onto `SdlPlatform` (which owns the
+  placement builders); `EVN_UI_SCALE` / `EVN_FLIGHT_SCENE_SCALE` /
+  `EVN_MISSION_SCALE` override it for debug iteration.
+- **General UI scale (Stage 3).** Every contained/centered authored UI
+  composition requests `platform.ui_scale()`: splash/progress, main menu,
+  landed/spaceport, starmap, preferences/key settings, comms, player info,
+  docked store/trade/bar/mission dialogs, boarding/capture, negotiation,
+  selection-text and locate-data. Full-window `PlaceWindow(...)` backgrounds
+  and scrims stay neutral (scale 1) because they are not authored
+  compositions, and the intro cinematic is deliberately excluded (timed media,
+  not interactive UI).
+- **HUD chrome scaling (Stage 3b).** `HudRenderer::Draw` pushes a full-window
+  placement at `hud_scale = min(U, window/art_w, window/art_h)`, drawing the
+  cockpit strip, radar and anchored `.ntf` panels in authored
+  `window/hud_scale` coordinates. `CurrentViewport` reserves
+  `194 * hud_scale` (its own copy of the same stock-art cap; a one-frame lag on
+  resize). The escort panel and overlay message are extracted to
+  `DrawOverlayAndEscort`, which nests its own full-window placement at `U`, so
+  the strip fit cap never shrinks overlay text. The flight-scene scale `F`, the
+  route map, the flash scope and the flight-input refactor are Stage 5 (below).
+- **Mission `M` (Stage 4).** `PresentationScale::mission_dialog()` composes
+  `U * M` before the single fit clamp; `NovaMission_RunOfferWindow` (DLOG
+  `0x3f8`/`0x3fc`) and `NovaMission_RunMissionInfoWindow` (`0x3f4`) request it
+  at both their initial and per-frame placements, and the shared
+  `NovaUi_RunTextReaderDialog` takes a `mission_dialog` flag so the mission
+  desc readers (Brief/QuickBrief/LoadCarg/DumpCargo/Comp/Fail/ShipDone and
+  the mission-cargo denials) request `U * M` while non-mission readers stay at
+  `U`. The mission BBS (`0x3ee`), comms (`0x3ef`/`0x3f1`) and every other
+  authored UI site stay at `U`, and their full-window background/scrim
+  `PlaceWindow` stays neutral.
+- **Flight scene `F` (Stage 5, WP3).** `FlightSceneGeometryFor` builds the
+  full-window scene placement at `F` (`PlaceWindow(window, F)`) and the authored
+  gameplay viewport (window minus the `194 * hud_scale` strip reserve, divided
+  by `F`); `CurrentViewport` and `SyncGameplayViewport` derive from it, and
+  `DrawGameFrame` installs its placement. Flight input now consumes the raw
+  `FlightInput::window_mouse_x/y` snapshot and maps it per consumer: the scene
+  picks through `FlightSceneGeometryFor(platform).placement.ToAuthored`, the
+  route map through its own shared overlay placement. The hyperspace flash is
+  drawn under a neutral full-window placement so it covers HUD and UI
+  regardless of `F`.
 
 Related: [dlog_ditl_dialog_format.md](dlog_ditl_dialog_format.md) (authored
 DLOG/DITL geometry), [preferences_keybindings.md](preferences_keybindings.md)
@@ -14,11 +76,17 @@ DLOG/DITL geometry), [preferences_keybindings.md](preferences_keybindings.md)
 
 ## 1. Current state (verified)
 
+> This section records the pre-implementation baseline that motivated the
+> design. Stages 1-5 have since changed the scale-sensitive sites (the top
+> status and §4 carry the current state).
+
 - [placement.hpp](../src/util/placement.hpp) owns `dst` (window points),
-  `scale`, authored/containing sizes and the reflow rule; `ToWindow` /
-  `ToAuthored` / `ToWindowRect` are the forward/inverse mappings.
-  `PlaceContained` fits at `min(1, W/Aw, H/Ah)`; `PlaceCenteredIn` centres a
-  modal on its background; `Reflow` rebuilds a placement after a resize.
+  `scale`, `requested_scale` (the caller's request before the fit clamp),
+  authored/containing sizes and the reflow rule; `ToWindow` / `ToAuthored` /
+  `ToWindowRect` are the forward/inverse mappings. `PlaceContained` fits at
+  `min(requested_scale, W/Aw, H/Ah)`; `PlaceCenteredIn` centres a modal on its
+  background; `Reflow` rebuilds a placement after a resize and preserves each
+  placement's request (`anchor_requested_scale` for the ancestor chain).
 - [sdl_platform.hpp](../src/sdl_platform.hpp) /
   [sdl_platform.cpp](../src/sdl_platform.cpp) own the active placement and a
   push/pop stack, apply `placement.scale * WindowPixelDensity()` to the render
@@ -26,7 +94,9 @@ DLOG/DITL geometry), [preferences_keybindings.md](preferences_keybindings.md)
   through `ToAuthored`, and expose `logical_playfield_size()` (**window points,
   unchanged semantics**), `playfield_window_rect()` (`placement.dst`) and
   `text_raster_scale()` (`placement.scale * density`). `mouse_position()` and
-  `mouse_window_point()` are existing getters.
+  `mouse_window_point()` are existing getters. It also carries the resolved
+  `PresentationScale` (`ui_scale()` / `flight_scene_scale()` /
+  `mission_scale()`), which the placement builders read.
 - There are no render targets; modals re-render a live background callback
   ([ui_dialog.cpp](../src/game/ui_dialog.cpp),
   [docked_mission_dialog.cpp](../src/game/docked_mission_dialog.cpp)), so a
@@ -63,10 +133,15 @@ DLOG/DITL geometry), [preferences_keybindings.md](preferences_keybindings.md)
   ([nova_font.cpp](../src/game/nova_font.cpp)).
 - `game::NovaExtraPrefs`
   ([extended_prefs.hpp](../src/game/extended_prefs.hpp) /
-  [extended_prefs.cpp](../src/game/extended_prefs.cpp)) currently stores only
-  `[paths] install_root`; its parser ignores section headers and unknown keys.
-  `_SaveToSystemStore` truncates the file, so new fields must be emitted there
-  or they are erased by the install-root save ([nova_app.cpp](../src/nova_app.cpp)).
+  [extended_prefs.cpp](../src/game/extended_prefs.cpp)) stores `[paths]
+  install_root` and a `[display]` section with `ui_scale`,
+  `flight_scene_scale` and `mission_scale`. The parser accepts keys flatly
+  (section headers and unknown keys are ignored) and emits every field on
+  save, so the truncating install-root save no longer erases them. Values are
+  validated by `PresentationScale_Parse` (finite, `[0.5, 4.0]`) and fall back
+  to `1.0`; `NovaExtraPrefs_ResolvePresentationScale` applies the debug
+  `EVN_UI_SCALE` / `EVN_FLIGHT_SCENE_SCALE` / `EVN_MISSION_SCALE` overrides.
+  The resolved `PresentationScale` lives on `NovaRuntime`.
 
 ## 2. Target architecture
 
@@ -79,12 +154,16 @@ Three independent multipliers, all defaulting to `1.0`:
 - **`F` — flight-scene scale.** Scales world rendering only (ships, sprites,
   starfield, effects, asteroids); less world is visible. HUD and UI are
   unaffected. Simulation units are not rescaled.
-- **`M` — mission-dialog multiplier**, applied **on top of `U`**. Two
-  entrypoints: `NovaMission_RunOfferWindow` (DLOG `0x3f8`, variant `0x3fc`)
-  and `NovaMission_RunMissionInfoWindow` (DLOG `0x3f4`), which request
-  `U * M`. The mission BBS (`0x3ee`) and ship/planet comms (`0x3ef`/`0x3f1`)
-  request only `U`. The generic mission text-reader dialog defaults to `U`,
-  not `M`, unless a later decision widens the mission DLOG scope.
+- **`M` — mission-dialog multiplier**, applied **on top of `U`**. The two
+  mission entrypoints `NovaMission_RunOfferWindow` (DLOG `0x3f8`, variant
+  `0x3fc`) and `NovaMission_RunMissionInfoWindow` (`0x3f4`) request `U * M`,
+  as does every mission desc text reader: the acceptance Brief/LoadCarg
+  readers, the QuickBrief shown in the mission-info window, the
+  success/failure/load/dump/ShipDone debriefs and the mission-cargo denial
+  texts (all through `NovaUi_RunTextReaderDialog(..., mission_dialog=true)`).
+  The mission BBS (`0x3ee`), ship/planet comms (`0x3ef`/`0x3f1`) and every
+  non-mission text reader (about, intro, store/bar notices, escort payroll)
+  request only `U`.
 
 This replaces the old full-game scale idea: `F` enlarges the world without
 enlarging the UI.
@@ -111,6 +190,24 @@ dst       = ((W - Aw*scale_ui)/2, (H - Ah*scale_ui)/2, Aw*scale_ui, Ah*scale_ui)
 
 Composing `U * M` before one clamp avoids a double shrink. `r < 1` shrinks.
 
+**Anchored modal** (centred on a background placement `B`, not the window):
+
+```
+available = B.containing_size            full window, or fallback B.dst size
+fit       = min(available.x/Aw, available.y/Ah)
+scale_m   = min(r, fit)                  single clamp, same as contained
+center    = B.dst centre
+x         = clamp(center.x - Aw*scale_m/2, 0, max(0, available.x - Aw*scale_m))
+y         = clamp(center.y - Ah*scale_m/2, 0, max(0, available.y - Ah*scale_m))
+dst       = (x, y, Aw*scale_m, Ah*scale_m)
+```
+
+The modal keeps the **background anchor centre** distinct from the window
+centre; the background is rebuilt first by `Reflow` at
+`anchor_requested_scale`, then the modal re-centres. This is the
+`PlaceCenteredIn(const Placement &, ...)` overload, distinct from the plain
+window-centred `PlaceCenteredIn(SDL_FRect, ...)` used by fixed screens.
+
 **HUD strip** (right-anchored; authored bounds from loaded art/layout):
 
 ```
@@ -128,9 +225,16 @@ s_hud`) with `render_right = W/s_hud` and the existing `HudPanel_AnchorTopRight`
 helper, or an equivalent HUD-specific `dst` origin; either way the window stays
 drawable so panels are not clipped to an art-sized box. Fit uses loaded
 nonzero art height/layout bounds; if art is missing or zero-sized, fall back
-to the logical `.ntf` layout bounds so fitting never divides by zero. The
+to the stock `194x767`. The
 native 194 anchor and `CurrentViewport` reserve stay the gameplay contract.
 Custom art larger than the stock 194x767 is not promised to fit.
+
+DIVERGENCE(original): the fit clamp itself has no original counterpart.
+The original strip width is `DAT_0088c020 = 194 * ui_scale` with no window
+cap, so at large `U` the port's reserve differs (e.g. `U = 4` at 1024px:
+original play width 248 vs port 830). The cap is a selected robustness choice;
+mark the port site `divergence`. The final fallback when both art and layout
+are `0`-sized is the stock `194x767`.
 
 **Flight scene** (world fills the window; camera extent is separate):
 
@@ -165,11 +269,13 @@ placement (scale 1) so they cover HUD and UI; they remain inside
 - `FlightInput::mouse_x/y` are in the **active placement's** authored space.
   On resize, the event drain runs `RefreshPlacementAfterResize`; consumers must
   not assume `current_placement()` is unchanged after a modal pushes/pops.
-- Robust recommendation: snapshot the raw window-point float (add
-  `window_mouse_x/y` to `FlightInput`, captured beside the existing values from
-  `mouse_window_point()`) and map per consumer. Avoiding a raw snapshot is
-  acceptable only if each consumer uses the same placement that produced the
-  snapshot, not an arbitrary later `current_placement()`.
+- Required: snapshot the raw window-point float (add `window_mouse_x/y` to
+  `FlightInput`, captured beside the existing values from
+  `mouse_window_point()`) and map per consumer. The frame order makes the
+  "same placement that produced the snapshot" fallback unworkable: input is
+  polled before `DrawGameFrame` installs the scene placement, and
+  `RefreshPlacementAfterResize` runs inside the drain, so the active placement
+  at poll time is not the one any target was drawn with.
 - With the raw window-point snapshot, map it **directly** to each target via
   that target's `ToAuthored` (route-map overlay placement, scene placement,
   dialog placement). Only consumers still holding an already-mapped
@@ -196,7 +302,12 @@ placement (scale 1) so they cover HUD and UI; they remain inside
   anchored. `RouteMapView::Draw` and `RouteMap_HandleClick` must share this one
   placement and authored rect (no `ToAuthored` inverse cancellation). The
   map's existing internal zoom is independent of `F`. The route map is drawn
-  after `DrawGameFrame`.
+  after `DrawGameFrame`. Note this rule is intentionally **responsive**: the
+  original derives the side from the live render-owner width
+  (`DAT_00575a80 = 0.25`), so at `U = 1` it reproduces today's
+  window-proportional square, and `U > 1` only enlarges within the
+  `W/b` / `H/b` cap. That is a divergence from the otherwise-authored model,
+  but it matches the original; mark the port site `divergence`.
 - Keep the existing z-order: world, HUD strip/panels, overlays, flash inside
   `DrawGameFrame`, then route map. The flash gets full-window coverage only.
 
@@ -204,46 +315,67 @@ placement (scale 1) so they cover HUD and UI; they remain inside
 
 | Area | Site | Change |
 |---|---|---|
-| Placement algebra | [placement.hpp](../src/util/placement.hpp) | Add `requested_scale` to `Placement`, `PlaceContained`, `PlaceCenteredIn` and the `window` rule; persist it through `Reflow` for contained/window/centered and for **ancestor** placements used by nested modals. |
-| Platform | [sdl_platform.hpp](../src/sdl_platform.hpp) / [sdl_platform.cpp](../src/sdl_platform.cpp) | Apply/refresh unchanged; expose active presentation scales; keep window-point getters. Rebuild the scaled scene placement on resize (the explicit-rect rule does not reflow). |
+| Placement algebra | [placement.hpp](../src/util/placement.hpp) | **Stage 1 done:** `requested_scale` on `Placement`, `PlaceContained`, both `PlaceCenteredIn` overloads and the `window` rule; `anchor_requested_scale` persists the ancestor request through `Reflow` for contained/window/centered chains. Default `1.0` is neutral. |
+| Platform | [sdl_platform.hpp](../src/sdl_platform.hpp) / [sdl_platform.cpp](../src/sdl_platform.cpp) | Apply/refresh unchanged; expose active presentation scales; keep window-point getters. The scene uses `Rule::window` (`PlaceWindow(window, F)`), so `Reflow` rebuilds it on resize. |
 | Frame defaults | `NovaMainLoop_UpdateFrame`, `NovaRender_RedrawAndPresentFrame` ([nova_app.cpp](../src/nova_app.cpp)) | Request `U` for the 1024x768 default and menu placement. |
-| Fixed screens | [landed_window.cpp](../src/game/landed_window.cpp), [starmap.cpp](../src/game/starmap.cpp), [preferences.cpp](../src/game/preferences.cpp), [docked_dialog.cpp](../src/game/docked_dialog.cpp), [docked_mission_dialog.cpp](../src/game/docked_mission_dialog.cpp), [ui_dialog.cpp](../src/game/ui_dialog.cpp) | Pass `U` as requested scale; `PlaceCenteredIn(background)` keeps the **background anchor center** distinct from window center. |
-| Mission dialogs | `NovaMission_RunOfferWindow`, `NovaMission_RunMissionInfoWindow` ([docked_mission_dialog.cpp](../src/game/docked_mission_dialog.cpp)) | Request `U * M`; authored DITL/list pitch/text sizes unchanged. |
-| HUD strip | `HudRenderer::Draw` strip/panel scope, `HudPanel_AnchorTopRight` ([hud_renderer.cpp](../src/game/hud_renderer.cpp), [gameplay_interface.cpp](../src/game/gameplay_interface.cpp)) | Right-anchored strip at `W - 194*s_hud` from loaded art/layout bounds; scene reserve `194 * s_hud`. |
-| HUD overlays | `DrawEscortCommandsPanel`, overlay message ([hud_renderer.cpp](../src/game/hud_renderer.cpp)) | Separate full-window UI placement; scale by `U`; top-left/bottom anchors from placement extent. |
-| Flight world/camera | `DrawGameFrame`, `CurrentViewport`, `SyncGameplayViewport` ([spaceflight_view.cpp](../src/game/spaceflight_view.cpp)) | Full-window scene placement scale `F`; authored `vp`; recompute on resize. |
-| Flight input | `PlayerTick_MouseTargetAndControlCommands`, `PollFlightInput` ([spaceflight.cpp](../src/game/spaceflight.cpp), [sdl_platform.cpp](../src/sdl_platform.cpp)) | Raw window-point snapshot; per-consumer mapping; re-sync viewport after event drain before consumers. |
-| Route map | `RouteMap_HandleClick`, `RouteMap_OverlayRect`, `RouteMapView::Draw` ([route_map.cpp](../src/game/route_map.cpp)) | Shared top-left overlay placement with `authored = (0,0,b,b)`, `b = max(200, round(W*0.25))`, `s_map = min(U, W/b, H/b)`; one rect for draw and hit-test. |
+| Fixed screens | all authored UI sites (e.g. [landed_window.cpp](../src/game/landed_window.cpp), [starmap.cpp](../src/game/starmap.cpp), [preferences.cpp](../src/game/preferences.cpp), [docked_dialog.cpp](../src/game/docked_dialog.cpp), [docked_mission_dialog.cpp](../src/game/docked_mission_dialog.cpp), [docked_store_dialog.cpp](../src/game/docked_store_dialog.cpp), [docked_trade_dialog.cpp](../src/game/docked_trade_dialog.cpp), [docked_bar_dialog.cpp](../src/game/docked_bar_dialog.cpp), [ship_comm_dialog.cpp](../src/game/ship_comm_dialog.cpp), [player_info_window.cpp](../src/game/player_info_window.cpp), [boarding_plunder.cpp](../src/game/boarding_plunder.cpp), [negotiation_dialog.cpp](../src/game/negotiation_dialog.cpp), [selection_text_dialog.cpp](../src/game/selection_text_dialog.cpp), [locate_data_dialog.cpp](../src/game/locate_data_dialog.cpp), [ui_dialog.cpp](../src/game/ui_dialog.cpp)) | **Stage 3 done:** every authored `PlaceContained`/`PlaceCenteredIn` passes `platform.ui_scale()`; `PlaceWindow` backgrounds stay neutral; the intro cinematic stays native; `PlaceCenteredIn(background)` keeps the **background anchor center** distinct from window center. |
+| Mission dialogs | `NovaMission_RunOfferWindow`, `NovaMission_RunMissionInfoWindow`, `NovaUi_RunTextReaderDialog(mission_dialog=true)` ([docked_mission_dialog.cpp](../src/game/docked_mission_dialog.cpp), [selection_text_dialog.cpp](../src/game/selection_text_dialog.cpp)) | **Stage 4 done:** the two DLOGs and every mission desc text reader request `platform.mission_dialog_scale()` (= `U * M`, composed in `PresentationScale`); authored DITL/list pitch/text sizes unchanged; BBS/comms and non-mission readers stay `U`. |
+| HUD strip | `HudRenderer::Draw` strip/panel scope, `HudPanel_AnchorTopRight` ([hud_renderer.cpp](../src/game/hud_renderer.cpp), [gameplay_interface.cpp](../src/game/gameplay_interface.cpp)) | **Stage 3b done:** full-window placement at `min(U, window/art)`; strip at authored `window/hud_scale - 194`; `CurrentViewport` reserve `194 * hud_scale`. Independent of `F`. |
+| HUD overlays | `DrawOverlayAndEscort` ([hud_renderer.cpp](../src/game/hud_renderer.cpp)) | **Stage 3b done:** separate full-window placement at `U`; escort panel and overlay message scale independently of the strip fit cap. |
+| Flight world/camera | `DrawGameFrame`, `CurrentViewport`, `FlightSceneGeometryFor`, `SyncGameplayViewport` ([spaceflight_view.cpp](../src/game/spaceflight_view.cpp), [spaceflight_view.hpp](../src/game/spaceflight_view.hpp)) | **Stage 5 done:** one `FlightSceneGeometryFor` builds the full-window `PlaceWindow(window, F)` placement and the authored viewport `(window - reserve)/F`; draw and picking share it. |
+| Flight input | `PlayerTick_MouseTargetAndControlCommands`, `PollFlightInput` ([spaceflight.cpp](../src/game/spaceflight.cpp), [sdl_platform.cpp](../src/sdl_platform.cpp), [sdl_platform.hpp](../src/sdl_platform.hpp)) | **Stage 5 done:** `FlightInput::window_mouse_x/y` raw snapshot; scene picks map through the scene placement, route-map clicks through the overlay placement; viewport re-synced after the event drain. |
+| Route map | `RouteMap_HandleClick`, `RouteMap_OverlayRect`, `RouteMap_OverlayPlacement`, `RouteMapView::Draw` ([route_map.cpp](../src/game/route_map.cpp), [route_map.hpp](../src/game/route_map.hpp)) | **Stage 5 done:** one shared top-left overlay placement (`authored = (0,0,b,b)`, `b = max(200, round(W*0.25))`, `s_map = min(U, W/b, H/b)`) consumed by both draw and hit-test; clicks arrive as raw window points and map in. |
 | Prefs | `game::NovaExtraPrefs` ([extended_prefs.hpp](../src/game/extended_prefs.hpp), [extended_prefs.cpp](../src/game/extended_prefs.cpp)), [nova_app.cpp](../src/nova_app.cpp) | Add/parse/save three keys; preserve on install-root save. |
 
 ## 4. Work packages (dependency order)
 
-**WP0 — Placement requested scale (S).** Add `requested_scale`; honour it in
-`PlaceContained`, `PlaceCenteredIn` and the window rule; persist through
-`Reflow` for contained, window and centered placements, including the ancestor
-placement chain a nested modal relies on. Tests assert **geometry/behavior is
-unchanged** at `r = 1` (not byte-for-byte equality before snapping).
+**WP0 — Placement requested scale (S). DONE (Stage 1).** `requested_scale`
+composes with the fit in `PlaceContained`, both `PlaceCenteredIn` overloads
+and the window rule; `anchor_requested_scale` persists the ancestor request
+through `Reflow`. Geometry is unchanged at `r = 1` (existing placement tests
+pass unmodified), and new cases cover the fit composition, the window-rule
+authored extent, contained-reflow persistence, and nested-modal ancestor +
+child requests.
 
-**WP1 — Preferences and settings plumbing (S/M).** Add `ui_scale`,
-`flight_scene_scale`, `mission_scale`; parse and emit them; keep all fields on
-the truncating install-root save; strict finite-positive validation. Default,
-absent or invalid values fall back to `1.0`. Thread the values into placement
-construction (a small `PresentationScale` value is preferred over hidden
-globals).
+**WP1 — Preferences and settings plumbing (S/M). DONE (Stage 2).**
+`ui_scale`, `flight_scene_scale` and `mission_scale` parse from the `[display]`
+section through `PresentationScale_Parse` (complete, finite, `[0.5, 4.0]`;
+malformed falls back to `1.0` with a warning), are emitted on every save, and
+survive the install-root save. `NovaExtraPrefs_ResolvePresentationScale`
+applies the debug env overrides. The resolved `PresentationScale` is set on
+`SdlPlatform`, which owns the placement builders. Call sites read
+`platform.ui_scale()` (wired in WP2); `F`/`M` stay `1.0` until WP3+.
 
-**WP2 — General UI scale `U` (M).** Pass `U` at the fixed-screen/menu/dialog
-sites; verify defaults.
+**WP2 — General UI scale `U` (M). DONE (Stage 3).** Every
+authored contained/centered UI composition passes `platform.ui_scale()`:
+splash/progress, main menu, landed/spaceport, starmap, preferences/key
+settings, comms, player info, docked store/trade/bar, mission dialogs (BBS and
+comms at `U`, the two offer/info entrypoints now at `U * M` via WP4),
+boarding/capture, negotiation, selection-text and locate-data. Full-window
+`PlaceWindow` backgrounds stay neutral, and the intro cinematic is deliberately
+excluded (timed media, not interactive UI). At `U = 1` geometry is unchanged
+(full suite passes unmodified).
 
-**WP3 — Flight/HUD geometry and input (M).** Integrate the coupled HUD and
-scene transforms together: right-anchored HUD
-placement and scene reserve, full-window scene placement scale `F`, authored
-`vp`/camera, resize recomputation and frame ordering, separated HUD overlay
-scopes, route-map draw/input, flash full-window coverage, and the raw
-window-point input snapshot with per-consumer mapping.
+**WP3 — Flight/HUD geometry and input (M). DONE (Stages 3b + 5).**
+`HudRenderer::Draw` scales the strip/radar/panels with the art-fit cap;
+`CurrentViewport` reserves `194 * hud_scale`; `DrawOverlayAndEscort` nests a
+`U` placement for the escort panel and overlay message. Stage 5 adds the
+full-window scene placement at `F`, the authored `vp`/camera and
+`SyncGameplayViewport`, the raw window-point input snapshot with per-consumer
+mapping, the shared route-map draw/hit placement, and the full-window flash
+scope.
 
-**WP4 — Mission `M` (S).** Request `U * M` at the two entrypoints only; leave
-BBS/comms at `U`. Update the affected functions' tracker comments in the same
-change (comment only, no percentage inflation: the original had no scaling).
+**WP4 — Mission `M` (S). DONE (Stage 4).** `PresentationScale::mission_dialog()`
+composes `U * M`. The two DLOG entrypoints request it at every placement they
+build (`NovaMission_RunOfferWindow` initial + draw frame, and
+`NovaMission_RunMissionInfoWindow` initial + draw frame), and
+`NovaUi_RunTextReaderDialog` takes a `mission_dialog` flag so the mission desc
+readers (acceptance Brief/LoadCarg, QuickBrief via the info window, the
+debriefs and the cargo denials) use it too; BBS/comms and non-mission readers
+stay `U`. At `M = 1` the request is exactly `U`, so geometry is unchanged
+(full suite passes, plus a composition unit test). Scaling is
+presentation-only, so the cited tracker rows keep their existing pct/tags (no
+new original work is implemented).
 
 **WP5 — Validation and docs.** Extend the tests in §6.
 
@@ -267,11 +399,15 @@ flight_scene_scale=1.0
 mission_scale=1.0
 ```
 
-Loading reuses the existing startup extra-prefs load; saving must emit these
-keys alongside `install_root`. Validation is strict: parse the complete value
+Loading reuses the existing startup extra-prefs load; saving emits these keys
+alongside `install_root`. Validation is strict: parse the complete value
 (reject trailing junk) and accept only finite floats in the selected proposal
 range `[0.5, 4.0]` per factor; `nan`, `inf`, `0`, negatives and out-of-range
 values fall back to `1.0` with a warning naming the offending value. The
+load/validate/save path is implemented (Stage 2); the values are resolved onto
+the runtime and applied at the placement sites (WP2+). For debug iteration
+`EVN_UI_SCALE`, `EVN_FLIGHT_SCENE_SCALE` and `EVN_MISSION_SCALE` override the
+file at startup. The
 product `U * M` may reach `16`, then the single fit clamp applies; this bounds
 tiny-`F` overflow and huge-`U` raster cost. The range is a selected
 proposal, not a user-agreed fact. A later optional package may add
@@ -285,10 +421,11 @@ ordinary presentation settings.
 
 ## 6. Validation and acceptance criteria
 
-This documentation-only edit requires no build. For the future code work,
-follow AGENTS: build release and debug, run targeted `ctest`, format changed
-C++ with `clang-format`, run clang-tidy on affected translation units, and run
-`tools/ref_audit.py` and inspect `analysis/ref_audit.txt`. Ordinary gameplay
+Stages 0-5 are implemented and validated. Per AGENTS, changes were built in
+release and debug, exercised with targeted and full `ctest`, formatted with
+`clang-format`, checked with clang-tidy on affected translation units, and
+verified with `tools/ref_audit.py` against `analysis/ref_audit.txt`. Ordinary
+gameplay
 launches do not require approval; only the external probe does. Probe geometry
 is published by `SdlPlatform::PumpProbe` / `SetGeometry`, not by `Present`.
 Restore a neutral full-window flight placement at the frame boundary and
@@ -324,7 +461,8 @@ screenshots/control. Do not expand the probe protocol.
 
 - No responsive reflow, text re-wrapping for font-only scaling, art
   rearrangement, or per-widget metric edits. Authored constants stay authored.
-- No BBS/comms `M`; `M` is only the two mission entrypoints listed above.
+- No BBS/comms `M`; `M` covers the two mission DLOG entrypoints and the
+  mission desc text readers listed above.
 - No physical-pixel sizing; window points only.
 - No change to `logical_playfield_size` semantics, no rescaling of simulation
   units, and no behavior claims beyond camera/spawn extent.

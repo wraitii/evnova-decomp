@@ -633,7 +633,8 @@ void DrawKeySettingsDialog(SdlPlatform &platform,
   SDL_Renderer *const renderer = platform.renderer();
   DrawOwningScreen(platform, render_background);
   platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
 
   const auto &window = layout.window;
   // UiWindow_Draw clears and frames the complete DLOG surface before calling
@@ -1076,7 +1077,8 @@ void DrawSettingsDialog(SdlPlatform &platform,
   SDL_Renderer *renderer = platform.renderer();
   DrawOwningScreen(platform, render_background);
   platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   if (!layout.from_ditl) {
     return;
   }
@@ -1265,7 +1267,8 @@ bool NovaMenu_RunSettingsDialog(
 
   while (!platform.quit_requested()) {
     platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
-                                         platform.logical_playfield_size()));
+                                         platform.logical_playfield_size(),
+                                         platform.ui_scale()));
     const SDL_FPoint mouse = platform.mouse_position();
     const auto hover = HitTestControl(layout, mouse.x, mouse.y);
     DrawSettingsDialog(

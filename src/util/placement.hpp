@@ -14,6 +14,9 @@ struct Placement {
 
   SDL_FRect dst{};
   float scale = 1.0F;
+  // The scale the caller asked for, before the window/container fit clamp.
+  // Preserved so a resize can rebuild the placement at the same request.
+  float requested_scale = 1.0F;
 
   // These fields retain enough information to rebuild the placement after a
   // window resize. Callers normally use one of the builders below.
@@ -25,6 +28,9 @@ struct Placement {
   Rule anchor_rule = Rule::explicit_rect;
   SDL_FPoint anchor_center_normalized{0.5F, 0.5F};
   bool anchor_reflows_with_window = false;
+  // The requested scale of the background placement a modal was centred in,
+  // so a resize rebuilds the whole ancestor chain at its own request.
+  float anchor_requested_scale = 1.0F;
   Rule rule = Rule::explicit_rect;
 
   [[nodiscard]] SDL_FPoint ToAuthored(SDL_FPoint window) const {
@@ -68,23 +74,29 @@ struct Placement {
   [[nodiscard]] Placement Reflow(SDL_FPoint window) const;
 };
 
+// `requested_scale` composes the caller's scale factor with the window fit:
+// the result is the single clamp min(requested, window/authored). 1.0
+// reproduces the historical min(1, ...) cap.
 [[nodiscard]] inline Placement PlaceContained(SDL_FPoint authored,
-                                              SDL_FPoint window) {
+                                              SDL_FPoint window,
+                                              float requested_scale = 1.0F) {
   if (authored.x <= 0.0F || authored.y <= 0.0F || window.x <= 0.0F ||
       window.y <= 0.0F) {
     Placement placement;
+    placement.requested_scale = requested_scale;
     placement.authored_size = authored;
     placement.containing_size = window;
     placement.rule = Placement::Rule::contained;
     return placement;
   }
-  const float scale =
-      std::min(1.0F, std::min(window.x / authored.x, window.y / authored.y));
+  const float scale = std::min(
+      requested_scale, std::min(window.x / authored.x, window.y / authored.y));
   const SDL_FPoint size{authored.x * scale, authored.y * scale};
   Placement placement;
   placement.dst = {
       (window.x - size.x) * 0.5F, (window.y - size.y) * 0.5F, size.x, size.y};
   placement.scale = scale;
+  placement.requested_scale = requested_scale;
   placement.authored_size = authored;
   placement.containing_size = window;
   placement.rule = Placement::Rule::contained;
@@ -92,19 +104,21 @@ struct Placement {
 }
 
 [[nodiscard]] inline Placement PlaceCenteredIn(SDL_FRect bounds,
-                                               SDL_FPoint authored) {
+                                               SDL_FPoint authored,
+                                               float requested_scale = 1.0F) {
   if (authored.x <= 0.0F || authored.y <= 0.0F || bounds.w <= 0.0F ||
       bounds.h <= 0.0F) {
     Placement placement;
     placement.dst = {bounds.x, bounds.y, 0.0F, 0.0F};
+    placement.requested_scale = requested_scale;
     placement.authored_size = authored;
     placement.containing_size = {bounds.w, bounds.h};
     placement.anchor_bounds = bounds;
     placement.rule = Placement::Rule::centered;
     return placement;
   }
-  const float scale =
-      std::min(1.0F, std::min(bounds.w / authored.x, bounds.h / authored.y));
+  const float scale = std::min(
+      requested_scale, std::min(bounds.w / authored.x, bounds.h / authored.y));
   const SDL_FPoint size{authored.x * scale, authored.y * scale};
   Placement placement;
   placement.dst = {bounds.x + (bounds.w - size.x) * 0.5F,
@@ -112,6 +126,7 @@ struct Placement {
                    size.x,
                    size.y};
   placement.scale = scale;
+  placement.requested_scale = requested_scale;
   placement.authored_size = authored;
   placement.containing_size = {bounds.w, bounds.h};
   placement.anchor_bounds = bounds;
@@ -119,17 +134,27 @@ struct Placement {
   return placement;
 }
 
-[[nodiscard]] inline Placement PlaceWindow(SDL_FPoint window) {
+// A window-rule placement fills the whole window at the requested scale; the
+// authored extent is the window divided by that scale (the scene uses this
+// for the flight-world transform). 1.0 reproduces the native 1:1 window.
+[[nodiscard]] inline Placement PlaceWindow(SDL_FPoint window,
+                                           float requested_scale = 1.0F) {
   Placement placement;
   placement.dst = {0.0F, 0.0F, window.x, window.y};
-  placement.authored_size = window;
+  placement.scale = requested_scale;
+  placement.requested_scale = requested_scale;
+  placement.authored_size =
+      requested_scale > 0.0F
+          ? SDL_FPoint{window.x / requested_scale, window.y / requested_scale}
+          : window;
   placement.containing_size = window;
   placement.rule = Placement::Rule::window;
   return placement;
 }
 
 [[nodiscard]] inline Placement PlaceCenteredIn(const Placement &background,
-                                               SDL_FPoint authored) {
+                                               SDL_FPoint authored,
+                                               float requested_scale = 1.0F) {
   // A modal is centred on the background's centre, but its native size is
   // constrained by the whole window. This keeps a 640-space dialog native
   // when a smaller fixed panel is behind it.
@@ -141,17 +166,19 @@ struct Placement {
                           background.dst.y + background.dst.h * 0.5F};
   const float scale = (authored.x > 0.0F && authored.y > 0.0F &&
                        available.x > 0.0F && available.y > 0.0F)
-                          ? std::min(1.0F,
+                          ? std::min(requested_scale,
                                      std::min(available.x / authored.x,
                                               available.y / authored.y))
-                          : 1.0F;
+                          : requested_scale;
   const SDL_FPoint size{authored.x * scale, authored.y * scale};
   const float x = std::clamp(
       center.x - size.x * 0.5F, 0.0F, std::max(0.0F, available.x - size.x));
   const float y = std::clamp(
       center.y - size.y * 0.5F, 0.0F, std::max(0.0F, available.y - size.y));
-  Placement placement = PlaceCenteredIn(
-      SDL_FRect{0.0F, 0.0F, available.x, available.y}, authored);
+  Placement placement =
+      PlaceCenteredIn(SDL_FRect{0.0F, 0.0F, available.x, available.y},
+                      authored,
+                      requested_scale);
   placement.dst = {x, y, size.x, size.y};
   placement.anchor_bounds = background.rule == Placement::Rule::centered
                                 ? background.anchor_bounds
@@ -159,6 +186,7 @@ struct Placement {
   placement.anchor_authored_size = background.authored_size;
   placement.anchor_containing_size = background.containing_size;
   placement.anchor_rule = background.rule;
+  placement.anchor_requested_scale = background.requested_scale;
   const SDL_FPoint available_norm = placement.containing_size;
   if (available_norm.x > 0.0F && available_norm.y > 0.0F) {
     placement.anchor_center_normalized = {
@@ -173,24 +201,25 @@ struct Placement {
 inline Placement Placement::Reflow(SDL_FPoint window) const {
   switch (rule) {
   case Rule::contained:
-    return PlaceContained(authored_size, window);
+    return PlaceContained(authored_size, window, requested_scale);
   case Rule::window:
-    return PlaceWindow(window);
+    return PlaceWindow(window, requested_scale);
   case Rule::explicit_rect:
     return *this;
   case Rule::centered:
     if (anchor_rule == Rule::contained) {
-      const Placement background = PlaceContained(anchor_authored_size, window);
-      return PlaceCenteredIn(background, authored_size);
+      const Placement background =
+          PlaceContained(anchor_authored_size, window, anchor_requested_scale);
+      return PlaceCenteredIn(background, authored_size, requested_scale);
     }
     if (anchor_rule == Rule::window) {
-      const Placement background = PlaceWindow(window);
-      return PlaceCenteredIn(background, authored_size);
+      const Placement background = PlaceWindow(window, anchor_requested_scale);
+      return PlaceCenteredIn(background, authored_size, requested_scale);
     }
     if (anchor_rule == Rule::centered) {
       if (anchor_reflows_with_window) {
         const float resized_scale = std::min(
-            1.0F,
+            requested_scale,
             std::min(window.x / authored_size.x, window.y / authored_size.y));
         const SDL_FPoint size{authored_size.x * resized_scale,
                               authored_size.y * resized_scale};
@@ -211,11 +240,11 @@ inline Placement Placement::Reflow(SDL_FPoint window) const {
         result.rule = Rule::centered;
         return result;
       }
-      const Placement background =
-          PlaceCenteredIn(anchor_bounds, anchor_authored_size);
-      return PlaceCenteredIn(background, authored_size);
+      const Placement background = PlaceCenteredIn(
+          anchor_bounds, anchor_authored_size, anchor_requested_scale);
+      return PlaceCenteredIn(background, authored_size, requested_scale);
     }
-    return PlaceCenteredIn(anchor_bounds, authored_size);
+    return PlaceCenteredIn(anchor_bounds, authored_size, requested_scale);
   }
   return *this;
 }

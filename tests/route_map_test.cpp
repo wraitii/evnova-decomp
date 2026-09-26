@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "game/presentation_scale.hpp"
 #include "game/route_map.hpp"
 #include "sdl_platform.hpp"
 
@@ -17,4 +18,43 @@ TEST_CASE("route map overlay is a top-left square scaled from the view width",
   CHECK(rect.y == 0.0F);
   CHECK(rect.w == 256.0F);
   CHECK(rect.h == 256.0F);
+}
+
+// The overlay placement is shared by the draw and the click hit-test
+// (docs/display_scaling.md): top-left anchored, authored square `(0,0,b,b)`
+// mapped by `s_map = min(U, W/b, H/b)`. At U = 1 it must reproduce the old
+// window-point rect exactly; a larger U enlarges it within the window fit.
+TEST_CASE("route map overlay placement is top-left and honours the UI scale",
+          "[routemap]") {
+  SdlPlatform platform;
+  const Placement neutral = game::RouteMap_OverlayPlacement(platform);
+  CHECK(neutral.dst.x == 0.0F);
+  CHECK(neutral.dst.y == 0.0F);
+  CHECK(neutral.dst.w == 256.0F);
+  CHECK(neutral.dst.h == 256.0F);
+  CHECK(neutral.scale == 1.0F);
+  CHECK(neutral.authored_size.x == 256.0F);
+  CHECK(neutral.authored_size.y == 256.0F);
+
+  platform.SetPresentationScale(game::PresentationScale{2.0F, 1.0F, 1.0F});
+  const Placement scaled = game::RouteMap_OverlayPlacement(platform);
+  // Window 1024x768: min(U=2, 1024/256=4, 768/256=3) = 2.
+  CHECK(scaled.dst.w == 512.0F);
+  CHECK(scaled.dst.h == 512.0F);
+  CHECK(scaled.scale == 2.0F);
+  // A raw window point at the chart centre maps to the authored centre.
+  const SDL_FPoint centre = scaled.ToAuthored({256.0F, 256.0F});
+  CHECK(centre.x == 128.0F);
+  CHECK(centre.y == 128.0F);
+}
+
+// A window point outside the placed square must not hit-test inside it. This
+// guards the shared draw/hit rect against an inverse-cancellation regression.
+TEST_CASE("route map clicks map through the overlay placement", "[routemap]") {
+  SdlPlatform platform;
+  const Placement placement = game::RouteMap_OverlayPlacement(platform);
+  const SDL_FPoint miss =
+      placement.ToAuthored({placement.dst.w + 10.0F, placement.dst.h + 10.0F});
+  CHECK(miss.x > placement.authored_size.x);
+  CHECK(miss.y > placement.authored_size.y);
 }

@@ -176,7 +176,8 @@ void DrawStoreBase(SdlPlatform &platform,
   // shipyard redraw fill and draw their modal window surface, then composite
   // it over the existing travel scene. There is no full-screen dim/scrim.
   platform.SetPlacement(PlaceContained({layout.frame.w, layout.frame.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   if (frame != nullptr) {
     SDL_RenderTexture(renderer, frame, nullptr, &layout.frame);
   }
@@ -1111,7 +1112,8 @@ void RenderStoreScreen(SdlPlatform &platform,
                        NovaRgbColor grid_bright) {
   const bool outfit_store = session.kind == LandedStoreKind::kOutfitter;
   platform.SetPlacement(PlaceContained({765.0F, outfit_store ? 321.0F : 323.0F},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   const StoreLayout layout = LayoutStore(outfit_store);
   SDL_Texture *selected_image = StorePreviewTexture(
       platform, state, texture_cache, outfit_store, session.selected_id);
@@ -1197,7 +1199,8 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
                       grid_bright);
     platform.SetPlacement(
         PlaceContained({custom ? 614.0F : 250.0F, custom ? 537.0F : 285.0F},
-                       platform.logical_playfield_size()));
+                       platform.logical_playfield_size(),
+                       platform.ui_scale()));
     const ShipyardInfoLayout layout = LayoutShipyardInfo(custom);
     const Placement detail_placement = platform.current_placement();
     const auto probe_rect = [&detail_placement](SDL_FRect rect) {
@@ -1567,7 +1570,8 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
     }
     platform.SetPlacement(
         PlaceContained({765.0F, outfit_store ? 321.0F : 323.0F},
-                       platform.logical_playfield_size()));
+                       platform.logical_playfield_size(),
+                       platform.ui_scale()));
     const StoreLayout layout = LayoutStore(outfit_store);
     // The store windows share one control set; the grid slots are published
     // as label/price items so a harness can find a ship or outfit by name and

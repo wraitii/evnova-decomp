@@ -174,7 +174,8 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
     }
   }
   platform.SetPlacement(PlaceContained({layout.frame.w, layout.frame.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   if (frame != nullptr) {
     SDL_RenderTexture(renderer, frame, nullptr, &layout.frame);
   }

@@ -655,6 +655,8 @@ FlightInput SdlPlatform::PollFlightInput() {
   FlightInput input;
   input.mouse_x = mouse_position_.x;
   input.mouse_y = mouse_position_.y;
+  input.window_mouse_x = mouse_window_point_.x;
+  input.window_mouse_y = mouse_window_point_.y;
   PumpProbe();
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
@@ -668,6 +670,8 @@ FlightInput SdlPlatform::PollFlightInput() {
       RefreshPlacementAfterResize();
       input.mouse_x = mouse_position_.x;
       input.mouse_y = mouse_position_.y;
+      input.window_mouse_x = mouse_window_point_.x;
+      input.window_mouse_y = mouse_window_point_.y;
       continue;
     }
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
@@ -676,6 +680,8 @@ FlightInput SdlPlatform::PollFlightInput() {
       mouse_position_ = point;
       input.mouse_x = point.x;
       input.mouse_y = point.y;
+      input.window_mouse_x = mouse_window_point_.x;
+      input.window_mouse_y = mouse_window_point_.y;
       continue;
     }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
@@ -685,6 +691,8 @@ FlightInput SdlPlatform::PollFlightInput() {
       mouse_position_ = point;
       input.mouse_x = point.x;
       input.mouse_y = point.y;
+      input.window_mouse_x = mouse_window_point_.x;
+      input.window_mouse_y = mouse_window_point_.y;
       input.primary_clicked = true;
       continue;
     }

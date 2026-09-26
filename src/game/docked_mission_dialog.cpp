@@ -368,7 +368,8 @@ void DrawMissionBbsBase(SdlPlatform &platform,
     SDL_RenderClear(renderer);
   }
   platform.SetPlacement(PlaceContained({layout.frame.w, layout.frame.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   if (render_background == nullptr && backdrop != nullptr) {
     float width = 0.0F;
     float height = 0.0F;
@@ -525,7 +526,8 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
     return LandedExit::kServiceComplete;
   }
   platform.SetPlacement(PlaceContained({layout->frame.w, layout->frame.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.ui_scale()));
   ProbeUiAutoClear probe_ui_guard(platform);
   MissionListEvaluation missions = Mission_EvaluateMissionLists(state);
   std::size_t selected = 0;
@@ -860,7 +862,8 @@ void NovaMission_RunAcceptanceDialogs(
                                  message.text,
                                  true,
                                  render_background,
-                                 message.dialog_variant);
+                                 message.dialog_variant,
+                                 /*mission_dialog=*/true);
     }
   }
   if (def->pickup_mode == 0 && def->text_description_ids[2] >= 0x80) {
@@ -875,7 +878,8 @@ void NovaMission_RunAcceptanceDialogs(
                                  message.text,
                                  false,
                                  render_background,
-                                 message.dialog_variant);
+                                 message.dialog_variant,
+                                 /*mission_dialog=*/true);
     }
   }
 }
@@ -1008,8 +1012,9 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   // (0x00447680: UiPanel_GetEntryInfo(window, 8)).
   const SDL_FRect variant_rect = item_rect(7);
 
-  platform.SetPlacement(
-      PlaceContained({win_w, win_h}, platform.logical_playfield_size()));
+  platform.SetPlacement(PlaceContained({win_w, win_h},
+                                       platform.logical_playfield_size(),
+                                       platform.mission_dialog_scale()));
 
   // Publish the window's control rects to the probe harness (window-point
   // space) so the harness can click by intent; cleared when this modal exits.
@@ -1127,7 +1132,8 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                                    followup.text,
                                    false,
                                    render_background,
-                                   followup.dialog_variant);
+                                   followup.dialog_variant,
+                                   /*mission_dialog=*/true);
       }
     }
     Mission_ExecuteReactionScript(
@@ -1154,8 +1160,9 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     if (render_background == nullptr && backdrop != nullptr) {
       DrawContainedPict(platform, backdrop->get());
     }
-    platform.SetPlacement(
-        PlaceContained({win_w, win_h}, platform.logical_playfield_size()));
+    platform.SetPlacement(PlaceContained({win_w, win_h},
+                                         platform.logical_playfield_size(),
+                                         platform.mission_dialog_scale()));
     const SDL_FRect window{origin.x, origin.y, win_w, win_h};
     SDL_SetRenderDrawColor(platform.renderer(), 16, 40, 72, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(platform.renderer(), &window);
@@ -1564,7 +1571,8 @@ void NovaMission_RunMissionInfoWindow(
     return;
   }
   platform.SetPlacement(PlaceContained({layout->frame.w, layout->frame.h},
-                                       platform.logical_playfield_size()));
+                                       platform.logical_playfield_size(),
+                                       platform.mission_dialog_scale()));
   ProbeUiAutoClear probe_ui_guard(platform);
   const auto publish_probe_ui = [&]() {
     const auto probe_rect = [&platform](SDL_FRect rect) {
@@ -1648,7 +1656,8 @@ void NovaMission_RunMissionInfoWindow(
       SDL_RenderClear(renderer);
     }
     platform.SetPlacement(PlaceContained({layout->frame.w, layout->frame.h},
-                                         platform.logical_playfield_size()));
+                                         platform.logical_playfield_size(),
+                                         platform.mission_dialog_scale()));
     // DrawContext_BlitImageToRect(DAT_007742e4, UiWindow_GetRect(...)).
     if (frame != nullptr) {
       SDL_RenderTexture(renderer, frame->get(), nullptr, &layout->frame);
