@@ -1,5 +1,6 @@
 #include "brgr_archive.hpp"
 #include "log.hpp"
+#include "mac_resource_fork.hpp"
 #include "nova_paths.hpp"
 #include "util/byte_reader.hpp"
 
@@ -85,28 +86,47 @@ struct LoadedArchive {
   std::vector<ResourceRecord> records;
 };
 
-// @port 0x004CE4D0 80% correctness
-// Ghidra 0x004ce4d0 ResourceArchive_OpenRez: ParseArchive reconstructs the
-// BRGR descriptor-table and big-endian resource.map parse into entries/records.
-// TODO(decomp(0x004ce4d0)): the original locates resource.map by name via
-// FUN_00501710("resource.map"); the port scans entries for a plausible map
-// header. Verify the scan accepts every shipped map variant and cannot select a
-// wrong region.
+[[nodiscard]] bool IsBrgrArchive(std::span<const std::byte> bytes) {
+  return bytes.size() >= 4 &&
+         std::array{bytes[0], bytes[1], bytes[2], bytes[3]} ==
+             std::array{std::byte{0x42},
+                        std::byte{0x52},
+                        std::byte{0x47},
+                        std::byte{0x52}};
+}
+
+// Builds the registry view of a parsed Mac resource fork: one container entry
+// per resource payload, with the record name taken from the fork's name list.
+// Compressed ('dcmp') payloads are skipped rather than served as garbage;
+// access is by (type,id), so a skipped resource is simply absent.
 [[nodiscard]] std::optional<LoadedArchive>
-ParseArchive(const std::filesystem::path &path) {
-  std::ifstream input{path, std::ios::binary | std::ios::ate};
-  const auto archive_size = input ? static_cast<std::size_t>(input.tellg()) : 0;
-  std::vector<std::byte> bytes(archive_size);
-  input.seekg(0);
-  input.read(reinterpret_cast<char *>(bytes.data()),
-             static_cast<std::streamsize>(bytes.size()));
-  if (bytes.size() < 0x1c ||
-      std::array{bytes[0], bytes[1], bytes[2], bytes[3]} !=
-          std::array{std::byte{0x42},
-                     std::byte{0x52},
-                     std::byte{0x47},
-                     std::byte{0x52}}) {
-    NovaLog::Warn("BRGR archive unavailable or malformed: {}", path.string());
+LoadedFromResourceFork(evnova::rez::ResourceFork fork,
+                       const std::filesystem::path &path) {
+  LoadedArchive archive;
+  archive.bytes = std::move(fork.bytes);
+  for (auto &resource : fork.resources) {
+    if ((resource.attributes & evnova::rez::kResourceAttributeCompressed) !=
+        0) {
+      NovaLog::Todo("resource {:#010x}/{} in '{}' is dcmp-compressed; skipped",
+                    resource.type_code,
+                    resource.resource_id,
+                    path.string());
+      continue;
+    }
+    archive.entries.push_back({resource.offset, resource.size});
+    archive.records.push_back({resource.type_code,
+                               resource.resource_id,
+                               archive.entries.size() - 1,
+                               std::move(resource.name)});
+  }
+  return archive;
+}
+
+[[nodiscard]] std::optional<LoadedArchive>
+ParseBrgrArchive(std::vector<std::byte> bytes,
+                 const std::filesystem::path &path) {
+  if (bytes.size() < 0x1c) {
+    NovaLog::Warn("BRGR archive is truncated: {}", path.string());
     return std::nullopt;
   }
 
@@ -231,6 +251,57 @@ ParseArchive(const std::filesystem::path &path) {
   return std::nullopt;
 }
 
+// @port 0x004CE4D0 80% correctness
+// Ghidra 0x004ce4d0 ResourceArchive_OpenRez: dispatches on the container. The
+// original CE executable only knows the flat 'BRGR' form (ParseBrgrArchive
+// above); the Mac resource-fork branch is a port extension so original Mac
+// data and plug-ins load unchanged. TODO(decomp(0x004ce4d0)): the original
+// locates resource.map by name via FUN_00501710("resource.map"); the port
+// scans entries for a plausible map header. Verify the scan accepts every
+// shipped map variant and cannot select a wrong region.
+[[nodiscard]] std::optional<LoadedArchive>
+ParseArchive(const std::filesystem::path &path) {
+  std::error_code size_ec;
+  const auto file_size = std::filesystem::file_size(path, size_ec);
+  const auto prefix = evnova::rez::ReadFilePrefix(path, 16);
+  // Sniff the container from a short prefix first: the data folders also hold
+  // large media (Nova Music.mp3, Race *.mov) that must not be read wholesale
+  // only to be rejected.
+  if (prefix && IsBrgrArchive(*prefix)) {
+    if (auto bytes = evnova::rez::ReadFileBytes(path)) {
+      return ParseBrgrArchive(std::move(*bytes), path);
+    }
+    NovaLog::Warn("archive is unreadable: {}", path.string());
+    return std::nullopt;
+  }
+  // A resource fork can live in the data fork (AppleSingle/AppleDouble, or a
+  // fork flattened into the file) rather than beside it.
+  const bool data_fork_is_fork =
+      prefix &&
+      (evnova::rez::IsAppleSingleOrDoubleHeader(*prefix) ||
+       evnova::rez::IsResourceForkHeader(
+           *prefix, size_ec ? 0 : static_cast<std::size_t>(file_size)));
+  if (data_fork_is_fork) {
+    if (auto bytes = evnova::rez::ReadFileBytes(path)) {
+      if (auto fork = evnova::rez::ParseResourceForkOrAppleDouble(*bytes)) {
+        return LoadedFromResourceFork(std::move(*fork), path);
+      }
+    }
+    NovaLog::Warn("resource-fork image could not be parsed: {}", path.string());
+    return std::nullopt;
+  }
+  // Otherwise read the fork stored beside the file (macOS named fork, then an
+  // AppleDouble sidecar). This is the path for a Mac plug-in whose data fork
+  // is empty. It is cheap for ordinary files with no resource fork.
+  if (auto fork = evnova::rez::LoadResourceFork(path)) {
+    return LoadedFromResourceFork(std::move(*fork), path);
+  }
+  // Not an archive at all: the data folders legitimately hold media and other
+  // assets, so this is not worth a warning.
+  NovaLog::Debug("skipping non-archive file {}", path.string());
+  return std::nullopt;
+}
+
 // ---------------------------------------------------------------------------
 // @port 0x0046f500 80% correctness
 // Archive discovery (Resource_ValidateInstallFolders 0x004bd160,
@@ -271,10 +342,16 @@ BundledPluginDirectory(const std::filesystem::path &install_root) {
   return value;
 }
 
-// FileEnumerator_NextMatchingExt (0x004f1d70): non-recursive scan keeping only
-// regular files whose extension is ".rez", compared case-insensitively.
+// FileEnumerator_NextMatchingExt (0x004f1d70): non-recursive scan of a data
+// folder, in case-insensitive filename order. The original CE build kept only
+// regular files whose extension was ".rez"; the port extension also accepts
+// Mac-era files, which usually carry no extension and store their content in
+// the resource fork, leaving the data fork empty. Every non-hidden regular
+// file is offered to ParseArchive, which rejects non-archives. Hidden names
+// are skipped: ".DS_Store" and the AppleDouble "._name" sidecars, which
+// LoadResourceFork reads indirectly for the file they shadow.
 [[nodiscard]] std::vector<std::filesystem::path>
-EnumerateRezArchives(const std::filesystem::path &directory) {
+EnumerateArchiveFiles(const std::filesystem::path &directory) {
   std::vector<std::filesystem::path> archives;
   std::error_code ec;
   std::filesystem::directory_iterator it{directory, ec};
@@ -283,8 +360,11 @@ EnumerateRezArchives(const std::filesystem::path &directory) {
   }
   for (const auto &entry : it) {
     std::error_code type_ec;
-    if (!entry.is_regular_file(type_ec) || type_ec ||
-        AsciiLower(entry.path().extension().string()) != ".rez") {
+    if (!entry.is_regular_file(type_ec) || type_ec) {
+      continue;
+    }
+    const auto name = entry.path().filename().string();
+    if (name.empty() || name.front() == '.') {
       continue;
     }
     archives.push_back(entry.path());
@@ -452,12 +532,12 @@ private:
     // plugins always load (matching a registered install).
     const std::size_t core_count = archives_.size();
     for (const auto &path :
-         EnumerateRezArchives(*install_root / "Nova Files")) {
+         EnumerateArchiveFiles(*install_root / "Nova Files")) {
       OpenArchive(path);
     }
     const std::size_t files_count = archives_.size() - core_count;
     for (const auto &path :
-         EnumerateRezArchives(BundledPluginDirectory(*install_root))) {
+         EnumerateArchiveFiles(BundledPluginDirectory(*install_root))) {
       OpenArchive(path);
     }
     const std::size_t bundled_plugin_count =
@@ -467,14 +547,14 @@ private:
     std::size_t support_plugin_count = 0;
     if (const auto support_plugins =
             NovaPaths::SupportSubdirectory("Nova Plug-ins")) {
-      for (const auto &path : EnumerateRezArchives(*support_plugins)) {
+      for (const auto &path : EnumerateArchiveFiles(*support_plugins)) {
         OpenArchive(path);
       }
       support_plugin_count =
           archives_.size() - core_count - files_count - bundled_plugin_count;
     }
     if (archives_.empty()) {
-      NovaLog::Todo("no Nova .rez archives were found under '{}'",
+      NovaLog::Todo("no resource archives were found under '{}'",
                     install_root->string());
       return;
     }
@@ -499,7 +579,7 @@ private:
     }
     if (auto archive = ParseArchive(path)) {
       archives_.push_back(std::move(*archive));
-      NovaLog::Info("opened BRGR archive {}", path.string());
+      NovaLog::Info("opened resource archive {}", path.string());
     }
   }
 
