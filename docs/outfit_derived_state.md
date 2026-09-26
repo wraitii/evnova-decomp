@@ -30,10 +30,10 @@ The binary mixes two different patterns, and the port mirrors both:
 |---|---|---|
 | License clamp | unlicensed → `max_shield/armor = 1.0` | TODO |
 | Junk flags | `DAT_007356cc/cf/d0` from `g_junk_defs` | TODO |
-| Owned-outfit scan | ModType `0x2f`/`0x32` → carried-bomb class + `g_bomb_detonation_timer` (rolls `NovaRandom_Range(100)`); `0x2c` (val −1) → `g_player_reinforcement_inhibit_all`; `0x2c` → matching governments' `reinforcement_inhibited` (+0x82); `0x30` → `iff_scrambler_active` (+0x83); `0x1f` → `mining_scoop_active` | partial (bomb TODO) |
+| Owned-outfit scan | Bible ModType 47 "bomb"/50 "nonlethal bomb" → `bomb_outfit_class` + `g_bomb_detonation_timer` (rolls `NovaRandom_Range(100)`; 47 wins over 50); `0x2c` (val −1) → `g_player_reinforcement_inhibit_all`; `0x2c` → matching governments' `reinforcement_inhibited` (+0x82); `0x30` → `iff_scrambler_active` (+0x83); `0x1f` → `mining_scoop_active` | done (bomb class/timer in `outfit.cpp`; scoop via `NovaOutfit_RefreshPlayerMiningScoopActive`) |
 | Mining-scoop gate | clears scoop when cargo+junk ≥ fleet capacity | done (`NovaOutfit_RefreshPlayerMiningScoopActive`) |
 | Jamming reset | `jamming_score_1..4 = -1` | done |
-| Cargo overflow | capacity < total → scale all 6 bins by `capacity/total` (x87 truncation) + inventory dirty | TODO |
+| Cargo overflow | capacity < total → scale all 6 bins by `capacity/total` (x87 truncation) + inventory dirty | done |
 | Negative clamps | bins (+0x7a) and `g_junk_defs` counts (+0x22) → 0 | done |
 | Cloak latches | `cloak_scanner_reveal_screen/radar`, `cloak_damage_deactivate_latch` = -1 | done |
 | Government clear | all 0x100 govts' `policy_flags[0..1] = 0` | done |
@@ -76,10 +76,12 @@ and `Stellar_HandleStellarEntryAndExit` once after
 
 `NovaOutfit_RecomputeOutfitDerivedState` (`src/game/outfit.cpp`) is the
 clean-room hook (renamed from `OutfitMarkStatsDirty`). It currently does the
-stat-cache invalidation, negative clamps, the jamming reset, the cloak-latch
+stat-cache invalidation, the cargo-overflow scaling and negative clamps, the
+contraband latches, the government latches and `policy_flags` rebuild, the
+carried-bomb class + detonation-timer seed, the jamming reset, the cloak-latch
 reset, the mining-scoop arm, and the recently-hit timer reset. The remaining
-eager arms above are TODO and tracked at `0x0046D4B0` in
-`decomp-progress.tsv`.
+eager arms above (license clamp, junk-derived flags) are TODO and tracked at
+`0x0046D4B0` in `decomp-progress.tsv`.
 
 Sites that call the full hook: `NovaWeapon_ResolveFreeflightScoop`,
 `Mission_ExecuteReactionScript`, `Mission_RunMisnScriptPayload`,
@@ -93,7 +95,7 @@ onto the hook (each stands in for an original recompute call):
 `mission.cpp` (`Mission_RefreshActiveMissionSpawnState`, `Mission_RerollOfferingRolls`,
 `Player_CollectStellarTribute`), `boarding_plunder.cpp`
 (`SelfDestructTarget` arms), `landed_store.cpp` (`NovaLanded_*` close paths),
-`spaceflight.cpp` (`DetonateCarriedBomb`, `RespawnResetPlayerShipState`,
+`spaceflight.cpp` (`DetonateNonlethalBomb`, `RespawnResetPlayerShipState`,
 `RunPlayerEjectTransform`), `new_pilot_flow.cpp` (`RecomputePlayerMeters`),
 `outfit.cpp` (`Player_ComputeRemainingCargoSpace`). Unifying will start
 consuming the bomb-timer RNG at those sites — that is *more* faithful but is a
@@ -110,14 +112,16 @@ deliberate laziness divergence gets a marker and a tracker note.
 
 ## Remaining work (in priority order)
 
-1. Cargo-overflow scaling (use `docs/x87_precision.md`).
-2. Carried-bomb class + detonation timer (gives `bomb_outfit_class` its writer;
-   note the shared-RNG timing change).
-3. Junk flags (`DAT_007356cc/cf/d0`) and the license clamp (the murk
+1. Junk flags (`DAT_007356cc/cf/d0`) — the `cf`/`d0` tribble/perishable flags
+   are read by the tribble-growth / perishable-spoilage arms of
+   `Ship_HandlePlayerShipCore` (0x00451e6f / 0x00451f0f), which are themselves
+   still unported; do both together.
+2. License clamp (unlicensed → player `max_shield`/`max_armor` = 1.0). The murk
    `distance_intensity_scale` cache is instead computed on demand in
-   `NovaSystem_GetEffectiveMurkPercent`; see docs/system_murk_rendering.md).
-4. Unify the bare `stat_cache_valid = false` sites onto the hook, per site
-   (only those that map to an original recompute call).
+   `NovaSystem_GetEffectiveMurkPercent`; see docs/system_murk_rendering.md.
+3. Unify the bare `stat_cache_valid = false` sites onto the hook, per site
+   (only those that map to an original recompute call). Note the hook now seeds
+   the bomb-timer RNG, so unification starts consuming RNG at those sites.
 
 Note on the sticky government latches: the original sets `reinforcement_inhibited`
 (+0x82) and `iff_scrambler_active` (+0x83) but the recompute's clear loop only

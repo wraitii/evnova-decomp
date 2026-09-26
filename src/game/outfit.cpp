@@ -11,6 +11,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
+#include "nova_random.hpp"
 #include "ship_ai.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
@@ -241,7 +242,7 @@ void NovaOutfit_RefreshContrabandScanLatches(GameState &state) {
   }
 }
 
-// @port 0x0046D4B0 62% gameplay,license
+// @port 0x0046D4B0 70% gameplay,license
 // Ghidra 0x0046d4b0 Outfit_RecomputeOutfitDerivedState. See
 // docs/outfit_derived_state.md for the two-mechanism model (eager
 // side-effecting recompute vs. the lazy Ship_Compute* sentinel caches) and the
@@ -249,15 +250,20 @@ void NovaOutfit_RefreshContrabandScanLatches(GameState &state) {
 //
 // Modelled arms: stat-cache invalidation, cargo-overflow scaling, negative
 // cargo/junk clamps, jamming reset, cloak-latch reset, outfit-derived
-// government latches (ModType 0x2c/0x30), government policy_flags
-// clear/rebuild from active ranks, mining-scoop latch + cargo-capacity gate,
-// the contraband-scan latches (NovaOutfit_RefreshContrabandScanLatches), and
-// the recently-hit timer reset. TODO(decomp): the remaining eager arms are not
-// ported -- license clamp (unlicensed -> max shield/armor 1.0), junk-derived
-// flags, carried-bomb class + detonation timer, and the distance-intensity/murk
-// cache.
+// government latches (ModType 0x2c/0x30), the carried-bomb class and
+// detonation-timer seed (Bible ModType 47 "bomb" / 50 "nonlethal bomb"),
+// government policy_flags clear/rebuild from active ranks, mining-scoop latch +
+// cargo-capacity gate, the contraband-scan latches
+// (NovaOutfit_RefreshContrabandScanLatches), and the recently-hit timer reset.
+// TODO(decomp): the remaining eager arms are not ported -- license clamp
+// (unlicensed -> max shield/armor 1.0) and junk-derived flags; the murk
+// distance-intensity cache is instead computed on demand by
+// NovaSystem_GetEffectiveMurkPercent.
 void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
   state.InvalidateDerivedStatCaches();
+  // Ghidra 0x0046d4b0: clear the carried-bomb class latch; the owned-outfit
+  // scan below re-derives it from the owned bomb outfits.
+  state.bomb_outfit_class = 0;
   // Ghidra 0x0046d4b0: rebuild the two contraband-scan candidate latches
   // (DAT_007356cc for held junk, DAT_007356cd for owned outfits) from scratch.
   // Ship_ScanPlayerForContraband clears each after a successful scan.
@@ -332,8 +338,27 @@ void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
         mark_matching_governments(mod_val, [](Government &govt) {
           govt.iff_scrambler_active = true;
         });
+      } else if (mod_type == static_cast<std::int16_t>(OutfitEffect::kBomb)) {
+        // Bible ModType 47 "bomb": destroys the player in flight. The engine
+        // treats it as the lethal class-1 variant (ModVal is the d\xe9sc id).
+        state.bomb_outfit_class = 1;
+        state.bomb_detonation_timer = 0.0F;
+      } else if (mod_type ==
+                 static_cast<std::int16_t>(OutfitEffect::kNonlethalBomb)) {
+        // Bible ModType 50 "nonlethal bomb": class 2. The class-1 bomb latch
+        // wins when both are owned (original `if (class < 1)` guard).
+        if (state.bomb_outfit_class < 1) {
+          state.bomb_outfit_class = 2;
+        }
+        state.bomb_detonation_timer = 0.0F;
       }
     }
+  }
+  // Ghidra 0x0046d4b0: arm the carried bomb's detonation countdown to a fresh
+  // Random(100) roll. The draw runs on every recompute while a bomb is owned,
+  // so it stays on the shared session RNG stream at this point.
+  if (state.bomb_outfit_class != 0 && state.bomb_detonation_timer <= 0.0F) {
+    state.bomb_detonation_timer = static_cast<float>(RandomBelow(state, 100));
   }
   // Ghidra 0x0046d4b0: clear every government's two policy flags, then rebuild
   // them from the active ranks. A rank with flags 0x100/0x200 and an

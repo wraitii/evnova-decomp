@@ -394,12 +394,13 @@ void NovaOutfit_RefreshContrabandScanLatches(GameState &state);
 // Ghidra Outfit_RecomputeOutfitDerivedState (0x0046d4b0): the inventory /
 // loadout recompute hook. The original invalidates the lazily computed
 // Ship_Compute* stat caches, then eagerly rebuilds the non-cache derived
-// latches (government policy flags, carried-bomb class + detonation timer,
-// mining scoop, cargo-overflow scaling/clamps, cloak latches, junk flags).
-// The port currently models the invalidation, the jamming-score reset and the
-// mining-scoop arm; the eager arms are TODO(decomp). The pure effective-stat
-// snapshot stays lazy (GameState.cached_stats / stat_cache_valid), mirroring
-// the original's own sentinel getters. See docs/outfit_derived_state.md.
+// latches (government policy flags, Bible ModType 47 "bomb" / 50 "nonlethal
+// bomb" class + detonation timer, mining scoop, cargo-overflow scaling/clamps,
+// cloak latches, junk flags). The port models all but the license clamp and
+// the junk-derived DAT_007356cc/cf/d0 flags (the murk cache is computed on
+// demand). The pure effective-stat snapshot stays lazy (GameState.cached_stats
+// / stat_cache_valid), mirroring the original's own sentinel getters. See
+// docs/outfit_derived_state.md.
 void NovaOutfit_RecomputeOutfitDerivedState(GameState &state);
 
 // Ghidra Mission_AccumulatePlayerContributeMask (0x0046cca0): aggregates the
