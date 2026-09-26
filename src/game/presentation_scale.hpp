@@ -1,7 +1,7 @@
 #pragma once
 
-// Port-only presentation multipliers (docs/display_scaling.md). The original
-// game has no user-facing scale controls; these let the SDL port scale UI,
+// Port-only presentation multipliers. The original game has no user-facing
+// scale controls; these let the SDL port scale UI,
 // the flight scene and mission dialogs independently. They are presentation
 // choices, not game-logic changes, so they are not gated through the original
 // bug-fix compatibility switch.

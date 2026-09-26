@@ -1091,7 +1091,7 @@ int NovaApp_Run(NovaRuntime &runtime) {
   // platform, which owns the placement builders. All three are live:
   // `ui_scale` at the authored UI/HUD sites, `flight_scene_scale` on the
   // free-flight world, and `mission_scale` composed on top of `ui_scale` at the
-  // two mission dialogs (docs/display_scaling.md).
+  // two mission dialogs.
   const game::PresentationScale presentation =
       game::NovaExtraPrefs_ResolvePresentationScale(extra_prefs);
   runtime.platform.SetPresentationScale(presentation);

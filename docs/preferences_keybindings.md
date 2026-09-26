@@ -255,7 +255,7 @@ byte-compatible and the shipped game never reads them. It stores
 `[paths] install_root`, the player-selected EV Nova install root written by the
 startup locate-data screen (see `docs/scenario_data_loading.md`), plus a
 `[display]` section with the port-only presentation multipliers (`ui_scale`,
-`flight_scene_scale`, `mission_scale`; `docs/display_scaling.md`). The INI is
+`flight_scene_scale`, `mission_scale`). The INI is
 rewritten wholesale on save, so every field is re-emitted.
 
 ## `ddraw.ini` settings outside the `.prf` preferences

@@ -362,9 +362,9 @@ public:
     return placement_;
   }
 
-  // Port-only presentation multipliers (docs/display_scaling.md), set once at
-  // startup from the resolved extra prefs. Authored UI compositions request
-  // `ui_scale()`; the flight scene and mission dialogs use the other factors.
+  // Port-only presentation multipliers, set once at startup from the resolved
+  // extra prefs. Authored UI compositions request `ui_scale()`; the flight
+  // scene and mission dialogs use the other factors.
   void SetPresentationScale(const game::PresentationScale &scale) {
     presentation_scale_ = scale;
   }

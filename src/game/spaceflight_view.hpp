@@ -63,11 +63,11 @@ struct ShipEmergencePresentation {
 [[nodiscard]] ShipEmergencePresentation
 NovaShip_EmergencePresentation(const Ship &ship);
 
-// The flight scene's presentation geometry (docs/display_scaling.md): the
-// full-window scene placement at the flight-scene scale `F`, plus the authored
-// gameplay viewport (window minus the drawn cockpit-strip reserve, divided by
-// `F`). Both the world draw and the raw-window-point click mapping build it
-// through this one function so they cannot disagree.
+// The flight scene's presentation geometry: the full-window scene placement
+// at the flight-scene scale `F`, plus the authored gameplay viewport (window
+// minus the drawn cockpit-strip reserve, divided by `F`). Both the world draw
+// and the raw-window-point click mapping build it through this one function so
+// they cannot disagree.
 struct FlightSceneGeometry {
   Placement placement;
   int viewport_w = 0;

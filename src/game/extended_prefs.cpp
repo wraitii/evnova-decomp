@@ -162,8 +162,7 @@ void NovaExtraPrefs_Write(std::ostream &out, const NovaExtraPrefs &prefs) {
          "# Port-only settings that have no slot in EV Nova Prefs.prf.\n"
          "# install_root: folder containing Nova.rez / Nova Files.\n"
          "# ui_scale / flight_scene_scale / mission_scale: presentation\n"
-         "# multipliers in [0.5, 4]; 1.0 is native. See "
-         "docs/display_scaling.md.\n"
+         "# multipliers in [0.5, 4]; 1.0 is native.\n"
          "[paths]\n";
   if (prefs.install_root) {
     out << kInstallRootKey << '=' << prefs.install_root->string() << '\n';
