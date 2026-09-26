@@ -156,8 +156,9 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 // the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance, which spawns
 // encounter-fleet leads / random dude ships toward avg_ships).
 // The overlay helper's HUD expiry and route-map deadline are represented by
-// their wall-clock state elsewhere in the port. The asteroid ring and
-// interaction flags are still absent.
+// their wall-clock state elsewhere in the port. The asteroid ring spawn and
+// g_ai_target_refresh_needed latch are still absent; g_ai_misc_event_flag is
+// cleared here (the original also clears g_ai_target_refresh_needed).
 void Stub_TickReactionsAndNpcSpawns(GameState &state,
                                     SdlAudio &audio,
                                     float elapsed_ticks,
@@ -180,6 +181,9 @@ void Stub_TickReactionsAndNpcSpawns(GameState &state,
     NovaSystem_UpdateReinforcementCountdown(state, kOriginalMaxRateFrameTicks);
     NovaSystem_TickNpcSpawnMaintenance(
         state, state.player.current_system_id, now_ms);
+    // Frame_TickSystems scope 0xb clears the AI event latches after the spawn
+    // maintenance (0x00418df7).
+    state.ai_misc_event_flag = false;
   }
 }
 

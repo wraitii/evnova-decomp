@@ -112,6 +112,7 @@ scans against unchanged inventory do not re-fire.
 
 ## Remaining gap
 
-Caller only: `g_ai_misc_event_flag = 1` and the `pers_def_slot == 0x3ff`
-shareware/licence nag arm in the state-7 caller (`Ship_UpdateShipAiState`,
-0x00405590) are unported. The scanner body has no known gaps.
+The state-7 caller now reconstructs `g_ai_misc_event_flag = 1` and the
+`pers_def_slot == 0x3ff` Shareware Enforcer split (100 px arrival range,
+licence nag skipped, expired-trial state-4 attack). The scanner body has no
+known gaps.

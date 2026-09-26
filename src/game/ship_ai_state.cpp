@@ -42,9 +42,11 @@ constexpr float kArriveRangeBase = 9.0F;
 constexpr float kArriveRangeTurnCap = 8.0F;
 constexpr float kArriveRangeScale = 8.0F;
 constexpr float kArriveRangeOffset = 32.0F;
-// Engagement distance within which a ship can fire on or engage a target
-// (0x5750b0, float).
-constexpr float kEngageDist = 165.0F;
+// State-7 escort/follow arrival range: within this many px on both axes the
+// follower has reached its primary target (FLOAT_0057501c, float = 100.0).
+// The separate 0x5750b0 float = 165.0 used by the unported state-5/state-0xd
+// combat-staging bands is not needed yet.
+constexpr float kEscortArriveDist = 100.0F;
 // Assist/response keep-distance thresholds.
 constexpr float kAssistClose = 300.0F;
 constexpr float kAssistFar = 600.0F;
@@ -128,16 +130,20 @@ std::int16_t CurrentSystemLinkSpriteWidth(const GameState &state,
 
 } // namespace
 
-// @port 0x00405590 75% gameplay,ui,license
+// @port 0x00405590 78% gameplay,ui,license
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame state machine. This
 // is a substantial function; the reconstruction below covers the core
 // movement/control-mode decision for the states the reimplementation drives
 // (travel, wander, escort-follow, hold, drift, disengage, defunct) and writes
 // Ship.ai_control_mode accordingly. The high-level attack states now enter
-// pursuit/engagement control modes using the reconstructed target slots;
-// weapon selection, cloak engagement, and HUD/mission flavor remain deferred.
-// TODO(decomp(0x00405590)): weapon selection, cloak engagement rules, and the
-// HUD/mission flavor arms of the per-frame state machine are unported.
+// pursuit/engagement control modes using the reconstructed target slots. The
+// state-7 escort/follow arm reconstructs the 100 px arrival range, the
+// g_ai_misc_event_flag write, and the pers_def_slot 0x3ff Shareware Enforcer
+// split (licence nag skipped, expired-trial attack). Weapon selection, other
+// cloak engagement rules, and HUD/mission flavor remain deferred.
+// TODO(decomp(0x00405590)): weapon selection, cloak engagement rules, the
+// state-7 Shareware Enforcer licence nag text, and the HUD/mission flavor arms
+// of the per-frame state machine are unported.
 void NovaAi_UpdateShipState(GameState &state,
                             Ship &ship,
                             std::uint32_t now_ms,
@@ -581,23 +587,35 @@ void NovaAi_UpdateShipState(GameState &state,
       return;
     }
     const Ship &tgt = state.ShipAt(static_cast<std::size_t>(target));
-    if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, tgt, ship)) {
-      ship.ai_state_code = 0;
-      ship.ai_control_mode = 0;
-      ship.primary_target_ship_slot = -1;
-      return;
-    }
     if (target == 0) {
+      // Following the player: the original raises the misc-event latch before
+      // the range test (0x004073fa).
+      state.ai_misc_event_flag = true;
       // Escorting the player: match hold distance, else pursue.
-      if (std::abs(ship.pos_x - tgt.pos_x) > kEngageDist ||
-          std::abs(ship.pos_y - tgt.pos_y) > kEngageDist) {
+      if (std::abs(ship.pos_x - tgt.pos_x) > kEscortArriveDist ||
+          std::abs(ship.pos_y - tgt.pos_y) > kEscortArriveDist) {
         ship.ai_control_mode = 9;
         return;
       }
       if (ship.pers_def_slot == 0x3ff) {
-        // Player-controlled ship: the shareware/licence nag arm is not
-        // reconstructed (see the TODO(decomp(0x00405590)) at this function's
-        // entry). Nothing else runs for this branch.
+        // Shareware Enforcer personality. The original gate is
+        // (is_licensed_runtime == 0) * g_shareware_day_counter < 0x1f: a
+        // licensed class (or a trial inside 0x1f days) shows the nag and then
+        // clears the target, while an expired trial attacks the player. The
+        // port models a registered game via control.registered and has no
+        // trial-day counter, so an unregistered run is treated as expired.
+        ship.ai_cached_target_ship_slot = 0;
+        if (state.control.registered) {
+          // TODO(decomp(0x00405590)) skipped: the shareware nag (voice slot,
+          // STR# 30000 line, NovaHud_ShowOverlayMessage) is licence-only; the
+          // original then clears through Ship_EnterShipAiState0x02.
+          NovaAi_EnterState2ClearPrimaryTarget(state, ship);
+        } else {
+          ship.ai_state_code = 4; // attack engagement
+          ship.primary_target_ship_slot = 0;
+          ship.ai_secondary_target_slot = -1;
+          ship.ai_hostility_accumulator = 1;
+        }
         return;
       }
       // Within escort distance an NPC clears its target and (warships /
@@ -609,11 +627,14 @@ void NovaAi_UpdateShipState(GameState &state,
       NovaShip_ScanPlayerForContraband(state, ship, now_ms);
       return;
     }
-    if (std::abs(ship.pos_x - tgt.pos_x) > kEngageDist ||
-        std::abs(ship.pos_y - tgt.pos_y) > kEngageDist) {
+    if (std::abs(ship.pos_x - tgt.pos_x) > kEscortArriveDist ||
+        std::abs(ship.pos_y - tgt.pos_y) > kEscortArriveDist) {
       ship.ai_control_mode = 9;
     } else {
+      // The original falls through to the shared state-0 arm, which zeroes the
+      // control mode; the port returns early, so do it here.
       ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
       ship.primary_target_ship_slot = -1;
     }
     return;

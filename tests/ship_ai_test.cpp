@@ -772,6 +772,98 @@ TEST_CASE(
   CHECK(ship.ai_control_mode == 9);
 }
 
+// State-7 escort/follow uses the 100 px arrival range (FLOAT_0057501c), not
+// the 165 px combat-staging band, and raises g_ai_misc_event_flag before the
+// range test when the primary target is the player. Unlike states 4/0xd,
+// state 7 has no cloak-engagement revalidation gate.
+TEST_CASE("state-7 escort uses the 100 px arrival range and raises the AI "
+          "event latch") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = 0;
+  state.player.armor_points = 100.0F;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = 0;
+  ship.current_system_id = 0;
+  ship.ai_state_code = 7;
+  ship.primary_target_ship_slot = 0;
+  ship.ai_maneuver_timer_ms = 0.0F;
+  ship.pers_def_slot = -1;
+  ship.ai_control_mode = -1;
+  state.ai_misc_event_flag = false;
+
+  // 120 px: outside the original 100 px arrival range, so pursue (mode 9).
+  ship.pos_x = 120.0F;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 9);
+  CHECK(state.ai_misc_event_flag);
+
+  // 80 px: inside, so the escort arrives and clears its target.
+  ship.pos_x = 80.0F;
+  ship.ai_state_code = 7;
+  ship.primary_target_ship_slot = 0;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_state_code == 0);
+  CHECK(ship.primary_target_ship_slot == -1);
+}
+
+// State-7 Shareware Enforcer (pers_def_slot 0x3ff) player arm. The registered
+// model takes the clear/state-2 arm (the licence nag text is skipped) and
+// records the player in the cached-target slot; an unregistered run is treated
+// as an expired trial and attacks the player.
+TEST_CASE("state-7 Shareware Enforcer clears the player or attacks") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = 0;
+  state.player.armor_points = 100.0F;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+
+  const auto make_enforcer = [&state](std::size_t slot) -> game::Ship & {
+    game::Ship &ship = state.ShipAt(slot);
+    ship.is_active = true;
+    ship.ship_instance_id = static_cast<std::int16_t>(slot);
+    ship.ship_class_id = 0;
+    ship.current_system_id = 0;
+    ship.ai_state_code = 7;
+    ship.primary_target_ship_slot = 0;
+    ship.ai_maneuver_timer_ms = 0.0F;
+    ship.pers_def_slot = 0x3ff;
+    ship.ai_cached_target_ship_slot = -1;
+    ship.pos_x = 10.0F;
+    ship.pos_y = 10.0F;
+    return ship;
+  };
+
+  state.control.registered = true;
+  game::Ship &registered = make_enforcer(1);
+  game::NovaAi_UpdateShipState(state, registered, /*now_ms=*/0);
+  CHECK(registered.ai_state_code == 2);
+  CHECK(registered.primary_target_ship_slot == -1);
+  CHECK(registered.ai_cached_target_ship_slot == 0);
+
+  state.control.registered = false;
+  game::Ship &unregistered = make_enforcer(2);
+  game::NovaAi_UpdateShipState(state, unregistered, /*now_ms=*/0);
+  CHECK(unregistered.ai_state_code == 4);
+  CHECK(unregistered.primary_target_ship_slot == 0);
+  CHECK(unregistered.ai_secondary_target_slot == -1);
+  CHECK(unregistered.ai_hostility_accumulator == 1);
+}
+
 TEST_CASE("state 9 assist service approaches, brakes, and transfers fuel") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
