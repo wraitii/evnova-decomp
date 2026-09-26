@@ -2834,10 +2834,11 @@ TEST_CASE("capture warship abandons only a disabled high-AI target",
       state.scenario.ships[static_cast<std::size_t>(ship_class)].base_armor);
   target.armor_points = target_max_armor;
 
-  REQUIRE_FALSE(
-      game::NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, attacker));
+  // REQUIRE_FALSE trips clang-analyzer's EnumCastOutOfRange on Catch2's
+  // ResultDisposition::Flags bitwise-OR; negated REQUIRE is equivalent.
+  REQUIRE(!game::NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, attacker));
   REQUIRE(game::NovaWeapon_ClassifyAmmoReadiness(state, attacker) == 0);
-  REQUIRE_FALSE(game::NovaAiShip_IsDisabled(state, target));
+  REQUIRE(!game::NovaAiShip_IsDisabled(state, target));
   game::NovaAi_UpdateBehavior0x03CaptureVariant(state,
                                                 attacker,
                                                 /*now_ms=*/0);
