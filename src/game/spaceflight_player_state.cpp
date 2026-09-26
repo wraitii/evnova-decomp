@@ -82,9 +82,15 @@ constexpr std::int16_t kBombDetonationRerollMax = 100;
 constexpr float kBombDetonationIntervalFrames = 300.0F;
 // Outfit ModType codes scanned in the four mod-type slots (decompile offsets
 // name-0x26..-0x20, 0x37c-byte def stride).
-constexpr std::int16_t kBombEscapePodModType = 0x2F; // self-destruct escape pod
-constexpr std::int16_t kBombWeaponModType = 0x32;    // carried bomb
-constexpr std::int16_t kAutoRepairOutfitModType = 0x31; // repair system
+// Bible ModType 47 "bomb" (lethal) and ModType 50 "nonlethal bomb"
+// (self-destructs and damages the player nonfatally). The engine also uses the
+// ModType 47 outfit for the escape-pod/death variant. Values mirror
+// OutfitEffect so the writer in Outfit_RecomputeOutfitDerivedState agrees.
+constexpr std::int16_t kBombModType =
+    static_cast<std::int16_t>(OutfitEffect::kBomb); // 0x2F
+constexpr std::int16_t kNonlethalBombModType =
+    static_cast<std::int16_t>(OutfitEffect::kNonlethalBomb); // 0x32
+constexpr std::int16_t kAutoRepairOutfitModType = 0x31;      // repair system
 // STR# 0x7d2 entries used by the block.
 constexpr std::uint16_t kStringListFlightText = 0x7D2;
 constexpr std::uint16_t kStrAutoRepairEngaged =
@@ -197,8 +203,7 @@ void RunDeathEscapePodScan(GameState &state) {
     if (state.inventory.outfit_owned_count[idx] <= 0) {
       continue;
     }
-    const Outfit *pod =
-        FindOutfitWithModType(state, idx, kBombEscapePodModType);
+    const Outfit *pod = FindOutfitWithModType(state, idx, kBombModType);
     if (pod == nullptr || pod->mod_val <= 0) {
       continue;
     }
@@ -232,10 +237,11 @@ std::string ComposeBombOverlay(const GameState &state,
   return text;
 }
 
-// Ghidra 0x0044daa0 escape-pod bomb variant (carried bomb outfit class 1):
-// kills shields/armor immediately, stops the hyperspace audio, shows the
-// deployment overlay, and returns to the menu shell (DAT_007354a5).
-void DetonateEscapePodBomb(GameState &state) {
+// Ghidra 0x0044daa0 bomb detonation, class 1 (Bible ModType 47 "bomb",
+// lethal / escape-pod variant): kills shields/armor immediately, stops the
+// hyperspace audio, shows the deployment overlay, and returns to the menu
+// shell (DAT_007354a5).
+void DetonateBomb(GameState &state) {
   PlayerShip &p = state.player;
   p.armor_points = -1.0F;
   p.shield_points = -1.0F;
@@ -249,7 +255,7 @@ void DetonateEscapePodBomb(GameState &state) {
     if (owned <= 0) {
       continue;
     }
-    if (FindOutfitWithModType(state, idx, kBombEscapePodModType) == nullptr) {
+    if (FindOutfitWithModType(state, idx, kBombModType) == nullptr) {
       continue;
     }
     // Singular/plural choice reproduces the original's name-flag ladder: the
@@ -283,11 +289,12 @@ void DetonateEscapePodBomb(GameState &state) {
   state.return_to_menu_pending = true;
 }
 
-// Ghidra 0x0044b446 bomb detonation: message, impact effect from the def's
-// 0x80-biased ModVal, outfit removal, and an armor-piercing self-damage roll
+// Ghidra 0x0044b446 nonlethal bomb detonation, class 2 (Bible ModType 50
+// "nonlethal bomb"): message, impact effect from the def's 0x80-biased ModVal,
+// outfit removal, and an armor-piercing self-damage roll
 // of max_armor * fraction + addend (bypass_shields, force_armor_only,
 // suppress_retarget, no aggro).
-void DetonateCarriedBomb(GameState &state) {
+void DetonateNonlethalBomb(GameState &state) {
   PlayerShip &p = state.player;
   for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
                             idx < state.inventory.outfit_owned_count.size();
@@ -295,7 +302,8 @@ void DetonateCarriedBomb(GameState &state) {
     if (state.inventory.outfit_owned_count[idx] <= 0) {
       continue;
     }
-    const Outfit *bomb = FindOutfitWithModType(state, idx, kBombWeaponModType);
+    const Outfit *bomb =
+        FindOutfitWithModType(state, idx, kNonlethalBombModType);
     if (bomb == nullptr) {
       continue;
     }
@@ -1120,9 +1128,9 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
       state.pending_impact_sounds.push_back(
           GameState::PendingImpactSound{0, p.pos_x, p.pos_y});
       if (state.bomb_outfit_class == 1) {
-        DetonateEscapePodBomb(state);
+        DetonateBomb(state);
       } else {
-        DetonateCarriedBomb(state);
+        DetonateNonlethalBomb(state);
       }
     }
   }

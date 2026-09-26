@@ -25,6 +25,7 @@ add_executable(evnova_tests
     nova_command_test.cpp
     nova_font_test.cpp
     nova_list_control_test.cpp
+    outfit_bomb_test.cpp
     outfit_clamp_test.cpp
     outfit_ionization_test.cpp
     pilot_file_test.cpp

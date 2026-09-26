@@ -219,8 +219,8 @@ address	name	impl_file	reimpl_pct	comment
 0x0043CC20	Stellar_RebuildTravelDestinationList		0%	
 0x0043CF00	Mission_EvaluateMissionLists	src/game/mission.cpp	85%	gameplay
 0x0043D240	Mission_ResolveMissionStellarTargets	src/game/mission.cpp	100%	divergence
-0x0043D490	Mission_ResolveMissionSpecialShipSystem	src/game/mission.cpp	65%	gameplay
-0x0043D4C0	Mission_ResolveMissionSpecialShipCount	src/game/mission.cpp	65%	gameplay
+0x0043D490	Mission_ResolveMissionSpecialShipSystem	src/game/mission.cpp	95%	rng
+0x0043D4C0	Mission_ResolveMissionSpecialShipCount	src/game/mission.cpp	95%	rng
 0x0043D510	Mission_SelectMissionStellarByLocator	src/game/mission.cpp	100%	divergence
 0x0043E6F0	Mission_SelectMissionSystemByLocator	src/game/mission.cpp	100%	divergence
 0x0043F080	Mission_ComputeDateAfterSteps	src/game/mission_world.cpp	100%	
@@ -489,7 +489,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046D190	Ship_ShipsShareSquadRoot	src/game/collision.cpp	100%	divergence
 0x0046D250	PascalString_ToCStringInPlace		0%	
 0x0046D380	CString_ToPascalStringInPlace		0%	
-0x0046D4B0	Outfit_RecomputeOutfitDerivedState	src/game/outfit.cpp	62%	gameplay,license
+0x0046D4B0	Outfit_RecomputeOutfitDerivedState	src/game/outfit.cpp	70%	gameplay,license
 0x0046DF70	Outfit_ShipIsInertialess	src/game/outfit.cpp	70%	gameplay
 0x0046E060	Ship_GetShipFuelBurnRate	src/game/outfit.cpp	75%	gameplay
 0x0046E120	Stellar_ShipHasGravityShielding	src/game/spaceflight_player_state.cpp	25%	gameplay

@@ -877,8 +877,12 @@ EvaluateMissionPage(GameState &state, std::int16_t page_group) {
   return result;
 }
 
-// @port 0x0043D4C0 65% gameplay
-// Ghidra 0x0043d4c0 Mission_ResolveMissionSpecialShipCount.
+// @port 0x0043D4C0 95% rng
+// Ghidra 0x0043d4c0 Mission_ResolveMissionSpecialShipCount. Non-negative
+// counts pass through, -1 maps to 0, and other negatives return
+// ceil(|encoded|/2) + Random(|encoded|). The only open item is the RNG
+// source: the port draws from the session mt19937 (nova_random.hpp) instead
+// of the original global LCG, so the rolled count differs between runs.
 [[nodiscard]] std::int16_t ResolveSpecialShipCount(GameState &state,
                                                    std::int16_t encoded) {
   if (encoded >= 0) {
@@ -896,8 +900,12 @@ EvaluateMissionPage(GameState &state, std::int16_t page_group) {
                                    (static_cast<int>(magnitude) + 1) / 2);
 }
 
-// @port 0x0043D490 65% gameplay
-// Ghidra 0x0043d490 Mission_ResolveMissionSpecialShipSystem.
+// @port 0x0043D490 95% rng
+// Ghidra 0x0043d490 Mission_ResolveMissionSpecialShipSystem. [0,1000) passes
+// through, 1000 picks Random(6), anything else is -1. The only open item is
+// the RNG source: the port draws from the session mt19937 (nova_random.hpp)
+// instead of the original global LCG, so the picked system differs between
+// runs.
 [[nodiscard]] std::int16_t ResolveSpecialShipSystem(GameState &state,
                                                     std::int16_t encoded) {
   if (encoded >= 0 && encoded < 1000) {

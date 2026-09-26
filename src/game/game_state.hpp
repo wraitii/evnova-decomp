@@ -1744,9 +1744,10 @@ struct GameState {
   std::array<std::int16_t, 4> target_category_command{{-1, -1, -1, -1}};
 
   // --- PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240) ------
-  // g_player_carried_bomb_outfit_class: 0 = no carried bomb, 1 = escape-pod
-  // variant, otherwise the bomb outfit's def id. Writers (bomb purchase/
-  // loading) are deferred TODO(decomp); it stays 0 until then.
+  // g_player_carried_bomb_outfit_class: 0 = no bomb, 1 = Bible ModType 47
+  // "bomb" (lethal / escape-pod variant), 2 = Bible ModType 50 "nonlethal
+  // bomb". Written by NovaOutfit_RecomputeOutfitDerivedState on every
+  // inventory change; refreshed here so purchases arm immediately.
   std::int16_t bomb_outfit_class = 0;
   // g_bomb_detonation_timer: countdown toward g_bomb_detonation_interval_
   // frames while a bomb is carried; rerolled (Random(100)) once it expires.
