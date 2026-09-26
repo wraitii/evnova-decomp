@@ -1,6 +1,7 @@
 #include "hud_renderer.hpp"
 
 #include "../brgr_archive.hpp"
+#include "../cicn_image.hpp"
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../pixpat_image.hpp"
@@ -40,6 +41,12 @@ namespace {
 // ScenarioData_FindObjectKey); NovaResource_LoadGameplayInterfaceLayout uses
 // the same .ntf FourCC as /type lookup.
 constexpr std::int16_t kDefaultInterfaceId = 0x80;
+
+// The x2 speed indicator icon (Ghidra g_x2_speed_indicator_sprite, latched
+// onto by Frame_AnchorX2IndicatorSprite 0x0042cbb0; FUN_004ad960 builds it
+// with Sprite_CreateFromSequentialFrameResources(20000, 1, 1)). It is a 32x16
+// color icon shown at screen (0,0) while g_x2_mode_active is set.
+constexpr std::uint16_t kX2IndicatorCicn = 20000;
 
 // The panel colour slots decoded from the .ntf layout (little-endian 32-bit
 // `00 rr gg bb`, opaque). The renderer applies them to the bars/readouts, in
@@ -152,6 +159,32 @@ bool HudRenderer::Install(SdlPlatform &platform, const GameState &state) {
   } else {
     NovaLog::Info("HUD: cockpit PICT {:#04x} not found; flat HUD bars",
                   layout_.interface_bg_pict_id);
+  }
+
+  // x2 speed indicator (cicn 20000): a gameplay sprite in the original, but
+  // screen-anchored, so the HUD overlay owns it here.
+  x2_indicator_.reset();
+  x2_indicator_w_ = 0;
+  x2_indicator_h_ = 0;
+  if (const auto cicn =
+          NovaResource_Load(kResourceTypeCicn, kX2IndicatorCicn)) {
+    if (const auto image = Resource_LoadCicnAsImage(*cicn)) {
+      auto tex = SdlTexture::Create(
+          platform.renderer(), image->width, image->height, image->rgba_pixels);
+      if (tex) {
+        x2_indicator_ = std::move(tex);
+        x2_indicator_w_ = image->width;
+        x2_indicator_h_ = image->height;
+      } else {
+        NovaLog::Warn("HUD: x2 indicator cicn {} upload failed",
+                      kX2IndicatorCicn);
+      }
+    } else {
+      NovaLog::Warn("HUD: x2 indicator cicn {} could not be decoded",
+                    kX2IndicatorCicn);
+    }
+  } else {
+    NovaLog::Info("HUD: x2 indicator cicn {} not found", kX2IndicatorCicn);
   }
 
   installed_ = true;
@@ -499,6 +532,24 @@ void HudRenderer::Draw(SdlPlatform &platform,
   const auto anchor_panel = [render_right](const HudPanelRect &panel) {
     return HudPanel_AnchorTopRight(panel, render_right);
   };
+
+  // @port 0x0042CBB0 100% divergence
+  // Ghidra Frame_AnchorX2IndicatorSprite (0x0042cbb0): shows the x2 indicator
+  // sprite (g_x2_speed_indicator_sprite, cicn 20000) iff g_x2_mode_active and
+  // anchors it at screen (0,0). DIVERGENCE(original): the original mutates a
+  // retained sprite's visibility/position/blend fields every full tick
+  // (TickSystems scope 8); the port immediate-draws the uploaded texture at
+  // (0,0) each frame instead. state.x2_mode_active is the port's stand-in for
+  // g_x2_mode_active (set from the accelerated clock). The original's
+  // sprite-world pass does not run in the docked composition, so the icon is
+  // suppressed there (force_empty_radar signals the docked visit).
+  if (state.x2_mode_active && !force_empty_radar && x2_indicator_) {
+    const SDL_FRect x2_rect{0.0F,
+                            0.0F,
+                            static_cast<float>(x2_indicator_w_),
+                            static_cast<float>(x2_indicator_h_)};
+    SDL_RenderTexture(renderer, x2_indicator_->get(), nullptr, &x2_rect);
+  }
 
   // Cockpit PICT: native size, pinned to the upper-right HUD origin.
   if (cockpit_) {

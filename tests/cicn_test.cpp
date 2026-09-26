@@ -61,4 +61,34 @@ TEST_CASE("cicn 10008 mask is a corner bracket, not a full block",
   CHECK(any_color); // the red->orange gradient palette is applied
 }
 
+// The x2 speed indicator (cicn 20000) is a native-size 32x16 color icon the
+// original loads into the aux HUD sprite (FUN_004ad960) and shows at screen
+// (0,0) while g_x2_mode_active is set (Frame_AnchorX2IndicatorSprite
+// 0x0042cbb0). Guard the resource id + geometry the SDL HUD path relies on.
+TEST_CASE("cicn 20000 decodes the 32x16 x2 indicator icon", "[cicn][hud][x2]") {
+  const auto data = NovaResource_Load(kResourceTypeCicn, 20000);
+  REQUIRE(data.has_value());
+  const auto img = Resource_LoadCicnAsImage(*data);
+  REQUIRE(img.has_value());
+  CHECK(img->width == 32);
+  CHECK(img->height == 16);
+  REQUIRE(img->rgba_pixels.size() == static_cast<std::size_t>(32 * 16 * 4));
+  // The icon box is opaque (its grey background covers the full frame); the
+  // foreground "x2" glyph is a red palette entry. Require both an opaque
+  // majority and at least one strongly red pixel.
+  int opaque = 0;
+  bool any_red = false;
+  for (std::size_t i = 0; i < img->rgba_pixels.size(); i += 4) {
+    if (img->rgba_pixels[i + 3] != 0) {
+      ++opaque;
+      if (img->rgba_pixels[i] > 128 && img->rgba_pixels[i + 1] < 96 &&
+          img->rgba_pixels[i + 2] < 96) {
+        any_red = true;
+      }
+    }
+  }
+  CHECK(opaque > 32 * 16 / 2);
+  CHECK(any_red);
+}
+
 } // namespace game

@@ -454,9 +454,10 @@ private:
   // Pushes fresh window geometry to the probe, then services the harness.
   void PumpProbe();
 
-  // DIVERGENCE(original): temporary test hook that maps the original x2 mode
-  // toggle key (Caps Lock by default; ddraw.ini key_x2mode, default 0x14 =
-  // VK_CAPITAL) onto the probe speed multiplier. See the definition.
+  // DIVERGENCE(original): temporary stand-in for the original x2 mode toggle
+  // key (Caps Lock by default; ddraw.ini key_x2mode, default 0x14 =
+  // VK_CAPITAL). It scales the shared accelerated gameplay clock, live in
+  // ordinary play and under the probe alike. See the definition.
   void ServiceX2SpeedDivergence();
 
   bool accelerated_ = false;

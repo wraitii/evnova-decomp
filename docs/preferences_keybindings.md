@@ -298,7 +298,8 @@ sensitivity and two opaque trailing shorts are unmodeled.
 fill-rate downgrade, so the Settings dialog draws the following controls
 light-grey/disabled and `NovaPrefs_ApplyLockedPreferences` forces their stored
 values on load (a legacy `.prf` cannot re-enable a downgrade): Share Processor
-Time (`true`), QuickTime Movies (`false`, inverted), Smoke Trails (`false`,
+Time (`true`), QuickTime Movies (`true`, inverted = forced off because the
+port has no movie playback), Smoke Trails (`false`,
 inverted), Ship Animations, Engine Glows, Running Lights, Weapon Effects,
 Parallax Starfield, Hyperspace Effects (`false`, inverted), Check For Updates
 (`true`), and the Brightness slider (`3`). Intro Music, Sound Volume and

@@ -158,7 +158,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00428340	Ship_UpdateVisualState	src/game/ship_visual.cpp	85%	rendering
 0x0042C1B0	Frame_UpdateFreeflightObjectSprites	src/game/freeflight_objects.cpp	85%	rendering,divergence
 0x0042C660	Shot_UpdateWeaponSmokePuffs	src/game/weapon_shots.cpp	100%	
-0x0042CBB0	Frame_AnchorAuxHUDSpriteToOrigin		0%	
+0x0042CBB0	Frame_AnchorX2IndicatorSprite	src/game/hud_renderer.cpp	100%	divergence
 0x0042CC30	Stellar_TickTravelCountdownSprite		0%	
 0x0042CD10	Stellar_UpdateStellarSprites	src/game/spaceflight_view.cpp	85%	rendering,gameplay
 0x0042D890	Stellar_TickStellarDefenseBatteries	src/game/collision.cpp	100%	

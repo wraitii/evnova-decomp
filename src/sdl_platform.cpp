@@ -554,20 +554,21 @@ void SdlPlatform::PumpProbe() {
 // clock (docs/frame_timing_and_cadence.md). The port has not reconstructed x2.
 // As a temporary testing convenience this maps the same toggle onto the probe
 // speed multiplier so a run can be accelerated 2x without the HTTP control
-// surface. It is gated on the probe being active so ordinary play is
-// unchanged, and it is not x2 fidelity: the whole gameplay clock is scaled,
-// including the maintenance work the original leaves at the normal cadence.
+// surface, but it is live in ordinary play too (the original's x2 binding is a
+// settings key, not a debug feature). It is still not full x2 fidelity: the
+// whole gameplay clock is scaled through the shared accelerated-execution path,
+// including the maintenance work the original leaves at the normal cadence. The
+// hyperspace jump path compensates for the scaled clock and maps multiplier
+// >= 2 onto g_x2_mode_active (shorter cue, 1.5 offset) so x1/x2 jump timing
+// roughly matches the original; other probe multipliers are approximate.
 // Remove once the real x2 scheduling is ported.
 void SdlPlatform::ServiceX2SpeedDivergence() {
-  if (!probe_.running()) {
-    return;
-  }
   const bool engaged = (SDL_GetModState() & SDL_KMOD_CAPS) != 0;
   if (engaged == x2_speed_divergence_active_) {
     return;
   }
   x2_speed_divergence_active_ = engaged;
-  NovaLog::Warn("probe: x2 key divergence {} ({}x gameplay clock)",
+  NovaLog::Warn("x2 key {} ({}x gameplay clock)",
                 engaged ? "engaged" : "released",
                 engaged ? 2 : 1);
   ApplyProbeExecutionSettings(engaged, 2, false);
@@ -811,7 +812,11 @@ std::uint64_t SdlPlatform::gameplay_ticks_ms() const {
 }
 
 void SdlPlatform::PaceFrame() {
-  if (!accelerated_) {
+  // Probe acceleration removes the historical yield so a run can execute as
+  // fast as the host allows. The x2 key in ordinary play keeps the yield: it
+  // doubles the simulation cadence, not the presentation rate, so menus and
+  // modals must not spin.
+  if (!accelerated_ || !probe_.running()) {
     SDL_Delay(16);
   }
 }
@@ -831,12 +836,19 @@ void SdlPlatform::ApplyProbeExecutionSettings(bool enabled,
   if (probe_audio_suppression_handler_) {
     probe_audio_suppression_handler_(enabled && suppress_audio);
   }
-  if (accelerated_) {
+  // Only the probe turns off VSync; the x2 key still renders at the display
+  // rate and only scales the simulation clock.
+  if (accelerated_ && probe_.running()) {
     SDL_SetRenderVSync(renderer_.get(), 0);
     NovaLog::Info("probe: accelerated mode enabled ({}x)", speed_multiplier_);
   } else {
     SDL_SetRenderVSync(renderer_.get(), 1);
-    NovaLog::Info("probe: accelerated mode disabled");
+    if (accelerated_) {
+      NovaLog::Info("x2: gameplay clock scaled ({}x), presentation unchanged",
+                    speed_multiplier_);
+    } else {
+      NovaLog::Info("probe: accelerated mode disabled");
+    }
   }
 }
 

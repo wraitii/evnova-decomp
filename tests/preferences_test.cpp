@@ -142,7 +142,7 @@ TEST_CASE("Preferences defaults match NovaPrefs_ResetToDefaults") {
   CHECK(prefs.sound_volume == 5);
   CHECK(prefs.brightness == 3);
   CHECK(prefs.share_processor_time == true);
-  CHECK(prefs.quicktime_movies == false); // inverted flag: 0 = on
+  CHECK(prefs.quicktime_movies == true); // inverted: 1 = movies off
   CHECK(prefs.smoke_trails == false);
   CHECK(prefs.ship_animations == true);
   CHECK(prefs.engine_glows == true);
@@ -198,7 +198,7 @@ TEST_CASE("Locked quality preferences force the render values") {
   // Simulate a hostile legacy .prf: every locked field set against the port's
   // fixed render values.
   prefs.share_processor_time = false;
-  prefs.quicktime_movies = true;
+  prefs.quicktime_movies = false; // enable movies, then verify the lock
   prefs.smoke_trails = true;
   prefs.ship_animations = false;
   prefs.engine_glows = false;
@@ -211,8 +211,8 @@ TEST_CASE("Locked quality preferences force the render values") {
 
   game::NovaPrefs_ApplyLockedPreferences(prefs);
   CHECK(prefs.share_processor_time == true);
-  CHECK(prefs.quicktime_movies == false); // inverted: 0 = movies on
-  CHECK(prefs.smoke_trails == false);     // inverted: 0 = trails on
+  CHECK(prefs.quicktime_movies == true); // inverted: 1 = movies off
+  CHECK(prefs.smoke_trails == false);    // inverted: 0 = trails on
   CHECK(prefs.ship_animations == true);
   CHECK(prefs.engine_glows == true);
   CHECK(prefs.running_lights == true);

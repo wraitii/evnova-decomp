@@ -96,9 +96,13 @@ constexpr float kTurnAroundAlignDeg = 20.0F;
 // (NovaTime_GetTickCount60Hz counts 1/60 s; the duration is the Warp up cue's
 // own length in the same unit, loaded from snd 128/129 at preload, loader
 // 0x004b0a07; see NovaTravel_JumpSequenceDuration60Hz). progress =
-// elapsed_60hz * jump_duration_multiplier
+// wall_elapsed_60hz * jump_duration_multiplier
 //   / (duration_60hz * 0.01)      (g_hyperspace_jump_duration_scale 0x575560)
-//   - escape_pod_offset / multiplier (0x575568 = 35.0)
+//   - (x2 ? 1.5 : 1.0) * escape_pod_offset / multiplier  (0x575568 = 35.0;
+//     g_x2_jump_progress_offset_scale 0x5755d0 = 1.5). wall_elapsed_60hz is
+// the original's wall-clock NovaTime_GetTickCount60Hz, not the probe's
+// accelerated tick counter (see NovaTravel_JumpWallClockScale). x2 also
+// selects the shorter noengine cue.
 // For a mult=1 stock ship: onset (progress > 0) at tick 127 = 2.12 s into the
 // hold, the min(progress, 50) px/tick cap at tick 309 = 5.16 s, and the fire
 // lands when the cue (whose duration is 1/multiplier of its base length)
@@ -109,11 +113,16 @@ constexpr float kHyperspaceTickHz = 60.0F;
 constexpr float kJumpDurationScale = 0.01F; // 0x575560
 constexpr float kJumpProgressOffset =
     35.0F; // g_hyperspace_jump_progress_offset 0x575568
+// x2 mode scales the progress-offset subtraction by this double
+// (g_x2_jump_progress_offset_scale 0x5755d0, IEEE754 1.5, read at 0x0044cee5),
+// which shifts the ramp onset later when the shorter noengine cue is used.
+constexpr float kX2JumpProgressOffsetScale = 1.5F;
 // The progress-onset threshold the jump progress tests against (g_hyperspace-
 // progress_onset_threshold 0x575540, 0.0): the tunnel ramp starts and the
 // disabled-jump collapse gains its exit velocity once progress crosses it.
 constexpr float kJumpProgressOnsetThreshold = 0.0F;
-constexpr float kTunnelSpeedCap = 50.0F; // 0x5755d8 threshold and literal cap
+constexpr float kTunnelSpeedCap =
+    50.0F; // g_hyperspace_tunnel_speed_cap 0x5755d8
 // ShipClassDef.jump_duration_multiplier (loader:
 // NovaData_LoadScenarioResourceTables 0x004bd3c0, shp pass) is applied per ship
 // class. It scales the tunnel ramp clock and the 'Warp up' cue duration through
@@ -572,6 +581,41 @@ NovaTravel_PlayerJumpDurationMultiplier(const GameState &state) {
   }
   return 1.0F;
 }
+
+// Clean-room helper (no single Ghidra function): the original jump ramp reads
+// NovaTime_GetTickCount60Hz, a wall-clock counter x2 mode never scales. The
+// accelerated probe scales the whole gameplay clock, so recover wall time.
+[[nodiscard]] float NovaTravel_JumpWallClockScale(const GameState &state) {
+  return state.gameplay_speed_multiplier == 0
+             ? 1.0F
+             : 1.0F / static_cast<float>(state.gameplay_speed_multiplier);
+}
+
+namespace {
+
+// Player tunnel ramp: progress = wall_elapsed_60hz * jump_multiplier /
+// (duration_60hz * 0.01) - (x2 ? 1.5 : 1.0) * 35 / jump_multiplier. Duration
+// is the engine cue normally and the shorter noengine cue in x2. Reads the
+// engage-time latch (TravelState::jump_speed_multiplier / jump_x2_mode) so a
+// mid-jump x2/probe toggle cannot change the schedule. Shared by the disabled
+// collapse, the hold's fade trigger and tunnel cap, and the contraband scan's
+// jump-onset guard.
+float PlayerJumpProgress(const GameState &state) {
+  const TravelState &t = state.travel;
+  const float jump_multiplier = NovaTravel_PlayerJumpDurationMultiplier(state);
+  const std::uint32_t speed_multiplier =
+      t.jump_speed_multiplier == 0 ? 1U : t.jump_speed_multiplier;
+  const float elapsed =
+      t.tunnel_elapsed_60hz / static_cast<float>(speed_multiplier);
+  const float duration_60hz =
+      static_cast<float>(t.jump_x2_mode ? state.jump_duration_noengine_60hz
+                                        : state.jump_duration_engine_60hz);
+  const float offset_scale = t.jump_x2_mode ? kX2JumpProgressOffsetScale : 1.0F;
+  return elapsed * jump_multiplier / (duration_60hz * kJumpDurationScale) -
+         offset_scale * kJumpProgressOffset / jump_multiplier;
+}
+
+} // namespace
 
 // @port 0x00456CA0 75% rng,rendering
 // Ghidra 0x00456ca0 Stellar_EnterWormhole.
@@ -1466,12 +1510,7 @@ void NovaTravel_Tick(GameState &state,
     // it near zero). The hold accumulator freezing (0x0044c940) is subsumed
     // by the abort.
     if (NovaAiShip_IsDisabled(state, player)) {
-      const float jump_multiplier =
-          NovaTravel_PlayerJumpDurationMultiplier(state);
-      const float progress = t.tunnel_elapsed_60hz * jump_multiplier /
-                                 (NovaTravel_JumpSequenceDuration60Hz(state) *
-                                  kJumpDurationScale) -
-                             kJumpProgressOffset / jump_multiplier;
+      const float progress = PlayerJumpProgress(state);
       // @port 0x0044B120 100% synthetic
       // Ghidra 0x0044b120 PlayerTick_HyperspaceExitVelocity (synthetic region
       // of 0x0044aa70): once the tunnel ramp has begun, the collapse zeroes
@@ -1662,12 +1701,7 @@ void NovaTravel_Tick(GameState &state,
       // sampled opacity. The Windows build computes progress * 0.3 - 15
       // (0x00450601) and calls the stubbed NoSys_NoOp_00467e60, so its build-up
       // is dead; the port follows the Mac display behaviour unconditionally.
-      const float jump_multiplier =
-          NovaTravel_PlayerJumpDurationMultiplier(state);
-      const float progress = t.tunnel_elapsed_60hz * jump_multiplier /
-                                 (NovaTravel_JumpSequenceDuration60Hz(state) *
-                                  kJumpDurationScale) -
-                             kJumpProgressOffset / jump_multiplier;
+      const float progress = PlayerJumpProgress(state);
       const float fade_trigger = (progress - 55.0F) * 5.0F;
       if (!state.screen_flash_fade_in_started && fade_trigger > 0.0F) {
         state.screen_flash_fade_in_started = true;
@@ -1915,6 +1949,11 @@ void NovaTravel_Tick(GameState &state,
   t.warp_up_started = false;
   t.tunnel_elapsed_60hz = 0.0F;
   t.hold_audio_latch = false;
+  // Latch the scheduler state for the whole jump: the wall-clock ramp scale
+  // and the x2 cue/offset choice must not change if the probe multiplier is
+  // toggled mid-sequence (the cue already playing fixes the wall duration).
+  t.jump_speed_multiplier = state.gameplay_speed_multiplier;
+  t.jump_x2_mode = state.x2_mode_active;
   NovaLog::Debug(
       "hyperspace jump engaged: from stellar {} (slot {}) to system {}",
       t.engaged_stellar_id,
@@ -2307,13 +2346,9 @@ bool NovaTravel_PlayerPastJumpOnset(const GameState &state) {
   // Same ramp schedule as the in-tunnel movement block (travel.cpp ~line
   // 1229). tunnel_elapsed_60hz is the port's authoritative player jump clock
   // (1/60 s ticks since the hold began), standing in for the original's
-  // NovaTime_GetTickCount60Hz() - ai_mode_start_time_ms.
-  const float jump_multiplier = NovaTravel_PlayerJumpDurationMultiplier(state);
-  const float progress =
-      state.travel.tunnel_elapsed_60hz * jump_multiplier /
-          (NovaTravel_JumpSequenceDuration60Hz(state) * kJumpDurationScale) -
-      kJumpProgressOffset / jump_multiplier;
-  return progress > kJumpProgressOnsetThreshold;
+  // NovaTime_GetTickCount60Hz() - ai_mode_start_time_ms; PlayerJumpProgress
+  // applies the x2 offset scale and the accelerated-clock wall-time recovery.
+  return PlayerJumpProgress(state) > kJumpProgressOnsetThreshold;
 }
 
 } // namespace game
