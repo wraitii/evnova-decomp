@@ -18,6 +18,7 @@ Relation to:
 
 Untested, but original nova should be 100% playable with essentially no noticeable differences to a regular player.
 Remaining missing pieces are small, e.g. ship paints, shield bubbles, stellar domination, and a few highly specific behaviours that stock nova didn't test but plug-ins might.
+The quicktime movies (in the bar for example) are also currently unsupported.
 However, many parts are not deterministically reproducible, so there will be minor differences in AI tick rate & the like that lead to a technically different gameplay experience.
 
 ## Extra features / divergences
