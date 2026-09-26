@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -147,6 +148,45 @@ AppleDoubleWrap(const std::vector<std::byte> &fork) {
   return out;
 }
 
+// Wraps a resource fork in a 128-byte MacBinary header (with an optional data
+// fork). The header CRC is left zero, matching the stale/absent CRC real
+// Mac-era files ship, so the reader must not depend on it.
+[[nodiscard]] std::vector<std::byte>
+MacBinaryWrap(const std::vector<std::byte> &fork,
+              std::span<const std::byte> data_fork = {}) {
+  constexpr std::size_t header_size = 128;
+  constexpr std::size_t alignment = 128;
+  const auto data_padding = data_fork.size() % alignment == 0
+                                ? 0
+                                : alignment - data_fork.size() % alignment;
+  std::vector<std::byte> out(header_size, std::byte{0});
+  const std::string name = "Plugin Name";
+  out[0] = std::byte{0};
+  out[1] = static_cast<std::byte>(name.size());
+  for (std::size_t i = 0; i < name.size(); ++i) {
+    out[2 + i] = static_cast<std::byte>(name[i]);
+  }
+  const auto put_be32 = [&out](std::size_t offset, std::uint32_t value) {
+    out[offset] = static_cast<std::byte>((value >> 24) & 0xff);
+    out[offset + 1] = static_cast<std::byte>((value >> 16) & 0xff);
+    out[offset + 2] = static_cast<std::byte>((value >> 8) & 0xff);
+    out[offset + 3] = static_cast<std::byte>(value & 0xff);
+  };
+  put_be32(83, static_cast<std::uint32_t>(data_fork.size()));
+  put_be32(87, static_cast<std::uint32_t>(fork.size()));
+  // MacBinary II signature/version fields (not required for detection).
+  out[102] = std::byte{'m'};
+  out[103] = std::byte{'B'};
+  out[104] = std::byte{'I'};
+  out[105] = std::byte{'N'};
+  out[122] = std::byte{129};
+  out[123] = std::byte{129};
+  out.insert(out.end(), data_fork.begin(), data_fork.end());
+  out.insert(out.end(), data_padding, std::byte{0});
+  out.insert(out.end(), fork.begin(), fork.end());
+  return out;
+}
+
 const std::vector<TestResource> kSample = {
     {.type = 0x73689570,
      .id = 128,
@@ -222,6 +262,37 @@ TEST_CASE("ParseResourceForkOrAppleDouble unwraps AppleDouble images") {
   // An unrelated blob is rejected.
   const std::vector<std::byte> junk(64, std::byte{0x5a});
   REQUIRE_FALSE(ParseResourceForkOrAppleDouble(junk).has_value());
+}
+
+TEST_CASE("ParseMacBinary extracts the embedded resource fork") {
+  const auto fork = BuildResourceFork(kSample);
+  // Include a data fork so the parser exercises the 128-byte fork alignment.
+  const std::vector<std::byte> data_fork(5, std::byte{0x7f});
+  const auto wrapped = MacBinaryWrap(fork, data_fork);
+  REQUIRE(evnova::rez::IsMacBinaryHeader(wrapped, wrapped.size()));
+
+  const auto parsed = evnova::rez::ParseMacBinary(wrapped);
+  REQUIRE(parsed.has_value());
+  REQUIRE(parsed->resources.size() == 3);
+  REQUIRE(parsed->resources[0].name == "Alpha");
+  REQUIRE(parsed->resources[2].name == "Beta");
+
+  // A raw fork is not MacBinary.
+  REQUIRE_FALSE(evnova::rez::IsMacBinaryHeader(fork, fork.size()));
+  REQUIRE_FALSE(evnova::rez::ParseMacBinary(fork).has_value());
+
+  // An image whose resource fork runs past EOF must be rejected.
+  auto truncated = MacBinaryWrap(fork);
+  truncated.resize(truncated.size() - 1);
+  REQUIRE_FALSE(evnova::rez::IsMacBinaryHeader(truncated, truncated.size()));
+  REQUIRE_FALSE(evnova::rez::ParseMacBinary(truncated).has_value());
+}
+
+TEST_CASE("MacBinary without a resource fork is not a fork container") {
+  const std::vector<std::byte> data_fork(3, std::byte{0x01});
+  const auto wrapped = MacBinaryWrap({}, data_fork);
+  REQUIRE_FALSE(evnova::rez::IsMacBinaryHeader(wrapped, wrapped.size()));
+  REQUIRE_FALSE(evnova::rez::ParseMacBinary(wrapped).has_value());
 }
 
 TEST_CASE("container pre-filters reject non-archives") {
