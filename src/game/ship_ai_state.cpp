@@ -27,6 +27,7 @@
 #include "travel.hpp"
 #include "weapon.hpp"
 
+#include "../brgr_archive.hpp"
 #include "../util/math.hpp"
 
 namespace game {
@@ -81,6 +82,50 @@ constexpr double kStandoffRangeScale = 0.85;
 // double 0.5), also truncated toward zero.
 constexpr double kStandoffDisabledScale = 0.5;
 
+// Ghidra 0x00462410 System_GetCurrentSystemLinkSpriteWidth, render-independent
+// core. The original returns the prepared link_a spin set's frame full width
+// for a stellar in the player's current system, or 0x96 after a debug log
+// (stellar out of range, not in the current system, invalid link_a_id, or the
+// spin set missing/unprepared). The AI layer has no renderer/SpriteStore, so
+// "prepared" is approximated by the presence of the sp\x95n descriptor; for a
+// tile-grid spin set the descriptor's tile width equals
+// Sprite_GetFrameFullWidth. The primary port site for this function is
+// StellarArrivalSpriteFullWidth (spaceflight.cpp), which adds the landing
+// path's two-tier ambient-sprite gate.
+std::int16_t CurrentSystemLinkSpriteWidth(const GameState &state,
+                                          std::int16_t stellar_id) {
+  constexpr std::int16_t kFallback = 0x96;
+  if (stellar_id < 0 || stellar_id >= 0x800) {
+    return kFallback;
+  }
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr ||
+      stellar->system_id != state.player.current_system_id ||
+      stellar->link_a_id < 0 || stellar->link_a_id > 0xff) {
+    return kFallback;
+  }
+  // link_a_id -> spin descriptor id 1000 + link_a_id. The descriptor is
+  // immutable once loaded, so cache the resolved width per link_a_id (0 means
+  // not yet resolved; every real tile width is positive).
+  static std::array<std::int16_t, 0x100> width_cache{};
+  const auto index = static_cast<std::size_t>(stellar->link_a_id);
+  if (width_cache[index] != 0) {
+    return width_cache[index];
+  }
+  std::int16_t width = kFallback;
+  const auto spin_data =
+      NovaResource_Load(kResourceTypeSprites,
+                        static_cast<std::uint16_t>(stellar->link_a_id + 1000));
+  if (spin_data) {
+    const auto def = NovaSpriteDefinition_Parse(*spin_data);
+    if (def && def->tile_width > 0) {
+      width = static_cast<std::int16_t>(def->tile_width);
+    }
+  }
+  width_cache[index] = width;
+  return width;
+}
+
 } // namespace
 
 // @port 0x00405590 75% gameplay,ui,license
@@ -103,15 +148,20 @@ void NovaAi_UpdateShipState(GameState &state,
   // ---- Defunct (0x16) unwind. ----
   if (ship.ai_state_code == 0x16) {
     if (ship.ai_maneuver_timer_ms <= 0.0F) {
+      // The original clears the state and then falls through to the rest of
+      // the machine on the same tick (no return): the dead-target clear, the
+      // station-hold preserve gate (which zeroes the timer for state 0), and
+      // the trailing state-0 arm all still run. The maneuver-timer gate
+      // catches the other branch.
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
+    } else {
+      ship.ai_fire_trigger_latch = 0;
+      ship.primary_target_ship_slot = -1;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_control_mode = 1;
       return;
     }
-    ship.ai_fire_trigger_latch = 0;
-    ship.primary_target_ship_slot = -1;
-    ship.ai_secondary_target_slot = -1;
-    ship.ai_control_mode = 1;
-    return;
   }
 
   // AI maneuver timer (>0) only suspends the machine
@@ -213,6 +263,9 @@ void NovaAi_UpdateShipState(GameState &state,
       // Restricted travel stellar (hypergate/wormhole): begin a jump sequence.
       ship.ai_state_code = 0x14;
     } else {
+      // The original clears the station-hold timer here as well as in the
+      // per-state preserve gate above (redundant, but part of state 1).
+      ship.ai_station_hold_timer = 0.0F;
       // Distances to the travel stellar.
       const float dx = static_cast<float>(target->pos_x) - ship.pos_x;
       const float dy = static_cast<float>(target->pos_y) - ship.pos_y;
@@ -241,7 +294,7 @@ void NovaAi_UpdateShipState(GameState &state,
         const ShipClass *sc2 = cls;
         const bool has_arrival_marker =
             sc2 && (sc2->sprite_behavior_flags & 2) != 0;
-        if (has_arrival_marker) {
+        if (has_arrival_marker && ship.waypoint_arrival_marker_b > 0) {
           ship.waypoint_arrival_marker_a = -1;
         }
         if (std::abs(ship.vel_x) >= kVerySlowSpeed ||
@@ -276,21 +329,19 @@ void NovaAi_UpdateShipState(GameState &state,
   // ---- Committed inter-system transfer (state 0x14). ----
   if (ship.ai_state_code == 0x14 && ship.ai_secondary_target_slot >= 0 &&
       ship.ai_secondary_target_slot < 0x800) {
+    // The original indexes g_stellar_defs directly with no null check; an
+    // unloaded slot reads as a zeroed position, so fall back to the origin
+    // instead of bailing out of the state.
     const Stellar *target =
         StellarByResourceId(state, ship.ai_secondary_target_slot);
-    if (!target) {
-      return;
-    }
-    ship.jump_destination_stellar_id = ship.ai_secondary_target_slot;
+    const float target_x = target ? static_cast<float>(target->pos_x) : 0.0F;
+    const float target_y = target ? static_cast<float>(target->pos_y) : 0.0F;
     ship.ai_station_hold_timer = 0.0F;
-    const float dx = static_cast<float>(target->pos_x) - ship.pos_x;
-    const float dy = static_cast<float>(target->pos_y) - ship.pos_y;
-    const System *sys = CurrentSystem(state, ship);
-    const std::int16_t half_span =
-        sys ? static_cast<std::int16_t>(sys->pos_x > 0 ? 0x96 : 0x96)
-            : 0x96; // System_GetCurrentSystemLinkSpriteWidth fallback
-                    // (provisional)
-    const std::int16_t span_q = static_cast<std::int16_t>(half_span / 4);
+    const float dx = target_x - ship.pos_x;
+    const float dy = target_y - ship.pos_y;
+    const std::int16_t full_width =
+        CurrentSystemLinkSpriteWidth(state, ship.ai_secondary_target_slot);
+    const std::int16_t span_q = static_cast<std::int16_t>(full_width / 4);
     const bool far = std::abs(dx) > span_q || std::abs(dy) > span_q;
     if (far) {
       // Unlike local state 2, this restricted-lane entry does not enter the
@@ -333,11 +384,15 @@ void NovaAi_UpdateShipState(GameState &state,
         other.ai_state_code = 0x14;
         other.ai_control_mode = 0;
       }
-      // Gameplay-visible NPC gate/wormhole transfer. Mode 0x17 is only the
-      // handoff marker in the AI/control switch; the original continues
-      // through a surrounding presentation/transfer path, and the
-      // gameplay-visible transfer completes once state 0x14 reaches the entry
-      // point.
+      // Gameplay-visible NPC gate/wormhole transfer. The original state
+      // machine only arms control mode 0x17 here; the actual system transfer
+      // runs in a separate jump-presentation path outside
+      // Ship_UpdateShipAiState. The clean-room reconstruction performs that
+      // transfer inline via NovaAi_CompleteNpcJump as soon as state 0x14
+      // reaches the gate. A persistent failure (no paired hyperlink in the
+      // current system) would leave the ship parked in mode 0x17. This is a
+      // hot path, so a TODO comment stands in for runtime logging.
+      // TODO(decomp): locate the original out-of-line transfer path.
       (void)NovaAi_CompleteNpcJump(state, ship);
     }
     return;
@@ -409,10 +464,13 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_control_mode = 0xd; // hold formation position
       }
     } else {
-      // Follow the target at hold distance.
-      const Ship &tgt = state.ShipAt(static_cast<std::size_t>(target));
-      if (tgt.ai_state_code != 0 &&
-          (tgt.ai_control_mode == 1 || tgt.ai_control_mode == 4)) {
+      // Follow the target at hold distance. The original first writes the
+      // followed ship into jump-departure staging (state 2) and then re-reads
+      // that same field for its non-zero test, so the test is always true;
+      // only the control-mode check can divert the escort.
+      Ship &tgt = state.ShipAt(static_cast<std::size_t>(target));
+      tgt.ai_state_code = 2;
+      if (tgt.ai_control_mode == 1 || tgt.ai_control_mode == 4) {
         ship.ai_secondary_target_slot = tgt.ai_secondary_target_slot;
         ship.primary_target_ship_slot = -1;
         ship.ai_control_mode = 0xd;
