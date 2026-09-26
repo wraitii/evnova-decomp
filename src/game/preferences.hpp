@@ -27,6 +27,11 @@ namespace game {
 // shows the dialog runner without pulling SDL_ttf into every consumer.
 class NovaFontCache;
 
+// game::NovaExtraPrefs (extended_prefs.hpp) — port-only settings with no slot
+// in the original .prf payload. Forward-declared so this header does not pull
+// the INI layer into every consumer.
+struct NovaExtraPrefs;
+
 // The gameplay command -> key-code binding table. Slot index == command id
 // (confirmed by the Ship_HandlePlayerShipControl reads); the stored value is
 // the game's normalized physical-key code. Most codes retain PC set-1/DIK
@@ -165,12 +170,30 @@ NovaAudio_EffectGainFromPreference(std::int32_t sound_volume) {
 // stops/restarts `music` and windowed mode is applied to `platform` live, so
 // the prefs feel immediate like the original. Returns true when the player
 // pressed OK.
+//
+// Port-only addition: a synthetic "Extra Prefs" button opens
+// NovaMenu_RunExtraPrefsDialog on `extra_prefs`, which edits the port-only
+// presentation multipliers. The original dialog has no such control.
 bool NovaMenu_RunSettingsDialog(
     SdlPlatform &platform,
     SdlAudio &audio,
     SdlMusic &music,
     NovaFontCache &font_cache,
     NovaPreferences &prefs,
+    NovaExtraPrefs &extra_prefs,
+    const std::function<void()> &render_background = {});
+
+// Runs the port-only Extra Prefs modal (no original counterpart). Reuses the
+// Settings dialog's window chrome (DLOG 0xfa3) and native arrow art, but its
+// three scale steppers and OK/Cancel buttons are laid out by the port. Edits
+// `extra_prefs` in place: OK saves 'EV Nova Extra Prefs.ini' and returns true,
+// Esc/Cancel restores the presentation scale and returns false. Scale changes
+// apply to `platform` live (the resolved presentation scale, env overrides
+// included).
+bool NovaMenu_RunExtraPrefsDialog(
+    SdlPlatform &platform,
+    NovaFontCache &font_cache,
+    NovaExtraPrefs &extra_prefs,
     const std::function<void()> &render_background = {});
 
 // Runs the separate Key Settings modal (Ghidra

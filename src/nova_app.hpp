@@ -1,6 +1,7 @@
 #pragma once
 
 #include "brgr_archive.hpp"
+#include "game/extended_prefs.hpp"
 #include "game/game_state.hpp"
 #include "game/nova_font.hpp"
 #include "game/preferences.hpp"
@@ -137,6 +138,12 @@ struct NovaRuntime {
   // (sound volume, ship animations, brightness, flight bindings) will read.
   // Kept on the runtime rather than as globals (AGENTS.md).
   game::NovaPreferences prefs;
+
+  // Port-only settings with no slot in the original .prf payload: the
+  // player-selected EV Nova install root and the presentation multipliers
+  // ('EV Nova Extra Prefs.ini'). Loaded at startup; the Settings dialog's
+  // port-only Extra Prefs button edits the scale fields live.
+  game::NovaExtraPrefs extra_prefs;
 
   // Active in-game state for the running pilot (new-game flow, intro
   // cinematic, and spaceflight mode all read/write it). Lives on the runtime

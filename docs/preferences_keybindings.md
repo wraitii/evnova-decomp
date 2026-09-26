@@ -310,6 +310,27 @@ defaulted to fullscreen), the live checkbox drives
 `SdlPlatform::ApplyWindowMode` (`SDL_SetWindowFullscreen`), and the same call
 runs once at startup. It is not part of the `.prf` payload, matching the
 original's `DAT_00bec178`.
+
+**Port-only Extra Prefs dialog.** The Settings dialog appends one synthetic
+push button (`Extra Prefs`) that is not in DITL 0xfa3 — there is no spare item,
+so the port draws it over the empty bottom band (DITL item 2) and routes it
+through the same `SettingsLayout`/`HitTestControl` path as the real controls.
+It opens `NovaMenu_RunExtraPrefsDialog` (`0x00488650` has no counterpart: the
+original exposes no scale UI), a port-only modal that reuses DLOG 0xfa3's
+window chrome and title band plus the native slider-arrow PICTs `0x86`/`0x87`.
+Three steppers edit the `[display]` multipliers (`ui_scale`,
+`mission_scale`, `flight_scene_scale`) in 0.05 steps within
+`[0.5, 4.0]`; the mission row sits next to UI with a "(multiplied by UI
+scale)" subline, matching `PresentationScale::mission_dialog()`. Changes apply
+to `SdlPlatform::SetPresentationScale` live, OK
+saves `EV Nova Extra Prefs.ini`, and Esc/Cancel restores the entry scale. The
+dialog applies its own edited values directly rather than through
+`NovaExtraPrefs_ResolvePresentationScale`: if the `EVN_*_SCALE` debug overrides
+were allowed to win, editing the dialog would leave the resolved scale pinned
+to the env value and appear to do nothing. Env overrides still take effect on
+the next startup. The `install_root` path is still managed by the startup
+locate-data screen, not this dialog.
+
 Brightness and Engine/Running-Lights/Weapon layer gates are the
 remaining fidelity gaps: the original applies these through
 `g_render_brightness_lut` and the class sprite-load gates
