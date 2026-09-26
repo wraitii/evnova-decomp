@@ -301,9 +301,14 @@ values on load (a legacy `.prf` cannot re-enable a downgrade): Share Processor
 Time (`true`), QuickTime Movies (`true`, inverted = forced off because the
 port has no movie playback), Smoke Trails (`false`,
 inverted), Ship Animations, Engine Glows, Running Lights, Weapon Effects,
-Parallax Starfield, Hyperspace Effects (`false`, inverted), Check For Updates
+Parallax Starfield, Check For Updates
 (`true`), and the Brightness slider (`3`). Intro Music, Sound Volume and
-Ambient Sounds stay live. `starmap_show_borders` is **not** locked: the in-game
+Ambient Sounds stay live. **Hyperspace Effects** is **not** locked: the
+checkbox is live and, as the CE Read Me describes, the inverted byte selects
+the arrival/jump flash colour (off -> black, the CE `0x00872384` gate; on ->
+the requested white). `prefs.hyperspace_effects` at `.prf +0x78` round-trips
+and is re-resolved by the spaceflight loop when the next flight starts.
+`starmap_show_borders` is **not** locked: the in-game
 galaxy map's Show/Hide Borders button toggles it,
 `GameState::starmap_show_borders` carries the runtime value, and `nova_app.cpp`
 seeds it from the `.prf` at startup and syncs it back at the save points. The
@@ -381,4 +386,5 @@ return, and edge-resolves the cancel command (slot `0x17`) through
 `DAT_007cab53` rather than the raw held bit.
 
 Open: whether `g_hyperspace_effects` keeps the CE raw-input-lock behaviour or is
-purely the effect toggle.
+purely the effect toggle. The port keeps it as a pure effect toggle (the
+Settings checkbox is live), so the CE raw-input lock remains a divergence.
