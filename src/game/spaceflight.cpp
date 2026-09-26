@@ -40,6 +40,7 @@
 #include "targeting.hpp"
 #include "travel.hpp"
 #include "weapon.hpp"
+#include "world_wrap.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -1699,7 +1700,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // The pause menu is not reconstructed, so Escape/'q' stand in for the
   // return-to-menu latch (documented divergence).
   // Ghidra Frame_SpaceflightLoop scope 1 stores the ship's pre-tick position
-  // (_DAT_005997c4/_c8) so the per-frame ambient-star parallax can be computed
+  // (g_player_frame_start_pos_x/y) so the per-frame ambient-star parallax can
+  // be computed
   // from the movement delta after simulation.
   float prev_x = state.player.pos_x;
   float prev_y = state.player.pos_y;
@@ -1969,6 +1971,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         }
       } else {
         state.command_latches.return_to_menu_was_held = false;
+      }
+      // Ghidra Ship_HandlePlayerShipCore 0x0044aa70: after velocity matching
+      // and before the primary-target validation the core recenters the world
+      // whenever the player is not holding station (ai_station_hold_timer <=
+      // 0). The recenter is idempotent while the player is inside the +-15000
+      // band. The same delta is applied to the frame-start player position the
+      // ambient-star parallax reads (Ghidra g_player_frame_start_pos_x/y) so a
+      // wrap is not
+      // mistaken for a 25000-pixel ship jump.
+      if (state.player.ai_station_hold_timer <= 0.0F) {
+        const WorldWrapDelta wrap = RecenterSpaceObjectsForWorldWrap(state);
+        if (wrap.applied()) {
+          prev_x += wrap.x;
+          prev_y += wrap.y;
+        }
       }
       // PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240): death
       // bookkeeping, disabled damping, disabled auto-repair, the periodic
