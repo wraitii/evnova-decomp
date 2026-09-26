@@ -7,7 +7,7 @@
 // caller that never sees this process's stdout can still confirm delivery.
 //
 // Commands: start | status | wait | talk | prompt | steer | abort | close
-//   start   run the supervisor (foreground; background it from the caller)
+//   start   run the supervisor (foreground; use --detach to daemonize it)
 //   status  print status.json, exit 5 if the launcher is gone
 //   wait    block until the session settles, then report (--timeout SECONDS)
 //   talk    prompt when idle, steer when running - the usual "say something"
@@ -16,13 +16,18 @@
 //   abort   stop the current turn, return to idle
 //   close   end the session (refused unless idle)
 //
+// `start --detach` re-execs itself as a session-leader daemon with stdout/stderr
+// in <run>/daemon.log, writes <run>/launcher.pid, and returns once status.json
+// exists. SIGINT/SIGTERM on the supervisor abort the turn and save before exit.
+//
 // No dependencies beyond Node and Pi.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const BOOLEAN_FLAGS = new Set(['json']);
+const BOOLEAN_FLAGS = new Set(['json', 'detach', 'daemon']);
 const [action, ...args] = process.argv.slice(2);
 const options = {};
 for (let i = 0; i < args.length; i++) {
@@ -40,7 +45,7 @@ for (let i = 0; i < args.length; i++) {
 
 const USAGE =
   'Usage: pi_session.mjs start|status|wait|talk|prompt|steer|abort|close --run DIR ' +
-  '[--task FILE | --message TEXT] [--budget 0.50] [--timeout SECONDS] [--json]';
+  '[--task FILE | --message TEXT] [--budget 0.50] [--timeout SECONDS] [--detach] [--json]';
 
 const dir = options.run ? path.resolve(options.run) : process.cwd();
 const statusPath = path.join(dir, 'status.json');
@@ -190,6 +195,45 @@ async function requestAction() {
 // Supervisor
 // ---------------------------------------------------------------------------
 
+async function detachAction() {
+  const budget = Number(options.budget ?? 0.5);
+  if (!(budget > 0 && Number.isFinite(budget))) throw new Error('Budget must be positive');
+  const message = readMessage();
+  fs.mkdirSync(inbox, { recursive: true });
+  if (fs.existsSync(path.join(dir, 'started.json'))) throw new Error(`Run directory is already in use: ${dir}`);
+
+  const taskFile = path.join(dir, 'task-initial.md');
+  fs.writeFileSync(taskFile, message);
+  const args = [
+    fileURLToPath(import.meta.url), 'start', '--daemon',
+    '--run', dir, '--task', taskFile, '--budget', String(budget),
+  ];
+  for (const key of ['pi', 'provider', 'model', 'poll-ms']) {
+    if (options[key] !== undefined) args.push(`--${key}`, String(options[key]));
+  }
+
+  const logPath = path.join(dir, 'daemon.log');
+  const logFd = fs.openSync(logPath, 'a');
+  const child = spawn(process.execPath, args, { detached: true, stdio: ['ignore', logFd, logFd] });
+  fs.closeSync(logFd);
+  child.unref();
+  fs.writeFileSync(path.join(dir, 'launcher.pid'), `${child.pid}\n`);
+
+  let exited = null;
+  child.on('exit', (code, signal) => { exited = { code, signal }; });
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(statusPath)) {
+    if (exited) throw new Error(`Supervisor exited immediately (${exited.code ?? exited.signal}); see ${logPath}`);
+    if (Date.now() >= deadline) throw new Error(`Supervisor did not publish status; see ${logPath}`);
+    await sleep(100);
+  }
+  const status = readStatus();
+  return (process.exitCode = emit(
+    { ok: true, queued: true, pid: child.pid, state: status?.state ?? 'starting', run: dir },
+    [`Started supervisor pid ${child.pid} (${status?.state ?? 'starting'}); logs in ${logPath}`],
+  ));
+}
+
 async function startAction() {
   const budget = Number(options.budget ?? 0.5);
   if (!(budget > 0 && Number.isFinite(budget))) throw new Error('Budget must be positive');
@@ -250,6 +294,7 @@ async function startAction() {
   let windingDown = false;
   let budgetWarning = false;
   let stopping = false;
+  let shuttingDown = false;
   let turns = 0;
   let lastPoll = 0;
   const pending = new Map();
@@ -267,10 +312,7 @@ async function startAction() {
         pending.delete(id);
         reject(new Error(`${type} timed out`));
       }, timeoutMs);
-      pending.set(id, response => {
-        clearTimeout(timer);
-        resolve(response);
-      });
+      pending.set(id, { resolve, timer });
     });
   }
   function ack(id, kind, accepted, error = null) {
@@ -291,6 +333,29 @@ async function startAction() {
       stopping = false;
     }
   }
+
+  async function shutdown(signal) {
+    if (shuttingDown || closed) return;
+    shuttingDown = true;
+    closing = true;
+    log(`Received ${signal}; aborting and saving state.`);
+    status.exitSignal = signal;
+    save();
+    try {
+      await stop();
+    } catch (err) {
+      log(`Shutdown stop failed: ${err.message}`);
+    }
+    try {
+      child.stdin.end();
+    } catch {
+      // stdin already closed
+    }
+    setTimeout(() => child.kill('SIGKILL'), 6000).unref();
+  }
+  process.on('SIGINT', () => { shutdown('SIGINT').catch(() => {}); });
+  process.on('SIGTERM', () => { shutdown('SIGTERM').catch(() => {}); });
+  process.on('SIGHUP', () => { shutdown('SIGHUP').catch(() => {}); });
 
   async function pollStats() {
     if (closing) return;
@@ -329,10 +394,11 @@ async function startAction() {
 
   function handleEvent(event) {
     if (event.type === 'response') {
-      const resolve = pending.get(event.id);
-      if (resolve) {
+      const entry = pending.get(event.id);
+      if (entry) {
         pending.delete(event.id);
-        resolve(event);
+        clearTimeout(entry.timer);
+        entry.resolve(event);
       }
       return;
     }
@@ -420,8 +486,13 @@ async function startAction() {
         if (status.state !== 'idle') throw new Error(`Session is ${status.state}; wait or abort first`);
         closing = true;
         ack(request.id, 'close', true);
-        child.stdin.end();
-        setTimeout(() => child.kill('SIGTERM'), 1500).unref();
+        try {
+          child.stdin.end();
+        } catch {
+          // stdin already closed
+        }
+        setTimeout(() => child.kill('SIGTERM'), 3000).unref();
+        setTimeout(() => child.kill('SIGKILL'), 6000).unref();
         break;
       }
       default:
@@ -537,6 +608,11 @@ async function startAction() {
     save();
     clearInterval(ticker);
     clearInterval(heartbeat);
+    for (const [id, entry] of pending) {
+      clearTimeout(entry.timer);
+      entry.resolve({ type: 'response', id, command: 'exit', success: false, error: 'Pi process exited' });
+    }
+    pending.clear();
     log('Pi process closed.');
   });
 }
@@ -552,6 +628,8 @@ try {
     await waitAction();
   } else if (action !== 'start') {
     await requestAction();
+  } else if (options.detach && !options.daemon) {
+    await detachAction();
   } else {
     await startAction();
   }
