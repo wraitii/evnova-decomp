@@ -772,6 +772,99 @@ TEST_CASE(
   CHECK(ship.ai_control_mode == 9);
 }
 
+// State-4 prologue (0x00406780): the allied-government disengage and the
+// squad-leader hierarchy stand-down run before the destroyed-target clear and
+// the combat-mode selection. The port previously collapsed them to a single
+// `squad_leader == primary` test.
+TEST_CASE("state-4 prologue disengages allied and shared-leader targets") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+
+  auto prepare = [&](std::size_t slot) -> game::Ship & {
+    game::Ship &s = state.ShipAt(slot);
+    s.is_active = true;
+    s.ship_instance_id = static_cast<std::int16_t>(slot);
+    s.ship_class_id = 0;
+    s.current_system_id = 0;
+    s.armor_points = 100.0F;
+    s.shield_points = 100.0F;
+    s.pos_x = 0.0F;
+    s.pos_y = 0.0F;
+    s.ai_state_code = 4;
+    s.ai_maneuver_timer_ms = 0.0F;
+    s.cloak_fade_progress = 0.0F;
+    return s;
+  };
+
+  game::Ship &ship = prepare(1);
+  game::Ship &target = prepare(3);
+  ship.primary_target_ship_slot = 3;
+  ship.ai_control_mode = 7;
+  ship.ai_hostility_accumulator = 5;
+
+  SECTION("allied squads disengage but keep the primary target") {
+    ship.faction_or_government_id = 0;
+    target.faction_or_government_id = 0; // self-allied
+    ship.squad_leader_ship_slot = 5;
+    target.squad_leader_ship_slot = 6;
+
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 0);
+    CHECK(ship.ai_control_mode == 0);
+    CHECK(ship.primary_target_ship_slot == 3); // retained
+    CHECK(ship.ai_hostility_accumulator == 5); // untouched
+  }
+
+  SECTION("the target being this ship's own leader stands it down") {
+    ship.faction_or_government_id = -1; // skip the allied arm
+    ship.squad_leader_ship_slot = 3;    // == primary target
+    target.squad_leader_ship_slot = 0;
+
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 0);
+    CHECK(ship.ai_control_mode == 0);
+    CHECK(ship.primary_target_ship_slot == -1);
+  }
+
+  SECTION("a shared squad leader stands it down") {
+    ship.faction_or_government_id = -1;
+    ship.squad_leader_ship_slot = 5;
+    target.squad_leader_ship_slot = 5;
+
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 0);
+    CHECK(ship.ai_control_mode == 0);
+    CHECK(ship.primary_target_ship_slot == -1);
+  }
+
+  SECTION("a two-hop grand-leader chain stands it down") {
+    // leader 5 -> 6; target's leader 7 -> 6, so this ship's grand-leader (6)
+    // matches the target's grand-leader.
+    ship.faction_or_government_id = -1;
+    ship.squad_leader_ship_slot = 5;
+    prepare(5).squad_leader_ship_slot = 6;
+    prepare(6).squad_leader_ship_slot = 6;
+    target.squad_leader_ship_slot = 7;
+    prepare(7).squad_leader_ship_slot = 6;
+
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 0);
+    CHECK(ship.ai_control_mode == 0);
+    CHECK(ship.primary_target_ship_slot == -1);
+  }
+
+  SECTION("an unrelated live target keeps the engagement") {
+    ship.faction_or_government_id = -1;
+    ship.squad_leader_ship_slot = -1;
+    target.squad_leader_ship_slot = 0;
+
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    CHECK(ship.ai_state_code == 4);
+    CHECK(ship.primary_target_ship_slot == 3);
+  }
+}
+
 // State-7 escort/follow uses the 100 px arrival range (FLOAT_0057501c), not
 // the 165 px combat-staging band, and raises g_ai_misc_event_flag before the
 // range test when the primary target is the player. Unlike states 4/0xd,
