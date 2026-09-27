@@ -146,8 +146,6 @@ constexpr float kEmptyThreshold = 0.0078125F;     // DAT_00575990 (1/128)
 
 // Original key codes (DIK) for the dispatch callback's keyboard arms.
 constexpr std::uint16_t kKeyCodeTab = 0x0f;
-constexpr std::uint16_t kKeyCodeEnter = 0x1c;
-constexpr std::uint16_t kKeyCodeEscape = 0x01;
 
 std::string MiscString(std::uint16_t entry_1based, std::string_view fallback) {
   if (auto s = NovaHud_LoadStringEntry(kMiscStr, entry_1based)) {
@@ -1150,9 +1148,12 @@ NovaPlayerInfo_RunWindow(SdlPlatform &platform,
         }
         redraw(-1);
         platform.Present();
-      } else if (in->key == TextKey::physical &&
-                 (in->key_code == kKeyCodeEnter ||
-                  in->key_code == kKeyCodeEscape)) {
+      } else if (in->key == TextKey::escape || in->key == TextKey::enter) {
+        // Dispatch callback 0x0049a3a0's Enter/Esc close arm. Escape and
+        // Return arrive as their own normalized TextKey values (SDLK_ESCAPE/
+        // SDLK_RETURN are handled before the physical-key fallthrough in
+        // SdlPlatform::PollTextEvent), so testing TextKey -- not a physical
+        // key_code -- is what actually fires.
         close = true;
       } else if (in->key == TextKey::primary) {
         const int released = HandleTabStrip(
