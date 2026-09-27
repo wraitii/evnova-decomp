@@ -499,14 +499,16 @@ LandedExit RunBarDialog(SdlPlatform &platform,
       // Gamble (NovaUi_RunBarGamblingWindow 0x0047dc50 -- the DB name was
       // NovaUi_RunTravelGoodsFlashWindow before the 2026 decode).
       if (state.player.credits < 1) {
-        // STR# 0x7d2 0x169 via the shared text-reader dialog.
+        // STR# 0x7d2 0x169 via the shared text-reader dialog. Pass the live
+        // bar surface (not the docked backdrop) so the notice layers over the
+        // bar, matching the mission-offer call below.
         NovaUi_RunTextReaderDialog(
             platform,
             state,
             NovaHud_LoadStringEntry(0x7d2, 0x169)
                 .value_or("Sorry, you don't have enough credits to bet today."),
             false,
-            render_background);
+            draw_bar_contents);
       } else {
         // TODO(decomp(0x0047dc50)) skipped: the gambling window (DLOG 0x3ff,
         // backdrop 0x2151, bet 1000/10000 arms, 4x payout on the rand(4)
@@ -522,18 +524,20 @@ LandedExit RunBarDialog(SdlPlatform &platform,
                        stellar_id,
                        news_headline,
                        news_body,
-                       render_background);
+                       draw_bar_contents);
       break;
     case 5:
       // Hire Escort: capacity gate + the shipyard purchase loop in hire mode
-      // (g_shipyard_purchase_mode = 1).
+      // (g_shipyard_purchase_mode = 1). The store's own "no ships available
+      // for hire" notice also uses this background, so the bar stays visible
+      // behind it.
       if (NovaShip_CanPlayerHaveMoreEscorts(state)) {
         (void)RunStoreDialog(platform,
                              audio,
                              state,
                              LandedService::kShipyard,
                              stellar_id,
-                             render_background,
+                             draw_bar_contents,
                              /*hire_mode=*/true);
       }
       break;
