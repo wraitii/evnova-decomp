@@ -786,7 +786,8 @@ const char *ServiceLabel(LandedService t) {
 //   Trade center, Shipyard, Bar    travel_flags bits 0x2/0x8/0x40
 //   Outfitter                       travel_flags bit 0x4
 //   Mission BBS                     non-hypergate (travel_flags bit 0x20 clear)
-// Unavailable slots render grey (disabled art) and refuse activation.
+// Unavailable slots are hidden (state -2 to NovaUi_DrawThreeStateButton) and
+// refuse activation.
 bool ServiceAvailable(const GameState &state,
                       std::int16_t stellar_id,
                       LandedService t) {
@@ -1028,30 +1029,31 @@ void DrawLandedMenu(SdlPlatform &platform,
   // labels centred in the body font. Following the original, there is NO
   // keyboard-focus/selection highlight: the pressed ("click") art marks the
   // slot the mouse currently hovers (NovaUi_HitTestAndTrackTravelActionButtons
-  // redraws with the hovered index), and unavailable slots are drawn grey with
-  // the disabled art (NovaUi_RedrawTravelActionButtons). Label baseline is
-  // centred on the +5px-below-centre rule the original uses
-  // (NovaUi_DrawThreeStateButton). Label colours follow the original's
-  // three-state label table (NovaUi_InitThreeStateButtonArt DAT_007d8350):
-  // white on the normal art, 50% grey on the pressed/hover and grey/disabled
-  // art -- the shared renderer draws the label in the plain screen font (it
-  // sets only the font id + size, never a bold style), so no bold here either.
+  // redraws with the hovered index). Unavailable slots are HIDDEN entirely,
+  // not greyed: NovaUi_RedrawTravelActionButtons (0x004a0220) passes state -2
+  // to NovaUi_DrawThreeStateButton, whose body+label draw is guarded by
+  // (state + 1 < 2), so -2 skips both. The trade/bar/outfit/mission strips pass
+  // -1 for grey disabled art instead. Label baseline is centred on the
+  // +5px-below-centre rule the original uses (NovaUi_DrawThreeStateButton).
+  // Label colours follow the original's three-state label table
+  // (NovaUi_InitThreeStateButtonArt DAT_007d8350): white on the normal art,
+  // 50% grey on the pressed/hover art -- the shared renderer draws the label in
+  // the plain screen font (it sets only the font id + size, never a bold
+  // style), so no bold here either.
   constexpr SDL_Color kButtonLabelNormal{255, 255, 255, 255};
   constexpr SDL_Color kButtonLabelGrey{128, 128, 128, 255};
   for (std::size_t i = 0; i < button_rects.size(); ++i) {
     const auto slot = button_rects[i].slot;
     const auto svc = static_cast<LandedService>(slot);
-    const bool enabled = ServiceAvailable(state, ctx.stellar_id, svc);
-    const bool hovered_by_mouse =
-        enabled && hovered.has_value() && *hovered == slot;
+    if (!ServiceAvailable(state, ctx.stellar_id, svc)) {
+      continue; // state -2: hidden, no body and no label
+    }
+    const bool hovered_by_mouse = hovered.has_value() && *hovered == slot;
     const auto button_state =
-        !enabled
-            ? ButtonState::kDisabled
-            : (hovered_by_mouse ? ButtonState::kHover : ButtonState::kNormal);
+        hovered_by_mouse ? ButtonState::kHover : ButtonState::kNormal;
     buttons.Draw(platform, button_rects[i].rect, button_state);
-    const SDL_Color &label_color = !enabled           ? kButtonLabelGrey
-                                   : hovered_by_mouse ? kButtonLabelGrey
-                                                      : kButtonLabelNormal;
+    const SDL_Color &label_color =
+        hovered_by_mouse ? kButtonLabelGrey : kButtonLabelNormal;
     const float label_baseline =
         ThreeStateButtonLabelBaseline(button_rects[i].rect);
     NovaText_DrawCentered(platform,

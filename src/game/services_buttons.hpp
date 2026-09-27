@@ -18,7 +18,8 @@
 //  (0x1d4c + 0..8). The down/disabled variant ids are *not* vertical slices of
 //  one button: 0x1d4f ("click left") and 0x1d52 ("grey left") begin separate
 //  state strips. NovaUi_DrawThreeStateButton selects one whole strip by state
-//  index (param_4/param_5: 0,0 -> normal; 0,!0 -> pressed; !0 -> grey) and
+//  index (param_4/param_5: 0,0 -> normal; 0,!0 -> pressed; -1 -> grey;
+//  -2 -> hidden, no body/label; -3 -> caller image) and
 //  stretches that state's 2px middle across the body. Each cap uses its 1-bit
 //  mask PICT (white = transparent), so the outside of the rounded corners
 //  is fully transparent; the middle tile is unmasked/opaque. This module loads
@@ -70,7 +71,10 @@ void DrawThreeStateButtonLabel(SdlPlatform &platform,
 
 // A three-state button body. States follow the game's DrawThreeStateButton
 // param_4/param_5 conventions: kNormal (idle), kHover (mouse over / focused;
-// uses the "click"/pressed art), kDisabled (uses the "grey" art).
+// uses the "click"/pressed art), kDisabled (uses the "grey" art). The original
+// renderer also has a HIDDEN state (state -2: no body and no label); callers
+// that hide unavailable buttons (the docked/stellar strip, 0x004a0220) simply
+// skip the Draw + label calls rather than passing a state here.
 enum class ButtonState : std::uint8_t { kNormal, kHover, kDisabled };
 
 // Loads and caches the three-state button edge slices. Kept on a per-window
