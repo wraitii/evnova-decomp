@@ -8,6 +8,8 @@
 
 #include <numbers>
 
+#include <cmath>
+
 namespace {
 
 game::ShipClass TestShipClass() {
@@ -32,6 +34,49 @@ TEST_CASE("flight integration uses elapsed original-cadence ticks") {
   CHECK(stats.thrust_px_per_tick2 == Catch::Approx(0.1F));
   CHECK(ship.vel_y == Catch::Approx(-0.05F));
   CHECK(ship.pos_y == Catch::Approx(-0.025F));
+}
+
+TEST_CASE("afterburner tail burns without the forward-thrust key") {
+  // Ghidra LAB_00451630: the afterburner is its own thruster, not a modifier
+  // on the forward key. With heading 0 it adds thrust * 2.75 along -y.
+  game::PlayerShip ship;
+  FlightInput input;
+  game::PlayerMovementOptions opts;
+  opts.afterburner = true;
+  opts.speed_cap_x = 7.2F;
+  opts.speed_cap_y = 7.2F;
+
+  (void)game::NovaPlayer_IntegrateMovement(
+      ship, input, TestShipClass(), 1.0F, opts);
+
+  CHECK(ship.vel_y == Catch::Approx(-0.275F));
+  CHECK(ship.vel_x == Catch::Approx(0.0F));
+  CHECK(ship.pos_y == Catch::Approx(-0.275F));
+}
+
+TEST_CASE("afterburner burn exceeds the class top speed") {
+  game::PlayerShip ship;
+  FlightInput input;
+  input.thrust = true;
+  game::PlayerMovementOptions opts;
+  opts.speed_cap_x = 7.2F;
+  opts.speed_cap_y = 7.2F;
+
+  for (int i = 0; i < 200; ++i) {
+    (void)game::NovaPlayer_IntegrateMovement(
+        ship, input, TestShipClass(), 1.0F, opts);
+  }
+  // Without the tail the width-1.8 caps are unreachable: the main-thrust
+  // per-axis clamp still holds the ship at the unboosted class max.
+  CHECK(std::abs(ship.vel_y) <= 4.11F);
+
+  game::PlayerShip afterburning_ship;
+  opts.afterburner = true;
+  for (int i = 0; i < 200; ++i) {
+    (void)game::NovaPlayer_IntegrateMovement(
+        afterburning_ship, input, TestShipClass(), 1.0F, opts);
+  }
+  CHECK(std::abs(afterburning_ship.vel_y) > 6.5F);
 }
 
 TEST_CASE("reverse command turns the ship but preserves its velocity") {

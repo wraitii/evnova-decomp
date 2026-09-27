@@ -1460,12 +1460,15 @@ bool PlayerTick_FaceTargetCommand(GameState &state,
   return true;
 }
 
-// @port 0x0044C8D0 85% gameplay,synthetic
+// @port 0x0044C8D0 90% gameplay,synthetic
 // Ghidra 0x0044C8D0 PlayerTick_ManualFlightAndRegeneration, internal umbrella
 // of Ship_HandlePlayerShipCore. Relevant synthetic CFGs: turn input
 // 0x0044C92E -> 0x0044C980; joined afterburner/thrust/glow
 // 0x0044C9AB -> 0x0044CA6B; bank animation 0x0044CA6B -> 0x0044CB99; reordered
-// afterburner speed-cap/fuel/glow tail 0x00451630 -> 0x004518EF.
+// afterburner speed-cap/fuel/glow tail 0x00451630 -> 0x004518EF. The tail's
+// velocity burn and speed-cap clamp now live in NovaPlayer_IntegrateMovement
+// (opts.afterburner / opts.gravity_pull); the player engine-glow state machine
+// and the inertialess scalar-speed branch remain the open gaps.
 void PlayerTick_ManualFlightAndRegeneration(GameState &state,
                                             const FlightInput &input,
                                             float elapsed_ticks,
@@ -1531,9 +1534,11 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
       effective_class.turn_rate *= (1.0F - intensity);
     }
   }
-  if (afterburner_active && !gravity_present) {
-    effective_class.speed *= 1.8F;
-  }
+  // The afterburner's speed widening and its own 2.75x burn are applied inside
+  // NovaPlayer_IntegrateMovement (opts.afterburner / opts.gravity_pull) so the
+  // main-thrust clamp, the tail burn and the caps all derive from the unboosted
+  // class speed. Ghidra LAB_00451630 applies the tail after the manual-flight
+  // thrust and the velocity-cap clamp; the integrator mirrors that order.
   // @port 0x0044D05B 90% correctness,synthetic
   // Ghidra 0x0044d05b PlayerTick_ClampVelocityToSpeedCaps (synthetic region of
   // 0x0044aa70). TODO(decomp): the exact same-frame parent ordering (the
@@ -1575,6 +1580,8 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   movement_opts.face_target_armed = face_target_armed;
   movement_opts.inertialess = NovaPlayer_IsInertialess(state);
   movement_opts.fire_restricted = fire_restricted;
+  movement_opts.afterburner = afterburner_active;
+  movement_opts.gravity_pull = gravity_present;
   movement_opts.speed_cap_x = state.player_speed_cap_x;
   movement_opts.speed_cap_y = state.player_speed_cap_y;
   // Capture the applied turn direction (keyboard OR auto-turn) for the bank

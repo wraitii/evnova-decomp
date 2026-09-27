@@ -132,6 +132,12 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
                              const PlayerMovementOptions &opts) {
   constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
   constexpr float kTwoPi = 6.283185307179586F;
+  // Afterburner tail constants (Ghidra LAB_00451630): _DAT_00575648 = 2.75
+  // thrust multiplier, g_afterburner_overspeed_factor (0x00575610) = 1.8 max
+  // speed, _DAT_00575678 = 0.99 per-axis decay when already inside the bound.
+  constexpr float kAfterburnerTailThrustFactor = 2.75F; // 0x00575648
+  constexpr float kAfterburnerOverspeedFactor = 1.8F;   // 0x00575610
+  constexpr float kAfterburnerTailDecay = 0.99F;        // 0x00575678
 
   PlayerMovementStats stats;
   elapsed_ticks = std::max(0.0F, elapsed_ticks);
@@ -262,14 +268,32 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
     } else {
       // Forward thrust: polar step toward the heading, per-axis clamped to
       // the class top speed projection (Math_AddPolarVelocityWithClamp
-      // semantics; the original clamps to effective max speed here and to
-      // max * 1.8 while the afterburner runs -- see the cap tail in
-      // PlayerTick_ManualFlightAndRegeneration for the overspeed mechanics).
+      // semantics). The original widens that clamp to max * 1.8 while the
+      // afterburner runs outside a gravity pull; the tail below adds the
+      // afterburner's own 2.75x burn.
+      const float thrust_max =
+          (opts.afterburner && !opts.gravity_pull)
+              ? stats.max_speed_px_per_tick * kAfterburnerOverspeedFactor
+              : stats.max_speed_px_per_tick;
       Math_AddPolarVelocityWithClamp(ship.heading,
                                      stats.thrust_px_per_tick2 * elapsed_ticks,
-                                     stats.max_speed_px_per_tick,
+                                     thrust_max,
                                      ship.vel_x,
                                      ship.vel_y);
+    }
+  }
+
+  if (opts.afterburner && opts.inertialess) {
+    // Ghidra LAB_00451630 inertialess afterburner arm: the tail adds
+    // thrust * 2.75 (0x00575648) to the scalar speed and clamps to max * 1.8.
+    // Runs regardless of the thrust key and of a gravity pull (the original
+    // only suppresses the cap widening, not the burn).
+    ship.speed += stats.thrust_px_per_tick2 * kAfterburnerTailThrustFactor *
+                  elapsed_ticks;
+    const float afterburner_max =
+        stats.max_speed_px_per_tick * kAfterburnerOverspeedFactor;
+    if (ship.speed > afterburner_max) {
+      ship.speed = afterburner_max;
     }
   }
 
@@ -321,6 +345,37 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
       opts.speed_cap_y >= 0.0F ? opts.speed_cap_y : stats.max_speed_px_per_tick;
   ship.vel_x = std::clamp(ship.vel_x, -cap_x, cap_x);
   ship.vel_y = std::clamp(ship.vel_y, -cap_y, cap_y);
+
+  if (opts.afterburner && !opts.inertialess) {
+    // Ghidra 0x00451630 LAB_00451630 non-inertialess afterburner arm (an
+    // interior slice of 0x0044aa70 Ship_HandlePlayerShipCore's manual-flight
+    // region): the tail emits a polar thrust step of thrust * 2.75
+    // (0x00575648) on each axis while that axis is inside the max * 1.8
+    // projection (0x00575610), decaying by 0.99 (0x00575678) once it is not.
+    // It runs after the speed-cap clamp and regardless of the thrust key or a
+    // gravity pull, so the afterburner is its own thruster rather than a
+    // modifier on the forward key.
+    // Ghidra 0x0044c8d0 PlayerTick_ManualFlightAndRegeneration owns the caps,
+    // fuel and glow arms of the same tail.
+    const float sin_h = std::sin(ship.heading);
+    const float cos_h = std::cos(ship.heading);
+    const float tail_thrust = stats.thrust_px_per_tick2 *
+                              kAfterburnerTailThrustFactor * elapsed_ticks;
+    const float tail_max =
+        stats.max_speed_px_per_tick * kAfterburnerOverspeedFactor;
+    const auto apply_tail_axis =
+        [](float thrust_axis, float max_axis, float current) -> float {
+      if ((thrust_axis > 0.0F && current < max_axis) ||
+          (thrust_axis <= 0.0F && max_axis < current)) {
+        return current + thrust_axis;
+      }
+      return current * kAfterburnerTailDecay;
+    };
+    ship.vel_x =
+        apply_tail_axis(sin_h * tail_thrust, sin_h * tail_max, ship.vel_x);
+    ship.vel_y =
+        apply_tail_axis(-cos_h * tail_thrust, -cos_h * tail_max, ship.vel_y);
+  }
 
   ship.pos_x += ship.vel_x * elapsed_ticks;
   ship.pos_y += ship.vel_y * elapsed_ticks;

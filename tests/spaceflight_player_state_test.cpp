@@ -164,4 +164,41 @@ TEST_CASE("cloak shield drain no longer stops at the per-second rate",
   CHECK(ship.shield_points == 0.0F);
 }
 
+TEST_CASE("player afterburner burns without the forward-thrust key",
+          "[player][afterburner]") {
+  // Ghidra LAB_00451630: once the afterburner key is held and the outfit is
+  // owned, g_player_afterburner_active makes the tail emit its own 2.75x
+  // thrust; the forward key is irrelevant.
+  GameState state;
+  state.player.is_active = true;
+  state.player.ship_class_id = 0;
+  state.player.fuel_points = 1000.0F;
+  state.player.heading = 0.0F;
+  state.player.armor_points = 100.0F;
+  state.stat_cache_valid = true;
+  state.cached_stats.thrust_raw = 500.0F;
+  state.cached_stats.speed_raw = 400.0F;
+  state.cached_stats.turn_raw = 40.0F;
+  state.cached_stats.fuel_capacity = 1000.0F;
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].accel = 500.0F;
+  state.scenario.ships[0].speed = 400.0F;
+  state.scenario.ships[0].turn_rate = 40.0F;
+  state.scenario.ships[0].base_armor = 100.0F;
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].mod_type = 15; // kAfterburner
+  state.scenario.outfits[0].mod_val = 37;  // fuel units/sec
+  state.inventory.outfit_owned_count.fill(0);
+  state.inventory.outfit_owned_count[0] = 1;
+
+  FlightInput input;
+  input.afterburner = true; // deliberately no input.thrust
+  for (int i = 0; i < 60; ++i) {
+    PlayerTick_ManualFlightAndRegeneration(state, input, 1.0F, false);
+  }
+  // Heading 0: 2.75 * 0.1 px/tick^2 along -y, bounded by max * 1.8.
+  CHECK(state.player.vel_y < -6.0F);
+  CHECK(state.player.fuel_points < 1000.0F);
+}
+
 } // namespace game

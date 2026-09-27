@@ -82,6 +82,14 @@ struct PlayerMovementOptions {
   // effective max speed while maintained by the afterburner tail.
   float speed_cap_x = -1.0F;
   float speed_cap_y = -1.0F;
+  // Afterburner tail (Ghidra LAB_00451630): when set, the afterburner emits its
+  // own 2.75x-thrust / 1.8x-max-speed burn (0x00575648 / 0x00575610) even
+  // without the forward-thrust key.
+  bool afterburner = false;
+  // True while a stellar gravity pull is active. The original still runs the
+  // afterburner tail's burn, but it gates the widened main-thrust clamp and the
+  // 1.8x speed caps on !g_gravity_pull_active, so this suppresses those two.
+  bool gravity_pull = false;
 };
 
 // Pure free-flight physics integrator (unit-testable; no SDL). Derives stats

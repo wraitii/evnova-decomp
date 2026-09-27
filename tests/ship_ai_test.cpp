@@ -1889,6 +1889,20 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
         Catch::Approx(eff.thrust_px_per_tick2 * 2.75F).margin(1e-4F));
   CHECK(ship.ai_desired_speed ==
         Catch::Approx(eff.max_speed_px_per_tick * 1.8F).margin(1e-3F));
+
+  // The NPC integrator consumes the boost: with the 1.8x cruise as its clamp
+  // and the 2.75x command as its thrust step, the hull settles above the
+  // unboosted class top speed.
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  ship.ai_maneuver_timer_ms = 0.0F;
+  ship.ai_station_hold_timer = 0.0F;
+  ship.ai_forward_thrust_cmd = eff.thrust_px_per_tick2 * 2.75F;
+  ship.ai_desired_speed = eff.max_speed_px_per_tick * 1.8F;
+  for (int i = 0; i < 200; ++i) {
+    NovaShip_IntegrateNpcMovement(state, ship, *cls, 1.0F);
+  }
+  CHECK(std::hypot(ship.vel_x, ship.vel_y) > eff.max_speed_px_per_tick * 1.5F);
 }
 
 // Regression: Ship_ApplyShipAiControls (0x00408150) mode 6 unconditionally
