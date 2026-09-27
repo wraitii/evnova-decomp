@@ -29,6 +29,12 @@ struct NovaExtraPrefs {
   PresentationScale scale{};
   // Clean-room bug-fix policy (see compatibility.hpp), edited live by the UI.
   BugFixPolicy bugfixes{};
+  // Port-only persisted window mode. The original never stored its
+  // DAT_00bec178 "run in a window" byte in the .prf (see
+  // docs/preferences_keybindings.md), so the port keeps the player's choice in
+  // this INI instead. Seeded into NovaPreferences::run_in_window at startup and
+  // written back when the Settings dialog commits.
+  bool run_in_window = true;
 };
 
 // The INI path under the support folder, or nullopt if it cannot be resolved.

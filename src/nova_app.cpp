@@ -1045,18 +1045,26 @@ int NovaProgramEntry() {
 // @port 0x004D2A80 100%
 // Ghidra: 0x004d2a80 NovaApp_Run: app entry / main menu loop.
 int NovaApp_Run(NovaRuntime &runtime) {
-  // Platform_RegisterMainWindow / QuickTime_Initialize are replaced by SDL
-  // setup.
-  if (!runtime.platform.Initialize()) {
-    return 1;
-  }
+  // Preferences select the startup window mode, so load both stores before the
+  // SDL window exists (neither path needs SDL video).
   if (!game::NovaPrefs_LoadFromSystemStore(runtime.prefs)) {
     NovaLog::Info("preferences: using original defaults");
   }
-  // Apply the stored window mode before the first frame. The port defaults to
-  // a window; an uncheck of "Run in a Window" switches the OS window to
-  // fullscreen (the original's DDIsWindowed toggle, DAT_00bec178).
-  runtime.platform.ApplyWindowMode(runtime.prefs.run_in_window);
+  // Port-only window mode. The original's DDIsWindowed toggle (DAT_00bec178)
+  // was never part of the .prf payload, so the Extra Prefs INI owns it; load it
+  // before window creation so the player's fullscreen choice survives a
+  // restart. The Settings dialog writes it back on commit.
+  if (!game::NovaExtraPrefs_LoadFromSystemStore(runtime.extra_prefs)) {
+    NovaLog::Info("extra prefs: no 'EV Nova Extra Prefs.ini' yet");
+  }
+  runtime.prefs.run_in_window = runtime.extra_prefs.run_in_window;
+  // Platform_RegisterMainWindow / QuickTime_Initialize are replaced by SDL
+  // setup. The window is created already in the stored mode, so fullscreen
+  // startup never performs a visible windowed -> fullscreen transition (that
+  // transition resized the splash several times; see SdlPlatform::Initialize).
+  if (!runtime.platform.Initialize(runtime.prefs.run_in_window)) {
+    return 1;
+  }
   // Hand the command-query service the now-loaded binding table. Key Settings
   // later edits runtime.prefs.bindings in place, so the install stays current.
   game::NovaInput_InstallCommandBindings(&runtime.prefs.bindings);
@@ -1084,9 +1092,6 @@ int NovaApp_Run(NovaRuntime &runtime) {
   // anywhere, so it cannot silently fall back to a mock menu (see
   // game::NovaUi_RunLocateDataDialog).
   game::NovaExtraPrefs &extra_prefs = runtime.extra_prefs;
-  if (!game::NovaExtraPrefs_LoadFromSystemStore(extra_prefs)) {
-    NovaLog::Info("extra prefs: no 'EV Nova Extra Prefs.ini' yet");
-  }
   // Resolve the presentation multipliers once at startup and hand them to the
   // platform, which owns the placement builders. All three are live:
   // `ui_scale` at the authored UI/HUD sites, `flight_scene_scale` on the

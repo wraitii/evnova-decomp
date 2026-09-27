@@ -292,7 +292,7 @@ SdlPlatform::~SdlPlatform() {
   }
 }
 
-bool SdlPlatform::Initialize() {
+bool SdlPlatform::Initialize(bool windowed) {
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     NovaLog::Error("SDL initialization failed: {}", SDL_GetError());
     return false;
@@ -302,16 +302,32 @@ bool SdlPlatform::Initialize() {
   gameplay_clock_anchor_ms_ = wall_clock_anchor_ms_;
 
   SDL_SetAppMetadata("Escape Velocity Nova", "0.1.0", "com.ambrosiasw.evnova");
+  // macOS: use a plain borderless fullscreen window instead of a native
+  // "Spaces" fullscreen. Spaces triggers an animated transition asynchronously
+  // after the window appears (the window visibly grows while the menu bar is
+  // removed), which stretches the splash vertically and flashes the Touch Bar
+  // with the Space-switch animation before it settles. Disabling Spaces makes
+  // SDL size the window to the desktop immediately. No-op on other platforms.
+  SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0");
   // Minimum window: 1024x768 (the user-facing baseline resolution, matching
   // the game's native 1024x768 canvas). The window opens at that minimum and
   // stays resizable so larger windows show more of the system in flight. A
   // high-density backing buffer keeps text sharp while each screen picks its
   // own authored placement per frame (see Placement and SetPlacement).
-  window_.reset(
-      SDL_CreateWindow("Escape Velocity Nova",
-                       kMinimumWindowWidth,
-                       kMinimumWindowHeight,
-                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY));
+  //
+  // Fullscreen is requested in the creation flags rather than switched on
+  // afterwards: a live SDL_SetWindowFullscreen transition right after startup
+  // makes the OS resize (and briefly show) the window several times, which the
+  // splash presents as a series of odd resizes.
+  SDL_WindowFlags window_flags =
+      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+  if (!windowed) {
+    window_flags |= SDL_WINDOW_FULLSCREEN;
+  }
+  window_.reset(SDL_CreateWindow("Escape Velocity Nova",
+                                 kMinimumWindowWidth,
+                                 kMinimumWindowHeight,
+                                 window_flags));
   if (!window_) {
     NovaLog::Error("SDL window creation failed: {}", SDL_GetError());
     return false;
@@ -319,6 +335,12 @@ bool SdlPlatform::Initialize() {
   // Users may not shrink the game below its baseline resolution.
   SDL_SetWindowMinimumSize(
       window_.get(), kMinimumWindowWidth, kMinimumWindowHeight);
+  if (!windowed) {
+    // Apply the fullscreen geometry now so the renderer and the first
+    // placement are built against the final size; otherwise the first frames
+    // see an intermediate size and the splash jumps before settling.
+    SDL_SyncWindow(window_.get());
+  }
 
   renderer_.reset(SDL_CreateRenderer(window_.get(), nullptr));
   if (!renderer_) {

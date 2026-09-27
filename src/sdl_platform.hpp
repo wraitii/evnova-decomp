@@ -239,7 +239,12 @@ public:
   SdlPlatform(SdlPlatform &&) = delete;
   SdlPlatform &operator=(SdlPlatform &&) = delete;
 
-  [[nodiscard]] bool Initialize();
+  // Creates the window and renderer. `windowed` picks the startup window
+  // mode; passing false creates the window already in fullscreen so the OS
+  // never performs a visible windowed -> fullscreen transition (which would
+  // resize the splash a few times during startup). The Settings dialog can
+  // still change the mode live through ApplyWindowMode.
+  [[nodiscard]] bool Initialize(bool windowed = true);
   [[nodiscard]] SDL_Renderer *renderer() const;
   // SDL3's native chooser is asynchronous and may invoke its callback from a
   // worker thread. Results are copied into platform-owned state and consumed

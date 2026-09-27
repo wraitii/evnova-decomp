@@ -59,6 +59,9 @@ constexpr std::string_view kInstallRootKey = "install_root";
 constexpr std::string_view kUiScaleKey = "ui_scale";
 constexpr std::string_view kFlightSceneScaleKey = "flight_scene_scale";
 constexpr std::string_view kMissionScaleKey = "mission_scale";
+// Port-only persistence for the original's DAT_00bec178 "run in a window"
+// toggle, which the .prf never stored.
+constexpr std::string_view kRunInWindowKey = "run_in_window";
 constexpr std::string_view kSafeBugFixesKey = "safe";
 constexpr std::string_view kOutfitSlotBalanceKey = "outfit_slot_balance";
 constexpr std::string_view kOutfitPricesKey = "outfit_prices";
@@ -192,6 +195,8 @@ void NovaExtraPrefs_Parse(std::istream &in,
           value, key, source, line_number, prefs.scale.flight_scene);
     } else if (key == kMissionScaleKey) {
       ParseScaleOrDefault(value, key, source, line_number, prefs.scale.mission);
+    } else if (key == kRunInWindowKey) {
+      ParseBoolOrDefault(value, key, source, line_number, prefs.run_in_window);
     } else if (key == kSafeBugFixesKey) {
       ParseBoolOrDefault(value, key, source, line_number, prefs.bugfixes.safe);
     } else if (key == kOutfitSlotBalanceKey) {
@@ -243,7 +248,10 @@ void NovaExtraPrefs_Write(std::ostream &out, const NovaExtraPrefs &prefs) {
       << kUiScaleKey << '=' << FormatScale(prefs.scale.ui) << '\n'
       << kFlightSceneScaleKey << '=' << FormatScale(prefs.scale.flight_scene)
       << '\n'
-      << kMissionScaleKey << '=' << FormatScale(prefs.scale.mission) << '\n';
+      << kMissionScaleKey << '=' << FormatScale(prefs.scale.mission) << '\n'
+      << "# run_in_window: 1 keeps the normal resizable window, 0 switches to\n"
+         "# fullscreen (the original's Run in a Window toggle).\n"
+      << kRunInWindowKey << '=' << BoolFlag(prefs.run_in_window) << '\n';
   out << "\n# Clean-room fixes for confirmed bugs in the original game.\n"
          "# safe bundles the correctness fixes; the rest can be turned off\n"
          "# for a more faithful original experience.\n"

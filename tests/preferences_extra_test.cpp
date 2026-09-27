@@ -39,6 +39,7 @@ TEST_CASE("extra prefs parse the display section and fall back on bad values") {
                         "ui_scale=2\n"
                         "flight_scene_scale=1.5\n"
                         "mission_scale=bogus\n"
+                        "run_in_window=0\n"
                         "unknown_key=7\n");
   NovaExtraPrefs prefs;
   game::NovaExtraPrefs_Parse(in, prefs, "<test>");
@@ -47,6 +48,7 @@ TEST_CASE("extra prefs parse the display section and fall back on bad values") {
   REQUIRE(prefs.scale.ui == 2.0F);
   REQUIRE(prefs.scale.flight_scene == 1.5F);
   REQUIRE(prefs.scale.mission == 1.0F); // invalid -> fallback
+  REQUIRE_FALSE(prefs.run_in_window);
 }
 
 TEST_CASE("extra prefs parse the bug-fix flags and fall back on bad values") {
@@ -74,6 +76,7 @@ TEST_CASE("extra prefs write and reparse every field") {
   prefs.bugfixes.outfit_prices = true;
   prefs.bugfixes.cron_events = false;
   prefs.bugfixes.particle_fog = true;
+  prefs.run_in_window = false;
 
   std::ostringstream out;
   game::NovaExtraPrefs_Write(out, prefs);
@@ -91,6 +94,7 @@ TEST_CASE("extra prefs write and reparse every field") {
   REQUIRE(parsed.bugfixes.outfit_prices == prefs.bugfixes.outfit_prices);
   REQUIRE(parsed.bugfixes.cron_events == prefs.bugfixes.cron_events);
   REQUIRE(parsed.bugfixes.particle_fog == prefs.bugfixes.particle_fog);
+  REQUIRE(parsed.run_in_window == prefs.run_in_window);
 }
 
 TEST_CASE("extra prefs write omits an unset install root") {
@@ -107,6 +111,7 @@ TEST_CASE("extra prefs write omits an unset install root") {
   REQUIRE(parsed.scale.ui == 1.0F);
   REQUIRE(parsed.scale.flight_scene == 1.0F);
   REQUIRE(parsed.scale.mission == 1.0F);
+  REQUIRE(parsed.run_in_window); // default: windowed
 }
 
 TEST_CASE("mission dialogs compose ui and mission on top of each other") {

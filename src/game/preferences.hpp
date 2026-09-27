@@ -80,7 +80,10 @@ struct NovaPreferences {
   bool smoke_trails = false;
   // Ghidra DAT_00bec178 (run in a window), toggled live via the window mode.
   // The port defaults to a window (the original defaulted to fullscreen); the
-  // checkbox is live and applies the OS window mode through SdlPlatform.
+  // checkbox is live and applies the OS window mode through SdlPlatform. The
+  // original never stored this in the .prf, so the port persists it in the
+  // port-only Extra Prefs INI (`NovaExtraPrefs::run_in_window`) and seeds this
+  // field from there at startup.
   bool run_in_window = true;
   // Ghidra g_pref_ship_animations.
   bool ship_animations = true;

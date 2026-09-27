@@ -1133,6 +1133,14 @@ bool NovaMenu_RunSettingsDialog(
   NovaLog::Info("opening Settings dialog (DLOG 0x{:04x})", kSettingsDialogId);
   const SettingsArtwork artwork = LoadSettingsArtwork(platform);
 
+  // Commits both stores. The original .prf has no slot for the window mode
+  // (DAT_00bec178), so the port mirrors it into the port-only Extra Prefs INI.
+  auto commit = [&] {
+    extra_prefs.run_in_window = prefs.run_in_window;
+    (void)NovaExtraPrefs_SaveToSystemStore(extra_prefs);
+    (void)NovaPrefs_SaveToSystemStore(prefs);
+  };
+
   while (!platform.quit_requested()) {
     platform.SetPlacement(PlaceContained({layout.window.w, layout.window.h},
                                          platform.logical_playfield_size(),
@@ -1149,7 +1157,7 @@ bool NovaMenu_RunSettingsDialog(
       case TextKey::escape:
         return false; // Cancel (discard changes).
       case TextKey::enter:
-        (void)NovaPrefs_SaveToSystemStore(prefs);
+        commit();
         return true; // Enter acts as OK.
       case TextKey::primary: {
         // Probe-harness support (docs/probe_harness.md): injected clicks land
@@ -1163,7 +1171,7 @@ bool NovaMenu_RunSettingsDialog(
         }
         switch (*hit) {
         case 0: // OK
-          (void)NovaPrefs_SaveToSystemStore(prefs);
+          commit();
           return true;
         case 15: // Key Settings
           // Preserve the original bottom-to-top window-stack result. The SDL
@@ -1219,9 +1227,12 @@ bool NovaMenu_RunSettingsDialog(
           }
           TogglePref(prefs, *hit);
           // Run in a Window applies immediately, as the original's
-          // DDIsWindowed toggle did. The source global was DAT_00bec178.
+          // DDIsWindowed toggle did. The source global was DAT_00bec178. Keep
+          // the port-only extra-prefs copy in sync so an Extra Prefs visit is
+          // not saved with a stale value; it is persisted on commit.
           if (*hit == 10) {
             platform.ApplyWindowMode(prefs.run_in_window);
+            extra_prefs.run_in_window = prefs.run_in_window;
           }
           if (*hit == 7 && !prefs.intro_music && music.IsPlaying()) {
             music.Stop();

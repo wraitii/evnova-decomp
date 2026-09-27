@@ -255,7 +255,9 @@ byte-compatible and the shipped game never reads them. It stores
 `[paths] install_root`, the player-selected EV Nova install root written by the
 startup locate-data screen (see `docs/scenario_data_loading.md`); a
 `[display]` section with the port-only presentation multipliers (`ui_scale`,
-`flight_scene_scale`, `mission_scale`); and a `[bugfixes]` section with the
+`flight_scene_scale`, `mission_scale`) and `run_in_window` (the original's
+`DAT_00bec178` window-mode toggle, which the `.prf` never stored); and a
+`[bugfixes]` section with the
 runtime clean-room bug-fix policy (`safe` plus the independent
 `outfit_slot_balance`, `outfit_prices`, `cron_events` and `particle_fog`
 toggles; every fix is marked `BUGFIX(original)` in `src/`).
@@ -316,9 +318,19 @@ port defaults it **ON** (the original's overlay was slow/buggy and defaulted
 OFF), while still persisting the choice at `.prf +0x76`. **Run in a Window** is
 also not locked: the port defaults `run_in_window` **ON** (the original
 defaulted to fullscreen), the live checkbox drives
-`SdlPlatform::ApplyWindowMode` (`SDL_SetWindowFullscreen`), and the same call
-runs once at startup. It is not part of the `.prf` payload, matching the
-original's `DAT_00bec178`.
+`SdlPlatform::ApplyWindowMode` (`SDL_SetWindowFullscreen`), and startup
+requests the stored mode in the `SDL_CreateWindow` flags (via
+`SdlPlatform::Initialize(windowed)`) so no visible windowed -> fullscreen
+transition resizes the splash. On macOS the native Spaces fullscreen
+animation is disabled (`SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES=0`) and the
+window geometry is synced before the renderer is created, so fullscreen
+starts as a stable borderless desktop window instead of animating (and
+vertically stretching the splash) after the first frame. The original's
+`.prf` has no slot for
+`DAT_00bec178`, so the port persists the choice in the port-only
+`EV Nova Extra Prefs.ini` (`[display] run_in_window`) and seeds
+`prefs.run_in_window` from it before window creation; the Settings OK/Enter
+path writes it back.
 
 **Port-only Extra Prefs dialog.** The Settings dialog appends one synthetic
 push button (`Extra Prefs`) that is not in DITL 0xfa3 — there is no spare item,
