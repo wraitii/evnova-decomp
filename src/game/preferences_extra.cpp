@@ -389,11 +389,12 @@ constexpr std::array<ExtraBugFixRow, 6> kExtraBugFixRows{{
      "This seems like an oversight / performance issue at the time. "
      "Turning this on/off is purely visual, no gameplay impact."},
     {ExtraPrefsControl::bugfix_weapon_cadence,
-     "30 Hz weapon fire rates",
-     "Reload and beam duration follow the intended 30 frames per second, and "
-     "every extra copy of a weapon adds to its fire rate. Off keeps the "
-     "original's cap of one shot per frame, which made very fast weapons "
-     "ignore extra copies."},
+     "Fix weapon fire rate / X = 1 bug",
+     "Fixes two related bugs: weapons firing at different rates based on "
+     "framerate, "
+     "and multiple copies of some beams not multiplying damage properly. "
+     "Turning this off makes weapons behave like the original Nova, X = 1 "
+     "bug included. In doubt, leave this on."},
 }};
 
 // Dialog-local rects for one scale row's stacked arrow images. The drawn art is
