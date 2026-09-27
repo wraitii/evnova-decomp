@@ -142,6 +142,17 @@ bool NovaGovernment_AreGovtsHostileOrXenophobic(const ScenarioData &scenario,
 
 // @port 0x0046BFF0 100%
 // Ghidra 0x0046bff0 Government_DoGovtsShareClass.
+// The original compares classes[i] against classes[i] at the SAME index
+// (disassembly 0x0046c021..0x0046c04f indexes both operands with one ECX loop
+// counter), not a cross product. Two governments that store the same class
+// number in different slots are therefore NOT class-mates, contradicting the
+// Bible's "any of its class mates" wording for the 30000..30255 misn/stell
+// families; this is the community "TravelStel 30000-30255 does not work"
+// report. The shipped scenario mostly fills only Class1, so Classes 2-4 look
+// ignored. The same positional rule gates the 31000..31255 not-class families,
+// the AuxShipSyst/TravelStel/ReturnStel locators, and the PayVal
+// -39999..-30000 shared-class reputation clear. Equal ids short-circuit to
+// true and there is no derelict exclusion.
 bool NovaGovernment_DoGovtsShareClass(const ScenarioData &scenario,
                                       std::int16_t govt_a,
                                       std::int16_t govt_b) {

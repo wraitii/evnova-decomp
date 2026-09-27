@@ -85,6 +85,47 @@ TEST_CASE("AvailRecord domination arms gate mission availability") {
   }
 }
 
+// Ghidra 0x00441b40 Gate 0: the AvailStel 30000..30999 family calls
+// Government_DoGovtsShareClass, which is a positional classes[i]==classes[i]
+// compare. A class shared across DIFFERENT class slots is not a match.
+TEST_CASE("AvailStel class family uses the positional share-class compare",
+          "[mission][locator]") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.avail_random = 100;
+  definition.avail_location = 0;
+  definition.link_system_filter = 30005; // govt 5 or its class-mates
+
+  state.scenario.governments.resize(7);
+  state.scenario.governments[5].classes = {-1, 2, -1, -1}; // class 2 in slot 1
+  state.scenario.governments[6].classes = {2, -1, -1, -1}; // class 2 in slot 0
+
+  state.scenario.stellars.resize(1);
+  state.scenario.stellars[0].government_id = 6;
+  state.travel.selected_stellar_id = 0x80;
+
+  const auto contains = [](const std::vector<std::int16_t> &list,
+                           std::int16_t id) {
+    return std::find(list.begin(), list.end(), id) != list.end();
+  };
+
+  // Same class number in different slots: no match under the positional
+  // compare, so the definition is not offered.
+  {
+    const auto lists = Mission_EvaluateMissionLists(state);
+    CHECK_FALSE(contains(lists.page_zero, 0));
+  }
+
+  // Both governments carry class 2 in the same slot: now it matches. (The
+  // AvailStel arm does NOT exclude the exact target government, unlike the
+  // Travel/ReturnStel selector; here the govts differ anyway.)
+  state.scenario.governments[6].classes = {-1, 2, -1, -1};
+  const auto lists = Mission_EvaluateMissionLists(state);
+  CHECK(contains(lists.page_zero, 0));
+}
+
 TEST_CASE("scenario ferry missions expose their decoded availability fields") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
@@ -1805,6 +1846,38 @@ TEST_CASE("system locators exclude same-discovery-slot twins") {
   REQUIRE(Mission_ActivateAtSlot(state, 0));
   // Only system 2 is both government 5 and on a different discovery slot.
   CHECK(state.active_missions[0].current_system_id == 2);
+}
+
+// Ghidra 0x0043e6f0: the system share-class family (30000..30999) does NOT
+// exclude the exact target government (0x0043ea24 / 0x0043ef49 have no
+// `wanted != govt` guard), unlike the stellar selector (0x0043d510). Only the
+// 31000 family excludes it, implicitly via `!DoGovtsShareClass`.
+TEST_CASE("system share-class family includes the exact target government") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.current_system_locator = 30005; // government 5 or class-mates
+  definition.travel_stellar_locator = 0x80;
+  definition.return_stellar_locator = 0x81;
+
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[0].system_id = 9;
+  state.scenario.stellars[1].system_id = 10;
+
+  state.scenario.governments.resize(7);
+  state.scenario.governments[5].classes = {2, -1, -1, -1};
+  state.scenario.governments[6].classes = {-1, 2, -1, -1}; // different slot
+
+  state.scenario.systems.resize(2);
+  state.scenario.systems[0].is_visible = true;
+  state.scenario.systems[0].government_id = 1; // player's current system
+  state.scenario.systems[1].is_visible = true;
+  state.scenario.systems[1].government_id = 5; // exact target government
+
+  state.player.current_system_id = 0;
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK(state.active_missions[0].current_system_id == 1);
 }
 
 // Bible mission Flags 0x0002 ("Don't show the red destination arrows") and

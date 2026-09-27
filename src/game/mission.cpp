@@ -554,28 +554,6 @@ SelectMissionStellarByLocator(GameState &state,
         state.scenario.stellars[static_cast<std::size_t>(selected_index)]
             .government_id;
   }
-  const auto same_government_class = [&](std::int16_t lhs, std::int16_t rhs) {
-    if (lhs < 0 || rhs < 0 ||
-        lhs >= static_cast<std::int16_t>(state.scenario.governments.size()) ||
-        rhs >= static_cast<std::int16_t>(state.scenario.governments.size())) {
-      return false;
-    }
-    const auto &left =
-        state.scenario.governments[static_cast<std::size_t>(lhs)];
-    const auto &right =
-        state.scenario.governments[static_cast<std::size_t>(rhs)];
-    for (const auto left_class : left.classes) {
-      if (left_class < 0) {
-        continue;
-      }
-      for (const auto right_class : right.classes) {
-        if (left_class == right_class) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
   const std::int16_t filter = def.link_system_filter;
   if (filter != -1 && !interaction_context) {
     bool location_ok = false;
@@ -614,14 +592,24 @@ SelectMissionStellarByLocator(GameState &state,
                                      static_cast<std::int16_t>(filter - 25000),
                                      selected_govt);
     } else if (filter >= 30000 && filter < 31000) {
-      location_ok = same_government_class(filter - 30000, selected_govt);
+      // The original calls Government_DoGovtsShareClass, which compares
+      // classes[i] against classes[i] at the SAME index (not a 4x4 cross
+      // product). Two governments match only when they share a class value in
+      // the same slot. It also returns true when the ids are equal.
+      location_ok = NovaGovernment_DoGovtsShareClass(
+          state.scenario,
+          static_cast<std::int16_t>(filter - 30000),
+          selected_govt);
     } else if (filter >= 31000 && filter < 32000) {
       // Binary quirk (0x00441e26): the not-my-class lane subtracts 30000, not
       // 31000, so the id lands outside the govt table; the bounds-safe helper
       // therefore makes this lane pass whenever a governed stellar is
       // selected. Quirk preserved.
-      location_ok = selected_govt != -1 &&
-                    !same_government_class(filter - 30000, selected_govt);
+      location_ok =
+          selected_govt != -1 && !NovaGovernment_DoGovtsShareClass(
+                                     state.scenario,
+                                     static_cast<std::int16_t>(filter - 30000),
+                                     selected_govt);
     }
     if (!location_ok) {
       return false;
@@ -1002,6 +990,11 @@ ResolveMissionCurrentSystem(GameState &state,
 // distribution matches the original. The original's existence scan omits the
 // exact-government exclusion (and the allied govt >= 0 guard), so the port's
 // shared predicate again avoids spinning on a pre-scan-only candidate.
+// The 30000..30999 share-class family is different: neither the original's
+// pre-scan (0x0043ea24) nor its sampling loop (0x0043ef49) excludes the exact
+// government, so a system of the target government matches via the equal-id
+// short-circuit. The 31000..31999 arm excludes it implicitly because
+// `!DoGovtsShareClass` is false when the ids are equal.
 [[nodiscard]] bool SystemLocatorEligible(const GameState &state,
                                          std::int16_t locator,
                                          int candidate,
@@ -1038,7 +1031,9 @@ ResolveMissionCurrentSystem(GameState &state,
   }
   if (locator >= 30000 && locator < 31000) {
     const auto wanted = static_cast<std::int16_t>(locator - 30000);
-    return govt != -1 && govt != wanted &&
+    // Exact government included (matches the original's equal-id
+    // short-circuit); only independent (-1) systems are rejected.
+    return govt != -1 &&
            NovaGovernment_DoGovtsShareClass(state.scenario, govt, wanted);
   }
   if (locator >= 31000 && locator < 32000) {

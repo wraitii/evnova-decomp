@@ -12,6 +12,7 @@ using game::GameState;
 using game::Government;
 using game::NovaGovernment_AreGovtsAllied;
 using game::NovaGovernment_AreGovtsHostileOrXenophobic;
+using game::NovaGovernment_DoGovtsShareClass;
 using game::NovaGovernment_IsCandidateHostileToTargeter;
 using game::NovaStellar_TickStellarDefenseBatteries;
 using game::ScenarioData;
@@ -61,6 +62,38 @@ TEST_CASE("allied helper matches a class against the other's allies",
   // Self is always allied.
   CHECK(NovaGovernment_AreGovtsAllied(data, 0, 0));
   CHECK(NovaGovernment_AreGovtsAllied(data, 1, 1));
+}
+
+// Ghidra 0x0046bff0 compares classes[i] against classes[i] at the SAME index.
+// The Bible describes the class lists as interchangeable groupings, but the
+// binary is positional: storing the same class number in Class1 on one govt
+// and Class2 on another does NOT make them class-mates.
+TEST_CASE("share-class is a positional compare, not a cross product",
+          "[government][relation]") {
+  ScenarioData data;
+  Government a; // index 0: class 2 in slot 0
+  Government b; // index 1: class 2 in slot 1 (different slot)
+  Government c; // index 2: class 2 in slot 0 (same slot as a)
+  a.classes = {2, -1, -1, -1};
+  b.classes = {-1, 2, -1, -1};
+  c.classes = {2, -1, -1, -1};
+  data.governments = {a, b, c};
+
+  CHECK_FALSE(NovaGovernment_DoGovtsShareClass(data, 0, 1));
+  CHECK_FALSE(NovaGovernment_DoGovtsShareClass(data, 1, 0));
+  CHECK(NovaGovernment_DoGovtsShareClass(data, 0, 2));
+
+  // Equal ids short-circuit to true even when every class is sentinel.
+  Government empty; // index 3
+  data.governments.push_back(empty);
+  CHECK(NovaGovernment_DoGovtsShareClass(data, 3, 3));
+  CHECK_FALSE(NovaGovernment_DoGovtsShareClass(data, 0, 3));
+
+  // A class value placed in the same slot matches; a later slot only matches
+  // when BOTH governments carry it there.
+  data.governments[1].classes = {-1, -1, 2, -1};
+  data.governments[2].classes = {-1, -1, 2, -1};
+  CHECK(NovaGovernment_DoGovtsShareClass(data, 1, 2));
 }
 
 // Ground truth from the real scenario data (see scenario_data_test.cpp: the

@@ -42,9 +42,12 @@ namespace game {
     const ScenarioData &scenario, std::int16_t govt_a, std::int16_t govt_b);
 
 // Ghidra 0x0046bff0 Government_DoGovtsShareClass. True when the ids are equal
-// or the two governments share any matching class_1..4 value (a's class
-// non-sentinel and equal to one of b's). Unlike the allied/hostile helpers
-// this check has no derelict exclusion.
+// or the two governments carry the same non-sentinel value at the SAME class
+// slot (classes[i] == classes[i], i in 0..3), NOT a cross product of a's
+// classes against b's. Two governments that each set the same class number in
+// a different slot (e.g. Class1 vs Class2) are therefore NOT class-mates,
+// contrary to the Bible's "any of its class mates" wording. Unlike the
+// allied/hostile helpers this check has no derelict exclusion.
 [[nodiscard]] bool NovaGovernment_DoGovtsShareClass(
     const ScenarioData &scenario, std::int16_t govt_a, std::int16_t govt_b);
 
