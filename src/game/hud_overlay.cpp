@@ -192,10 +192,13 @@ NovaResources_LoadPatchedStringEntry(std::uint16_t fallback_pool,
 namespace {
 // STR# 0x7d2 (landing/docking feedback) entry numbers, exactly as the original
 // passes them to Resource_LoadStringEntry (1-based;
-// Stellar_HandleStellarEntryAndExit 0x00457580). pool content: 0x3c "You don't
-// have enough", 0x3e "to pay the docking fee.", 0x3f "to pay the landing fee.",
-// 0x42/0x43 too-far station/planet, 0x46/0x47 too-fast station/planet, 0x56
-// "dock at ", 0x57 "land on ".
+// Stellar_HandleStellarEntryAndExit 0x00457580). Entries used here:
+//   0x3d "You don't have enough", 0x3f "to pay the docking fee.",
+//   0x40 "to pay the landing fee.", 0x43/0x44 too-far station/planet,
+//   0x47/0x48 too-fast station/planet, 0x49 "Disengage cloaking device first.",
+//   0x52/0x53 denied station/planet, 0x54 "Your ship is unable to",
+//   0x55 hypergate-offline / 0x56 wormhole-radiation, 0x57 "dock at " /
+//   0x58 "land on ", 0x59 station-hull / 0x5a planet-environment tails.
 inline constexpr std::uint16_t kStrId = 0x7d2;
 inline constexpr std::uint16_t kTooFarStation = 0x43;
 inline constexpr std::uint16_t kTooFarPlanet = 0x44;
@@ -204,6 +207,16 @@ inline constexpr std::uint16_t kTooFastPlanet = 0x48;
 inline constexpr std::uint16_t kNoCredits = 0x3d;  // "You don't have enough"
 inline constexpr std::uint16_t kPayDockFee = 0x3f; // "to pay the docking fee."
 inline constexpr std::uint16_t kPayLandFee = 0x40; // "to pay the landing fee."
+// kUnavailable composition (Stellar_HandleStellarEntryAndExit 0x00457580):
+// "Your ship is unable to" + hypergate/wormhole/dock/land variant, then
+// " <name>. " + the station/planet tail for ordinary bodies.
+inline constexpr std::uint16_t kUnableLead = 0x54;
+inline constexpr std::uint16_t kUnableHypergate = 0x55;
+inline constexpr std::uint16_t kUnableWormhole = 0x56;
+inline constexpr std::uint16_t kUnableDock = 0x57;
+inline constexpr std::uint16_t kUnableLand = 0x58;
+inline constexpr std::uint16_t kUnableStationTail = 0x59;
+inline constexpr std::uint16_t kUnablePlanetTail = 0x5a;
 } // namespace
 
 void NovaHud_ShowLandingDenial(GameState &state,
@@ -213,16 +226,50 @@ void NovaHud_ShowLandingDenial(GameState &state,
   switch (denial) {
   case LandedDenial::kNone:
     return;
-  case LandedDenial::kUnavailable:
-    // TODO(decomp): the original composes the 0x54 lead-in ("Your ship is
-    // unable to") with the 0x55/0x56 wormhole/hypergate variants too; the port
-    // shows only the dock/land fragment.
-    text = NovaHud_LoadStringEntry(
-        kStrId,
-        is_station ? static_cast<std::uint16_t>(0x57) // "dock at "
-                   : static_cast<std::uint16_t>(0x58) // "land on "
-    );
+  case LandedDenial::kUnavailable: {
+    // Ghidra 0x00457580: the original composes
+    //   entry 0x54 "Your ship is unable to" + " " + variant, then (ordinary
+    //   bodies only) " <name>. " + 0x59/0x5a. The hypergate/wormhole variants
+    //   are self-contained and carry no name.
+    const Stellar *stellar =
+        state.scenario.Stellar(state.travel.selected_stellar_id);
+    const bool hypergate =
+        stellar != nullptr && (stellar->availability_flags & 0x1000U) != 0U;
+    const bool wormhole =
+        stellar != nullptr && (stellar->availability_flags & 0x2000U) != 0U;
+    const bool station =
+        stellar != nullptr ? (stellar->flags & 0x10U) != 0U : is_station;
+    std::string message = NovaHud_LoadStringEntry(kStrId, kUnableLead)
+                              .value_or("Your ship is unable to");
+    message.push_back(' ');
+    if (hypergate) {
+      message += NovaHud_LoadStringEntry(kStrId, kUnableHypergate)
+                     .value_or("enter this hypergate - it is offline.");
+    } else if (wormhole) {
+      message += NovaHud_LoadStringEntry(kStrId, kUnableWormhole)
+                     .value_or("enter this wormhole - the radiation levels "
+                               "are too extreme.");
+    } else if (station) {
+      message +=
+          NovaHud_LoadStringEntry(kStrId, kUnableDock).value_or("dock at ");
+    } else {
+      message +=
+          NovaHud_LoadStringEntry(kStrId, kUnableLand).value_or("land on ");
+    }
+    if (stellar != nullptr && (stellar->availability_flags & 0x3000U) == 0U) {
+      message.push_back(' ');
+      message += stellar->name;
+      message += ". ";
+      message += NovaHud_LoadStringEntry(
+                     kStrId, station ? kUnableStationTail : kUnablePlanetTail)
+                     .value_or(station ? "The station's hull integrity is too "
+                                         "unstable."
+                                       : "The planet's environment is too "
+                                         "hostile.");
+    }
+    text = std::move(message);
     break;
+  }
   case LandedDenial::kUnauthorized:
     // Stellar_HandleStellarEntryAndExit: STR# 0x7d2 entry 0x52 for stations,
     // 0x53 for planets (0x51 is reserved for denied hypergates).
