@@ -737,6 +737,35 @@ TEST_CASE("landing reports authorization denial before distance",
   CHECK(ctx.denial == game::LandedDenial::kTooFar);
 }
 
+// Regression: travel_flags 0x20 is Bible "uninhabited" (no traffic control),
+// NOT a landing denial. Kont, the Federation ringed world, carries
+// 0x01 (Can land) | 0x20; the original skips the clearance wait and lands.
+TEST_CASE("landing accepts an uninhabited stellar", "[landed_window]") {
+  game::GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  game::Stellar &stellar = state.scenario.stellars[0];
+  stellar.name = "Kont";
+  stellar.pos_x = 0;
+  stellar.pos_y = 0;
+  stellar.flags = 0x21; // Can land | uninhabited
+  stellar.is_available = true;
+  stellar.system_id = 0;
+  state.player.current_system_id = 0;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.player.ai_maneuver_timer_ms = 500.0F; // cleared by the 0x20 arm
+  state.travel.selected_stellar_id = 0x80;
+  state.travel.engage_timer = 0; // no clearance pass ran
+
+  game::LandedContext ctx;
+  REQUIRE(game::Stellar_Dock(state, ctx, 96));
+  CHECK(ctx.landed);
+  CHECK(state.travel.engage_timer == 0x2ee);
+  CHECK(state.player.ai_maneuver_timer_ms == 0.0F);
+}
+
 TEST_CASE("landing approach timer arms within 250 and expires", "[travel]") {
   game::GameState state;
   state.scenario.systems.resize(1);

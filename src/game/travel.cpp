@@ -2322,10 +2322,11 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
     if (!eligible) {
       return;
     }
-    // travel_flags 0x20 (cannot-land) but otherwise eligible: the original
-    // still arms the timer and (when the land-command latch is set) shows STR
-    // 0x35. The port's docking gate rejects 0x20 targets, so only the timer
-    // arming/expiry is reproduced here; the overlay is TODO(decomp).
+    // travel_flags 0x20 (Bible "uninhabited") but otherwise eligible: the
+    // original still arms the timer and (when the land-command latch is set)
+    // shows STR 0x35. The port arms it here (so the approach proximity check
+    // succeeds); the land-command edge's own 0x35 overlay is emitted by
+    // Stellar_Dock (landed_window.cpp).
     if (state.travel.engage_timer > 0x2ec) {
       ++state.travel.engage_timer;
     }

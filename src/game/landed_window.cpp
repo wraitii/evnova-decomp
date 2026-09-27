@@ -8,6 +8,7 @@
 #include "asteroid.hpp"
 #include "docked_dialog.hpp"
 #include "escort_formation.hpp"
+#include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "landed_store.hpp"
 #include "nova_font.hpp"
@@ -140,10 +141,15 @@ bool Stellar_Dock(GameState &state,
   ctx.denial = LandedDenial::kNone;
   const std::int16_t stellar_id = state.travel.selected_stellar_id;
   const auto *stellar = state.scenario.Stellar(stellar_id);
+  // Stellar_HandleStellarEntryAndExit 0x00457bb2/0x00459710: the unavailable
+  // gate is only the wrong-system check and is_available == 0. travel_flags
+  // 0x20 is Bible "uninhabited" (no traffic control), NOT a landing denial --
+  // the original handles it at 0x00457dc1 by skipping the clearance wait (see
+  // below), and a landable uninhabited world such as Kont carries
+  // 0x01 (Can land) | 0x20 (uninhabited).
   if (stellar == nullptr || !stellar->is_available ||
       stellar->system_id != state.player.current_system_id ||
       (stellar->availability_flags & 0x3000U) != 0U ||
-      (stellar->flags & 0x20U) != 0U ||
       !NovaTargeting_StellarTargetsSpriteSetActive(*stellar)) {
     ctx.denial = LandedDenial::kUnavailable;
     return false;
@@ -156,6 +162,19 @@ bool Stellar_Dock(GameState &state,
   if (!NovaTravel_PlayerMeetsStellarAccess(state, stellar_id)) {
     ctx.denial = LandedDenial::kUnauthorized;
     return false;
+  }
+  // Stellar_HandleStellarEntryAndExit 0x00457dc1 -> 0x00458720: travel_flags
+  // 0x20 (Bible "uninhabited", i.e. no traffic control) skips the landing
+  // clearance wait. The original forces the engage timer to 0x2ee, clears the
+  // maneuver timer, sets the selected stellar, and shows STR# 0x7d2 0x35
+  // before running the same envelope/velocity gate below.
+  if ((stellar->flags & 0x20U) != 0U) {
+    state.travel.engage_timer = 0x2ee;
+    state.player.ai_maneuver_timer_ms = 0.0F;
+    if (auto message = NovaHud_LoadStringEntry(0x7d2, 0x35)) {
+      NovaHud_ShowOverlayMessage(
+          state, std::move(*message), static_cast<std::uint64_t>(0xfaU));
+    }
   }
   // Stellar_HandleStellarEntryAndExit normal-arrival gate. The original runs a
   // single failure branch (0x00458de0) and picks the feedback from whether the
