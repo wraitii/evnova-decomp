@@ -59,7 +59,7 @@ Per the discord.
 * **Dude-specific advice STR# resources sometimes fail to load all entries.** 
 * **Always-dominated spobs show a disabled-looking “Leave” button that remains clickable.** 
 * **Beam decay can stack successive beam instances into an “auto-machine-gun” effect**, greatly multiplying damage. 
-* **Weapon timing mixes frame-based and fixed 1/30-second timing**, making beam continuity and damage-per-second depend on machine framerate. 
+* (fixed) **Weapon timing mixes frame-based and fixed 1/30-second timing**, making beam continuity and damage-per-second depend on machine framerate. Reload counts normalized ticks but `Shot_UpdateBeamHitQueue` (0x0042f270) steps beam lifetime once per raw call. Fixed under `BugFixPolicy::weapon_cadence`, which runs beam duration on the 30 Hz clock; off, the port replays the raw calls. See `docs/frame_timing_and_cadence.md`.
 * **AI cloaking has several broken transitions** (hyperspace cloak state: no cloak on jump-in or system departure; approach-uncloak only works for carried fighters; docking does nothing). 
 * (discovery, fixed) **Fast-cloaking is gated on the swarm behaviour flag instead of the device's fast-fade bit**. Fixed under `BugFixPolicy::safe` in `NovaShip_TickCloakFadeState`. 
 * (discovery, fixed) **Cloaks that drain shields can't drain to 0 and can be activated at 0 shields**. 
@@ -89,7 +89,7 @@ Per the discord.
 * (identified, reworked) Carrier escorts use weapon 1's range to decide attack vs. defend. 
 * **Non-strict play gives the player +50% top speed**, with no independent switch for the bonus. 
 * **Escape-pod destination/location is undocumented**, so plug-in authors cannot reliably infer where the player will reappear. 
-* **Non-simultaneous weapons cannot fire more than once per rendered frame.** 
+* (fixed) **Non-simultaneous weapons cannot fire more than once per rendered frame.** Both fire paths fire one volley per call and overwrite the cooldown, and `Weapon_GetWeaponBurstAttempts` (0x0046f2c0) gives a non-simultaneous weapon one shot per volley, so the per-mount rate `30 * mounted / Reload` saturates at the call rate (extra Reload 0 mounts do nothing). Fixed under `BugFixPolicy::weapon_cadence` (`NovaWeapon_PlanFireVolleys`): the cooldown carries and a call fires every volley it owes; Reload 0 counts as one frame.
 * **A `përs` absent when a pilot is created is treated as permanently dead** (a plugin added mid-run never makes the person appear). 
 * **Mission persistence after failure depends on `CanAbort` rather than simply whether a fail text exists.** 
 * **Weapon firing arcs are calculated from the firing ship's center rather than the weapon exit point**, allowing geometrically strange shots. 

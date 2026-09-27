@@ -771,6 +771,227 @@ TEST_CASE("NPC exclusive weapon raises every other bank cooldown",
   CHECK(npc.weapon_banks[1].cooldown == Catch::Approx(bank0 + 2.0F));
 }
 
+namespace {
+
+constexpr float kRawCallTicks = 21.0F * 0.03F;
+
+struct CadenceBank {
+  std::int16_t reload = 0;
+  std::int16_t mounted = 1;
+  std::uint32_t flags = 0;
+  std::int16_t burst_cycle = 0;
+  std::int16_t burst_reset = 0;
+};
+
+// Holds an NPC's trigger on bank 0 for `calls` raw 21 ms calls (decay, then
+// fire, as Ship_HandleShip orders them) and returns the projectiles spawned.
+int NpcShotsOverCalls(bool cadence, const CadenceBank &bank, int calls) {
+  GameState state;
+  state.bugfixes.weapon_cadence = cadence;
+  SetUpDirectFirePair(state);
+  Ship &npc = state.ShipAt(1);
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.primary_target_ship_slot = -1; // no combat-rating scale
+  ArmNpcDirectFireBank(state, 0, -1, 1, 1, 500.0F);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.reload_ticks = bank.reload;
+  weapon.flags = bank.flags;
+  weapon.burst_cycle_ticks = bank.burst_cycle;
+  weapon.burst_reset_cooldown = bank.burst_reset;
+  npc.weapon_banks[0].mounted = bank.mounted;
+  for (int call = 0; call < calls; ++call) {
+    NovaWeapon_TickNpcWeaponBanks(state, npc, kRawCallTicks);
+    npc.active_weapon_bank_slot = 0;
+    npc.ai_fire_trigger_latch = 1;
+    NovaWeapon_FireNpcWeaponBank(state, npc);
+  }
+  return static_cast<int>(state.active_shots.size());
+}
+
+} // namespace
+
+// Weapon_FireShipWeapons (0x00414550) fires one volley per raw call and
+// overwrites the cooldown with Reload / mounted (no floor), so a bank refires
+// after ceil(cooldown / 0.63) calls: Reload 0 every call whatever the mount
+// count, Reload 1 every other call with one mount and every call with two.
+TEST_CASE("original cadence fires at most one volley per call",
+          "[weapon][cadence]") {
+  constexpr int kCalls = 300;
+  CHECK(NpcShotsOverCalls(false, {.reload = 0}, kCalls) == 300);
+  CHECK(NpcShotsOverCalls(false, {.reload = 0, .mounted = 2}, kCalls) == 300);
+  CHECK(NpcShotsOverCalls(false, {.reload = 1}, kCalls) == 150);
+  CHECK(NpcShotsOverCalls(false, {.reload = 1, .mounted = 2}, kCalls) == 300);
+  CHECK(NpcShotsOverCalls(false, {.reload = 2}, kCalls) == 75);
+  CHECK(NpcShotsOverCalls(false, {.reload = 2, .mounted = 3}, kCalls) == 150);
+  // Simultaneous banks fire every mount per volley.
+  CHECK(NpcShotsOverCalls(
+            false, {.reload = 0, .mounted = 3, .flags = 0x40}, kCalls) == 900);
+}
+
+// BUGFIX(original) BugFixPolicy::weapon_cadence: the carried cooldown owes
+// 30 * mounted / max(Reload, 1) shots per second, several per call if need
+// be. 300 calls are 189 normalized ticks.
+TEST_CASE("weapon_cadence fires every mount at its 30 Hz rate",
+          "[weapon][cadence]") {
+  constexpr int kCalls = 300;
+  const float ticks = static_cast<float>(kCalls) * kRawCallTicks;
+  auto expected = [&](int mounted, int reload) {
+    return ticks * static_cast<float>(mounted) /
+           static_cast<float>(std::max(1, reload));
+  };
+  for (const int reload : {0, 1, 2, 10}) {
+    for (const std::int16_t mounted : {1, 2, 3}) {
+      CAPTURE(reload, mounted);
+      const int shots = NpcShotsOverCalls(
+          true,
+          {.reload = static_cast<std::int16_t>(reload), .mounted = mounted},
+          kCalls);
+      CHECK(std::abs(static_cast<float>(shots) - expected(mounted, reload)) <=
+            1.5F);
+    }
+  }
+  // Simultaneous: `mounted` shots per volley, one volley per max(Reload, 1).
+  const int simultaneous = NpcShotsOverCalls(
+      true, {.reload = 0, .mounted = 3, .flags = 0x40}, kCalls);
+  CHECK(std::abs(static_cast<float>(simultaneous) - 3.0F * ticks) <= 3.5F);
+}
+
+// Bursts count volleys (single shots for a non-simultaneous bank), so a burst
+// of BurstCount * mounted ends mid-call, drops the carry, and preloads
+// BurstReload.
+TEST_CASE("weapon_cadence stops a burst at its limit within a call",
+          "[weapon][cadence]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  Ship &npc = state.ShipAt(1);
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.primary_target_ship_slot = -1;
+  ArmNpcDirectFireBank(state, 0, -1, 1, 1, 500.0F);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.reload_ticks = 0;
+  weapon.burst_cycle_ticks = 1;
+  weapon.burst_reset_cooldown = 15;
+  npc.weapon_banks[0].mounted = 20; // limit 20, interval 1/20 tick
+  int calls = 0;
+  while (npc.weapon_banks[0].cooldown < 1.0F && calls < 100) {
+    NovaWeapon_TickNpcWeaponBanks(state, npc, kRawCallTicks);
+    npc.active_weapon_bank_slot = 0;
+    npc.ai_fire_trigger_latch = 1;
+    NovaWeapon_FireNpcWeaponBank(state, npc);
+    ++calls;
+  }
+  CHECK(state.active_shots.size() == 20);
+  CHECK(npc.weapon_banks[0].burst == 0);
+  CHECK(npc.weapon_banks[0].cooldown == Catch::Approx(15.0F));
+  CHECK(calls == 3); // 1 volley, then 12 owed, then 13 owed capped to 7
+}
+
+// Owed volleys still pass Weapon_CanFireWeaponBank per shot, so a bank stops
+// when its ammunition runs out.
+TEST_CASE("weapon_cadence owed volleys stop at the ammunition",
+          "[weapon][cadence]") {
+  GameState state;
+  SetUpDirectFirePair(state);
+  Ship &npc = state.ShipAt(1);
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.primary_target_ship_slot = -1;
+  npc.pers_def_slot = -1; // pays ammunition
+  ArmNpcDirectFireBank(state, 0, -1, 1, 1, 500.0F);
+  state.scenario.weapons[0].reload_ticks = 0;
+  state.scenario.weapons[0].ammo_type = 0;
+  npc.weapon_banks[0].mounted = 20;
+  npc.weapon_banks[0].ammo = 5;
+  for (int call = 0; call < 10; ++call) {
+    NovaWeapon_TickNpcWeaponBanks(state, npc, kRawCallTicks);
+    npc.active_weapon_bank_slot = 0;
+    npc.ai_fire_trigger_latch = 1;
+    NovaWeapon_FireNpcWeaponBank(state, npc);
+  }
+  CHECK(state.active_shots.size() == 5);
+  CHECK(npc.weapon_banks[0].ammo == 0);
+}
+
+// The player path (Weapon_FirePlayerWeaponBank 0x00455150) shares the plan:
+// two Reload 0 mounts fire 60 shots/s with the policy and 47.6 without.
+TEST_CASE("player primary fire follows the weapon_cadence policy",
+          "[weapon][cadence]") {
+  for (const bool cadence : {false, true}) {
+    GameState state;
+    state.bugfixes.weapon_cadence = cadence;
+    state.scenario.ships.resize(1);
+    state.scenario.weapons.resize(1);
+    Weapon &weapon = state.scenario.weapons[0];
+    weapon.weapon_mode_code = -1;
+    weapon.ammo_type = -1;
+    weapon.projectile_speed = 100.0F;
+    weapon.lifetime_ticks = 30;
+    weapon.reload_ticks = 0;
+    Ship &player = state.player;
+    player.is_active = true;
+    player.ship_instance_id = 0;
+    player.ship_class_id = 0;
+    player.armor_points = 100.0F;
+    player.primary_target_ship_slot = -1;
+    player.weapon_banks[0].mounted = 2;
+    constexpr int kCalls = 300;
+    for (int call = 0; call < kCalls; ++call) {
+      NovaWeapon_TickPlayerWeaponCommands(
+          state, PlayerWeaponCommandInput{.fire_primary_held = true}, 0.0F);
+      NovaWeapon_TickPlayerWeaponBankCooldowns(state, kRawCallTicks);
+    }
+    CAPTURE(cadence);
+    const float shots = static_cast<float>(state.active_shots.size());
+    const float expected =
+        cadence ? 2.0F * kRawCallTicks * static_cast<float>(kCalls)
+                : static_cast<float>(kCalls);
+    CHECK(std::abs(shots - expected) <= 1.5F);
+  }
+}
+
+// BioRelay-style beam (Reload 0, Count 1) on two mounts, end to end: the
+// original lands one hit per raw call whatever the mount count; the policy
+// lands one per mount per 30 Hz tick.
+TEST_CASE("two Reload-0 beam mounts hit at twice the 30 Hz rate",
+          "[weapon][cadence][beam]") {
+  for (const bool cadence : {false, true}) {
+    GameState state;
+    state.bugfixes.weapon_cadence = cadence;
+    SetUpDirectFirePair(state);
+    Ship &target = state.player; // 100 px ahead of the NPC's nose
+    target.shield_points = -1.0F;
+    target.armor_points = 100000.0F;
+    Ship &npc = state.ShipAt(1);
+    npc.armor_points = 100.0F;
+    npc.shield_points = 100.0F;
+    npc.heading = 0.0F;
+    npc.primary_target_ship_slot = -1;
+    ArmNpcDirectFireBank(state, 0, 0, 1, 0, 500.0F);
+    Weapon &beam = state.scenario.weapons[0];
+    beam.beam_length_px = 200;
+    beam.beam_falloff = 16;
+    beam.lifetime_ticks = 1;
+    beam.reload_ticks = 0;
+    npc.weapon_banks[0].mounted = 2;
+    constexpr int kCalls = 300;
+    for (int call = 0; call < kCalls; ++call) {
+      NovaWeapon_TickNpcWeaponBanks(state, npc, kRawCallTicks);
+      npc.active_weapon_bank_slot = 0;
+      npc.ai_fire_trigger_latch = 1;
+      NovaWeapon_FireNpcWeaponBank(state, npc);
+      NovaWeapon_TickBeamHitQueue(state, kRawCallTicks);
+    }
+    CAPTURE(cadence);
+    const float hits = 100000.0F - target.armor_points;
+    const float expected =
+        cadence ? 2.0F * kRawCallTicks * static_cast<float>(kCalls)
+                : static_cast<float>(kCalls);
+    CHECK(std::abs(hits - expected) <= 2.5F);
+  }
+}
+
 // Ghidra 0x0046f2c0 Weapon_GetWeaponBurstAttempts and 0x0046f270
 // Weapon_GetWeaponFireIntervalTicks.
 TEST_CASE("burst attempts cap by the cost bank, mode 99, and fuel",
@@ -1622,7 +1843,6 @@ TEST_CASE("a beam lands exactly Count hits plus its decay tail",
 // queueing call takes the first step and the beam lands exactly Count hits.
 TEST_CASE("beam lifetime follows raw calls or the 30 Hz clock by policy",
           "[weapon][beam]") {
-  constexpr float kRawCallTicks = 21.0F * 0.03F;
   for (const bool cadence : {false, true}) {
     GameState state;
     state.bugfixes.weapon_cadence = cadence;

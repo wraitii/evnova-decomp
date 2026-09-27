@@ -316,6 +316,23 @@ the step is one logical 21 ms call; on, it is one normalized tick, so beam
 duration and Reload share the 30 Hz clock (the Lance becomes a continuous
 180 dps beam).
 
+Weapon fire itself is the same trap on the Reload side.
+`Weapon_FirePlayerWeaponBank` (`0x00455150`) and `Weapon_FireShipWeapons`
+(`0x00414550`) fire one volley per raw call once `cooldown <= 0`, then
+overwrite the cooldown with `shots * (Reload / mounted)` (or `Reload` for a
+simultaneous weapon); the decay zeroes an expired cooldown and otherwise
+subtracts the tick scale. A bank therefore refires every `ceil(cooldown / 0.63)`
+calls at the 21 ms floor: Reload 0 fires every call however many mounts, and
+Reload 1 fires every other call with one mount but every call with two.
+`BugFixPolicy::weapon_cadence` keeps the decay's overshoot and fires every
+volley it owes (`NovaWeapon_PlanFireVolleys`), so a bank reaches
+`30 * mounted / max(Reload, 1)` shots/s; volleys fired in one call are spread
+by their lateness (projectiles are advanced, beams offset their later hits),
+bursts count one step per volley, and the fire sound and exclusive-weapon floor
+stay once per call. None of this depends on the 21 ms outer call, so it holds
+if the outer frame is later decoupled from 47.6 Hz. Off, the port reproduces the
+original's per-call cap.
+
 There are also non-policy defects to keep distinct from cadence choices:
 
 - **NPC player-aggro pressure:** incidental player hits test the

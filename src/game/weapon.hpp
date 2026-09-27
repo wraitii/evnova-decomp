@@ -134,6 +134,29 @@ NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,
                                                     const Ship &ship,
                                                     std::int16_t weapon_bank);
 
+// How many volleys one fire call owes and what each costs. The original fires
+// one volley per call and overwrites the cooldown (volleys = 1, interval
+// unused); BugFixPolicy::weapon_cadence carries the cooldown instead, so a
+// bank whose interval is shorter than a call fires several volleys.
+struct WeaponVolleyPlan {
+  int volleys = 1;
+  // Cooldown charged per volley: max(Reload, 1), divided by the mount count
+  // unless the weapon fires simultaneously, times any NPC rating scale.
+  float interval = 0.0F;
+  // How long ago, in normalized ticks, volley 0 was due; volley v is due
+  // lateness - v * interval.
+  float lateness = 0.0F;
+};
+
+// BUGFIX(original) (BugFixPolicy::weapon_cadence): plan a ready bank's
+// volleys. Off returns the original's single volley. interval_scale is the
+// NPC combat-rating cooldown multiplier (1 otherwise).
+[[nodiscard]] WeaponVolleyPlan
+NovaWeapon_PlanFireVolleys(const GameState &state,
+                           const Ship &ship,
+                           std::int16_t weapon_bank,
+                           double interval_scale = 1.0);
+
 // Ghidra 0x0046f270 Weapon_GetWeaponFireIntervalTicks: the burst-cycle wrap
 // threshold. flags_primary 0x40 banks wrap at burst_cycle_ticks; every other
 // burst weapon scales by the mount count.

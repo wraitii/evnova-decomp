@@ -82,7 +82,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00413B60	Ship_SetEscortLaunchOffsetVelocity	src/game/escort_formation.cpp	100%	
 0x00414390	Ship_MoveShipTowardFormationOffset	src/game/escort_formation.cpp	100%	
 0x00414530	Ship_IsShipInAiState0x11	src/game/collision.cpp	100%	
-0x00414550	Weapon_FireShipWeapons	src/game/weapon.cpp	90%	gameplay,audio,moddata
+0x00414550	Weapon_FireShipWeapons	src/game/weapon.cpp	90%	gameplay,audio,moddata,bugfix
 0x004152E0	Ship_IssueEscortOrders	src/game/ship_ai.cpp	100%	moddata
 0x004156A0	Ship_ReacquireSquadLeader	src/game/escort_formation.cpp	100%	moddata
 0x004159A0	Ship_IsShipInAiControlMode0x17		0%	
@@ -301,7 +301,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00450717	PlayerTick_IonizationAndFuelRegeneration	src/game/spaceflight_player_state.cpp	100%	divergence,synthetic
 0x00451940	PlayerTick_InteractionCloakAndStatus	src/game/spaceflight.cpp	45%	gameplay,license,synthetic
 0x00454910	Ship_HandlePlayerTargetActionCommand	src/game/spaceflight.cpp	65%	gameplay,audio
-0x00455150	Weapon_FirePlayerWeaponBank	src/game/weapon.cpp	88%	gameplay,audio
+0x00455150	Weapon_FirePlayerWeaponBank	src/game/weapon.cpp	88%	gameplay,audio,bugfix
 0x00455E10	Stellar_RunDockAndLaunchSequence	src/game/landed_window.cpp	70%	rendering
 0x00456480	Stellar_EnterHypergate	src/game/travel.cpp	65%	gameplay,rendering
 0x00456CA0	Stellar_EnterWormhole	src/game/travel.cpp	75%	rng,rendering

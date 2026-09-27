@@ -837,7 +837,7 @@ void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
 
 // Ghidra 0x0044aa70 cooldown-decay tail of PlayerTick_WeaponCommands: per
 // bank with ammo > 0, clamp expired cooldowns to zero, otherwise decay by the
-// frame tick scale; and while the player is ionized, banks whose weapon has
+// frame tick scale (possibly below zero); and while the player is ionized, banks whose weapon has
 // flags_quaternary 0x20 are pinned at a 1-tick cooldown (0x3f800000),
 // disabling them until the charge decays.
 void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
@@ -848,10 +848,13 @@ void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
       continue;
     }
     float &cooldown = bank.cooldown;
+    // The original zeroes an expired cooldown but lets a positive one step
+    // below zero for a call; BugFixPolicy::weapon_cadence carries that
+    // overshoot into the next volley.
     if (cooldown <= 0.0F) {
       cooldown = 0.0F;
     } else {
-      cooldown = std::max(0.0F, cooldown - elapsed_ticks);
+      cooldown -= elapsed_ticks;
     }
     const Weapon *w = WeaponAt(state, static_cast<std::int16_t>(b));
     if (w != nullptr && (w->flags_quaternary & 0x0020U) != 0 &&
@@ -885,7 +888,7 @@ void NovaWeapon_TickNpcWeaponBanks(GameState &state,
     if (cooldown <= 0.0F) {
       cooldown = 0.0F;
     } else {
-      cooldown = std::max(0.0F, cooldown - ticks);
+      cooldown -= ticks; // may step below zero; see the player tail
     }
     const std::int16_t bank_id = static_cast<std::int16_t>(bank);
     const Weapon *w = WeaponAt(state, bank_id);
@@ -957,6 +960,55 @@ void NovaWeapon_TickNpcWeaponBanks(GameState &state,
     }
   }
   return std::min(attempts, std::max(0, cap));
+}
+
+// BUGFIX(original) (BugFixPolicy::weapon_cadence; known bugs 62 and 92).
+// Weapon_FirePlayerWeaponBank (0x00455150) and Weapon_FireShipWeapons
+// (0x00414550) fire at most one volley per raw call and overwrite the
+// cooldown, and Weapon_GetWeaponBurstAttempts gives a non-simultaneous weapon
+// one shot per volley. Reload is split across mounts, so a bank whose
+// per-mount interval is shorter than a call (Reload 0/1, or many mounts)
+// cannot reach 30 * mounted / Reload shots/s, and extra Reload 0 mounts do
+// nothing. With the policy on, the cooldown overshoot carries into how many
+// volleys are owed; Reload 0 means one frame. Carrier bays keep one launch.
+WeaponVolleyPlan NovaWeapon_PlanFireVolleys(const GameState &state,
+                                            const Ship &ship,
+                                            std::int16_t weapon_bank,
+                                            double interval_scale) {
+  // Owing more than this in one call means the cooldown was corrupted; one
+  // call's overshoot is bounded by the frame tick scale.
+  constexpr int kMaxVolleysPerCall = 64;
+  WeaponVolleyPlan plan;
+  const Weapon *w = WeaponAt(state, weapon_bank);
+  if (!state.bugfixes.weapon_cadence || w == nullptr ||
+      w->weapon_mode_code == 99) {
+    return plan;
+  }
+  const WeaponBanks &bank =
+      ship.weapon_banks[static_cast<std::size_t>(weapon_bank)];
+  const float reload = std::max(1.0F, static_cast<float>(w->reload_ticks));
+  const float per_volley =
+      (w->flags & 0x0040U) != 0U
+          ? reload
+          : reload /
+                static_cast<float>(std::max<std::int16_t>(1, bank.mounted));
+  plan.interval =
+      static_cast<float>(static_cast<double>(per_volley) * interval_scale);
+  plan.lateness = std::max(0.0F, -bank.cooldown);
+  if (plan.interval <= 0.0F) {
+    return plan;
+  }
+  const float owed = std::floor(plan.lateness / plan.interval);
+  int volleys = 1 + static_cast<int>(
+                        std::min(owed, static_cast<float>(kMaxVolleysPerCall)));
+  if (w->burst_cycle_ticks > 0) {
+    // Stop at the burst limit; the wrap preloads BurstReload.
+    const int limit =
+        NovaWeapon_GetWeaponFireIntervalTicks(state, weapon_bank, bank.mounted);
+    volleys = std::min(volleys, std::max(1, limit - bank.burst));
+  }
+  plan.volleys = std::min(volleys, kMaxVolleysPerCall);
+  return plan;
 }
 
 std::string NovaWeapon_BankDisplayName(const GameState &state,

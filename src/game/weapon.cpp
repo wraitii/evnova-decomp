@@ -48,6 +48,70 @@ constexpr double kNpcFireCooldownScale1p1 = 1.1;
   return 5;
 }
 
+// BugFixPolicy::weapon_cadence: a bank firing several volleys in one call
+// spawns them all at once; move each projectile along as if it had left at
+// its own due time, lateness normalized ticks ago, so they don't clump.
+void AdvanceSpawnedShot(GameState &state, int shot_index, float lateness) {
+  if (shot_index < 0 || lateness <= 0.0F ||
+      static_cast<std::size_t>(shot_index) >= state.active_shots.size()) {
+    return;
+  }
+  ActiveShot &shot = state.active_shots[static_cast<std::size_t>(shot_index)];
+  shot.pos_x += shot.vel_x * lateness;
+  shot.pos_y += shot.vel_y * lateness;
+  shot.life_ticks_remaining -= lateness;
+  shot.life_frames =
+      static_cast<int>(std::ceil(std::max(0.0F, shot.life_ticks_remaining)));
+}
+
+// Ghidra Weapon_FireShipWeapons (0x00414550): when the target is the player
+// (slot 0), scale the bank cooldown 1.75/1.5/1.25/1.1 as the rating passes
+// base*100/400/800/1600 (full rate above). Base is pinned to the shipped
+// class-0 Strength (2) rather than read live; see game_state.hpp.
+[[nodiscard]] double NpcFireCooldownScale(const GameState &state,
+                                          const Ship &ship) {
+  if (ship.primary_target_ship_slot != 0) {
+    return 1.0;
+  }
+  const std::int32_t reference_strength = GameState::kCombatRatingBaseStrength;
+  const std::int32_t rating = state.player_combat_rating_points;
+  if (rating < reference_strength * 100) {
+    return kNpcFireCooldownScale1p75;
+  }
+  if (rating < reference_strength * 400) {
+    return kNpcFireCooldownScale1p5;
+  }
+  if (rating < reference_strength * 800) {
+    return kNpcFireCooldownScale1p25;
+  }
+  if (rating < reference_strength * 1600) {
+    return kNpcFireCooldownScale1p1;
+  }
+  return 1.0;
+}
+
+// Kickback (resource "recoil"): rearward polar impulse of kickback /
+// hull_mass, clamped per axis to the class base speed
+// (Math_AddPolarVelocityWithClamp 0x0043b4e0). Unlike the player path
+// (kickback > 0 only), Weapon_FireShipWeapons applies the impulse for any
+// nonzero kickback except -1 (0 < k || k < -1).
+void ApplyNpcKickback(Ship &ship,
+                      const Weapon &weapon,
+                      const ShipClass *ship_cls) {
+  const std::int16_t kickback = weapon.kickback_impulse;
+  if ((kickback > 0 || kickback < -1) && ship_cls != nullptr &&
+      ship_cls->mass_tons > 0) {
+    const float cur_deg = ship.heading * (180.0F / 3.14159265358979323846F);
+    const float rear_bearing = std::remainder(cur_deg + 180.0F, 360.0F);
+    Math_AddPolarVelocityWithClamp(
+        rear_bearing * (3.14159265358979323846F / 180.0F),
+        static_cast<float>(kickback) / static_cast<float>(ship_cls->mass_tons),
+        ship_cls->speed,
+        ship.vel_x,
+        ship.vel_y);
+  }
+}
+
 } // namespace
 
 // @port 0x0046C320 100%
@@ -123,8 +187,10 @@ std::int16_t NovaWeapon_GetWeaponFireIntervalTicks(const GameState &state,
   return static_cast<std::int16_t>(burst_count * w->burst_cycle_ticks);
 }
 
-// @port 0x00455150 88% gameplay,audio
-// Ghidra 0x00455150 Weapon_FirePlayerWeaponBank.
+// @port 0x00455150 88% gameplay,audio,bugfix
+// Ghidra 0x00455150 Weapon_FirePlayerWeaponBank. BUGFIX(original): under
+// BugFixPolicy::weapon_cadence a call fires every volley it owes
+// (NovaWeapon_PlanFireVolleys) and the cooldown overshoot carries.
 void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      std::int16_t weapon_bank) {
   if (weapon_bank < 0 ||
@@ -173,165 +239,165 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
       target_slot < static_cast<std::int16_t>(GameState::kMaxShips) &&
       state.ShipAt(static_cast<std::size_t>(target_slot)).is_active;
 
-  const int burst_attempts =
-      NovaWeapon_GetWeaponBurstAttempts(state, player, weapon_bank);
-  int volley_fired = 0;
   const float heading_deg = player.heading * (180.0F / 3.14159265358979323846F);
+  const float gate_cooldown = firing_bank.cooldown;
+  const WeaponVolleyPlan plan =
+      NovaWeapon_PlanFireVolleys(state, player, weapon_bank);
+  const ShipClass *cls = state.scenario.Ship(
+      static_cast<std::int16_t>(player.ship_class_id + 0x80));
+  int volley_fired = 0; // shots this call (the original's sVar14)
+  int volleys = 0;
+  bool burst_wrapped = false;
 
-  for (int attempt = 0; attempt < burst_attempts; ++attempt) {
-    if (!NovaWeapon_CanFireWeaponBank(state, player, weapon_bank)) {
-      continue;
-    }
-    bool fired = false;
-    if (mode == -1 || mode == 1 || mode == 5 || mode == 6) {
-      // Straight projectile (-1/6), homing (1), freefall (5).
-      static_cast<void>(
+  // The original runs one volley per call; BugFixPolicy::weapon_cadence may
+  // owe several (NovaWeapon_PlanFireVolleys).
+  for (int volley = 0; volley < plan.volleys && !burst_wrapped; ++volley) {
+    const float lateness = std::max(
+        0.0F, plan.lateness - static_cast<float>(volley) * plan.interval);
+    auto spawn_shot = [&](std::int16_t target) {
+      AdvanceSpawnedShot(
+          state,
           NovaWeapon_SpawnProjectile(state,
                                      0,
-                                     target_slot,
+                                     target,
                                      weapon_bank,
                                      /*spawn_without_owner=*/false,
-                                     /*apply_random_spread=*/true));
-      fired = true;
-    } else if (mode == 0) {
-      // Fixed beam along the current heading (the original queues the record
-      // with the live target slot; the endpoint stays heading-driven).
-      static_cast<void>(
-          NovaWeapon_QueueBeamHit(state,
-                                  0,
-                                  target_slot,
-                                  weapon_bank,
-                                  /*forced_targeting=*/-1,
-                                  static_cast<std::int16_t>(heading_deg)));
-      fired = true;
-    } else if (mode == 3 || mode == 4) {
-      // Turreted beam (3) / turreted projectile (4): fire only while the
-      // target is NOT inside a turret blind-spot sector.
-      if (has_target) {
-        const Ship &target =
-            state.ShipAt(static_cast<std::size_t>(target_slot));
-        const std::int16_t bearing =
-            static_cast<std::int16_t>(std::lround(BearingDeg(
-                player.pos_x, player.pos_y, target.pos_x, target.pos_y)));
-        if (!NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
-                *state.scenario.Ship(
-                    static_cast<std::int16_t>(player.ship_class_id + 0x80)),
-                *w,
-                static_cast<std::int16_t>(heading_deg),
-                bearing)) {
-          if (mode == 3) {
-            static_cast<void>(NovaWeapon_QueueBeamHit(state,
-                                                      0,
-                                                      target_slot,
-                                                      weapon_bank,
-                                                      /*forced_targeting=*/-1,
-                                                      bearing));
+                                     /*apply_random_spread=*/true),
+          lateness);
+    };
+    auto queue_beam = [&](std::int16_t bearing) {
+      static_cast<void>(NovaWeapon_QueueBeamHit(state,
+                                                0,
+                                                target_slot,
+                                                weapon_bank,
+                                                /*forced_targeting=*/-1,
+                                                bearing,
+                                                lateness));
+    };
+    const int burst_attempts =
+        NovaWeapon_GetWeaponBurstAttempts(state, player, weapon_bank);
+    int volley_shots = 0;
+    for (int attempt = 0; attempt < burst_attempts; ++attempt) {
+      if (!NovaWeapon_CanFireWeaponBank(state, player, weapon_bank)) {
+        continue;
+      }
+      bool fired = false;
+      if (mode == -1 || mode == 1 || mode == 5 || mode == 6) {
+        // Straight projectile (-1/6), homing (1), freefall (5).
+        spawn_shot(target_slot);
+        fired = true;
+      } else if (mode == 0) {
+        // Fixed beam along the current heading (the original queues the record
+        // with the live target slot; the endpoint stays heading-driven).
+        queue_beam(static_cast<std::int16_t>(heading_deg));
+        fired = true;
+      } else if (mode == 3 || mode == 4) {
+        // Turreted beam (3) / turreted projectile (4): fire only while the
+        // target is NOT inside a turret blind-spot sector.
+        if (has_target) {
+          const Ship &target =
+              state.ShipAt(static_cast<std::size_t>(target_slot));
+          const std::int16_t bearing =
+              static_cast<std::int16_t>(std::lround(BearingDeg(
+                  player.pos_x, player.pos_y, target.pos_x, target.pos_y)));
+          if (!NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
+                  *state.scenario.Ship(
+                      static_cast<std::int16_t>(player.ship_class_id + 0x80)),
+                  *w,
+                  static_cast<std::int16_t>(heading_deg),
+                  bearing)) {
+            if (mode == 3) {
+              queue_beam(bearing);
+              fired = true;
+            } else {
+              spawn_shot(target_slot);
+              fired = true;
+            }
+          }
+        }
+      } else if (mode == 7 || mode == 8) {
+        // Guided launch gate: mode 7 requires the target within 46 deg of the
+        // nose, mode 8 of the tail (heading + 180). Outside the gate, mode 7
+        // dumb-fires without a target; mode 8 holds fire.
+        if (has_target) {
+          const Ship &target =
+              state.ShipAt(static_cast<std::size_t>(target_slot));
+          const float tb = BearingDeg(
+              player.pos_x, player.pos_y, target.pos_x, target.pos_y);
+          const float reference =
+              (mode == 8) ? std::remainder(heading_deg + 180.0F, 360.0F)
+                          : heading_deg;
+          const float delta = std::abs(std::remainder(tb - reference, 360.0F));
+          if (delta < 46.0F) {
+            spawn_shot(target_slot);
             fired = true;
-          } else {
-            static_cast<void>(NovaWeapon_SpawnProjectile(
-                state, 0, target_slot, weapon_bank, false, true));
+          } else if (mode == 7) {
+            spawn_shot(-1);
             fired = true;
+          }
+        } else if (mode == 7) {
+          spawn_shot(-1);
+          fired = true;
+        }
+      } else if (mode == 99) {
+        // Carrier-bay launch (Weapon_SpawnShipFromCarrierBayWeapon): the port
+        // does not spawn bay ships from the fire path yet.
+        // TODO(decomp(0x00455150)) skipped: launch-bay ship spawn.
+      }
+
+      // The original counts every dispatched shot, whether or not
+      // Shot_QueueBeamHit found a free record or Shot_SpawnShotFromWeapon
+      // spawned, so a full queue still charges the cooldown and ammo.
+      if (!fired) {
+        continue;
+      }
+      ++volley_shots;
+      // flags_secondary 0x200: muzzle sprite flash to level 32. The renderer
+      // draws the weapon-effects layer at this brightness and
+      // NovaShip_TickWeaponSpriteAndRunningLights fades it (Ghidra
+      // Weapon_FirePlayerWeaponBank 0x00455150).
+      if ((w->flags_secondary & 0x200U) != 0U) {
+        player.weapon_sprite_flash_level = 32.0F;
+      }
+
+      // Per-shot cost (skipped for burst-counted weapons, flags_tertiary 0x1;
+      // they pay once per burst-cycle wrap below). Energy weapons (cost -1) are
+      // free per shot; codes in [-999,-1] spend nothing; codes < -999 draw fuel
+      // at (|cost| - 1000) * 0.1 units; [0,255] consumes one round from that
+      // bank's ammo counter. Mode-99 bays spend from their own counter.
+      if ((w->flags_tertiary & 0x0001U) == 0U) {
+        const int cost = w->ammo_type;
+        if (cost < -999) {
+          player.fuel_points = std::max(
+              0.0F,
+              player.fuel_points - static_cast<float>(-cost - 1000) * 0.1F);
+        } else {
+          std::int16_t spend_slot = -1;
+          if (cost >= 0 && cost <= 0xff) {
+            spend_slot = static_cast<std::int16_t>(cost);
+          } else if (mode == 99) {
+            spend_slot = weapon_bank;
+          }
+          if (spend_slot != -1) {
+            std::int16_t &counter =
+                state.player.weapon_banks[static_cast<std::size_t>(spend_slot)]
+                    .ammo;
+            counter = static_cast<std::int16_t>(
+                std::max<std::int16_t>(0, counter - 1));
           }
         }
       }
-    } else if (mode == 7 || mode == 8) {
-      // Guided launch gate: mode 7 requires the target within 46 deg of the
-      // nose, mode 8 of the tail (heading + 180). Outside the gate, mode 7
-      // dumb-fires without a target; mode 8 holds fire.
-      if (has_target) {
-        const Ship &target =
-            state.ShipAt(static_cast<std::size_t>(target_slot));
-        const float tb =
-            BearingDeg(player.pos_x, player.pos_y, target.pos_x, target.pos_y);
-        const float reference =
-            (mode == 8) ? std::remainder(heading_deg + 180.0F, 360.0F)
-                        : heading_deg;
-        const float delta = std::abs(std::remainder(tb - reference, 360.0F));
-        if (delta < 46.0F) {
-          static_cast<void>(NovaWeapon_SpawnProjectile(
-              state, 0, target_slot, weapon_bank, false, true));
-          fired = true;
-        } else if (mode == 7) {
-          static_cast<void>(NovaWeapon_SpawnProjectile(
-              state, 0, -1, weapon_bank, false, true));
-          fired = true;
-        }
-      } else if (mode == 7) {
-        static_cast<void>(
-            NovaWeapon_SpawnProjectile(state, 0, -1, weapon_bank, false, true));
-        fired = true;
-      }
-    } else if (mode == 99) {
-      // Carrier-bay launch (Weapon_SpawnShipFromCarrierBayWeapon): the port
-      // does not spawn bay ships from the fire path yet.
-      // TODO(decomp(0x00455150)) skipped: launch-bay ship spawn.
     }
-
-    // The original counts every dispatched shot, whether or not
-    // Shot_QueueBeamHit found a free record or Shot_SpawnShotFromWeapon
-    // spawned, so a full queue still charges the cooldown and ammo.
-    if (!fired) {
-      continue;
+    if (volley_shots < 1) {
+      break;
     }
-    ++volley_fired;
-    // flags_secondary 0x200: muzzle sprite flash to level 32. The renderer
-    // draws the weapon-effects layer at this brightness and
-    // NovaShip_TickWeaponSpriteAndRunningLights fades it (Ghidra
-    // Weapon_FirePlayerWeaponBank 0x00455150).
-    if ((w->flags_secondary & 0x200U) != 0U) {
-      player.weapon_sprite_flash_level = 32.0F;
-    }
+    volley_fired += volley_shots;
+    ++volleys;
 
-    // Per-shot cost (skipped for burst-counted weapons, flags_tertiary 0x1;
-    // they pay once per burst-cycle wrap below). Energy weapons (cost -1) are
-    // free per shot; codes in [-999,-1] spend nothing; codes < -999 draw fuel
-    // at (|cost| - 1000) * 0.1 units; [0,255] consumes one round from that
-    // bank's ammo counter. Mode-99 bays spend from their own counter.
-    if ((w->flags_tertiary & 0x0001U) == 0U) {
-      const int cost = w->ammo_type;
-      if (cost < -999) {
-        player.fuel_points = std::max(
-            0.0F, player.fuel_points - static_cast<float>(-cost - 1000) * 0.1F);
-      } else {
-        std::int16_t spend_slot = -1;
-        if (cost >= 0 && cost <= 0xff) {
-          spend_slot = static_cast<std::int16_t>(cost);
-        } else if (mode == 99) {
-          spend_slot = weapon_bank;
-        }
-        if (spend_slot != -1) {
-          std::int16_t &counter =
-              state.player.weapon_banks[static_cast<std::size_t>(spend_slot)]
-                  .ammo;
-          counter =
-              static_cast<std::int16_t>(std::max<std::int16_t>(0, counter - 1));
-        }
-      }
-    }
-  }
-
-  if (volley_fired < 1) {
-    return;
-  }
-  // A volley actually fired: queue the fire sound (the port plays it through
-  // the spaceflight loop's sound queue; the original's beam modes 0/3 play
-  // theirs through a separate immediate NovaAudio_PlaySpatialByDistance call,
-  // approximated here by the same queued path).
-  if (w->fire_sound >= 0) {
-    state.pending_fire_sounds.push_back({w->fire_sound,
-                                         player.pos_x,
-                                         player.pos_y,
-                                         PlayerFireSoundPriorityWidth(*w),
-                                         (w->flags & 0x0010U) != 0U});
-  }
-
-  // Kickback (resource "recoil"): rearward polar impulse of kickback /
-  // hull_mass, clamped per axis to the class base speed
-  // (Math_AddPolarVelocityWithClamp 0x0043b4e0).
-  if (w->kickback_impulse > 0) {
-    const ShipClass *cls = state.scenario.Ship(
-        static_cast<std::int16_t>(player.ship_class_id + 0x80));
-    if (cls != nullptr && cls->mass_tons > 0) {
+    // Kickback (resource "recoil"): rearward polar impulse of kickback /
+    // hull_mass, clamped per axis to the class base speed
+    // (Math_AddPolarVelocityWithClamp 0x0043b4e0); once per volley.
+    if (w->kickback_impulse > 0 && cls != nullptr && cls->mass_tons > 0) {
       const float rear_bearing = std::remainder(heading_deg + 180.0F, 360.0F);
       Math_AddPolarVelocityWithClamp(rear_bearing *
                                          (3.14159265358979323846F / 180.0F),
@@ -341,17 +407,74 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      player.vel_x,
                                      player.vel_y);
     }
+
+    // Burst cycle, one step per volley: on the wrap edge of a burst-counted
+    // weapon (flags_tertiary 0x1) pay one burst's worth of ammo/fuel; when the
+    // counter reaches Weapon_GetWeaponFireIntervalTicks (0x0046f270) it resets
+    // and the bank preloads burst_reset_cooldown (applied below, after the
+    // exclusive-weapon floor, as in the original).
+    if (w->burst_cycle_ticks > 0) {
+      std::int16_t &cycle = firing_bank.burst;
+      cycle = static_cast<std::int16_t>(cycle + 1);
+      if ((w->flags_tertiary & 0x0001U) != 0U &&
+          cycle % w->burst_cycle_ticks == 0) {
+        const int pay = (w->flags & 0x0040U) != 0U ? volley_shots : 1;
+        if (mode == 99) {
+          std::int16_t &counter = firing_bank.ammo;
+          counter = static_cast<std::int16_t>(std::max<std::int16_t>(
+              0, counter - static_cast<std::int16_t>(pay)));
+        } else {
+          const int cost = w->ammo_type;
+          if (cost < -999) {
+            player.fuel_points =
+                std::max(0.0F,
+                         player.fuel_points -
+                             static_cast<float>(pay * (-cost - 1000)) * 0.1F);
+          } else if (cost >= 0 && cost <= 0xff) {
+            std::int16_t &counter =
+                state.player.weapon_banks[static_cast<std::size_t>(cost)].ammo;
+            counter = static_cast<std::int16_t>(std::max<std::int16_t>(
+                0, counter - static_cast<std::int16_t>(pay)));
+          }
+        }
+      }
+      const std::int16_t interval = NovaWeapon_GetWeaponFireIntervalTicks(
+          state, weapon_bank, firing_bank.mounted);
+      if (cycle >= interval) {
+        cycle = 0;
+        burst_wrapped = true;
+      }
+    }
+  }
+
+  if (volley_fired < 1) {
+    return;
+  }
+  // A volley actually fired: queue the fire sound once per call (the port
+  // plays it through the spaceflight loop's sound queue; the original's beam
+  // modes 0/3 play theirs through a separate immediate
+  // NovaAudio_PlaySpatialByDistance call, approximated here by the same
+  // queued path).
+  if (w->fire_sound >= 0) {
+    state.pending_fire_sounds.push_back({w->fire_sound,
+                                         player.pos_x,
+                                         player.pos_y,
+                                         PlayerFireSoundPriorityWidth(*w),
+                                         (w->flags & 0x0010U) != 0U});
   }
 
   // Bank cooldown: flags_primary 0x40 weapons reload for the fixed interval;
   // the rest scale by the volley and the mount count (a second identical
   // weapon doubles the fire rate). There is no floor: Reload 0 refires on the
-  // next call.
-  if ((w->flags & 0x0040U) == 0U) {
+  // next call. Under BugFixPolicy::weapon_cadence the overshoot carries.
+  if (state.bugfixes.weapon_cadence && plan.interval > 0.0F) {
+    firing_bank.cooldown =
+        gate_cooldown + static_cast<float>(volleys) * plan.interval;
+  } else if ((w->flags & 0x0040U) == 0U) {
     const int mount_count = std::max(1, static_cast<int>(firing_bank.mounted));
-    firing_bank.cooldown = static_cast<float>(volley_fired) *
-                           (static_cast<float>(w->reload_ticks) /
-                            static_cast<float>(mount_count));
+    firing_bank.cooldown =
+        static_cast<float>(volley_fired) *
+        (static_cast<float>(w->reload_ticks) / static_cast<float>(mount_count));
   } else {
     firing_bank.cooldown = static_cast<float>(w->reload_ticks);
   }
@@ -371,42 +494,8 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
       }
     }
   }
-
-  // Burst cycle: advance the per-bank counter; on the wrap edge of a
-  // burst-counted weapon (flags_tertiary 0x1) pay one burst's worth of
-  // ammo/fuel; when the counter reaches Weapon_GetWeaponFireIntervalTicks
-  // (0x0046f270) it resets and the bank preloads burst_reset_cooldown.
-  if (w->burst_cycle_ticks > 0) {
-    std::int16_t &cycle = firing_bank.burst;
-    cycle = static_cast<std::int16_t>(cycle + 1);
-    if ((w->flags_tertiary & 0x0001U) != 0U &&
-        cycle % w->burst_cycle_ticks == 0) {
-      const int pay = (w->flags & 0x0040U) != 0U ? volley_fired : 1;
-      if (mode == 99) {
-        std::int16_t &counter = firing_bank.ammo;
-        counter = static_cast<std::int16_t>(std::max<std::int16_t>(
-            0, counter - static_cast<std::int16_t>(pay)));
-      } else {
-        const int cost = w->ammo_type;
-        if (cost < -999) {
-          player.fuel_points =
-              std::max(0.0F,
-                       player.fuel_points -
-                           static_cast<float>(pay * (-cost - 1000)) * 0.1F);
-        } else if (cost >= 0 && cost <= 0xff) {
-          std::int16_t &counter =
-              state.player.weapon_banks[static_cast<std::size_t>(cost)].ammo;
-          counter = static_cast<std::int16_t>(std::max<std::int16_t>(
-              0, counter - static_cast<std::int16_t>(pay)));
-        }
-      }
-    }
-    const std::int16_t interval = NovaWeapon_GetWeaponFireIntervalTicks(
-        state, weapon_bank, firing_bank.mounted);
-    if (cycle >= interval) {
-      cycle = 0;
-      firing_bank.cooldown = static_cast<float>(w->burst_reset_cooldown);
-    }
+  if (burst_wrapped) {
+    firing_bank.cooldown = static_cast<float>(w->burst_reset_cooldown);
   }
 }
 
@@ -684,10 +773,12 @@ void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
   }
 }
 
-// @port 0x00414550 90% gameplay,audio,moddata
+// @port 0x00414550 90% gameplay,audio,moddata,bugfix
 // DIVERGENCE(original): the combat-rating base unit is pinned to
 // GameState::kCombatRatingBaseStrength instead of class 0's Strength, and
 // fire-restricted/dead ships are defensively cleared at the port boundary.
+// BUGFIX(original): BugFixPolicy::weapon_cadence volleys as in the player
+// path.
 // Ghidra Weapon_FireShipWeapons (0x00414550), ported for NPCs as
 // NovaWeapon_FireNpcWeaponBank (the player path is separate).
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
@@ -813,138 +904,173 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
       static_cast<float>(weapon->beam_length_px) + 32.0F;
 
   // ---- burst loop (Weapon_FireShipWeapons 0x00414550) ----
+  // The original runs one volley per call; BugFixPolicy::weapon_cadence may
+  // owe several (NovaWeapon_PlanFireVolleys). The rating scale applies to the
+  // per-volley interval.
+  const double rating_scale = NpcFireCooldownScale(state, ship);
+  const float gate_cooldown = firing_bank.cooldown;
+  const WeaponVolleyPlan plan =
+      NovaWeapon_PlanFireVolleys(state, ship, bank, rating_scale);
   int shots_fired = 0;
-  for (int attempt = 0; attempt < burst_attempts; ++attempt) {
-    // Weapon_CanFireWeaponBank (0x00468990) per-burst gate on THIS SHIP's own
-    // banks, including the cloak/ammo/fuel checks. Cooldown is already 0 at
-    // entry and stays 0 through the burst.
-    if (!NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
-      continue;
-    }
-    bool fired = false;
-    if (mode == 0) {
-      // Beam: no arc gate (original's mode -1/0/6 block fires regardless).
-      static_cast<void>(NovaWeapon_QueueBeamHit(
+  int volleys = 0;
+  bool burst_wrapped = false;
+  for (int volley = 0; volley < plan.volleys && !burst_wrapped; ++volley) {
+    const float lateness = std::max(
+        0.0F, plan.lateness - static_cast<float>(volley) * plan.interval);
+    auto spawn_shot = [&](std::int16_t shot_target) {
+      AdvanceSpawnedShot(
           state,
-          ship.ship_instance_id,
-          ship.primary_target_ship_slot,
-          bank,
-          -1,
-          static_cast<std::int16_t>(ship.heading *
-                                    (180.0F / 3.14159265358979323846F))));
-      fired = true;
-    } else if (mode == 3 || mode == 4) {
-      // Turreted beam (3) / turreted unguided (4): fire only when the target
-      // is NOT in the fixed arc (the turret's relief role) but within reach.
-      if (has_target && target != nullptr) {
-        const float tb =
-            BearingDeg(ship.pos_x, ship.pos_y, target->pos_x, target->pos_y);
-        const float reach =
-            (mode == 3) ? beam_turret_reach : projectile_turret_reach;
-        if (!blind_spot(tb) && std::abs(ship.pos_x - target->pos_x) < reach &&
-            std::abs(ship.pos_y - target->pos_y) < reach) {
-          if (mode == 3) {
-            static_cast<void>(NovaWeapon_QueueBeamHit(
-                state,
-                ship.ship_instance_id,
-                ship.primary_target_ship_slot,
-                bank,
-                -1,
-                static_cast<std::int16_t>(std::lround(tb))));
+          NovaWeapon_SpawnProjectile(
+              state, ship.ship_instance_id, shot_target, bank, false, true),
+          lateness);
+    };
+    auto queue_beam = [&](std::int16_t bearing) {
+      static_cast<void>(NovaWeapon_QueueBeamHit(state,
+                                                ship.ship_instance_id,
+                                                ship.primary_target_ship_slot,
+                                                bank,
+                                                -1,
+                                                bearing,
+                                                lateness));
+    };
+    const int attempts =
+        volley == 0 ? burst_attempts
+                    : NovaWeapon_GetWeaponBurstAttempts(state, ship, bank);
+    int volley_shots = 0;
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+      // Weapon_CanFireWeaponBank (0x00468990) per-burst gate on THIS SHIP's
+      // own banks, including the cloak/ammo/fuel checks.
+      if (!NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+        continue;
+      }
+      bool fired = false;
+      if (mode == 0) {
+        // Beam: no arc gate (original's mode -1/0/6 block fires regardless).
+        queue_beam(static_cast<std::int16_t>(
+            ship.heading * (180.0F / 3.14159265358979323846F)));
+        fired = true;
+      } else if (mode == 3 || mode == 4) {
+        // Turreted beam (3) / turreted unguided (4): fire only when the target
+        // is NOT in the fixed arc (the turret's relief role) but within reach.
+        if (has_target && target != nullptr) {
+          const float tb =
+              BearingDeg(ship.pos_x, ship.pos_y, target->pos_x, target->pos_y);
+          const float reach =
+              (mode == 3) ? beam_turret_reach : projectile_turret_reach;
+          if (!blind_spot(tb) && std::abs(ship.pos_x - target->pos_x) < reach &&
+              std::abs(ship.pos_y - target->pos_y) < reach) {
+            if (mode == 3) {
+              queue_beam(static_cast<std::int16_t>(std::lround(tb)));
+              fired = true;
+            } else {
+              spawn_shot(ship.primary_target_ship_slot);
+              fired = true;
+            }
+          }
+        }
+      } else if (mode == 7 || mode == 8) {
+        // Front (7) / rear (8) quadrant turret: within 46 deg of the nose/tail
+        // AND within reach (original's unaff_EBP < 0x2e gate). With a live
+        // target outside the arc the NPC path holds fire -- unlike the player
+        // path, Weapon_FireShipWeapons has no mode-7 dumb-fire fallback here.
+        if (has_target && target != nullptr) {
+          const float tb =
+              BearingDeg(ship.pos_x, ship.pos_y, target->pos_x, target->pos_y);
+          const float cur_deg =
+              ship.heading * (180.0F / 3.14159265358979323846F);
+          const float reference =
+              (mode == 8) ? std::remainder(cur_deg + 180.0F, 360.0F) : cur_deg;
+          const float delta = std::abs(std::remainder(tb - reference, 360.0F));
+          if (delta < 46.0F &&
+              std::abs(ship.pos_x - target->pos_x) < projectile_turret_reach &&
+              std::abs(ship.pos_y - target->pos_y) < projectile_turret_reach) {
+            spawn_shot(ship.primary_target_ship_slot);
             fired = true;
-          } else {
-            static_cast<void>(
-                NovaWeapon_SpawnProjectile(state,
-                                           ship.ship_instance_id,
-                                           ship.primary_target_ship_slot,
-                                           bank,
-                                           false,
-                                           true));
-            fired = true;
+          }
+        } else if (mode == 7) {
+          // Blind fire: mode 7 with no primary target launches a forward shot
+          // with target -1 (Weapon_FireShipWeapons 0x00414550).
+          spawn_shot(-1);
+          fired = true;
+        }
+      } else if (mode == -1 || mode == 6) {
+        // Straight projectile (-1/6): fire toward the primary target slot,
+        // which may be -1 for an unguided shot.
+        spawn_shot(ship.primary_target_ship_slot);
+        fired = true;
+      } else if (mode == 1) {
+        // Homing requires a live primary target.
+        if (has_target) {
+          spawn_shot(ship.primary_target_ship_slot);
+          fired = true;
+        }
+      }
+      // Modes 5 (freefall/mine), 9 (point defense) and 99 (carrier bay) are not
+      // fired by Weapon_FireShipWeapons (0x00414550): they fall through with no
+      // spawn, but still pay the per-pass cost below.
+      //
+      // Per-pass cost. The original consumes one charge every time
+      // Weapon_CanFireWeaponBank passes, whether or not a projectile actually
+      // spawned; burst-counted weapons (flags_tertiary 0x1) pay at the
+      // burst-cycle wrap instead. Cost -1 is free, [-999,-2] spends nothing,
+      // and
+      // <= -1000 draws fuel at (|cost| - 1000) * 0.1. Codes in [0,255] and mode
+      // 99 decrement the FIRING bank's counter; the original does not clamp,
+      // but CanFire guarantees the counter is >= 1 for an NPC.
+      const int cost = weapon->ammo_type;
+      if (cost != -1 && ship.pers_def_slot != 0x3ff &&
+          (weapon->flags_tertiary & 0x0001U) == 0U) {
+        if (mode == 99 || (cost >= 0 && cost < 0x100)) {
+          firing_bank.ammo = static_cast<std::int16_t>(firing_bank.ammo - 1);
+        } else if (cost < -999) {
+          ship.fuel_points = std::max(
+              0.0F, ship.fuel_points - static_cast<float>(-cost - 1000) * 0.1F);
+        }
+      }
+      // Counted whether or not the queue/pool had room (see the player path).
+      if (!fired) {
+        continue;
+      }
+      ++volley_shots;
+    }
+    if (volley_shots < 1) {
+      break;
+    }
+    shots_fired += volley_shots;
+    ++volleys;
+    ApplyNpcKickback(ship, *weapon, ship_cls);
+    // Burst cycle (Weapon_FireShipWeapons), one step per volley: on the wrap
+    // edge (flags_tertiary & 1) charge one burst; when
+    // Weapon_GetWeaponFireIntervalTicks is reached, reset the counter; the
+    // reset cooldown replaces the bank cooldown below.
+    if (weapon->burst_cycle_ticks > 0) {
+      firing_bank.burst = static_cast<std::int16_t>(firing_bank.burst + 1);
+      if ((weapon->flags_tertiary & 0x0001U) != 0 &&
+          (firing_bank.burst % weapon->burst_cycle_ticks) == 0) {
+        // The NPC burst wrap charges the FIRING bank (the player path charges
+        // the cost bank): one round for a non-0x40 weapon, else the whole
+        // volley. Fuel-cost weapons fall through to the fuel deduction.
+        const int pay = (weapon->flags & 0x0040U) != 0 ? volley_shots : 1;
+        if (mode == 99 || firing_bank.ammo > 0) {
+          firing_bank.ammo = static_cast<std::int16_t>(
+              std::max(0, static_cast<int>(firing_bank.ammo) - pay));
+        } else {
+          const int cost = weapon->ammo_type;
+          if (cost < -999) {
+            ship.fuel_points =
+                std::max(0.0F,
+                         ship.fuel_points -
+                             static_cast<float>(pay * (-cost - 1000)) * 0.1F);
           }
         }
       }
-    } else if (mode == 7 || mode == 8) {
-      // Front (7) / rear (8) quadrant turret: within 46 deg of the nose/tail
-      // AND within reach (original's unaff_EBP < 0x2e gate). With a live
-      // target outside the arc the NPC path holds fire -- unlike the player
-      // path, Weapon_FireShipWeapons has no mode-7 dumb-fire fallback here.
-      if (has_target && target != nullptr) {
-        const float tb =
-            BearingDeg(ship.pos_x, ship.pos_y, target->pos_x, target->pos_y);
-        const float cur_deg = ship.heading * (180.0F / 3.14159265358979323846F);
-        const float reference =
-            (mode == 8) ? std::remainder(cur_deg + 180.0F, 360.0F) : cur_deg;
-        const float delta = std::abs(std::remainder(tb - reference, 360.0F));
-        if (delta < 46.0F &&
-            std::abs(ship.pos_x - target->pos_x) < projectile_turret_reach &&
-            std::abs(ship.pos_y - target->pos_y) < projectile_turret_reach) {
-          static_cast<void>(
-              NovaWeapon_SpawnProjectile(state,
-                                         ship.ship_instance_id,
-                                         ship.primary_target_ship_slot,
-                                         bank,
-                                         false,
-                                         true));
-          fired = true;
-        }
-      } else if (mode == 7) {
-        // Blind fire: mode 7 with no primary target launches a forward shot
-        // with target -1 (Weapon_FireShipWeapons 0x00414550).
-        static_cast<void>(NovaWeapon_SpawnProjectile(
-            state, ship.ship_instance_id, -1, bank, false, true));
-        fired = true;
-      }
-    } else if (mode == -1 || mode == 6) {
-      // Straight projectile (-1/6): fire toward the primary target slot,
-      // which may be -1 for an unguided shot.
-      static_cast<void>(
-          NovaWeapon_SpawnProjectile(state,
-                                     ship.ship_instance_id,
-                                     ship.primary_target_ship_slot,
-                                     bank,
-                                     false,
-                                     true));
-      fired = true;
-    } else if (mode == 1) {
-      // Homing requires a live primary target.
-      if (has_target) {
-        static_cast<void>(
-            NovaWeapon_SpawnProjectile(state,
-                                       ship.ship_instance_id,
-                                       ship.primary_target_ship_slot,
-                                       bank,
-                                       false,
-                                       true));
-        fired = true;
+      const std::int16_t interval = NovaWeapon_GetWeaponFireIntervalTicks(
+          state, bank, firing_bank.mounted);
+      if (interval > 0 && firing_bank.burst >= interval) {
+        firing_bank.burst = 0;
+        burst_wrapped = true;
       }
     }
-    // Modes 5 (freefall/mine), 9 (point defense) and 99 (carrier bay) are not
-    // fired by Weapon_FireShipWeapons (0x00414550): they fall through with no
-    // spawn, but still pay the per-pass cost below.
-    //
-    // Per-pass cost. The original consumes one charge every time
-    // Weapon_CanFireWeaponBank passes, whether or not a projectile actually
-    // spawned; burst-counted weapons (flags_tertiary 0x1) pay at the
-    // burst-cycle wrap instead. Cost -1 is free, [-999,-2] spends nothing, and
-    // <= -1000 draws fuel at (|cost| - 1000) * 0.1. Codes in [0,255] and mode
-    // 99 decrement the FIRING bank's counter; the original does not clamp, but
-    // CanFire guarantees the counter is >= 1 for an NPC.
-    const int cost = weapon->ammo_type;
-    if (cost != -1 && ship.pers_def_slot != 0x3ff &&
-        (weapon->flags_tertiary & 0x0001U) == 0U) {
-      if (mode == 99 || (cost >= 0 && cost < 0x100)) {
-        firing_bank.ammo = static_cast<std::int16_t>(firing_bank.ammo - 1);
-      } else if (cost < -999) {
-        ship.fuel_points = std::max(
-            0.0F, ship.fuel_points - static_cast<float>(-cost - 1000) * 0.1F);
-      }
-    }
-    // Counted whether or not the queue/pool had room (see the player path).
-    if (!fired) {
-      continue;
-    }
-    ++shots_fired;
   }
 
   if (shots_fired < 1) {
@@ -968,91 +1094,29 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
                                          /*priority_width=*/4,
                                          (weapon->flags & 0x0010U) != 0U});
   }
-  // Kickback (resource "recoil"): rearward polar impulse of kickback /
-  // hull_mass, clamped per axis to the class base speed
-  // (Math_AddPolarVelocityWithClamp 0x0043b4e0). Unlike the player path
-  // (kickback > 0 only), Weapon_FireShipWeapons applies the impulse for any
-  // nonzero kickback except -1 (0 < k || k < -1).
-  const std::int16_t kickback = weapon->kickback_impulse;
-  if (kickback > 0 || kickback < -1) {
-    if (ship_cls != nullptr && ship_cls->mass_tons > 0) {
-      const float cur_deg = ship.heading * (180.0F / 3.14159265358979323846F);
-      const float rear_bearing = std::remainder(cur_deg + 180.0F, 360.0F);
-      Math_AddPolarVelocityWithClamp(
-          rear_bearing * (3.14159265358979323846F / 180.0F),
-          static_cast<float>(kickback) /
-              static_cast<float>(ship_cls->mass_tons),
-          ship_cls->speed,
-          ship.vel_x,
-          ship.vel_y);
-    }
-  }
-  const int mount_count = std::max(1, static_cast<int>(firing_bank.mounted));
   float fire_cooldown;
-  if ((weapon->flags & 0x0040U) == 0) {
-    // Original: local_1c = sVar9 * (speed_scalar / mount_count), no floor.
-    fire_cooldown = static_cast<float>(shots_fired) *
-                    (static_cast<float>(weapon->reload_ticks) /
-                     static_cast<float>(mount_count));
+  if (state.bugfixes.weapon_cadence && plan.interval > 0.0F) {
+    // BugFixPolicy::weapon_cadence: carry the overshoot; the interval already
+    // holds the rating scale.
+    fire_cooldown = gate_cooldown + static_cast<float>(volleys) * plan.interval;
   } else {
-    fire_cooldown = static_cast<float>(weapon->reload_ticks);
-  }
-  // Ghidra Weapon_FireShipWeapons (0x00414550): when the target is the player
-  // (slot 0), scale the cooldown 1.75/1.5/1.25/1.1 as the rating passes
-  // base*100/400/800/1600 (full rate above). Base is pinned to the shipped
-  // class-0 Strength (2) rather than read live; see game_state.hpp. Applied
-  // before the burst block, so a burst wrap still overwrites it unscaled.
-  if (ship.primary_target_ship_slot == 0) {
-    const std::int32_t reference_strength =
-        GameState::kCombatRatingBaseStrength;
-    const std::int32_t rating = state.player_combat_rating_points;
-    if (rating < reference_strength * 100) {
-      fire_cooldown = static_cast<float>(static_cast<double>(fire_cooldown) *
-                                         kNpcFireCooldownScale1p75);
-    } else if (rating < reference_strength * 400) {
-      fire_cooldown = static_cast<float>(static_cast<double>(fire_cooldown) *
-                                         kNpcFireCooldownScale1p5);
-    } else if (rating < reference_strength * 800) {
-      fire_cooldown = static_cast<float>(static_cast<double>(fire_cooldown) *
-                                         kNpcFireCooldownScale1p25);
-    } else if (rating < reference_strength * 1600) {
-      fire_cooldown = static_cast<float>(static_cast<double>(fire_cooldown) *
-                                         kNpcFireCooldownScale1p1);
+    const int mount_count = std::max(1, static_cast<int>(firing_bank.mounted));
+    if ((weapon->flags & 0x0040U) == 0) {
+      // Original: local_1c = sVar9 * (speed_scalar / mount_count), no floor.
+      fire_cooldown = static_cast<float>(shots_fired) *
+                      (static_cast<float>(weapon->reload_ticks) /
+                       static_cast<float>(mount_count));
+    } else {
+      fire_cooldown = static_cast<float>(weapon->reload_ticks);
+    }
+    if (rating_scale != 1.0) {
+      fire_cooldown =
+          static_cast<float>(static_cast<double>(fire_cooldown) * rating_scale);
     }
   }
-
-  // Burst cycle (Weapon_FireShipWeapons): count a cycle tick; on the wrap
-  // edge (flags_tertiary & 1) charge one burst; when
-  // Weapon_GetWeaponFireIntervalTicks is reached, reset the counter and
-  // preload the reset cooldown.
-  if (weapon->burst_cycle_ticks > 0) {
-    firing_bank.burst = static_cast<std::int16_t>(firing_bank.burst + 1);
-    if ((weapon->flags_tertiary & 0x0001U) != 0 &&
-        (firing_bank.burst % weapon->burst_cycle_ticks) == 0) {
-      // The NPC burst wrap charges the FIRING bank (the player path charges
-      // the cost bank): one round for a non-0x40 weapon, else the whole
-      // volley. Fuel-cost weapons fall through to the fuel deduction.
-      const int pay =
-          (weapon->flags & 0x0040U) != 0 ? std::max(1, shots_fired) : 1;
-      if (mode == 99 || firing_bank.ammo > 0) {
-        firing_bank.ammo = static_cast<std::int16_t>(
-            std::max(0, static_cast<int>(firing_bank.ammo) - pay));
-      } else {
-        const int cost = weapon->ammo_type;
-        if (cost < -999) {
-          ship.fuel_points =
-              std::max(0.0F,
-                       ship.fuel_points -
-                           static_cast<float>(pay * (-cost - 1000)) * 0.1F);
-        }
-      }
-    }
-    const std::int16_t interval =
-        NovaWeapon_GetWeaponFireIntervalTicks(state, bank, firing_bank.mounted);
-    if (interval > 0 && firing_bank.burst >= interval) {
-      firing_bank.burst = 0;
-      fire_cooldown = static_cast<float>(weapon->burst_reset_cooldown);
-    }
+  // Applied after the rating scale, so a burst wrap overwrites it unscaled.
+  if (burst_wrapped) {
+    fire_cooldown = static_cast<float>(weapon->burst_reset_cooldown);
   }
   firing_bank.cooldown = fire_cooldown;
   // flags_tertiary 0x20 (exclusive weapon, Bible Flags3): raise every other
