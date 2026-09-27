@@ -137,6 +137,27 @@ TEST_CASE("player reset preserves the christened ship name") {
   CHECK(state.player.death_timer_active == -999.0F);
 }
 
+TEST_CASE("player reset clears reinforcement state") {
+  // Ghidra 0x004b3350 zeroes every system's pending reinforcement countdown
+  // and cooldown, then arms the current (just-reset) system's countdown to -1.
+  // The loader restores the cooldown table but never the countdown, so this
+  // clear keeps a pending reinforcement from a previous session out of a
+  // load/respawn.
+  game::GameState state;
+  state.reinforcement_countdown[0] = 123.0F;
+  state.reinforcement_retrigger_delay[0] = 5;
+  state.reinforcement_countdown[1] = 77.0F;
+  state.reinforcement_retrigger_delay[1] = 9;
+
+  game::NovaShip_ResetPlayerShipState(state);
+
+  CHECK(state.player.current_system_id == 0);
+  CHECK(state.reinforcement_countdown[0] == -1.0F);
+  CHECK(state.reinforcement_retrigger_delay[0] == 0);
+  CHECK(state.reinforcement_countdown[1] == 0.0F);
+  CHECK(state.reinforcement_retrigger_delay[1] == 0);
+}
+
 TEST_CASE("fresh pilot application retains the christened ship name") {
   game::GameState state;
   state.player.ship_name = "Vengeance";

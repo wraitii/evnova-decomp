@@ -756,7 +756,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004AF020	SpriteWorld_RebuildSessionSpritePools	src/game/hud_renderer.cpp	85%	rendering,divergence
 0x004B0740	NovaAudio_PreloadGameplayData	src/game/weapon.cpp	25%	audio
 0x004B0A30	FUN_004b0a30		0%	
-0x004B3350	Ship_ResetPlayerShipState	src/game/new_pilot_flow.cpp	75%	gameplay
+0x004B3350	Ship_ResetPlayerShipState	src/game/new_pilot_flow.cpp	78%	gameplay
 0x004B4220	Game_ResetReputationAndAvailability	src/game/new_pilot_flow.cpp	100%	
 0x004B42F0	FUN_004b42f0		0%	
 0x004B4320	NovaPrefs_ResetToDefaults	src/game/preferences.cpp	85%	gameplay

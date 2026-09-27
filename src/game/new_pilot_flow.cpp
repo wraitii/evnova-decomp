@@ -748,7 +748,7 @@ void NovaGame_ResetReputationAndAvailability(GameState &state,
   state.recently_activated_rank_id = -1;
 }
 
-// @port 0x004B3350 75% gameplay
+// @port 0x004B3350 78% gameplay
 // Ghidra 0x004b3350 Ship_ResetPlayerShipState: fresh position/velocity,
 // default class id, cleared targeting/travel/mission/AI fields and debuffs.
 // The param_1 reputation seed to each government's InitialRec is subsumed by
@@ -811,6 +811,23 @@ void NovaShip_ResetPlayerShipState(GameState &state) {
   state.pending_red_alert = false;
   state.bomb_detonation_timer = 0.0F;
   state.recently_hit_timer = 0.0F;
+
+  // Ghidra 0x004b3350. The param_1 != 0 branch zeroes every system's pending
+  // reinforcement countdown and cooldown, then the unconditional tail arms the
+  // (just-zeroed) current system's countdown to -1. The port's reset is only
+  // reached from that full-reset path, so reproduce both. The save loader
+  // restores the cooldown table (block2+0x3d90) but never the countdown, so
+  // this clear is what keeps a pending reinforcement from a previous session
+  // out of a new-game/load/respawn. The fresh-world flow then arms the actual
+  // start system via PlacePlayerInStartSystem.
+  state.reinforcement_countdown.fill(0.0F);
+  state.reinforcement_retrigger_delay.fill(0);
+  if (state.player.current_system_id >= 0 &&
+      static_cast<std::size_t>(state.player.current_system_id) <
+          state.reinforcement_countdown.size()) {
+    state.reinforcement_countdown[static_cast<std::size_t>(
+        state.player.current_system_id)] = -1.0F;
+  }
 
   NovaOutfit_RecomputeOutfitDerivedState(state);
   const PlayerEffectiveStats effective =
