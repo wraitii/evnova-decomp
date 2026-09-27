@@ -1790,7 +1790,13 @@ void NovaWeapon_TickShots(GameState &state,
         shot.fade_alpha = progress / 32.0F;
       }
     } else if (weapon->shot_fade_rate > 0.0F &&
-               shot.life_ticks_remaining < 32.0F && progress < 32.0F) {
+               shot.life_ticks_remaining < 32.0F) {
+      // The original writes the sprite attenuation from the CURRENT progress
+      // every frame the shot's remaining life is below 32, even after the
+      // fade has completed; only the advance is gated on progress < 32. Keep
+      // the fully-faded attenuation once visibility reaches the 32 cap, or a
+      // spent projectile would pop back to full opacity (32 - a2) for its
+      // last frames.
       if (!shot.fade_additive) {
         shot.visibility_attenuation = std::min(31.0F, progress);
         shot.fade_alpha = (32.0F - shot.visibility_attenuation) / 32.0F;
@@ -1800,8 +1806,10 @@ void NovaWeapon_TickShots(GameState &state,
         shot.visibility_attenuation = 32.0F;
         shot.fade_alpha = std::max(4.0F, 32.0F - progress) / 32.0F;
       }
-      shot.visibility_or_falloff +=
-          static_cast<float>(weapon->shot_fade_rate) * tick_scale;
+      if (progress < 32.0F) {
+        shot.visibility_or_falloff +=
+            static_cast<float>(weapon->shot_fade_rate) * tick_scale;
+      }
     } else if (shot.fade_additive && weapon->shot_fade_rate == 0) {
       // Additive with no fade on a >=16-bit surface: all corner words 0x20.
       shot.visibility_attenuation = 32.0F;

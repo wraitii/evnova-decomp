@@ -1697,6 +1697,43 @@ TEST_CASE("shot fade quads preserve additive quirks and pre-advance alpha",
   CHECK(additive_static.fade_alpha == Catch::Approx(1.0F));
 }
 
+// Ghidra Shot_HandleShot positive-fade block: the sprite attenuation is written
+// from the current visibility every frame the shot's remaining life is below
+// 32, even after visibility reaches the 32 cap. Only the advance is gated, so a
+// completed fade must hold its fully-transparent value instead of popping back
+// to opaque for the projectile's last frames.
+TEST_CASE("completed positive shot fade holds its transparent attenuation",
+          "[weapon][shot]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &w = state.scenario.weapons[0];
+  w.weapon_mode_code = 4;
+  w.lifetime_ticks = 30;
+  w.projectile_speed = 100;
+  w.shot_fade_rate = 4;
+  ActiveShot s;
+  s.weapon_id = 0;
+  s.owner_ship_slot = -1;
+  s.system_id = 0;
+  s.life_ticks_remaining = 30.0F;
+  state.active_shots.push_back(s);
+
+  // Advance visibility to the 32 cap (8 * 4). The shot is still alive.
+  for (int tick = 0; tick < 8; ++tick) {
+    NovaWeapon_TickShots(state, 1.0F);
+  }
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].visibility_or_falloff == Catch::Approx(32.0F));
+
+  // One more live tick: progress cannot advance past 32, but the attenuation
+  // must stay clamped at the transparent value rather than reset to opaque.
+  NovaWeapon_TickShots(state, 1.0F);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].visibility_or_falloff == Catch::Approx(32.0F));
+  CHECK(state.active_shots[0].visibility_attenuation == Catch::Approx(31.0F));
+  CHECK(state.active_shots[0].fade_alpha == Catch::Approx(1.0F / 32.0F));
+}
+
 // Ghidra Shot_HandleShot animated branch: the displayed frame is latched
 // BEFORE the animation increment, so frame 0 shows on the first advancing
 // call (the increment only shows next call).
