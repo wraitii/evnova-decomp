@@ -715,7 +715,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004A4353	NovaUi_StarmapWindowInnerLoop	src/game/starmap.cpp	60%	gameplay,ui
 0x004A4FD0	NovaUi_CloseStarmapWindow		0%	
 0x004A51E0	FUN_004a51e0		0%	
-0x004A51F0	NovaUi_RedrawStarmapWindow	src/game/starmap_render.cpp	80%	rendering,ui
+0x004A51F0	NovaUi_RedrawStarmapWindow	src/game/starmap.cpp	80%	rendering,ui,bugfix
 0x004A7470	NovaUi_RedrawStarmapAfterPan		0%	
 0x004A74E0	FUN_004a74e0		0%	
 0x004A7E80	NovaUi_NormalizeStarmapRoutePlan	src/game/travel.cpp	90%	gameplay

@@ -383,8 +383,10 @@ and are skipped.
   opens the original's modal search dialog (DLOG 0xbbd, `0x004aab30`) and
   re-centres the map on the chosen system).
 - The political/government **overlay** (`NovaUi_DrawStarmapPoliticalOverlay`
-  per-cell strength tint) is implemented as smooth fading government discs
-  behind the graph: one disc per discovered, travel-reachable system with a
+  per-cell strength tint) is drawn first, before the nebula backdrops and the
+  graph, matching the original composite order (0x004a51f0: panel fill,
+  overlay, nebulae, routes/markers); it is implemented as smooth fading
+  government discs: one disc per discovered, travel-reachable system with a
   valid government, radius `round(22/zoom)+12` (or `round(11/zoom)+9` for
   `scan_mask` bit-1 governments) half-pixel cells, per-cell strength
   `(r^2-d^2)*fade*zoom` clamped [1,255], `theme_*0.5` at the centre fading to
@@ -398,6 +400,17 @@ and are skipped.
   (the original persists a default-Off preference; the clean-room has no prefs
   store yet) and the Show/Hide Borders button toggles it; while active the
   markers drop to their neutral base.
+- **Nebula backdrops** (`Nëbu` regions, PICT `0x251c + nebula*7 + tier`) are
+  drawn between the overlay and the graph (original order). The original blits
+  the chosen tier with `DrawContext_BlitClippedRect` mode 0x25, which selects
+  `FUN_004b8400`: a per-channel **maximum** ("lighten") blend. Black backdrop
+  pixels are therefore identity (the panel/overlay underneath survives) and
+  lit pixels brighten the map, rather than an opaque rectangle overwriting it.
+  The port reproduces this with an SDL custom `SDL_BLENDOPERATION_MAXIMUM`
+  texture blend, falling back to additive (also black-identity) if a renderer
+  rejects MAX. Tier choice follows the original 0x004a5560 loop except under
+  `BugFixPolicy::safe`, where `starmap_detail::ChooseNebulaTier` requires the
+  image to cover both dimensions (see `docs/known_original_bugs.md`).
 - Multi-hop plotted routes exist (Shift+click route editing, green route
   chain, route → travel-target sync on close and on jump arrival), but the
   mission-info window's destination-window sub-flow (DAT_007354a6 route mode)

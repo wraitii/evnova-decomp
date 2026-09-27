@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -75,6 +76,31 @@ struct PoliticalOverlay {
                                                      const MapView &view,
                                                      const SDL_FRect &panel);
 
+// Ghidra 0x004aa620 NovaUi_DrawStarmapPoliticalOverlay: uploads the built
+// overlay as a texture and blits it over the panel. The caller draws it
+// before the nebula pass so the original compositing order is preserved.
+void DrawPoliticalOverlay(SdlPlatform &platform,
+                          const PoliticalOverlay &overlay,
+                          const SDL_FRect &panel);
+
+// Chooses the nebula zoom-tier image for a projected destination rect.
+// `tier_w`/`tier_h` are the per-tier pixel dimensions in the original's
+// ascending-size order (a zero dimension means the PICT is absent). Returns
+// the selected index, or -1 when no tier image is available.
+//
+// Ghidra 0x004a5560 (inside NovaUi_RedrawStarmapWindow 0x004a51f0): the
+// original accepts the first tier that covers the destination in *either*
+// dimension. BUGFIX(original) (`safe`): require both dimensions so a
+// destination whose aspect ratio differs from the (square) PICTs picks the
+// slightly-oversized image and scales it down instead of stretching a
+// too-small one up; falls back to the largest available tier as the original
+// does when no image covers the destination.
+[[nodiscard]] int ChooseNebulaTier(std::span<const float> tier_w,
+                                   std::span<const float> tier_h,
+                                   float dst_w,
+                                   float dst_h,
+                                   bool safe);
+
 void DrawGalaxy(SdlPlatform &platform,
                 NovaFontCache &font_cache,
                 const GameState &state,
@@ -82,7 +108,6 @@ void DrawGalaxy(SdlPlatform &platform,
                 const MapView &view,
                 const StarmapGeometry &geometry,
                 std::int16_t selected_id,
-                const PoliticalOverlay *overlay,
                 const std::vector<std::int16_t> &mission_targets,
                 const NovaStarmap_MarkerIcons &icons,
                 float alpha = 1.0F);

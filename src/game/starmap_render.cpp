@@ -11,8 +11,10 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -374,6 +376,31 @@ void DrawReticle(SDL_Renderer *renderer,
 }
 } // namespace
 
+// Ghidra 0x004a5560 (inside NovaUi_RedrawStarmapWindow 0x004a51f0) tier
+// selection, extracted so the BUGFIX(original) selection policy is testable.
+int ChooseNebulaTier(std::span<const float> tier_w,
+                     std::span<const float> tier_h,
+                     float dst_w,
+                     float dst_h,
+                     bool safe) {
+  const std::size_t count = std::min(tier_w.size(), tier_h.size());
+  int fallback = -1;
+  for (std::size_t t = 0; t < count; ++t) {
+    const float iw = tier_w[t];
+    const float ih = tier_h[t];
+    if (iw <= 0.0F || ih <= 0.0F) {
+      continue; // tier PICT absent
+    }
+    fallback = static_cast<int>(t);
+    const bool covers =
+        safe ? (dst_w <= iw && dst_h <= ih) : (dst_w <= iw || dst_h <= ih);
+    if (covers) {
+      return static_cast<int>(t);
+    }
+  }
+  return fallback;
+}
+
 // ---- Political overlay -----------------------------------------------------
 // @port 0x004A9D50 90% rendering,bugfix
 // @port 0x004AA070 75% rendering,bugfix
@@ -527,11 +554,11 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
   return out;
 }
 
-namespace {
-
 // @port 0x004AA620 90% rendering
 // Ghidra 0x004aa620 NovaUi_DrawStarmapPoliticalOverlay: uploads the built
-// overlay as a texture and blits it over the panel.
+// overlay as a texture and blits it over the panel. The caller (draw_starmap)
+// invokes this before the nebula pass to match the original's compositing
+// order (0x004a51f0: overlay, then nebulae, then routes/markers).
 void DrawPoliticalOverlay(SdlPlatform &platform,
                           const PoliticalOverlay &overlay,
                           const SDL_FRect &panel) {
@@ -549,8 +576,6 @@ void DrawPoliticalOverlay(SdlPlatform &platform,
                       static_cast<float>(overlay.height)};
   SDL_RenderTexture(renderer, texture->get(), nullptr, &dst);
 }
-
-} // namespace
 
 // ---- Galaxy graph ----------------------------------------------------------
 
@@ -572,13 +597,13 @@ std::vector<MappedSystem> BuildMappedSystems(const GameState &state,
   return out;
 }
 
-// @port 0x004A51F0 80% rendering,ui
 // @port 0x004A8100 85% rendering,gameplay
-// Ghidra 0x004a8100 NovaUi_DrawStarmapRoutesAndMarkers (+ the nebula and
-// overlay passes of 0x004a51f0 that precede it). Draw order: political
-// overlay, plotted-route chain (green), adjacency links from visited systems
-// (grey; links radiate into unrevealed space because the target needs no
-// discovery gate), the committed-jump accent (dark green), then markers
+// Ghidra 0x004a8100 NovaUi_DrawStarmapRoutesAndMarkers. The political overlay
+// and the nebula pass (both from 0x004a51f0) are drawn by draw_starmap before
+// this call, so this pass draws, in order: plotted-route chain (green),
+// adjacency links from visited systems (grey; links radiate into unrevealed
+// space because the target needs no discovery gate), the committed-jump
+// accent (dark green), then markers
 // (background disc + status ring), the mission-target arrows and the selected
 // marker icon, the current-system cyan dot, the selection reticle and finally
 // the white system labels.
@@ -589,7 +614,6 @@ void DrawGalaxy(SdlPlatform &platform,
                 const MapView &view,
                 const StarmapGeometry &geometry,
                 std::int16_t selected_id,
-                const PoliticalOverlay *overlay,
                 const std::vector<std::int16_t> &mission_targets,
                 const NovaStarmap_MarkerIcons &icons,
                 float alpha) {
@@ -611,10 +635,6 @@ void DrawGalaxy(SdlPlatform &platform,
                       static_cast<int>(geometry.map.h)};
   SDL_SetRenderClipRect(renderer, &clip);
   const auto restore_clip = [&]() { SDL_SetRenderClipRect(renderer, nullptr); };
-
-  if (overlay != nullptr) {
-    DrawPoliticalOverlay(platform, *overlay, geometry.map);
-  }
 
   const auto find_mapped = [&](std::int16_t id) -> const MappedSystem * {
     if (id < 0 || static_cast<std::size_t>(id) >= mapped.size()) {

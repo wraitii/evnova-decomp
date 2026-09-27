@@ -47,6 +47,7 @@ add_executable(evnova_tests
     ship_spawn_test.cpp
     ship_visual_test.cpp
     spaceflight_player_state_test.cpp
+    starmap_nebula_test.cpp
     starmap_search_test.cpp
     smoke_test.cpp
     sprite_test.cpp

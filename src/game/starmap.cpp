@@ -36,7 +36,9 @@ namespace {
 
 using starmap_detail::BuildMappedSystems;
 using starmap_detail::BuildPoliticalOverlay;
+using starmap_detail::ChooseNebulaTier;
 using starmap_detail::DrawGalaxy;
+using starmap_detail::DrawPoliticalOverlay;
 using starmap_detail::MappedSystem;
 using starmap_detail::MapView;
 using starmap_detail::PoliticalOverlay;
@@ -350,6 +352,35 @@ void DrawRule(SDL_Renderer *renderer, float x0, float x1, float y) {
 // chrome below).
 void ClipToMapPanel(SDL_Renderer *renderer, const SDL_FRect &panel);
 
+// Nebula compositing blend. The original blits each backdrop with
+// DrawContext_BlitClippedRect mode 0x25, which selects FUN_004b8400: a
+// per-channel maximum ("lighten") with the destination. Black backdrop pixels
+// are therefore identity (they leave the panel/overlay underneath intact) and
+// lit pixels brighten it, instead of an opaque rectangle overwriting the map.
+// SDL's named modes cannot express max, so compose one; if the renderer rejects
+// it, fall back to additive, which is also black-identity.
+SDL_BlendMode NebulaBlendMode() {
+  return SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE,
+                                    SDL_BLENDFACTOR_ONE,
+                                    SDL_BLENDOPERATION_MAXIMUM,
+                                    SDL_BLENDFACTOR_ONE,
+                                    SDL_BLENDFACTOR_ONE,
+                                    SDL_BLENDOPERATION_MAXIMUM);
+}
+
+void ApplyNebulaBlendMode(SDL_Texture *texture) {
+  if (SDL_SetTextureBlendMode(texture, NebulaBlendMode())) {
+    return;
+  }
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    NovaLog::Warn("nebula max blend unsupported ({}); using additive",
+                  SDL_GetError());
+  }
+  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_ADD);
+}
+
 NebulaTiers LoadNebulaTiers(SdlPlatform &platform, std::size_t nebula_index) {
   NebulaTiers tiers;
   for (std::size_t tier = 0; tier < tiers.size(); ++tier) {
@@ -367,14 +398,29 @@ NebulaTiers LoadNebulaTiers(SdlPlatform &platform, std::size_t nebula_index) {
         platform.renderer(), img->width, img->height, img->rgba_pixels);
     tiers[tier].width = img->width;
     tiers[tier].height = img->height;
+    if (tiers[tier].texture) {
+      ApplyNebulaBlendMode(tiers[tier].texture->get());
+    }
   }
   return tiers;
 }
 
-// Picks the nebula image for the projected rect the way the redraw does
-// (0x004a5560 loop): the first tier (ascending size) tall enough, else the
-// first one wide enough, else the largest available; then blits it stretched
-// into the projected rect (clipped by the map scissor).
+// @port 0x004A51F0 80% rendering,ui,bugfix
+// Ghidra 0x004a51f0 NovaUi_RedrawStarmapWindow: the nebula backdrop pass runs
+// inline here (the surrounding chrome, overlay ordering, side panels and button
+// row live in draw_starmap; the route/marker pass is DrawGalaxy).
+//
+// Picks the nebula image for the projected rect (the 0x004a5560 loop) and
+// blits it stretched into the rect, clipped by the map scissor. The original
+// accepts the first ascending-size tier that covers the destination in either
+// dimension; under BugFixPolicy::safe ChooseNebulaTier instead requires both
+// dimensions, so a non-square destination picks the slightly-oversized image
+// and scales it down rather than stretching a too-small one up. Falls back to
+// the largest available tier either way.
+//
+// BUGFIX(original): the 0x004a5560 tier selection stretches a too-small image
+// up when only one dimension fits; corrected via
+// starmap_detail::ChooseNebulaTier (see docs/known_original_bugs.md).
 void DrawNebulae(SdlPlatform &platform,
                  const GameState &state,
                  const std::vector<NebulaTiers> &nebula_images,
@@ -407,31 +453,21 @@ void DrawNebulae(SdlPlatform &platform,
     if (dst.w < 1.0F || dst.h < 1.0F) {
       continue;
     }
-    std::size_t chosen = tiers.size();
-    std::size_t fallback = tiers.size();
+    std::array<float, 7> tier_widths{};
+    std::array<float, 7> tier_heights{};
     for (std::size_t t = 0; t < tiers.size(); ++t) {
-      if (!tiers[t].texture) {
-        continue;
-      }
-      const float iw = static_cast<float>(tiers[t].width);
-      const float ih = static_cast<float>(tiers[t].height);
-      if (dst.h <= ih) {
-        chosen = t;
-        break;
-      }
-      fallback = t;
-      if (dst.w <= iw) {
-        chosen = t;
-        break;
-      }
+      tier_widths[t] = static_cast<float>(tiers[t].width);
+      tier_heights[t] = static_cast<float>(tiers[t].height);
     }
-    if (chosen >= tiers.size()) {
-      chosen = fallback;
-    }
-    if (chosen >= tiers.size() || !tiers[chosen].texture) {
+    const int chosen = ChooseNebulaTier(
+        tier_widths, tier_heights, dst.w, dst.h, state.bugfixes.safe);
+    if (chosen < 0 || !tiers[static_cast<std::size_t>(chosen)].texture) {
       continue;
     }
-    SDL_RenderTexture(renderer, tiers[chosen].texture->get(), nullptr, &dst);
+    SDL_RenderTexture(renderer,
+                      tiers[static_cast<std::size_t>(chosen)].texture->get(),
+                      nullptr,
+                      &dst);
   }
   restore_clip();
 }
@@ -1358,7 +1394,6 @@ void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
              view,
              geometry,
              selected_id,
-             /*overlay=*/nullptr,
              mission_targets,
              icons,
              alpha);
@@ -1562,34 +1597,26 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
     } else {
       DrawChrome(platform, geometry, backdrop ? backdrop->get() : nullptr);
     }
-    DrawNebulae(platform, state, nebula_images, view, panel);
+    // Original compositing order (0x004a51f0): black panel, political
+    // overlay, nebula backdrops, then the route/marker pass. The overlay is
+    // therefore painted under the nebulae, not over them.
     if (show_borders) {
       if (overlay_needs_rebuild) {
         overlay = BuildPoliticalOverlay(state, view, panel);
         overlay_needs_rebuild = false;
       }
-      DrawGalaxy(platform,
-                 font_cache,
-                 state,
-                 mapped,
-                 view,
-                 geometry,
-                 selected_id,
-                 &overlay,
-                 mission_targets,
-                 icons);
-    } else {
-      DrawGalaxy(platform,
-                 font_cache,
-                 state,
-                 mapped,
-                 view,
-                 geometry,
-                 selected_id,
-                 nullptr,
-                 mission_targets,
-                 icons);
+      DrawPoliticalOverlay(platform, overlay, panel);
     }
+    DrawNebulae(platform, state, nebula_images, view, panel);
+    DrawGalaxy(platform,
+               font_cache,
+               state,
+               mapped,
+               view,
+               geometry,
+               selected_id,
+               mission_targets,
+               icons);
     DrawSidePanels(platform, font_cache, state, geometry, strings, selected_id);
     DrawButtons(platform,
                 font_cache,
