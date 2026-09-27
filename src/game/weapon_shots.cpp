@@ -1281,6 +1281,16 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
             beam.turret_quadrant);
       }
     }
+    // Shot_UpdateBeamHitQueue (0x0042f270) resolves the collision once per raw
+    // simulation call and decrements the beam lifetime in that same call, so
+    // damage per shot is damage-per-call * lifetime. The port consumes
+    // `whole_ticks` normalized ticks per call, so the hit must be applied once
+    // per tick (recorded here, applied in the lifetime loop below), not once
+    // per call: at a 60/120 Hz host cadence a once-per-call hit multiplies the
+    // damage, shredding a Thunderhead Lance's 180 dps into several hundred.
+    std::int16_t point_defense_shot_slot = -1;
+    std::int16_t direct_hit_slot = -1;
+    bool direct_suppress_retarget = false;
     if (beam.forced_targeting == 1 && beam.target_shot_slot >= 0) {
       const auto shot_slot = static_cast<std::size_t>(beam.target_shot_slot);
       if (shot_slot >= state.active_shots.size() ||
@@ -1289,19 +1299,10 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
         beam.lifetime_ticks = -1;
         beam.target_shot_slot = -1;
       } else {
-        ActiveShot &shot = state.active_shots[shot_slot];
+        const ActiveShot &shot = state.active_shots[shot_slot];
         beam.target_x = shot.pos_x;
         beam.target_y = shot.pos_y;
-        if (shot.point_defense_durability < 1) {
-          shot.consumed = true;
-          shot.life_ticks_remaining = 0.0F;
-        } else if (beam_weapon != nullptr) {
-          const int damage =
-              static_cast<int>(beam_weapon->mass_damage) +
-              (static_cast<int>(beam_weapon->energy_damage) + 1) / 2;
-          shot.point_defense_durability =
-              static_cast<std::int16_t>(shot.point_defense_durability - damage);
-        }
+        point_defense_shot_slot = beam.target_shot_slot;
       }
     } else if (beam_weapon != nullptr && beam_weapon->weapon_mode_code == 0) {
       // Shot_UpdateBeamHitQueue (0x0042f270) keeps a mode-0 beam on the owner's
@@ -1392,38 +1393,30 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
       beam.target_x = beam.source_x + std::sin(rad) * visible_length;
       beam.target_y = beam.source_y - std::cos(rad) * visible_length;
       if (hit_slot >= 0) {
-        // Ghidra 0x0042f270 re-applies the hit on EVERY call while the target
-        // stays in the cone: the record has no already-resolved flag, so a beam
-        // delivers Weapon mass_damage + energy_damage (and Weapon_ApplyWeapon-
-        // OnHitEffects) each tick it is in contact -- the 6 mass + 6 energy,
-        // 180 dps of the Thunderhead Lance. This port previously gated the hit
-        // on a port-only BeamHit::impact_resolved, collapsing a continuous
-        // beam to a single damage event.
+        // Ghidra 0x0042f270 has no already-resolved flag: a beam delivers
+        // Weapon mass_damage + energy_damage (and Weapon_ApplyWeaponOnHit-
+        // Effects) on every simulation call it stays in contact -- the 6 mass
+        // + 6 energy of the Thunderhead Lance. Applied once per normalized
+        // tick in the lifetime loop below.
         //
-        // The aggro-suppression flag is likewise chosen per call: a swept
-        // contact is treated as targeted only when it matches the beam's
-        // recorded target slot, or -- for a targetless (beam.target_ship_slot
-        // == -1) beam -- the owner's *current* primary target. A stray player
-        // beam contact must not bypass the 50-point player-aggro accumulator
-        // in Ship_ApplyDamageToShip, or the first untargeted beam that clips
-        // an NPC turns it hostile instantly.
-        bool suppress_retarget_logic = false;
+        // The aggro-suppression flag is chosen per call: a swept contact is
+        // treated as targeted only when it matches the beam's recorded target
+        // slot, or -- for a targetless (beam.target_ship_slot == -1) beam --
+        // the owner's *current* primary target. A stray player beam contact
+        // must not bypass the 50-point player-aggro accumulator in
+        // Ship_ApplyDamageToShip, or the first untargeted beam that clips an
+        // NPC turns it hostile instantly.
+        direct_hit_slot = hit_slot;
         if (owner_valid) {
           const Ship &owner =
               state.ShipAt(static_cast<std::size_t>(beam.owner_ship_slot));
           if (beam.target_ship_slot == -1) {
-            suppress_retarget_logic =
+            direct_suppress_retarget =
                 hit_slot == owner.primary_target_ship_slot;
           } else if (hit_slot == beam.target_ship_slot) {
-            suppress_retarget_logic = true;
+            direct_suppress_retarget = true;
           }
         }
-        NovaWeapon_ResolveDirectWeaponHit(state,
-                                          beam.owner_ship_slot,
-                                          hit_slot,
-                                          beam.weapon_id,
-                                          beam.impact_variant,
-                                          suppress_retarget_logic);
       }
     } else if (beam.target_ship_slot >= 0 &&
                beam.target_ship_slot <
@@ -1433,13 +1426,7 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
       beam.target_x = target.pos_x;
       beam.target_y = target.pos_y;
       if (target.is_active) {
-        // Per-call as above: a recorded-target beam re-applies its damage every
-        // tick the target stays alive.
-        NovaWeapon_ResolveDirectWeaponHit(state,
-                                          beam.owner_ship_slot,
-                                          beam.target_ship_slot,
-                                          beam.weapon_id,
-                                          beam.impact_variant);
+        direct_hit_slot = beam.target_ship_slot;
       }
     }
     beam.lifetime_remainder += ticks;
@@ -1453,6 +1440,36 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
         state.scenario.Weapon(static_cast<std::int16_t>(beam.weapon_id + 0x80));
     for (std::int16_t tick = 0; tick < whole_ticks && beam.lifetime_ticks >= 0;
          ++tick) {
+      // One simulation call's worth of the collision arm: the original applies
+      // the resolved hit in the same call that decrements the lifetime.
+      if (point_defense_shot_slot >= 0) {
+        const auto shot_slot =
+            static_cast<std::size_t>(point_defense_shot_slot);
+        if (shot_slot < state.active_shots.size()) {
+          ActiveShot &shot = state.active_shots[shot_slot];
+          if (!shot.consumed && shot.life_ticks_remaining >= 0.0F) {
+            if (shot.point_defense_durability < 1) {
+              shot.consumed = true;
+              shot.life_ticks_remaining = 0.0F;
+            } else if (beam_weapon != nullptr) {
+              const int damage =
+                  static_cast<int>(beam_weapon->mass_damage) +
+                  (static_cast<int>(beam_weapon->energy_damage) + 1) / 2;
+              shot.point_defense_durability = static_cast<std::int16_t>(
+                  shot.point_defense_durability - damage);
+            }
+          }
+        }
+      } else if (direct_hit_slot >= 0) {
+        if (state.ShipAt(static_cast<std::size_t>(direct_hit_slot)).is_active) {
+          NovaWeapon_ResolveDirectWeaponHit(state,
+                                            beam.owner_ship_slot,
+                                            direct_hit_slot,
+                                            beam.weapon_id,
+                                            beam.impact_variant,
+                                            direct_suppress_retarget);
+        }
+      }
       // Decay phase (Bible "Decay"): once the lifetime reaches 0, a beam with
       // a positive Decay value holds on screen while
       // animation_counter + falloff < 0x10, counting animation_counter up;

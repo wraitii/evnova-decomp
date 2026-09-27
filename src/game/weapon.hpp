@@ -343,10 +343,12 @@ void NovaWeapon_TickNpcWeaponBanks(GameState &state,
                                            std::int16_t firing_bearing_deg = 0);
 
 // Ghidra Shot_UpdateBeamHitQueue (0x0042F270): advance beam lifetimes and
-// re-apply each in-contact beam's direct hit every call. The original has no
-// already-resolved flag, so a beam delivers mass/energy damage (and impact
-// effects) on every tick it stays in contact; see the Thunderhead Lance's
-// continuous 180 dps in NovaWeapon_TickBeamHitQueue.
+// re-apply each in-contact beam's direct hit every simulation tick. The
+// original has no already-resolved flag, so a beam delivers mass/energy damage
+// (and impact effects) once per raw call in lock-step with its lifetime
+// decrement; the port replays that per normalized tick so the damage does not
+// scale with the host render rate (see the Thunderhead Lance's 180 dps in
+// NovaWeapon_TickBeamHitQueue).
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks);
 
 // Ghidra Shot_UpdateShotGuidance (0x00431530): per-frame projectile guidance.

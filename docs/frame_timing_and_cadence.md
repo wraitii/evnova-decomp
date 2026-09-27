@@ -299,6 +299,17 @@ calls. Normal state-0 homing remains continuous: it turns by
 `guided_turn_rate * elapsed_ticks` after the executable's strict
 `shot_age > elapsed_ticks * 15` gate.
 
+The beam hit queue (`Shot_UpdateBeamHitQueue` `0x0042f270`) is a related trap.
+The original has no already-resolved flag: it applies a contact's mass/energy
+damage in the same raw call that decrements the beam lifetime, so damage per
+shot is `damage-per-call * lifetime` (the Thunderhead Lance's 6 mass + 6 energy
+over a 10-tick life, wiki-confirmed at 180 dps against both shields and armor).
+The port consumes `elapsed_ticks` of lifetime per call, so it applies the hit
+once per normalized tick, in lock-step with the decrement. Applying the hit
+once per `NovaWeapon_TickBeamHitQueue` call instead makes the damage scale with
+the host render rate -- roughly 1.6x at 60/120 Hz since sub-tick calls would
+damage without consuming lifetime.
+
 There are also non-policy defects to keep distinct from cadence choices:
 
 - **NPC player-aggro pressure:** incidental player hits test the

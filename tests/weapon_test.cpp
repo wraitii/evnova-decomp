@@ -1479,50 +1479,71 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
 }
 
 // Regression: Shot_UpdateBeamHitQueue (0x0042f270) has no already-resolved
-// flag, so a beam re-applies its mass/energy damage on every call while the
-// target stays in the cone. The port previously resolved each beam's hit once
-// through a port-only BeamHit::impact_resolved, collapsing a continuous beam
-// (e.g. the Thunderhead Lance, Count/Reload 10, 6 mass + 6 energy, 180 dps)
-// into a single damage event. Tick an in-contact mode-0 beam and require armor
-// to fall by one mass_damage per call.
+// flag, so a beam re-applies its mass/energy damage on every simulation call
+// while the target stays in the cone. The port previously resolved each beam's
+// hit once through a port-only BeamHit::impact_resolved, collapsing a
+// continuous beam (the Thunderhead Lance -- Reload 10, Lifetime 10, 6 mass +
+// 6 energy -- from its wiki-confirmed 180 dps into a single damage event).
+//
+// The hit must be applied once per normalized tick, in lock-step with the
+// lifetime decrement, NOT once per TickBeamHitQueue call: the host drives
+// this from the render loop, so a once-per-call hit scales with the display
+// rate. This test pins that the per-tick damage is independent of how the
+// same normalized elapsed time is subdivided.
 TEST_CASE("an in-contact beam re-applies its damage every tick",
           "[weapon][beam]") {
-  GameState state;
-  state.scenario.weapons.resize(1);
-  Weapon &beam = state.scenario.weapons[0];
-  beam.weapon_mode_code = 0;
-  beam.beam_length_px = 100;
-  beam.lifetime_ticks = 10;
-  beam.beam_falloff = 0x10;
-  beam.mass_damage = 5;
-  beam.energy_damage = 0;
-  state.scenario.ships.resize(1);
-  state.player.current_system_id = 0;
+  auto make_state = [](GameState &state) -> Ship & {
+    state.scenario.weapons.resize(1);
+    Weapon &beam = state.scenario.weapons[0];
+    beam.weapon_mode_code = 0;
+    beam.beam_length_px = 100;
+    beam.lifetime_ticks = 10;
+    beam.beam_falloff = 0x10;
+    beam.mass_damage = 5;
+    beam.energy_damage = 0;
+    state.scenario.ships.resize(1);
+    state.player.current_system_id = 0;
 
-  Ship &owner = state.ShipAt(0);
-  owner.is_active = true;
-  owner.ship_instance_id = 0;
-  owner.ship_class_id = 0;
-  owner.current_system_id = 0;
-  owner.pos_x = 100.0F;
-  owner.pos_y = 200.0F;
-  owner.heading = 0.0F; // heading 0 points toward -y
+    Ship &owner = state.ShipAt(0);
+    owner.is_active = true;
+    owner.ship_instance_id = 0;
+    owner.ship_class_id = 0;
+    owner.current_system_id = 0;
+    owner.pos_x = 100.0F;
+    owner.pos_y = 200.0F;
+    owner.heading = 0.0F; // heading 0 points toward -y
 
-  Ship &target = state.ShipAt(1);
-  target.is_active = true;
-  target.ship_instance_id = 1;
-  target.ship_class_id = 0;
-  target.current_system_id = 0;
-  target.shield_points = -1.0F; // no shields: mass damage reaches armor
-  target.armor_points = 100.0F;
-  target.pos_x = 100.0F;
-  target.pos_y = 140.0F; // 60 px directly ahead, inside the cone
+    Ship &target = state.ShipAt(1);
+    target.is_active = true;
+    target.ship_instance_id = 1;
+    target.ship_class_id = 0;
+    target.current_system_id = 0;
+    target.shield_points = -1.0F; // no shields: mass damage reaches armor
+    target.armor_points = 100.0F;
+    target.pos_x = 100.0F;
+    target.pos_y = 140.0F; // 60 px directly ahead, inside the cone
+    return target;
+  };
 
-  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
-  NovaWeapon_TickBeamHitQueue(state, 1.0F);
-  CHECK(target.armor_points == Catch::Approx(95.0F));
-  NovaWeapon_TickBeamHitQueue(state, 1.0F);
-  CHECK(target.armor_points == Catch::Approx(90.0F));
+  // Whole-tick steps: one damage application per call.
+  GameState whole;
+  Ship &whole_target = make_state(whole);
+  REQUIRE(NovaWeapon_QueueBeamHit(whole, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(whole, 1.0F);
+  CHECK(whole_target.armor_points == Catch::Approx(95.0F));
+  NovaWeapon_TickBeamHitQueue(whole, 1.0F);
+  CHECK(whole_target.armor_points == Catch::Approx(90.0F));
+
+  // Same two normalized ticks delivered as eight 0.25-tick (120 Hz) steps
+  // must deal the same damage -- the defect was extra hits on the sub-tick
+  // calls that did not consume lifetime.
+  GameState split;
+  Ship &split_target = make_state(split);
+  REQUIRE(NovaWeapon_QueueBeamHit(split, 0, 1, 0, -1, 0));
+  for (int call = 0; call < 8; ++call) {
+    NovaWeapon_TickBeamHitQueue(split, 0.25F);
+  }
+  CHECK(split_target.armor_points == Catch::Approx(90.0F));
 }
 
 // Ghidra Shot_UpdateBeamHitQueue (0x0042f270): the incidental mode-0 sweep
