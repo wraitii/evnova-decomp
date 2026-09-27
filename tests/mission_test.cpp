@@ -797,6 +797,62 @@ TEST_CASE("mission random locator uses the current travel stellar as anchor") {
   CHECK(state.mission_target_resolutions[0].travel_stellar_id == -1);
 }
 
+// Regression: Mission_EvaluateMissionLists runs on demand every time a BBS or
+// bar window opens, but the RNG-driven target resolution (0x0043d240 locator /
+// special-ship draws) belongs to the landing/arrival cadence (0x0043cf00 runs
+// only there). Re-resolving per open re-rolled the destinations and made the
+// offer list appear to reset. mission_targets_dirty gates it so a second
+// evaluation without a fresh Mission_RerollOfferingRolls leaves the targets
+// and the session PRNG untouched.
+TEST_CASE("mission evaluation resolves targets once per arrival") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = -2;
+  definition.return_stellar_locator = -1;
+  definition.avail_random = 100;
+
+  state.scenario.systems.resize(3);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+    system.has_explored_flag = true;
+  }
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.systems[1].nav_defs[0] = 0x81;
+  state.scenario.systems[2].nav_defs[0] = 0x82;
+  state.scenario.stellars.resize(3);
+  for (auto &stellar : state.scenario.stellars) {
+    stellar.is_available = true;
+    stellar.is_defined = true;
+    stellar.flags = 0x81;
+    stellar.strength_capacity = 1;
+    stellar.strength = 1;
+    stellar.destroyed_days_remaining = 1;
+  }
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[1].system_id = 1;
+  state.scenario.stellars[2].system_id = 2;
+  state.travel.selected_stellar_id = 0x80;
+
+  // The first evaluation resolves the random target and consumes PRNG state.
+  (void)Mission_EvaluateMissionLists(state);
+  const auto resolved = state.mission_target_resolutions[0].travel_stellar_id;
+  REQUIRE(resolved >= 1);
+  const auto rng_after_first = state.rng;
+
+  // A second evaluation without a fresh landing/arrival must not re-roll.
+  (void)Mission_EvaluateMissionLists(state);
+  CHECK(state.mission_target_resolutions[0].travel_stellar_id == resolved);
+  CHECK(state.rng == rng_after_first);
+
+  // A fresh landing/arrival marks the table stale, so the next evaluation
+  // re-resolves it (the roll itself also advances the PRNG).
+  Mission_RerollOfferingRolls(state);
+  (void)Mission_EvaluateMissionLists(state);
+  CHECK(state.rng != rng_after_first);
+}
+
 // Ghidra 0x0043d510 (disassembled at 0x0043da4c/0x0043db4d): the random
 // allied-government stellar family compares the target government against
 // g_system_defs indexed by the STELLAR slot (not the candidate's own system),

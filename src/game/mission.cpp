@@ -1314,8 +1314,11 @@ void Mission_ResolveMissionStellarTargets(GameState &state,
 
 // @port 0x0043C3E0 100% divergence
 // DIVERGENCE(original): the discarded RNG warm-up is not run; the port
-// resolves all present mission targets eagerly instead.
-// Ghidra 0x0043c3e0 Misn_ResolveMissionStellarLocators.
+// resolves all present mission targets eagerly instead of per lane passer.
+// Ghidra 0x0043c3e0 Misn_ResolveMissionStellarLocators. Called from
+// Mission_EvaluateMissionLists only when mission_targets_dirty is set, so the
+// RNG draws happen once per landing/arrival, matching the original's
+// evaluate cadence (0x0043cf00 runs only at those transitions).
 void Mission_ResolveMissionStellarLocators(GameState &state) {
   for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
     if (state.scenario.missions[index].present) {
@@ -1328,7 +1331,10 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
 // @port 0x0043CF00 85% gameplay
 // TODO(decomp(0x0043cf00)): target resolution runs for all present defs (the
 // original resolves per eligible def), and the return-list finalize arm is
-// approximated by lane-1 emptiness.
+// approximated by lane-1 emptiness. Unlike the original, the port evaluates
+// lists on demand (BBS/bar/mission-computer opens); the RNG-driven target
+// resolution is therefore gated on mission_targets_dirty so it runs once per
+// landing/arrival rather than on every open.
 // Ghidra 0x0043cf00 Mission_EvaluateMissionLists.
 MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
   // The original opens with NovaResources_EvaluateAvailability (0x00448090):
@@ -1342,7 +1348,10 @@ MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
         mission.present && mission.link_system_filter != -32000 &&
         NovaControlExpression_Evaluate(mission.availability_expr, expression);
   }
-  Mission_ResolveMissionStellarLocators(state);
+  if (state.mission_targets_dirty) {
+    Mission_ResolveMissionStellarLocators(state);
+    state.mission_targets_dirty = false;
+  }
   MissionListEvaluation result;
   // Two offering lanes per the original (g_mission_slot_list[2][1000],
   // evaluated with g_misn_list_page_group = 0 then 1 so the eligibility
@@ -2353,8 +2362,13 @@ void Mission_ResolveMisnSlot(GameState &state,
 // Ghidra 0x00458802 (inside Stellar_HandleStellarEntryAndExit): draws the
 // per-definition offering roll (NovaRandom_Range(100) + 1, i.e. 1..100) for
 // every mission definition, then re-runs Mission_EvaluateMissionLists. Called
-// at game start and on every system arrival; the port evaluates lists on
-// demand, so only the rolls are refreshed here.
+// at game start and on every system arrival. The port evaluates lists on
+// demand, so only the rolls are refreshed here; the target-resolution reroll
+// that the original's evaluate pass performs is deferred to the next
+// Mission_EvaluateMissionLists call via mission_targets_dirty. Marking the
+// table stale here (rather than re-resolving immediately) matters because the
+// landing path calls this before ai_secondary_target_slot is repointed at the
+// landed stellar; the first evaluate happens after the anchor is set.
 void Mission_RerollOfferingRolls(GameState &state) {
   std::uniform_int_distribution<int> roll(1, 100);
   const std::size_t count = std::min<std::size_t>(
@@ -2363,6 +2377,7 @@ void Mission_RerollOfferingRolls(GameState &state) {
     state.mission_offering_rolls[i] =
         static_cast<std::int16_t>(roll(state.rng));
   }
+  state.mission_targets_dirty = true;
 }
 
 // Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs, runtime half. The

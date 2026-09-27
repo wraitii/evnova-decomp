@@ -1481,6 +1481,15 @@ struct GameState {
   std::array<MissionRuntimeFlags, kMaxActiveMissions>
       active_mission_runtime_flags{};
   std::array<MissionTargetResolution, 1000> mission_target_resolutions{};
+  // The original resolves every mission's stellar target (and its RNG-driven
+  // random destination / special-ship / cargo fields) inside
+  // Mission_EvaluateMissionLists (0x0043cf00), which runs only at landing and
+  // system arrival (0x00458802's reroll arm). The port evaluates lists on
+  // demand, so it must not re-run the resolution on every window open: that
+  // re-drew the random locators and visibly changed the BBS/bar offer list.
+  // Mission_RerollOfferingRolls marks the table stale; the next
+  // Mission_EvaluateMissionLists resolves once and clears it.
+  bool mission_targets_dirty = true;
   // Ghidra DAT_00734c20: per-definition offering roll, drawn 1..100 for every
   // mission definition on system arrival (Stellar_HandleStellarEntryAndExit
   // 0x00458802) and initialised at game start. Mission_EvaluateMissionLists

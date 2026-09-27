@@ -627,8 +627,9 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
 
     // Ghidra 0x0043c470: after a successful Mission_ActivateMissionAtSlot
     // (whose acceptance UI runs synchronously) the original sets the
-    // window-exit flag, so the BBS closes. It never rebuilds the list here; the
-    // previous re-evaluation rerolled every definition's random destination.
+    // window-exit flag, so the BBS closes. It never rebuilds the list here;
+    // the cached missions/mission_target_resolutions stay fixed for the visit
+    // (Mission_EvaluateMissionLists resolves targets only once per arrival).
     auto accept = [&]() -> bool {
       if (missions.page_zero.empty() || selected >= missions.page_zero.size()) {
         return false;
