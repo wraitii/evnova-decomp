@@ -899,7 +899,7 @@ void NovaMission_RunAcceptanceDialogs(
 
 } // namespace
 
-// @port 0x004A1670 70% ui
+// @port 0x004A1670 70% ui,divergence
 // Ghidra 0x004a1670 NovaUi_HitTestMissionOfferButtons: the accept/decline and
 // up/down scroll slots are hit-tested inline in the mouse arm below; Flags
 // 0x0004 maps the accept slot to DITL entry 6 with decline unhittable.
@@ -1266,11 +1266,19 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   bool mission_computer_command_was_held = false;
   while (!platform.quit_requested()) {
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
+      // @port 0x00447170 85% ui,divergence
       // 0x00447170 has no Esc arm: unlike the BBS poller (0x00440c90, which
       // maps 0x1b to exit) the offer window closes only through its buttons,
-      // Return, or the caption mnemonic, so Esc is deliberately ignored.
+      // Return, or the caption mnemonic. DIVERGENCE(original): the port also
+      // maps Esc to the decline arm for shortcut consistency; the can't-refuse
+      // arm has no decline, so Esc is ignored there.
+      if (input->key == TextKey::escape) {
+        if (normal_arm) {
+          return decline_offer();
+        }
+        continue;
+      }
       if (input->key == TextKey::character) {
-        // @port 0x00447170 85% ui
         // Ghidra 0x00447170 key arms: Return (0xd) is action 1 (accept, same
         // in both arms); otherwise the first lower-case letter of a caption is
         // that button's mnemonic. The original honours the mnemonics only when

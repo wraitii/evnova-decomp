@@ -245,7 +245,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00446150	NovaUi_RunMissionComputerWindow	src/game/docked_mission_dialog.cpp	88%	ui,rendering
 0x00446770	NovaUi_PollMissionComputerWindow	src/game/docked_mission_dialog.cpp	65%	ui
 0x00446E00	NovaUi_DrawMissionComputerWindow	src/game/docked_mission_dialog.cpp	70%	ui,rendering
-0x00447170	NovaUi_PollMissionOfferWindow	src/game/docked_mission_dialog.cpp	85%	ui
+0x00447170	NovaUi_PollMissionOfferWindow	src/game/docked_mission_dialog.cpp	85%	ui,divergence
 0x00447680	NovaUi_DrawMissionOfferWindow	src/game/docked_mission_dialog.cpp	68%	ui,rendering
 0x00447A30	Mission_DoesSystemMatchMissionLocator	src/game/mission.cpp	95%	gameplay
 0x00447D90	Mission_ResolveMisnSlot	src/game/mission.cpp	100%	bugfix
@@ -693,7 +693,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004A0F90	NovaUi_DrawTravelDestinationPrimaryButtons	src/game/negotiation_dialog.cpp	60%	ui
 0x004A1130	NovaUi_HitTestMissionBbsActionButtons	src/game/docked_mission_dialog.cpp	70%	ui
 0x004A1290	NovaUi_DrawMissionBbsActionButtons	src/game/docked_mission_dialog.cpp	80%	ui
-0x004A1670	NovaUi_HitTestMissionOfferButtons	src/game/docked_mission_dialog.cpp	70%	ui
+0x004A1670	NovaUi_HitTestMissionOfferButtons	src/game/docked_mission_dialog.cpp	70%	ui,divergence
 0x004A1AE0	NovaUi_HandlePlayerSpecialInteractionTabs	src/game/player_info_window.cpp	85%	ui
 0x004A1C40	NovaUi_DrawPlayerSpecialInteractionTabs	src/game/player_info_window.cpp	80%	ui
 0x004A1D90	NovaUi_HandleEscortShipManagementButtons	src/game/ship_comm_dialog.cpp	90%	ui
