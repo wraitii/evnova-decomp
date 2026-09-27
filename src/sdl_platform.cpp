@@ -629,10 +629,17 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
       default:
         break;
       }
-      // Any printable key symbols map to their ASCII value: letters and digits
-      // use ASCII syms, while combined punctuation is approximated by its
-      // scanned key's symbol (enough for callsign entry).
-      const auto sym = static_cast<int>(event.key.key);
+      // Any printable key symbols map to their ASCII value. SDL's keycode is
+      // the unshifted logical key, so re-resolve the scancode through the
+      // active layout with this event's Shift/Caps state applied; without it
+      // every typed letter arrives lower-case. Punctuation still follows the
+      // layout table, which is enough for callsign entry.
+      const auto translated = SDL_GetKeyFromScancode(
+          event.key.scancode,
+          static_cast<SDL_Keymod>(event.key.mod &
+                                  (SDL_KMOD_SHIFT | SDL_KMOD_CAPS)),
+          false);
+      const auto sym = static_cast<int>(translated);
       if (sym >= 32 && sym < 127) {
         return TextInput{TextKey::character,
                          static_cast<char>(sym),
