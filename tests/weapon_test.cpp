@@ -1396,7 +1396,6 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   const BeamHit &queued = state.beam_hit_queue[0];
   CHECK(queued.target_x == Catch::Approx(100.0F));
   CHECK(queued.target_y == Catch::Approx(100.0F));
-  CHECK_FALSE(queued.impact_resolved);
 
   // Nearby (56 px) but 45 deg off the heading, well outside the 15 deg cone:
   // still ignored, still ends at BeamLength.
@@ -1407,7 +1406,6 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
   CHECK(queued.target_x == Catch::Approx(100.0F));
   CHECK(queued.target_y == Catch::Approx(100.0F));
-  CHECK_FALSE(queued.impact_resolved);
 
   // Same-government, non-squad target directly ahead and in range: the
   // original beam scan does NOT reject same-government contacts, so it is hit
@@ -1420,7 +1418,6 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
   CHECK(queued.target_y == Catch::Approx(200.0F - 45.0F));
-  CHECK(queued.impact_resolved);
   owner.faction_or_government_id = -1;
   target.faction_or_government_id = -1;
 
@@ -1431,7 +1428,6 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
   CHECK(queued.target_y == Catch::Approx(100.0F));
-  CHECK_FALSE(queued.impact_resolved);
   target.squad_leader_ship_slot = -1;
 
   // Friendly squad exclusion: the candidate is the owner's own squad leader.
@@ -1440,7 +1436,6 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
   CHECK(queued.target_y == Catch::Approx(100.0F));
-  CHECK_FALSE(queued.impact_resolved);
   owner.squad_leader_ship_slot = -1;
 
   // Directly ahead at 60 px: the beam is truncated at distance minus
@@ -1454,7 +1449,6 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
   CHECK(queued.target_x == Catch::Approx(100.0F));
   CHECK(queued.target_y == Catch::Approx(200.0F - 45.0F));
-  CHECK(queued.impact_resolved);
 
   // A valid target near the outer reach (120 px) truncates to 120 - 15 = 105
   // px, which is longer than BeamLength: the original does not re-clamp the
@@ -1467,7 +1461,6 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   CHECK(queued.target_x == Catch::Approx(100.0F));
   CHECK(queued.target_y == Catch::Approx(200.0F - 105.0F));
   CHECK(200.0F - queued.target_y > static_cast<float>(beam.beam_length_px));
-  CHECK(queued.impact_resolved);
 
   // The source follows the live owner: a moving muzzle must not leave the
   // beam behind at its queue-time position.
@@ -1483,6 +1476,53 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   CHECK(queued.source_y == Catch::Approx(410.0F));
   CHECK(queued.target_x == Catch::Approx(260.0F));
   CHECK(queued.target_y == Catch::Approx(410.0F - 100.0F));
+}
+
+// Regression: Shot_UpdateBeamHitQueue (0x0042f270) has no already-resolved
+// flag, so a beam re-applies its mass/energy damage on every call while the
+// target stays in the cone. The port previously resolved each beam's hit once
+// through a port-only BeamHit::impact_resolved, collapsing a continuous beam
+// (e.g. the Thunderhead Lance, Count/Reload 10, 6 mass + 6 energy, 180 dps)
+// into a single damage event. Tick an in-contact mode-0 beam and require armor
+// to fall by one mass_damage per call.
+TEST_CASE("an in-contact beam re-applies its damage every tick",
+          "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 0;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.beam_falloff = 0x10;
+  beam.mass_damage = 5;
+  beam.energy_damage = 0;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F; // heading 0 points toward -y
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.shield_points = -1.0F; // no shields: mass damage reaches armor
+  target.armor_points = 100.0F;
+  target.pos_x = 100.0F;
+  target.pos_y = 140.0F; // 60 px directly ahead, inside the cone
+
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(target.armor_points == Catch::Approx(95.0F));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(target.armor_points == Catch::Approx(90.0F));
 }
 
 // Ghidra Shot_UpdateBeamHitQueue (0x0042f270): the incidental mode-0 sweep
@@ -1531,7 +1571,6 @@ TEST_CASE("stray mode-zero beam contact is gated by the player-aggro threshold",
   REQUIRE(target.player_aggro_accumulator == 0.0F);
   REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 0));
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
-  CHECK(state.beam_hit_queue[0].impact_resolved);
   CHECK(target.primary_target_ship_slot == -1);
   CHECK(target.ai_state_code != 4);
   // The hit still banks aggro pressure for the next contact.
@@ -1875,7 +1914,6 @@ TEST_CASE("mode-zero beams never intercept their own owner", "[weapon][beam]") {
   REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 180));
   NovaWeapon_TickBeamHitQueue(state, 1.0F);
   const BeamHit &queued = state.beam_hit_queue[0];
-  CHECK_FALSE(queued.impact_resolved);
   CHECK(queued.target_x == Catch::Approx(100.0F));
   CHECK(queued.target_y == Catch::Approx(300.0F));
   CHECK(owner.armor_points == Catch::Approx(100.0F));

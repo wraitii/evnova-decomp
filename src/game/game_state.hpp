@@ -1082,7 +1082,6 @@ struct BeamHit {
   // following the target.
   std::int16_t firing_bearing_deg = 0;
   std::int8_t impact_variant = 0;
-  bool impact_resolved = false;
 };
 
 // Ghidra g_weapon_smoke_puff_instances_ptr (0x005912bc), 64 entries at a

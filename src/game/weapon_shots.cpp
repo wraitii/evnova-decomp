@@ -1240,13 +1240,12 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
             owner, state.ShipAt(static_cast<std::size_t>(target_ship_slot)))) {
       beam.impact_variant = 1;
     }
-    beam.impact_resolved = false;
     return true;
   }
   return false;
 }
 
-// @port 0x0042f270 72% gameplay,rng
+// @port 0x0042f270 80% gameplay,rng
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
   const float ticks = std::max(0.0F, elapsed_ticks);
   for (BeamHit &beam : state.beam_hit_queue) {
@@ -1392,14 +1391,22 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
       const float rad = bearing_deg * (3.14159265358979323846F / 180.0F);
       beam.target_x = beam.source_x + std::sin(rad) * visible_length;
       beam.target_y = beam.source_y - std::cos(rad) * visible_length;
-      if (!beam.impact_resolved && hit_slot >= 0) {
-        // Ghidra 0x0042f270 chooses the aggro-suppression flag at the impact
-        // call: a swept contact is treated as targeted only when it matches
-        // the beam's recorded target slot, or -- for a targetless
-        // (beam.target_ship_slot == -1) beam -- the owner's *current* primary
-        // target. A stray player beam contact must not bypass the 50-point
-        // player-aggro accumulator in Ship_ApplyDamageToShip, or the first
-        // untargeted beam that clips an NPC turns it hostile instantly.
+      if (hit_slot >= 0) {
+        // Ghidra 0x0042f270 re-applies the hit on EVERY call while the target
+        // stays in the cone: the record has no already-resolved flag, so a beam
+        // delivers Weapon mass_damage + energy_damage (and Weapon_ApplyWeapon-
+        // OnHitEffects) each tick it is in contact -- the 6 mass + 6 energy,
+        // 180 dps of the Thunderhead Lance. This port previously gated the hit
+        // on a port-only BeamHit::impact_resolved, collapsing a continuous
+        // beam to a single damage event.
+        //
+        // The aggro-suppression flag is likewise chosen per call: a swept
+        // contact is treated as targeted only when it matches the beam's
+        // recorded target slot, or -- for a targetless (beam.target_ship_slot
+        // == -1) beam -- the owner's *current* primary target. A stray player
+        // beam contact must not bypass the 50-point player-aggro accumulator
+        // in Ship_ApplyDamageToShip, or the first untargeted beam that clips
+        // an NPC turns it hostile instantly.
         bool suppress_retarget_logic = false;
         if (owner_valid) {
           const Ship &owner =
@@ -1417,7 +1424,6 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
                                           beam.weapon_id,
                                           beam.impact_variant,
                                           suppress_retarget_logic);
-        beam.impact_resolved = true;
       }
     } else if (beam.target_ship_slot >= 0 &&
                beam.target_ship_slot <
@@ -1426,13 +1432,14 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
           state.ShipAt(static_cast<std::size_t>(beam.target_ship_slot));
       beam.target_x = target.pos_x;
       beam.target_y = target.pos_y;
-      if (!beam.impact_resolved && target.is_active) {
+      if (target.is_active) {
+        // Per-call as above: a recorded-target beam re-applies its damage every
+        // tick the target stays alive.
         NovaWeapon_ResolveDirectWeaponHit(state,
                                           beam.owner_ship_slot,
                                           beam.target_ship_slot,
                                           beam.weapon_id,
                                           beam.impact_variant);
-        beam.impact_resolved = true;
       }
     }
     beam.lifetime_remainder += ticks;
