@@ -42,7 +42,7 @@ constexpr float kExtraValueWidth = 84.0F;
 // up and down targets meet but never overlap.
 constexpr float kExtraArrowHitPadX = 8.0F;
 constexpr float kExtraArrowHitPadY = 5.0F;
-constexpr float kExtraWindowHeight = 350.0F;
+constexpr float kExtraWindowHeight = 372.0F;
 constexpr float kExtraButtonWidth = 70.0F;
 constexpr float kExtraButtonHeight = 20.0F;
 constexpr float kExtraButtonMargin = 13.0F;
@@ -67,6 +67,7 @@ constexpr std::string_view kOutfitSlotBalanceKey = "outfit_slot_balance";
 constexpr std::string_view kOutfitPricesKey = "outfit_prices";
 constexpr std::string_view kCronEventsKey = "cron_events";
 constexpr std::string_view kParticleFogKey = "particle_fog";
+constexpr std::string_view kWeaponCadenceKey = "weapon_cadence";
 
 [[nodiscard]] std::string_view Trim(std::string_view text) {
   constexpr std::string_view kWhitespace = " \t\r\n";
@@ -211,6 +212,9 @@ void NovaExtraPrefs_Parse(std::istream &in,
     } else if (key == kParticleFogKey) {
       ParseBoolOrDefault(
           value, key, source, line_number, prefs.bugfixes.particle_fog);
+    } else if (key == kWeaponCadenceKey) {
+      ParseBoolOrDefault(
+          value, key, source, line_number, prefs.bugfixes.weapon_cadence);
     } else {
       NovaLog::Warn("extra prefs '{}': unknown key '{}' on line {}, ignoring",
                     std::string{source},
@@ -262,7 +266,8 @@ void NovaExtraPrefs_Write(std::ostream &out, const NovaExtraPrefs &prefs) {
       << kOutfitPricesKey << '=' << BoolFlag(prefs.bugfixes.outfit_prices)
       << '\n'
       << kCronEventsKey << '=' << BoolFlag(prefs.bugfixes.cron_events) << '\n'
-      << kParticleFogKey << '=' << BoolFlag(prefs.bugfixes.particle_fog)
+      << kParticleFogKey << '=' << BoolFlag(prefs.bugfixes.particle_fog) << '\n'
+      << kWeaponCadenceKey << '=' << BoolFlag(prefs.bugfixes.weapon_cadence)
       << '\n';
 }
 
@@ -347,6 +352,7 @@ enum class ExtraPrefsControl {
   bugfix_outfit_prices,
   bugfix_cron_events,
   bugfix_particle_fog,
+  bugfix_weapon_cadence,
 };
 
 // One row per bug-fix toggle, in dialog order. `safe` bundles the correctness
@@ -357,7 +363,7 @@ struct ExtraBugFixRow {
   const char *tooltip;
 };
 
-constexpr std::array<ExtraBugFixRow, 5> kExtraBugFixRows{{
+constexpr std::array<ExtraBugFixRow, 6> kExtraBugFixRows{{
     {ExtraPrefsControl::bugfix_safe,
      "Safe bug fixes",
      "Fixes for small issues that won't really affect your game. "
@@ -382,6 +388,12 @@ constexpr std::array<ExtraBugFixRow, 5> kExtraBugFixRows{{
      "Nova did not apply murk to particles such as weapon trails or impacts. "
      "This seems like an oversight / performance issue at the time. "
      "Turning this on/off is purely visual, no gameplay impact."},
+    {ExtraPrefsControl::bugfix_weapon_cadence,
+     "30 Hz weapon fire rates",
+     "Reload and beam duration follow the intended 30 frames per second, and "
+     "every extra copy of a weapon adds to its fire rate. Off keeps the "
+     "original's cap of one shot per frame, which made very fast weapons "
+     "ignore extra copies."},
 }};
 
 // Dialog-local rects for one scale row's stacked arrow images. The drawn art is
@@ -447,6 +459,8 @@ constexpr std::array<ExtraBugFixRow, 5> kExtraBugFixRows{{
     return &policy.cron_events;
   case ExtraPrefsControl::bugfix_particle_fog:
     return &policy.particle_fog;
+  case ExtraPrefsControl::bugfix_weapon_cadence:
+    return &policy.weapon_cadence;
   default:
     return nullptr;
   }

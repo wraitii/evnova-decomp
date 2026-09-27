@@ -300,15 +300,21 @@ calls. Normal state-0 homing remains continuous: it turns by
 `shot_age > elapsed_ticks * 15` gate.
 
 The beam hit queue (`Shot_UpdateBeamHitQueue` `0x0042f270`) is a related trap.
-The original has no already-resolved flag: it applies a contact's mass/energy
-damage in the same raw call that decrements the beam lifetime, so damage per
-shot is `damage-per-call * lifetime` (the Thunderhead Lance's 6 mass + 6 energy
-over a 10-tick life, wiki-confirmed at 180 dps against both shields and armor).
-The port consumes `elapsed_ticks` of lifetime per call, so it applies the hit
-once per normalized tick, in lock-step with the decrement. Applying the hit
-once per `NovaWeapon_TickBeamHitQueue` call instead makes the damage scale with
-the host render rate -- roughly 1.6x at 60/120 Hz since sub-tick calls would
-damage without consuming lifetime.
+The original has no already-resolved flag: each raw call first steps the beam
+lifetime (holding it at 0 through a live Decay tail) and then, while the
+lifetime is still `>= 0`, applies the contact's raw mass/energy damage. A
+Count-N beam therefore lands exactly N hits (`N + 15 - Falloff` with a Decay
+tail; the loader rewrites Falloff 0 to 16, which cancels the tail for every
+stock beam). The queueing call takes the first step. Beam lifetime counts raw
+calls while Reload counts normalized ticks -- known bug 62: the Thunderhead
+Lance (Reload 10, Count 10, 6 + 6) is on for 10 calls out of every 16,
+~179 dps at the 47.6 Hz maximum rate.
+
+The port applies the hit once per lifetime step, never once per
+`NovaWeapon_TickBeamHitQueue` call. With `BugFixPolicy::weapon_cadence` off
+the step is one logical 21 ms call; on, it is one normalized tick, so beam
+duration and Reload share the 30 Hz clock (the Lance becomes a continuous
+180 dps beam).
 
 There are also non-policy defects to keep distinct from cadence choices:
 

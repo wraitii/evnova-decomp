@@ -335,20 +335,24 @@ void NovaWeapon_TickNpcWeaponBanks(GameState &state,
 // (Shot_UpdateBeamHitQueue 0x0042F270) remain deferred. With a valid target
 // the beam endpoint tracks the target; otherwise firing_bearing_deg aims the
 // endpoint downrange at BeamLength + 32 (the original's beam reach constant).
+
+// lateness_ticks (port-only) is how long ago, on the beam's lifetime clock,
+// the shot was due within this call; it offsets the beam's later hits so
+// several beams fired in one call land them on their own grids.
 [[nodiscard]] bool NovaWeapon_QueueBeamHit(GameState &state,
                                            std::int16_t owner_ship_slot,
                                            std::int16_t target_ship_slot,
                                            std::int16_t weapon_id,
                                            std::int16_t forced_targeting = -1,
-                                           std::int16_t firing_bearing_deg = 0);
+                                           std::int16_t firing_bearing_deg = 0,
+                                           float lateness_ticks = 0.0F);
 
 // Ghidra Shot_UpdateBeamHitQueue (0x0042F270): advance beam lifetimes and
-// re-apply each in-contact beam's direct hit every simulation tick. The
+// re-apply each in-contact beam's direct hit on every lifetime step. The
 // original has no already-resolved flag, so a beam delivers mass/energy damage
 // (and impact effects) once per raw call in lock-step with its lifetime
-// decrement; the port replays that per normalized tick so the damage does not
-// scale with the host render rate (see the Thunderhead Lance's 180 dps in
-// NovaWeapon_TickBeamHitQueue).
+// decrement. The port steps the lifetime per raw 21 ms call, or per normalized
+// tick under BugFixPolicy::weapon_cadence, never per host frame.
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks);
 
 // Ghidra Shot_UpdateShotGuidance (0x00431530): per-frame projectile guidance.

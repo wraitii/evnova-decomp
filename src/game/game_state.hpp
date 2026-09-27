@@ -1053,13 +1053,14 @@ struct BeamHit {
   float target_x = 0.0F;
   float target_y = 0.0F;
   std::int16_t lifetime_ticks = -2; // < -1 means inactive in the original
-  // Port-only sub-tick accumulator. The original decrements lifetime_ticks by
-  // exactly 1 per fixed 30-tick/s TickSystems call, but this port drives the
-  // sim once per rendered frame with a fractional elapsed_ticks (0.5 at 60fps).
-  // lifetime_ticks stays the authoritative whole-tick count (matching the
-  // 0x22-byte record); this float absorbs the remainder so beams expire at the
-  // correct wall-clock time instead of stalling when truncated to int16.
+  // Port-only lifetime clock. The original decrements lifetime_ticks once per
+  // raw TickSystems call; the port advances this remainder by raw calls
+  // (BugFixPolicy::weapon_cadence off) or normalized ticks (on) and consumes
+  // it in whole steps, so lifetime_ticks stays the authoritative count. A
+  // freshly queued beam takes its first step in the call that queued it and
+  // starts the remainder at the shot's lateness within that call.
   float lifetime_remainder = 0.0F;
+  bool first_step_pending = false;
   // Ghidra record +0x12: decay-phase counter. Only incremented while the
   // beam's lifetime sits at 0 with a positive WeaponDef Decay value (Bible
   // "Decay"); holds the beam on screen until counter + beam_falloff >= 0x10

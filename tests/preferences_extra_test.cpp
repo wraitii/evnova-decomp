@@ -57,7 +57,8 @@ TEST_CASE("extra prefs parse the bug-fix flags and fall back on bad values") {
                         "outfit_slot_balance=FALSE\n"
                         "outfit_prices=yes\n"
                         "cron_events=nonsense\n"
-                        "particle_fog=1\n");
+                        "particle_fog=1\n"
+                        "weapon_cadence=0\n");
   NovaExtraPrefs prefs;
   game::NovaExtraPrefs_Parse(in, prefs, "<test>");
   REQUIRE_FALSE(prefs.bugfixes.safe);
@@ -65,6 +66,7 @@ TEST_CASE("extra prefs parse the bug-fix flags and fall back on bad values") {
   REQUIRE(prefs.bugfixes.outfit_prices);
   REQUIRE(prefs.bugfixes.cron_events); // invalid -> default kept
   REQUIRE(prefs.bugfixes.particle_fog);
+  REQUIRE_FALSE(prefs.bugfixes.weapon_cadence);
 }
 
 TEST_CASE("extra prefs write and reparse every field") {
@@ -76,6 +78,7 @@ TEST_CASE("extra prefs write and reparse every field") {
   prefs.bugfixes.outfit_prices = true;
   prefs.bugfixes.cron_events = false;
   prefs.bugfixes.particle_fog = true;
+  prefs.bugfixes.weapon_cadence = false;
   prefs.run_in_window = false;
 
   std::ostringstream out;
@@ -94,6 +97,7 @@ TEST_CASE("extra prefs write and reparse every field") {
   REQUIRE(parsed.bugfixes.outfit_prices == prefs.bugfixes.outfit_prices);
   REQUIRE(parsed.bugfixes.cron_events == prefs.bugfixes.cron_events);
   REQUIRE(parsed.bugfixes.particle_fog == prefs.bugfixes.particle_fog);
+  REQUIRE(parsed.bugfixes.weapon_cadence == prefs.bugfixes.weapon_cadence);
   REQUIRE(parsed.run_in_window == prefs.run_in_window);
 }
 

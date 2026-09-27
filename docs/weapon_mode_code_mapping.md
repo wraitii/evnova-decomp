@@ -150,9 +150,9 @@ Thunderhead mount the Thunderhead Lance (weapon 0xa6, ExitType 3): sh\x8an group
   `capability_flags 0x400`, not the owner's direct subordinate / own squad leader / player-squad mate, and the
   mission-critical dude `booty_flags 0x100` exclusions. It deliberately does **not** reject same-government non-squad
   ships, matching the original (unlike the projectile `Weapon_CanWeaponHitTarget` 0x00426ef0 gate).
-- The scan lacks the original's asteroid arm. It applies the resolved hit once per normalized tick (in lock-step with
-  the beam lifetime decrement), matching the original's once-per-raw-call hit while keeping the damage independent of
-  the host render rate; `shot_random_spread`
+- The scan lacks the original's asteroid arm. It applies the resolved hit once per lifetime step, after the decrement
+  (a raw 21 ms call, or a normalized tick under `BugFixPolicy::weapon_cadence`; see
+  `docs/frame_timing_and_cadence.md`); `shot_random_spread`
   (Bible Inaccuracy) is not added to the beam bearing per tick.
 - Twin-surface plotters `SWBeams_DrawKinkedBeam` 0x0047AC50 / `SWBeams_DrawBeamWithFlare` 0x0047AFD0 (the
   `Shot_DrawBeamHitQueueForSurface` 0x00438810 `field_0xec != 0` path) are not ported.

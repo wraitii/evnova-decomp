@@ -1114,7 +1114,8 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
                              std::int16_t target_ship_slot,
                              std::int16_t weapon_id,
                              std::int16_t forced_targeting,
-                             std::int16_t firing_bearing_deg) {
+                             std::int16_t firing_bearing_deg,
+                             float lateness_ticks) {
   if (owner_ship_slot < 0 ||
       owner_ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips) ||
       weapon_id < 0 ||
@@ -1224,6 +1225,8 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
     }
     // Shot_QueueBeamHit (0x00427a90) stores the raw Count.
     beam.lifetime_ticks = weapon->lifetime_ticks;
+    beam.lifetime_remainder = std::max(0.0F, lateness_ticks);
+    beam.first_step_pending = true;
     beam.animation_counter = 0;
     beam.weapon_id = weapon_id;
     beam.owner_ship_slot = owner_ship_slot;
@@ -1286,13 +1289,10 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
             beam.turret_quadrant);
       }
     }
-    // Shot_UpdateBeamHitQueue (0x0042f270) resolves the collision once per raw
-    // simulation call and decrements the beam lifetime in that same call, so
-    // damage per shot is damage-per-call * lifetime. The port consumes
-    // `whole_ticks` normalized ticks per call, so the hit must be applied once
-    // per tick (recorded here, applied in the lifetime loop below), not once
-    // per call: at a 60/120 Hz host cadence a once-per-call hit multiplies the
-    // damage, shredding a Thunderhead Lance's 180 dps into several hundred.
+    // Shot_UpdateBeamHitQueue (0x0042f270) resolves the collision in the same
+    // call that decrements the beam lifetime, so damage per shot is
+    // damage-per-step * lifetime. The hit is recorded here and applied once
+    // per lifetime step in the loop below, never once per port call.
     std::int16_t point_defense_shot_slot = -1;
     std::int16_t direct_hit_slot = -1;
     bool direct_suppress_retarget = false;
@@ -1434,13 +1434,24 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
         direct_hit_slot = beam.target_ship_slot;
       }
     }
-    beam.lifetime_remainder += ticks;
-    const std::int16_t whole_ticks =
-        static_cast<std::int16_t>(beam.lifetime_remainder);
-    if (whole_ticks <= 0) {
-      continue;
+    // Shot_UpdateBeamHitQueue steps the lifetime once per raw call, while
+    // Reload is in normalized ticks (known bug 62). With
+    // BugFixPolicy::weapon_cadence the lifetime uses the same 30 Hz clock as
+    // Reload; otherwise it replays the original's 21 ms calls. The call that
+    // queued a beam always takes its first step, as in the original, and the
+    // remainder then carries the shot's lateness.
+    std::int16_t whole_ticks = 1;
+    if (beam.first_step_pending) {
+      beam.first_step_pending = false;
+    } else {
+      beam.lifetime_remainder +=
+          state.bugfixes.weapon_cadence ? ticks : ticks / kOriginalRawCallTicks;
+      whole_ticks = static_cast<std::int16_t>(beam.lifetime_remainder);
+      if (whole_ticks <= 0) {
+        continue;
+      }
+      beam.lifetime_remainder -= static_cast<float>(whole_ticks);
     }
-    beam.lifetime_remainder -= static_cast<float>(whole_ticks);
     const Weapon *weapon =
         state.scenario.Weapon(static_cast<std::int16_t>(beam.weapon_id + 0x80));
     auto apply_hit = [&]() {

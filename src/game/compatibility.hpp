@@ -27,6 +27,11 @@ struct BugFixPolicy {
   bool cron_events = true;
   // System murk fades SWParticle weapon sparks and debris.
   bool particle_fog = true;
+  // Weapon reload and beam Count both run on the 30 Hz design clock: carried
+  // cooldown lets a bank fire several shots per call, so every mount adds its
+  // share of the fire rate (known bugs 62 and 92). Off reproduces the
+  // original's once-per-call fire cap and raw-call beam lifetime.
+  bool weapon_cadence = true;
 };
 
 } // namespace game

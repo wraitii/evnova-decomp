@@ -1340,8 +1340,8 @@ TEST_CASE("queued beam hits expire at sub-tick frame rates", "[weapon][npc]") {
     NovaWeapon_TickBeamHitQueue(state, 0.5F);
     ++frames;
   }
-  // 13 ticks of life at 0.5 ticks/frame: lifetime reaches 0 after 26 frames
-  // and the slot frees on the next whole-tick step (~frame 28).
+  // 13 ticks of life at 0.5 ticks/frame: the queueing frame takes the first
+  // step, the other 13 take two frames each, so the slot frees at frame 27.
   CHECK(frames <= 30);
   CHECK(beam.lifetime_ticks == -2); // reset to the inactive sentinel
 }
@@ -1547,6 +1547,48 @@ TEST_CASE("an in-contact beam re-applies its damage every tick",
   CHECK(split_target.armor_points == Catch::Approx(90.0F));
 }
 
+namespace {
+
+// A mode-0 beam owner at slot 0 with an unshielded target 60 px ahead.
+Ship &ArmBeamContact(GameState &state, std::int16_t count) {
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 0;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = count;
+  beam.beam_falloff = 16;
+  beam.mass_damage = 1;
+  beam.energy_damage = 0;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F;
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.shield_points = -1.0F;
+  target.armor_points = 1000.0F;
+  target.pos_x = 100.0F;
+  target.pos_y = 140.0F;
+  return target;
+}
+
+int HitsTaken(const Ship &target) {
+  return static_cast<int>(std::lround(1000.0F - target.armor_points));
+}
+
+} // namespace
+
 // Ghidra Shot_UpdateBeamHitQueue (0x0042f270) decrements the lifetime before
 // the collision block, which requires lifetime >= 0: a Count-N beam lands N
 // hits, and a live Decay tail (lifetime held at 0 while
@@ -1556,42 +1598,14 @@ TEST_CASE("a beam lands exactly Count hits plus its decay tail",
   auto hits_for =
       [](std::int16_t count, std::int16_t decay, std::int16_t falloff) {
         GameState state;
-        state.scenario.weapons.resize(1);
-        Weapon &beam = state.scenario.weapons[0];
-        beam.weapon_mode_code = 0;
-        beam.beam_length_px = 100;
-        beam.lifetime_ticks = count;
-        beam.damage_decay_interval_ticks = decay;
-        beam.beam_falloff = falloff;
-        beam.mass_damage = 1;
-        beam.energy_damage = 0;
-        state.scenario.ships.resize(1);
-        state.player.current_system_id = 0;
-
-        Ship &owner = state.ShipAt(0);
-        owner.is_active = true;
-        owner.ship_instance_id = 0;
-        owner.ship_class_id = 0;
-        owner.current_system_id = 0;
-        owner.pos_x = 100.0F;
-        owner.pos_y = 200.0F;
-        owner.heading = 0.0F;
-
-        Ship &target = state.ShipAt(1);
-        target.is_active = true;
-        target.ship_instance_id = 1;
-        target.ship_class_id = 0;
-        target.current_system_id = 0;
-        target.shield_points = -1.0F;
-        target.armor_points = 1000.0F;
-        target.pos_x = 100.0F;
-        target.pos_y = 140.0F;
-
+        Ship &target = ArmBeamContact(state, count);
+        state.scenario.weapons[0].damage_decay_interval_ticks = decay;
+        state.scenario.weapons[0].beam_falloff = falloff;
         REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
         for (int tick = 0; tick < 40; ++tick) {
           NovaWeapon_TickBeamHitQueue(state, 1.0F);
         }
-        return static_cast<int>(std::lround(1000.0F - target.armor_points));
+        return HitsTaken(target);
       };
 
   CHECK(hits_for(1, 0, 16) == 1);
@@ -1600,6 +1614,47 @@ TEST_CASE("a beam lands exactly Count hits plus its decay tail",
   // Falloff 16 (the loader's rewrite of 0) cancels the tail entirely.
   CHECK(hits_for(3, 5, 16) == 3);
   CHECK(hits_for(3, 5, 12) == 3 + (15 - 12));
+}
+
+// Known bug 62: the original steps beam lifetime once per raw 21 ms call while
+// Reload runs in normalized ticks. BugFixPolicy::weapon_cadence moves the
+// lifetime onto the 30 Hz clock; off replays the raw calls. Either way the
+// queueing call takes the first step and the beam lands exactly Count hits.
+TEST_CASE("beam lifetime follows raw calls or the 30 Hz clock by policy",
+          "[weapon][beam]") {
+  constexpr float kRawCallTicks = 21.0F * 0.03F;
+  for (const bool cadence : {false, true}) {
+    GameState state;
+    state.bugfixes.weapon_cadence = cadence;
+    Ship &target = ArmBeamContact(state, 10);
+    REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+    NovaWeapon_TickBeamHitQueue(state, kRawCallTicks);
+    CHECK(HitsTaken(target) == 1);
+    for (int call = 1; call < 10; ++call) {
+      NovaWeapon_TickBeamHitQueue(state, kRawCallTicks);
+    }
+    // Ten raw calls: the original's whole life, but only 1 + 9 * 0.63 ticks.
+    CHECK(HitsTaken(target) == (cadence ? 1 + 5 : 10));
+    for (int call = 10; call < 30; ++call) {
+      NovaWeapon_TickBeamHitQueue(state, kRawCallTicks);
+    }
+    CHECK(HitsTaken(target) == 10);
+  }
+}
+
+// Two beams queued in one call land their first hits together, then keep
+// their own grids: the later-due beam's lateness brings its next hit forward.
+TEST_CASE("beam lateness offsets its later hits", "[weapon][beam]") {
+  GameState state;
+  Ship &target = ArmBeamContact(state, 3);
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0, 0.0F));
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0, 0.5F));
+  NovaWeapon_TickBeamHitQueue(state, 0.63F);
+  CHECK(HitsTaken(target) == 2);
+  NovaWeapon_TickBeamHitQueue(state, 0.63F); // 0.63 vs 1.13
+  CHECK(HitsTaken(target) == 3);
+  NovaWeapon_TickBeamHitQueue(state, 0.63F); // 1.26 vs 0.76
+  CHECK(HitsTaken(target) == 4);
 }
 
 // Ghidra Shot_UpdateBeamHitQueue (0x0042f270): the incidental mode-0 sweep
