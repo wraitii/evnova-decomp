@@ -185,21 +185,25 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
     bool fired = false;
     if (mode == -1 || mode == 1 || mode == 5 || mode == 6) {
       // Straight projectile (-1/6), homing (1), freefall (5).
-      fired = NovaWeapon_SpawnProjectile(state,
-                                         0,
-                                         target_slot,
-                                         weapon_bank,
-                                         /*spawn_without_owner=*/false,
-                                         /*apply_random_spread=*/true) >= 0;
+      static_cast<void>(
+          NovaWeapon_SpawnProjectile(state,
+                                     0,
+                                     target_slot,
+                                     weapon_bank,
+                                     /*spawn_without_owner=*/false,
+                                     /*apply_random_spread=*/true));
+      fired = true;
     } else if (mode == 0) {
       // Fixed beam along the current heading (the original queues the record
       // with the live target slot; the endpoint stays heading-driven).
-      fired = NovaWeapon_QueueBeamHit(state,
-                                      0,
-                                      target_slot,
-                                      weapon_bank,
-                                      /*forced_targeting=*/-1,
-                                      static_cast<std::int16_t>(heading_deg));
+      static_cast<void>(
+          NovaWeapon_QueueBeamHit(state,
+                                  0,
+                                  target_slot,
+                                  weapon_bank,
+                                  /*forced_targeting=*/-1,
+                                  static_cast<std::int16_t>(heading_deg)));
+      fired = true;
     } else if (mode == 3 || mode == 4) {
       // Turreted beam (3) / turreted projectile (4): fire only while the
       // target is NOT inside a turret blind-spot sector.
@@ -216,15 +220,17 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                 static_cast<std::int16_t>(heading_deg),
                 bearing)) {
           if (mode == 3) {
-            fired = NovaWeapon_QueueBeamHit(state,
-                                            0,
-                                            target_slot,
-                                            weapon_bank,
-                                            /*forced_targeting=*/-1,
-                                            bearing);
+            static_cast<void>(NovaWeapon_QueueBeamHit(state,
+                                                      0,
+                                                      target_slot,
+                                                      weapon_bank,
+                                                      /*forced_targeting=*/-1,
+                                                      bearing));
+            fired = true;
           } else {
-            fired = NovaWeapon_SpawnProjectile(
-                        state, 0, target_slot, weapon_bank, false, true) >= 0;
+            static_cast<void>(NovaWeapon_SpawnProjectile(
+                state, 0, target_slot, weapon_bank, false, true));
+            fired = true;
           }
         }
       }
@@ -242,15 +248,18 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                         : heading_deg;
         const float delta = std::abs(std::remainder(tb - reference, 360.0F));
         if (delta < 46.0F) {
-          fired = NovaWeapon_SpawnProjectile(
-                      state, 0, target_slot, weapon_bank, false, true) >= 0;
+          static_cast<void>(NovaWeapon_SpawnProjectile(
+              state, 0, target_slot, weapon_bank, false, true));
+          fired = true;
         } else if (mode == 7) {
-          fired = NovaWeapon_SpawnProjectile(
-                      state, 0, -1, weapon_bank, false, true) >= 0;
+          static_cast<void>(NovaWeapon_SpawnProjectile(
+              state, 0, -1, weapon_bank, false, true));
+          fired = true;
         }
       } else if (mode == 7) {
-        fired = NovaWeapon_SpawnProjectile(
-                    state, 0, -1, weapon_bank, false, true) >= 0;
+        static_cast<void>(
+            NovaWeapon_SpawnProjectile(state, 0, -1, weapon_bank, false, true));
+        fired = true;
       }
     } else if (mode == 99) {
       // Carrier-bay launch (Weapon_SpawnShipFromCarrierBayWeapon): the port
@@ -258,6 +267,9 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
       // TODO(decomp(0x00455150)) skipped: launch-bay ship spawn.
     }
 
+    // The original counts every dispatched shot, whether or not
+    // Shot_QueueBeamHit found a free record or Shot_SpawnShotFromWeapon
+    // spawned, so a full queue still charges the cooldown and ammo.
     if (!fired) {
       continue;
     }
@@ -333,20 +345,21 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
 
   // Bank cooldown: flags_primary 0x40 weapons reload for the fixed interval;
   // the rest scale by the volley and the mount count (a second identical
-  // weapon doubles the fire rate).
+  // weapon doubles the fire rate). There is no floor: Reload 0 refires on the
+  // next call.
   if ((w->flags & 0x0040U) == 0U) {
     const int mount_count = std::max(1, static_cast<int>(firing_bank.mounted));
-    firing_bank.cooldown =
-        static_cast<float>(volley_fired) *
-        static_cast<float>(std::max(1, static_cast<int>(w->reload_ticks))) /
-        static_cast<float>(mount_count);
+    firing_bank.cooldown = static_cast<float>(volley_fired) *
+                           (static_cast<float>(w->reload_ticks) /
+                            static_cast<float>(mount_count));
   } else {
     firing_bank.cooldown = static_cast<float>(w->reload_ticks);
   }
 
-  // flags_tertiary 0x20 (linked fire): every other bank's cooldown rises to
-  // at least this bank's cooldown + 2.0 ticks (_DAT_00575698), so bank groups
-  // fire in sequence instead of simultaneously.
+  // flags_tertiary 0x20 (exclusive weapon, Bible Flags3): every other bank's
+  // cooldown rises to at least this bank's cooldown + 2.0 ticks
+  // (_DAT_00575698), so no other weapon fires while this one fires or
+  // reloads.
   if ((w->flags_tertiary & 0x0020U) != 0U) {
     const float floor = firing_bank.cooldown + 2.0F;
     for (std::size_t b = 0; b < kWeaponBankCount; ++b) {
@@ -811,14 +824,15 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     bool fired = false;
     if (mode == 0) {
       // Beam: no arc gate (original's mode -1/0/6 block fires regardless).
-      fired = NovaWeapon_QueueBeamHit(
+      static_cast<void>(NovaWeapon_QueueBeamHit(
           state,
           ship.ship_instance_id,
           ship.primary_target_ship_slot,
           bank,
           -1,
           static_cast<std::int16_t>(ship.heading *
-                                    (180.0F / 3.14159265358979323846F)));
+                                    (180.0F / 3.14159265358979323846F))));
+      fired = true;
     } else if (mode == 3 || mode == 4) {
       // Turreted beam (3) / turreted unguided (4): fire only when the target
       // is NOT in the fixed arc (the turret's relief role) but within reach.
@@ -830,20 +844,23 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
         if (!blind_spot(tb) && std::abs(ship.pos_x - target->pos_x) < reach &&
             std::abs(ship.pos_y - target->pos_y) < reach) {
           if (mode == 3) {
-            fired = NovaWeapon_QueueBeamHit(
+            static_cast<void>(NovaWeapon_QueueBeamHit(
                 state,
                 ship.ship_instance_id,
                 ship.primary_target_ship_slot,
                 bank,
                 -1,
-                static_cast<std::int16_t>(std::lround(tb)));
+                static_cast<std::int16_t>(std::lround(tb))));
+            fired = true;
           } else {
-            fired = NovaWeapon_SpawnProjectile(state,
-                                               ship.ship_instance_id,
-                                               ship.primary_target_ship_slot,
-                                               bank,
-                                               false,
-                                               true) >= 0;
+            static_cast<void>(
+                NovaWeapon_SpawnProjectile(state,
+                                           ship.ship_instance_id,
+                                           ship.primary_target_ship_slot,
+                                           bank,
+                                           false,
+                                           true));
+            fired = true;
           }
         }
       }
@@ -862,37 +879,44 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
         if (delta < 46.0F &&
             std::abs(ship.pos_x - target->pos_x) < projectile_turret_reach &&
             std::abs(ship.pos_y - target->pos_y) < projectile_turret_reach) {
-          fired = NovaWeapon_SpawnProjectile(state,
-                                             ship.ship_instance_id,
-                                             ship.primary_target_ship_slot,
-                                             bank,
-                                             false,
-                                             true) >= 0;
-        }
-      } else if (mode == 7) {
-        // Blind fire: mode 7 with no primary target launches a forward shot
-        // with target -1 (Weapon_FireShipWeapons 0x00414550).
-        fired = NovaWeapon_SpawnProjectile(
-                    state, ship.ship_instance_id, -1, bank, false, true) >= 0;
-      }
-    } else if (mode == -1 || mode == 6) {
-      // Straight projectile (-1/6): fire toward the primary target slot,
-      // which may be -1 for an unguided shot.
-      fired = NovaWeapon_SpawnProjectile(state,
+          static_cast<void>(
+              NovaWeapon_SpawnProjectile(state,
                                          ship.ship_instance_id,
                                          ship.primary_target_ship_slot,
                                          bank,
                                          false,
-                                         true) >= 0;
+                                         true));
+          fired = true;
+        }
+      } else if (mode == 7) {
+        // Blind fire: mode 7 with no primary target launches a forward shot
+        // with target -1 (Weapon_FireShipWeapons 0x00414550).
+        static_cast<void>(NovaWeapon_SpawnProjectile(
+            state, ship.ship_instance_id, -1, bank, false, true));
+        fired = true;
+      }
+    } else if (mode == -1 || mode == 6) {
+      // Straight projectile (-1/6): fire toward the primary target slot,
+      // which may be -1 for an unguided shot.
+      static_cast<void>(
+          NovaWeapon_SpawnProjectile(state,
+                                     ship.ship_instance_id,
+                                     ship.primary_target_ship_slot,
+                                     bank,
+                                     false,
+                                     true));
+      fired = true;
     } else if (mode == 1) {
       // Homing requires a live primary target.
       if (has_target) {
-        fired = NovaWeapon_SpawnProjectile(state,
-                                           ship.ship_instance_id,
-                                           ship.primary_target_ship_slot,
-                                           bank,
-                                           false,
-                                           true) >= 0;
+        static_cast<void>(
+            NovaWeapon_SpawnProjectile(state,
+                                       ship.ship_instance_id,
+                                       ship.primary_target_ship_slot,
+                                       bank,
+                                       false,
+                                       true));
+        fired = true;
       }
     }
     // Modes 5 (freefall/mine), 9 (point defense) and 99 (carrier bay) are not
@@ -916,6 +940,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
             0.0F, ship.fuel_points - static_cast<float>(-cost - 1000) * 0.1F);
       }
     }
+    // Counted whether or not the queue/pool had room (see the player path).
     if (!fired) {
       continue;
     }
@@ -965,11 +990,10 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   const int mount_count = std::max(1, static_cast<int>(firing_bank.mounted));
   float fire_cooldown;
   if ((weapon->flags & 0x0040U) == 0) {
-    // Original: local_1c = sVar9 * (speed_scalar / mount_count).
-    fire_cooldown = static_cast<float>(
-                        std::max(1, static_cast<int>(weapon->reload_ticks))) *
-                    static_cast<float>(std::max(1, shots_fired)) /
-                    static_cast<float>(mount_count);
+    // Original: local_1c = sVar9 * (speed_scalar / mount_count), no floor.
+    fire_cooldown = static_cast<float>(shots_fired) *
+                    (static_cast<float>(weapon->reload_ticks) /
+                     static_cast<float>(mount_count));
   } else {
     fire_cooldown = static_cast<float>(weapon->reload_ticks);
   }
@@ -1031,9 +1055,10 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     }
   }
   firing_bank.cooldown = fire_cooldown;
-  // flags_tertiary 0x20 (linked fire): raise every other bank's cooldown to
-  // at least this bank's + 2.0 ticks (FLOAT_00575040), so a bank group fires
-  // in sequence rather than simultaneously. The original scans all 256 banks.
+  // flags_tertiary 0x20 (exclusive weapon, Bible Flags3): raise every other
+  // bank's cooldown to at least this bank's + 2.0 ticks (FLOAT_00575040), so no
+  // other weapon fires while this one fires or reloads. The original scans all
+  // 256 banks.
   if ((weapon->flags_tertiary & 0x0020U) != 0U) {
     const float floor = firing_bank.cooldown + 2.0F;
     for (std::size_t b = 0; b < kWeaponBankCount; ++b) {

@@ -748,7 +748,8 @@ TEST_CASE("NPC kickback applies a rearward clamped impulse", "[weapon][npc]") {
   CHECK(npc.vel_y == Catch::Approx(10.0F));
 }
 
-TEST_CASE("NPC linked fire raises every other bank cooldown", "[weapon][npc]") {
+TEST_CASE("NPC exclusive weapon raises every other bank cooldown",
+          "[weapon][npc]") {
   GameState state;
   SetUpDirectFirePair(state);
   Ship &npc = state.ShipAt(1);
@@ -1544,6 +1545,61 @@ TEST_CASE("an in-contact beam re-applies its damage every tick",
     NovaWeapon_TickBeamHitQueue(split, 0.25F);
   }
   CHECK(split_target.armor_points == Catch::Approx(90.0F));
+}
+
+// Ghidra Shot_UpdateBeamHitQueue (0x0042f270) decrements the lifetime before
+// the collision block, which requires lifetime >= 0: a Count-N beam lands N
+// hits, and a live Decay tail (lifetime held at 0 while
+// animation_counter + Falloff < 16) adds 15 - Falloff more.
+TEST_CASE("a beam lands exactly Count hits plus its decay tail",
+          "[weapon][beam]") {
+  auto hits_for =
+      [](std::int16_t count, std::int16_t decay, std::int16_t falloff) {
+        GameState state;
+        state.scenario.weapons.resize(1);
+        Weapon &beam = state.scenario.weapons[0];
+        beam.weapon_mode_code = 0;
+        beam.beam_length_px = 100;
+        beam.lifetime_ticks = count;
+        beam.damage_decay_interval_ticks = decay;
+        beam.beam_falloff = falloff;
+        beam.mass_damage = 1;
+        beam.energy_damage = 0;
+        state.scenario.ships.resize(1);
+        state.player.current_system_id = 0;
+
+        Ship &owner = state.ShipAt(0);
+        owner.is_active = true;
+        owner.ship_instance_id = 0;
+        owner.ship_class_id = 0;
+        owner.current_system_id = 0;
+        owner.pos_x = 100.0F;
+        owner.pos_y = 200.0F;
+        owner.heading = 0.0F;
+
+        Ship &target = state.ShipAt(1);
+        target.is_active = true;
+        target.ship_instance_id = 1;
+        target.ship_class_id = 0;
+        target.current_system_id = 0;
+        target.shield_points = -1.0F;
+        target.armor_points = 1000.0F;
+        target.pos_x = 100.0F;
+        target.pos_y = 140.0F;
+
+        REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+        for (int tick = 0; tick < 40; ++tick) {
+          NovaWeapon_TickBeamHitQueue(state, 1.0F);
+        }
+        return static_cast<int>(std::lround(1000.0F - target.armor_points));
+      };
+
+  CHECK(hits_for(1, 0, 16) == 1);
+  CHECK(hits_for(10, 0, 16) == 10);
+  CHECK(hits_for(0, 0, 16) == 0);
+  // Falloff 16 (the loader's rewrite of 0) cancels the tail entirely.
+  CHECK(hits_for(3, 5, 16) == 3);
+  CHECK(hits_for(3, 5, 12) == 3 + (15 - 12));
 }
 
 // Ghidra Shot_UpdateBeamHitQueue (0x0042f270): the incidental mode-0 sweep

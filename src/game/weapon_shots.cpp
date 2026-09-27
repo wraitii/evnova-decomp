@@ -421,9 +421,11 @@ int NovaWeapon_SpawnProjectile(GameState &state,
     apply_spread();
   }
 
-  shot.life_ticks_remaining =
-      std::max(1.0F, static_cast<float>(w->lifetime_ticks));
-  shot.life_frames = static_cast<int>(std::ceil(shot.life_ticks_remaining));
+  // Shot_QueueShot / Shot_SpawnShotFromWeapon store the raw Count; a Count
+  // <= 0 shot expires on its first Shot_HandleShot pass.
+  shot.life_ticks_remaining = static_cast<float>(w->lifetime_ticks);
+  shot.life_frames =
+      static_cast<int>(std::ceil(std::max(0.0F, shot.life_ticks_remaining)));
   shot.collision_radius_px = 2.0F;
   // @port 0x0046C2F0 100%
   // Weapon_GetShotImpactVariant (0x0046c2f0): Flags2 bit 0x1000 makes a
@@ -555,9 +557,11 @@ int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
   shot.impact_variant = (w->flags_secondary & 0x1000U) != 0U
                             ? static_cast<std::int8_t>(1)
                             : static_cast<std::int8_t>(0);
-  shot.life_ticks_remaining =
-      std::max(1.0F, static_cast<float>(w->lifetime_ticks));
-  shot.life_frames = static_cast<int>(std::ceil(shot.life_ticks_remaining));
+  // Shot_QueueShot / Shot_SpawnShotFromWeapon store the raw Count; a Count
+  // <= 0 shot expires on its first Shot_HandleShot pass.
+  shot.life_ticks_remaining = static_cast<float>(w->lifetime_ticks);
+  shot.life_frames =
+      static_cast<int>(std::ceil(std::max(0.0F, shot.life_ticks_remaining)));
   shot.collision_radius_px = 2.0F;
   shot.damage_decay_elapsed_ticks =
       w->damage_decay_interval_ticks < 1 ? -1.0F : 0.0F;
@@ -1218,7 +1222,8 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
       beam.target_x = beam.source_x + std::sin(rad) * reach;
       beam.target_y = beam.source_y - std::cos(rad) * reach;
     }
-    beam.lifetime_ticks = std::max<std::int16_t>(1, weapon->lifetime_ticks);
+    // Shot_QueueBeamHit (0x00427a90) stores the raw Count.
+    beam.lifetime_ticks = weapon->lifetime_ticks;
     beam.animation_counter = 0;
     beam.weapon_id = weapon_id;
     beam.owner_ship_slot = owner_ship_slot;
@@ -1438,10 +1443,7 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
     beam.lifetime_remainder -= static_cast<float>(whole_ticks);
     const Weapon *weapon =
         state.scenario.Weapon(static_cast<std::int16_t>(beam.weapon_id + 0x80));
-    for (std::int16_t tick = 0; tick < whole_ticks && beam.lifetime_ticks >= 0;
-         ++tick) {
-      // One simulation call's worth of the collision arm: the original applies
-      // the resolved hit in the same call that decrements the lifetime.
+    auto apply_hit = [&]() {
       if (point_defense_shot_slot >= 0) {
         const auto shot_slot =
             static_cast<std::size_t>(point_defense_shot_slot);
@@ -1470,20 +1472,32 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
                                             direct_suppress_retarget);
         }
       }
+    };
+    for (std::int16_t tick = 0; tick < whole_ticks && beam.lifetime_ticks >= 0;
+         ++tick) {
       // Decay phase (Bible "Decay"): once the lifetime reaches 0, a beam with
       // a positive Decay value holds on screen while
       // animation_counter + falloff < 0x10, counting animation_counter up;
       // the renderer shrinks the corona / fades the beam with it. The
       // original only ever increments animation_counter in this branch.
+      bool hold = false;
       if (beam.lifetime_ticks == 0 && weapon != nullptr &&
           weapon->damage_decay_interval_ticks > 0) {
         beam.animation_counter =
             static_cast<std::int16_t>(beam.animation_counter + 1);
-        if (beam.animation_counter + weapon->beam_falloff < 0x10) {
-          continue;
-        }
+        hold = beam.animation_counter + weapon->beam_falloff < 0x10;
       }
-      beam.lifetime_ticks = static_cast<std::int16_t>(beam.lifetime_ticks - 1);
+      if (!hold) {
+        beam.lifetime_ticks =
+            static_cast<std::int16_t>(beam.lifetime_ticks - 1);
+      }
+      // Shot_UpdateBeamHitQueue resolves the collision after the decrement
+      // and only while the lifetime is still >= 0, so a Count-N beam lands N
+      // hits (plus 15 - Falloff with a live Decay tail), not N + 1.
+      if (beam.lifetime_ticks < 0) {
+        break;
+      }
+      apply_hit();
     }
     if (beam.lifetime_ticks < 0) {
       beam = BeamHit{};
