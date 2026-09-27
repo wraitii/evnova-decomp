@@ -123,6 +123,7 @@ Per the discord.
 * **System-summoned fleets always arrive after the player**, via hyperspace/hypergate, rather than being present beforehand. 
 * **Scan-triggered mission failure requires the scanning government to have a smuggling penalty ≥1 as well as a matching scan mask.** 
 * (harcoded to avoid mod weirdness) **The combat-rating system's base unit is ship class 0's Strength** (the Shuttle, 2), read unindexed by the NPC fire-cooldown ladder (`0x00414ea8`), the afterburner roll (`0x0046b308`), and combat-odds player scaling (`0x0041343c`). The port pins 2 (`GameState::kCombatRatingBaseStrength`) so a mod editing class 0 cannot rescale the rating system. (The afterburner divides by this base, not the ship's own Strength; the port previously misread that.) 
+* **A foreign hostile government judges the player by the local system's reputation, not its own.** NPC target acquisition (`Ship_AcquirePrimaryTargetForShip` `0x0040e020`) flags the player when the ship's government is hostile to the system owner and the player's *local* reputation exceeds the *ship* government's CrimeTol; the ship government's own standing with the player is never read. An Auroran warship in Federation space therefore attacks a player the Federation likes (rep > 6) even at maximum Aurora reputation, while a Federation criminal is left alone.
 
 ## Datafile bugs
 
