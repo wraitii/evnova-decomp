@@ -473,14 +473,31 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   publish_probe_controls();
 
   const auto run_mission_offer = [&]() {
-    return Mission_RunAvailLocOffers(
-        state,
-        1,
-        static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
-        [&](std::int16_t mission_def) {
+    // Mission_RunAvailLocOffers stamps its recheck deadline from the time
+    // passed here. The original samples NovaTime_GetTickCount60Hz after the
+    // offer window closes, so shift that deadline by the modal's elapsed
+    // ticks before the Bar loop resumes.
+    const std::uint32_t started_ms =
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
+    const std::uint32_t started_tick = static_cast<std::uint32_t>(
+        static_cast<std::uint64_t>(started_ms) * 60 / 1000);
+    const bool offered = Mission_RunAvailLocOffers(
+        state, 1, started_ms, [&](std::int16_t mission_def) {
           return NovaMission_RunOfferWindow(
               platform, audio, state, mission_def, draw_bar_contents);
         });
+    if (offered) {
+      const std::uint32_t finished_tick = static_cast<std::uint32_t>(
+          static_cast<std::uint64_t>(platform.gameplay_ticks_ms()) * 60 / 1000);
+      const std::uint32_t delay_ticks =
+          static_cast<std::uint32_t>(
+              state.mission_interaction_recheck_tick_60hz) -
+          started_tick;
+      state.tick_60hz = finished_tick;
+      state.mission_interaction_recheck_tick_60hz =
+          static_cast<std::int32_t>(finished_tick + delay_ticks);
+    }
+    return offered;
   };
 
   // Ghidra 0x0047c8e0 sets g_misn_list_page_group = 1 and schedules action 6
