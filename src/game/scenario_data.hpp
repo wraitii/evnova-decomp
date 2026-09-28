@@ -876,6 +876,12 @@ struct Weapon {
   std::array<std::int16_t, 4> jam_vuln{}; // JamVuln1-4 (resource +0x5e..)
 };
 
+// g_stellar_defs holds Max Stellar Objects (2048) slots, indexed by resource
+// id minus 0x80. NovaData_LoadScenarioResourceTables (0x004bd3c0) scans index
+// < 0x800 and stops once every sp\x9ab record is loaded; the shipped ids run
+// to 0x58c (Nirvana), so the table must not stop at 0x580.
+inline constexpr std::size_t kStellarTableSize = 0x800;
+
 // Ghidra StellarDef (g_stellar_defs, entries indexed by stellar id minus
 // 0x80). One planet/station/object in a system.
 struct Stellar {

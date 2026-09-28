@@ -1663,7 +1663,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
   ships.assign(0x300, {});
   outfits.assign(0x200, {});
   weapons.assign(kWeaponBankCount, {});
-  stellars.assign(0x600, {});
+  stellars.assign(kStellarTableSize, {});
   systems.assign(0x800, {});
   // GovernmentDef table is capped at 0x100 entries by the original (loop bound
   // sVar21 < 0x100); federal classes are indexed by government id minus 0x80.
@@ -1943,13 +1943,19 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
   // Apply the loader's ship-section default-loadout FreeMass fold once the
   // outfit and weapon tables it resolves against are loaded (0x004bd3c0).
   FoldShipDefaultLoadoutMass(*this);
-  for (std::int32_t id = 0x80; id <= 0x57f; ++id) {
-    if (const auto res = NovaResource_LoadNamed(
-            scenario::kStellarResourceType, static_cast<std::uint16_t>(id))) {
+  // The original scans the sp\x9ab id space by index with an early-out once
+  // every ResourceData_CountEntries record is loaded and an index < 0x800
+  // safety bound (NovaData_LoadScenarioResourceTables 0x004bd3c0). Iterating
+  // the whole table is equivalent and keeps the high shipped ids
+  // (0x580..0x58c: the hypergates, UHP-1001 and Nirvana) reachable.
+  for (std::size_t index = 0; index < kStellarTableSize; ++index) {
+    if (const auto res =
+            NovaResource_LoadNamed(scenario::kStellarResourceType,
+                                   static_cast<std::uint16_t>(index + 0x80))) {
       game::Stellar st = DecodeStellar(res->bytes);
       st.name = res->name;
       st.is_defined = true;
-      stellars[static_cast<std::size_t>(id) - 0x80] = std::move(st);
+      stellars[index] = std::move(st);
       ++loaded_stellars;
     }
   }

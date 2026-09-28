@@ -885,6 +885,46 @@ TEST_CASE("system nav_defs identify the owned space stellars",
   CHECK(data.Stellar(0x57c)->link_a_id == 1);
 }
 
+// Regression: the sp\x9ab loader must scan the whole g_stellar_defs table
+// (Max Stellar Objects 2048), not stop at 0x580. The shipped data carries 13
+// resources above 0x57f -- every hypergate plus UHP-1001 and Nirvana -- which
+// previously decoded as zeroed Stellars at (0,0). In the Aurora system the
+// unloaded HG-Aurora 0x586 overlapped the real planet Aurora 0x152 at (0,0)
+// and rendered as a grey radar disc.
+TEST_CASE("high-id stellars load across the whole table",
+          "[scenario][stellar]") {
+  game::ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  CHECK(data.stellars.size() == game::kStellarTableSize);
+
+  const game::Stellar *hg_aurora = data.Stellar(0x586);
+  REQUIRE(hg_aurora != nullptr);
+  CHECK(hg_aurora->is_defined);
+  CHECK(hg_aurora->name == "HG-Aurora");
+  CHECK(hg_aurora->link_a_id == 1); // hypergate sprite set
+  CHECK((hg_aurora->availability_flags & 0x1000U) != 0U);
+  CHECK(hg_aurora->pos_x == -480);
+  CHECK(hg_aurora->pos_y == -600);
+
+  const game::Stellar *nirvana = data.Stellar(0x58c);
+  REQUIRE(nirvana != nullptr);
+  CHECK(nirvana->is_defined);
+  CHECK(nirvana->name == "Nirvana");
+
+  // Every Aurora-system nav now resolves to a loaded, defined stellar
+  // (0x152 planet, 0x153/0x154 stations, 0x586 hypergate).
+  const game::System *aurora = data.System(0x13b);
+  REQUIRE(aurora != nullptr);
+  for (const auto nav : aurora->nav_defs) {
+    if (nav < 0x80) {
+      continue;
+    }
+    const game::Stellar *st = data.Stellar(nav);
+    REQUIRE(st != nullptr);
+    CHECK(st->is_defined);
+  }
+}
+
 // The starter weapon's fire sound. The Light Blaster's `fire_sound` field is a
 // slot index (8), not a resource id; the slot maps to the snd resource id
 // 200 + slot (so 208 = "Light Blaster.sfil"), and that payload is a format-1
