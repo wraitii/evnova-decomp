@@ -549,11 +549,11 @@ RunTradeCenterDialog(SdlPlatform &platform,
       if (in->key == TextKey::escape || in->key == TextKey::enter) {
         return LandedExit::kServiceComplete;
       }
-      if (in->key == TextKey::physical && in->key_code == 0xc8) {
+      if (in->key == TextKey::physical && in->key_code == 0x61) { // Up
         NovaTradeCenter_CycleSelection(session, session.selected, true);
         continue;
       }
-      if (in->key == TextKey::physical && in->key_code == 0xd0) {
+      if (in->key == TextKey::physical && in->key_code == 0x66) { // Down
         NovaTradeCenter_CycleSelection(session, session.selected, false);
         continue;
       }

@@ -1669,12 +1669,12 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         return LandedExit::kServiceComplete;
       }
       if (input->key == TextKey::character) {
-        // Deliberate divergence (docs/dlog_ditl_dialog_format.md section 7.2):
-        // the original NovaUi_HandleOutfitterMenuInput (0x004903c0) navigates
-        // through the command-map menu actions and DIK arrow keys; only 'b'
-        // (buy) and 's' (sell) are direct letters. The port adds 'l' leave,
-        // 'p'/'n' page and 'i' info as conveniences while the original
-        // command-map navigation remains TODO(decomp).
+        // The original NovaUi_HandleOutfitterMenuInput (0x004903c0) handles
+        // only 'b' (buy) and 's' (sell) as direct letters; navigation runs
+        // through the arrow keys (MoveCursor) and the
+        // command-map menu actions. The port additionally accepts 'l' leave,
+        // 'p'/'n' page and 'i' info as conveniences; the command-map actions
+        // remain TODO(decomp).
         const char key = static_cast<char>(
             std::tolower(static_cast<unsigned char>(input->character)));
         if (key == 'l') {
@@ -1750,6 +1750,27 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
                                 grid_dim,
                                 grid_bright);
           continue;
+        }
+      }
+      if (input->key == TextKey::physical) {
+        // Ghidra 0x004903c0 (outfitter) / 0x00493fc0 (shipyard, including the
+        // Bar's Hire Escort action): the directional keys move the 4x5 grid
+        // cursor. sdl_platform surfaces the original normalized arrow codes.
+        switch (input->key_code) {
+        case 0x61: // Up
+          session.MoveCursor(StoreCursorMove::kUp);
+          continue;
+        case 0x66: // Down
+          session.MoveCursor(StoreCursorMove::kDown);
+          continue;
+        case 0x63: // Left
+          session.MoveCursor(StoreCursorMove::kLeft);
+          continue;
+        case 0x64: // Right
+          session.MoveCursor(StoreCursorMove::kRight);
+          continue;
+        default:
+          break;
         }
       }
       if (input->key != TextKey::primary)

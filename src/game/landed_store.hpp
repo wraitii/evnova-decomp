@@ -11,6 +11,10 @@ namespace game {
 
 enum class LandedStoreKind : std::uint8_t { kOutfitter, kShipyard };
 
+// Arrow-key direction for the 4x5 store grid, matching the directional arms of
+// the original outfitter/shipyard input handlers.
+enum class StoreCursorMove : std::uint8_t { kUp, kDown, kLeft, kRight };
+
 // State shared by the two 4x5 landed-store lists.  IDs are scenario resource
 // IDs (0x80-based), while cursor/page positions are UI positions.
 struct LandedStoreSession {
@@ -32,6 +36,7 @@ struct LandedStoreSession {
   void PagePrevious();
   void PageNext();
   void SelectSlot(std::size_t slot);
+  void MoveCursor(StoreCursorMove move);
 };
 
 [[nodiscard]] ControlExpressionState

@@ -1430,3 +1430,92 @@ TEST_CASE("hypergate entry opens the destination gate on its last frame",
   CHECK(unseen.animation.current_frame == 0);
   CHECK(unseen.animation.frame_accumulator == Catch::Approx(-3.0F));
 }
+
+// The landed store's directional navigation mirrors the original's arrow-key
+// arms (0x004903c0 / 0x00493fc0): the cursor moves over the compact 4x5 page,
+// scrolling the page a row at the edges and walking back to the last offered
+// cell when the target lands past the end of the list.
+TEST_CASE("store cursor follows original arrow navigation",
+          "[landed_store][ui]") {
+  game::LandedStoreSession session;
+  session.available_ids.resize(20);
+  for (std::size_t i = 0; i < session.available_ids.size(); ++i) {
+    session.available_ids[i] = static_cast<std::int16_t>(0x80 + i);
+  }
+
+  // No cursor yet: down starts top-left, up starts bottom-right of the page.
+  session.MoveCursor(game::StoreCursorMove::kDown);
+  CHECK(session.cursor_slot == 0);
+  CHECK(session.selected_id == 0x80);
+  session.MoveCursor(game::StoreCursorMove::kRight);
+  session.MoveCursor(game::StoreCursorMove::kDown);
+  CHECK(session.cursor_slot == 5);
+  CHECK(session.selected_id == 0x85);
+  session.MoveCursor(game::StoreCursorMove::kUp);
+  CHECK(session.cursor_slot == 1);
+  session.MoveCursor(game::StoreCursorMove::kLeft);
+  CHECK(session.cursor_slot == 0);
+  // At the page edges with no more items the cursor stays put.
+  session.MoveCursor(game::StoreCursorMove::kLeft);
+  session.MoveCursor(game::StoreCursorMove::kUp);
+  CHECK(session.cursor_slot == 0);
+  CHECK(session.page_base == 0);
+
+  session.cursor_slot = -1;
+  session.selected_id = -1;
+  session.MoveCursor(game::StoreCursorMove::kUp);
+  CHECK(session.cursor_slot == 19);
+  CHECK(session.selected_id == 0x93);
+}
+
+TEST_CASE("store cursor scrolls a row at the page edges",
+          "[landed_store][ui]") {
+  game::LandedStoreSession session;
+  session.available_ids.resize(24);
+  for (std::size_t i = 0; i < session.available_ids.size(); ++i) {
+    session.available_ids[i] = static_cast<std::int16_t>(0x80 + i);
+  }
+
+  // Right off the last page slot scrolls down a row and shifts the cursor
+  // back three columns (0x13 -> 0x10) so the next item stays highlighted.
+  session.cursor_slot = 19;
+  session.MoveCursor(game::StoreCursorMove::kRight);
+  CHECK(session.page_base == 4);
+  CHECK(session.cursor_slot == 16);
+  CHECK(session.selected_id == 0x80 + 20);
+
+  // Up at the top row scrolls a page back without moving the cursor.
+  session.page_base = 4;
+  session.cursor_slot = 2;
+  session.MoveCursor(game::StoreCursorMove::kUp);
+  CHECK(session.page_base == 0);
+  CHECK(session.cursor_slot == 2);
+  // Down off the bottom row scrolls a page forward when more items remain.
+  session.page_base = 0;
+  session.cursor_slot = 16;
+  session.MoveCursor(game::StoreCursorMove::kDown);
+  CHECK(session.page_base == 4);
+  CHECK(session.cursor_slot == 16);
+  CHECK(session.selected_id == 0x80 + 20);
+
+  // Left at the first column scrolls a page back and lands on the column
+  // before the one that scrolled off (0x00 -> 0x03).
+  session.page_base = 4;
+  session.cursor_slot = 0;
+  session.MoveCursor(game::StoreCursorMove::kLeft);
+  CHECK(session.page_base == 0);
+  CHECK(session.cursor_slot == 3);
+  CHECK(session.selected_id == 0x80 + 3);
+}
+
+TEST_CASE("store cursor walks back past the end of the listing",
+          "[landed_store][ui]") {
+  game::LandedStoreSession session;
+  session.available_ids = {0x80, 0x81, 0x82, 0x83, 0x84};
+
+  // Up from no cursor targets slot 0x13; the listing is shorter, so the
+  // original walks the cursor back to the last offered cell.
+  session.MoveCursor(game::StoreCursorMove::kUp);
+  CHECK(session.cursor_slot == 4);
+  CHECK(session.selected_id == 0x84);
+}

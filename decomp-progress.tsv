@@ -638,6 +638,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0048D6F0	NovaUi_RedrawTradeCenterWindow	src/game/docked_trade_dialog.cpp	85%	ui
 0x0048E970	NovaUi_LoadTravelOverlaySprites		0%	
 0x0048EA70	NovaUi_RunOutfitterInteractionLoop	src/game/docked_store_dialog.cpp	65%	gameplay,bugfix
+0x004903C0	NovaUi_HandleOutfitterMenuInput	src/game/landed_store.cpp	75%	ui
 0x004909A0	OutfitterMenu_FUN_004909a0		0%	
 0x00490C70	NovaUi_RedrawOutfitterMenu	src/game/docked_store_dialog.cpp	100%	
 0x00491950	NovaLanded_CanBuyOutfit	src/game/landed_store.cpp	100%	
@@ -645,6 +646,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00492C40	NovaUi_RenderTravelDestinationOverlay		0%	
 0x00492F10	NovaUi_PollTravelScriptAction		0%	
 0x00492F30	NovaUi_RunShipyardPurchaseLoop	src/game/docked_store_dialog.cpp	92%	gameplay
+0x00493FC0	NovaUi_ShipyardHandleSelectionInput	src/game/landed_store.cpp	75%	ui
 0x0049458D	NovaUi_ShipyardSetCursorSlot	src/game/landed_store.cpp	25%	ui
 0x004948B0	NovaUi_DrawShipyardShipList	src/game/docked_store_dialog.cpp	100%	
 0x004956A0	NovaUi_RunShipyardDetailWindow	src/game/docked_store_dialog.cpp	90%	ui
@@ -1846,7 +1848,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00872040	Debug_HandleCheatAndNcbCommands		0%	Cheat-mode arming plus debug NCB condition-test/set-script dialogs; called from Ship_HandlePlayerShipCore and returns the caller's command probe. Renamed in Ghidra from the misleading Mission_TickReactionInputTrigger; unported debug path.
 0x008721C2	FUN_008721c2		0%	
 0x008721FC	FUN_008721fc		0%	
-0x008722B0	FUN_008722b0		0%	
+0x008722B0	FUN_008722b0		0%	Late-linked patch chunk of 0x00493fc0 key-down arm: jumps back into the directional block (ported in LandedStoreSession::MoveCursor); Space (0x20) -> action 10 unported.
 0x00872310	Settings_LoadIniAndPrefs		0%	
 0x00872375	Settings_PollKeyX2Mode		0%	
 0x00872384	DrawContext_SetHyperspaceFlashColor	src/game/preferences.hpp	100%	

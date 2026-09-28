@@ -323,8 +323,12 @@ inventory state:
   (0x62 -> buy, action 7) and `s` (0x73 -> sell, action 4) are direct letter
   keys, plus Escape/Return. `RunStoreDialog` (`docked_store_dialog.cpp`) additionally
   accepts `l` (leave), `p`/`n` (page) and `i` (shipyard info) as convenience
-  keys. The original command-map/arrow navigation is still TODO(decomp), so
-  these stand in for it rather than replacing it.
+  keys alongside the original controls. Arrow-key grid navigation is ported
+  (`LandedStoreSession::MoveCursor`, shared by the outfitter, shipyard and
+  hire-escort modes); the key mapping is provisional (0x15/0x96 right/left,
+  0x0b/0x0a up/down), and the alternate up/down codes 0x92/0x94 are
+  unidentified and unmapped. The command-map actions (starmap, player info,
+  mission computer) remain TODO(decomp).
 * **Ship portrait fallback.** `StorePreviewTexture` falls back to the ship's
   `shïp` visual descriptor when no thumbnail PICT resolves. The original leaves
   the atlas cell black (`NovaUi_BlitPictThumbnailCached` 0x00497b70 returns

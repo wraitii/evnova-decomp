@@ -142,7 +142,8 @@ bool NovaLanded_RequireGovtAllows(const ScenarioData &scenario,
 }
 
 // @port 0x0049458d 25% ui
-// TODO(decomp): original directional command mapping.
+// TODO(decomp): double-click on the held cell opens the detail window, and the
+// selection's custom movie (ShipClassDef movie path) plays in DITL item 8.
 // Ghidra 0x0049458d NovaUi_ShipyardSetCursorSlot. The session tracks the
 // 20-slot (4x5 grid) cursor selection and preserves/clears it across paging.
 std::int16_t LandedStoreSession::IdAtCursor() const {
@@ -201,6 +202,80 @@ void LandedStoreSession::SelectSlot(std::size_t slot) {
   }
   cursor_slot = static_cast<std::int16_t>(slot);
   selected_id = available_ids[page_base + slot];
+}
+
+// @port 0x004903c0,0x00493fc0 75% ui
+// Ghidra 0x004903c0 NovaUi_HandleOutfitterMenuInput and 0x00493fc0
+// NovaUi_ShipyardHandleSelectionInput directional arms: both move the 4x5 grid
+// cursor, scrolling the visible page by one row at the edges. Provisional key
+// mapping: 0x15/0x96 right/left (from the +1/-1 arms), 0x0b/0x0a up/down (as in
+// the BBS poller 0x00440c90). The alternate up/down codes 0x92/0x94 are
+// unidentified and not mapped.
+// TODO(decomp): the command-map (starmap / player-special) actions, the
+// custom-picture selection movie, and the pending-overlay arm of these
+// handlers are still handled outside this helper / not reproduced.
+void LandedStoreSession::MoveCursor(StoreCursorMove move) {
+  // Offered cells are compact in the port, so the original's trailing -1
+  // sentinels reduce to an in-range check.
+  const auto offered = [this](std::size_t index) {
+    return index < available_ids.size();
+  };
+  if (cursor_slot < 0) {
+    // First press with no cursor: right/down land on the top-left cell,
+    // left/up on the last cell of the page (Ghidra picks 0 or 0x13).
+    cursor_slot =
+        (move == StoreCursorMove::kRight || move == StoreCursorMove::kDown)
+            ? 0
+            : static_cast<std::int16_t>(kPageSlots - 1);
+  } else {
+    switch (move) {
+    case StoreCursorMove::kRight:
+      if (cursor_slot < static_cast<std::int16_t>(kPageSlots - 1)) {
+        if (offered(page_base + static_cast<std::size_t>(cursor_slot) + 1)) {
+          cursor_slot = static_cast<std::int16_t>(cursor_slot + 1);
+        }
+      } else if (CanPageNext()) {
+        page_base += 4;
+        cursor_slot = static_cast<std::int16_t>(cursor_slot - 3);
+      }
+      break;
+    case StoreCursorMove::kLeft:
+      if (cursor_slot < 1) {
+        if (CanPagePrevious()) {
+          page_base -= 4;
+          cursor_slot = static_cast<std::int16_t>(cursor_slot + 3);
+        }
+      } else {
+        cursor_slot = static_cast<std::int16_t>(cursor_slot - 1);
+      }
+      break;
+    case StoreCursorMove::kUp:
+      if (cursor_slot < 4) {
+        if (CanPagePrevious()) {
+          page_base -= 4;
+        }
+      } else {
+        cursor_slot = static_cast<std::int16_t>(cursor_slot - 4);
+      }
+      break;
+    case StoreCursorMove::kDown:
+      if (cursor_slot < 16) {
+        if (offered(page_base + static_cast<std::size_t>(cursor_slot) + 4)) {
+          cursor_slot = static_cast<std::int16_t>(cursor_slot + 4);
+        }
+      } else if (CanPageNext()) {
+        page_base += 4;
+      }
+      break;
+    }
+  }
+  selected_id = IdAtCursor();
+  // The original walks the cursor back to the previous offered cell when the
+  // target lands past the end of the list.
+  while (selected_id == -1 && cursor_slot > 0) {
+    cursor_slot = static_cast<std::int16_t>(cursor_slot - 1);
+    selected_id = IdAtCursor();
+  }
 }
 
 ControlExpressionState
