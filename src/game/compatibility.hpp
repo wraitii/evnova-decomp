@@ -12,7 +12,7 @@ namespace game {
 // previous all-on behavior.
 //
 // `safe` bundles the fixes that correct clear defects without changing the
-// game's intended balance, connectivity or presentation. The remaining flags
+// game's intended balance or connectivity. The remaining flags
 // each cover a correction that shifts observable play, so a player wanting a
 // more faithful original experience can turn them off individually.
 struct BugFixPolicy {

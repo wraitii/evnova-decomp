@@ -554,43 +554,20 @@ void LoadShipVisualLayer(SDL_Renderer *renderer,
   }
 }
 
-// Draws one additive ship effect layer (running lights / weapon effects). The
-// original stores round(intensity) in the Sprite's tint channels with
-// brightness_level 32; SDL has no per-channel tint here, so the brightness
-// maps to a multiplicative alpha (level/32), matching the existing engine-glow
-// approximation. `visible_threshold` mirrors the original's hide test (the
-// light layer hides at <= 1.0, the weapon layer at <= 0).
-void DrawShipEffectLayer(SDL_Renderer *renderer,
-                         const SpriteAsset &layer,
-                         int frame,
-                         float world_x,
-                         float world_y,
-                         float camera_x,
-                         float camera_y,
-                         int viewport_w,
-                         int viewport_h,
-                         float intensity,
-                         float visible_threshold,
-                         int fog_murk) {
-  if (layer.frames.empty() || intensity <= visible_threshold) {
-    return;
-  }
+// Draw options for one additive ship effect layer (engine glow / running
+// lights / weapon effects) at `level`, the original's 0..32 tint units. The
+// original stores round(level) in the Sprite's tint channels with
+// brightness_level 32, i.e. dst + src*level/0x20; SDL has no per-channel tint
+// here, so the level maps to a multiplicative alpha (level/32). The layer
+// carries its own copy of the hull's fog (NovaShip_EffectLayerFog).
+SpriteDrawOptions ShipEffectLayerOptions(float level,
+                                         const ShipSpriteFog &fog) {
   SpriteDrawOptions opts;
-  opts.alpha_mod = std::clamp(intensity / 32.0F, 0.0F, 1.0F);
-  opts.fog_murk = fog_murk;
-  // The original's light/weapon layers use the tinted draw proc at brightness
-  // 0x20, i.e. dst + src*intensity/0x20 (additive).
+  opts.alpha_mod = std::clamp(level / 32.0F, 0.0F, 1.0F);
   opts.additive = true;
-  DrawSprite(renderer,
-             layer,
-             frame,
-             world_x,
-             world_y,
-             camera_x,
-             camera_y,
-             viewport_w,
-             viewport_h,
-             opts);
+  opts.fog_amount = fog.amount;
+  opts.fog_color = fog.color;
+  return opts;
 }
 
 } // namespace
@@ -935,9 +912,27 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
   const NovaShipTintColor tint = NovaShip_ResolveTintColor(state, ship);
   const ShipCloakPresentation cloak =
       NovaShip_CloakPresentation(state, ship, tint);
+  // Every composite layer shares the hull's cloak jitter (0x0042b0b2 writes
+  // the same offset into each Sprite rect).
   const float hull_x = ship.pos_x + cloak.jitter_x;
   const float hull_y = ship.pos_y + cloak.jitter_y;
+  const auto draw_layer = [&](const SpriteAsset &layer,
+                              int layer_frame,
+                              const SpriteDrawOptions &opts) {
+    DrawSprite(platform.renderer(),
+               layer,
+               layer_frame,
+               hull_x,
+               hull_y,
+               camera_x,
+               camera_y,
+               viewport_w,
+               viewport_h,
+               opts);
+  };
 
+  // Hull draw state. The alt sheet copies all of it: brightness, paint and fog
+  // (Ship_UpdateVisualState 0x0042b4b0 and the cloak slice).
   SpriteDrawOptions hull_opts;
   hull_opts.alpha_mod = layer_alpha * cloak.hull_alpha;
   // Base-hull tint from Ship_ResolveShipTintColor (0x0046e470): the player uses
@@ -949,137 +944,83 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
     // resolved-progress.
     hull_opts.additive = true;
     hull_opts.tint_rgb5 = cloak.hull_tint;
-  } else if (cloak.progress >= 32.0F) {
-    // Full-fade ghost: hull_alpha carries the brightness-0x1e source weight,
-    // so leave the hull untinted rather than darkening it a second time.
-    hull_opts.tint_rgb5 = std::nullopt;
-  } else {
+  } else if (cloak.progress < 32.0F) {
     hull_opts.tint_rgb5 =
         std::array<std::int16_t, 3>{tint.red, tint.green, tint.blue};
   }
-  // Ionization flash (Ship_UpdateVisualState's ionization block): the hull's
-  // fog amount and colour become the level/colour the visual tick rolled. The
-  // gate transition later overwrites both with its white fade, so it wins.
-  const bool ionization_tint =
-      ship.ionization_tint_level >= 0 && gate_transition.white_mix <= 0.0F;
-  const auto apply_hull_fog = [&](SpriteDrawOptions &opts) {
-    ApplyFog(opts);
-    // Safe policy: paint, then ionization tint, then murk. Off, the fog
-    // colours are painted too (the original's fog-then-paint order).
-    opts.paint_fog_colors = !state.bugfixes.safe;
-    if (!ionization_tint) {
-      return;
-    }
-    if (ship.ionization_tint_under_murk) {
-      opts.pre_fog_tint_level = ship.ionization_tint_level;
-      opts.pre_fog_tint_color = ship.ionization_tint_color;
-      return;
-    }
-    opts.fog_brightness_override = ship.ionization_tint_level;
-    opts.fog_color = ship.ionization_tint_color;
-  };
-  apply_hull_fog(hull_opts);
-  if (!cloak.hidden && hull_opts.alpha_mod > 0.0F) {
-    DrawSprite(platform.renderer(),
-               sprite.base,
-               frame,
-               hull_x,
-               hull_y,
-               camera_x,
-               camera_y,
-               viewport_w,
-               viewport_h,
-               hull_opts);
+  // A full-fade ghost stays untinted: hull_alpha already carries the
+  // brightness-0x1e source weight.
+  //
+  // Hull fog from the visual tick (murk + ionization flash). The gate
+  // transition's white fade replaces the ionization tint, so it keeps only the
+  // murk. Safe policy: paint, then ionization tint, then murk; off, the fog
+  // colours are painted too (the original's fog-then-paint order).
+  const bool gate_white = gate_transition.white_mix > 0.0F;
+  const ShipSpriteFog &hull_fog =
+      gate_white ? ship.hull_fog.murk : ship.hull_fog.hull;
+  hull_opts.fog_amount = hull_fog.amount;
+  hull_opts.fog_color = hull_fog.color;
+  if (!gate_white && ship.hull_fog.pre_tint) {
+    hull_opts.pre_fog_tint = SpriteFogTint{ship.hull_fog.pre_tint->amount,
+                                           ship.hull_fog.pre_tint->color};
   }
-  // Engine-glow layer, drawn over the hull with the same heading-selected frame
-  // and a thrust-driven additive intensity (NovaShip_TickWeaponSpriteAnd-
-  // RunningLights folds the per-ship fog into it for NPCs).
+  hull_opts.paint_fog_colors = !state.bugfixes.safe;
+  if (!cloak.hidden && hull_opts.alpha_mod > 0.0F) {
+    draw_layer(sprite.base, frame, hull_opts);
+  }
+
+  // Additive effect layers over the hull, at the level the visual tick left
+  // (glow already capped by its fog there). The lights and weapon flash take
+  // their fog cap here (the tick's intensities are persistent state), then
+  // the cloak cap, and fade as the gate silhouette takes over.
+  const float effect_fade = 1.0F - gate_transition.white_mix;
   if (sprite.has_glow && !sprite.glow.frames.empty() &&
       ship.engine_glow_intensity > 0.0F && cloak.effect_cap > 0.0F) {
-    SpriteDrawOptions opts;
-    // engine_glow_intensity is normalized 0..1 while effect_cap is the
-    // original's 0..32 tint units, so compare in the same scale.
-    opts.alpha_mod =
-        std::min(ship.engine_glow_intensity, cloak.effect_cap / 32.0F) *
-        (1.0F - gate_transition.white_mix);
-    opts.additive = true;
-    ApplyFog(opts);
-    DrawSprite(platform.renderer(),
-               sprite.glow,
+    const float level =
+        std::min(ship.engine_glow_intensity * 32.0F, cloak.effect_cap) *
+        effect_fade;
+    draw_layer(sprite.glow,
                frame,
-               hull_x,
-               hull_y,
-               camera_x,
-               camera_y,
-               viewport_w,
-               viewport_h,
-               opts);
+               ShipEffectLayerOptions(
+                   level,
+                   NovaShip_EffectLayerFog(
+                       state.bugfixes, ship, ShipEffectLayer::Glow)));
   }
-  // Running lights and weapon effects over the hull (additive, intensity from
-  // the visual tick). Every composite layer shares the hull's cloak jitter
-  // (0x0042b0b2 writes the same offset into each Sprite rect).
-  if (sprite.has_light) {
-    DrawShipEffectLayer(platform.renderer(),
-                        sprite.light,
-                        frame,
-                        hull_x,
-                        hull_y,
-                        camera_x,
-                        camera_y,
-                        viewport_w,
-                        viewport_h,
-                        std::min(ship.light_intensity, cloak.effect_cap) *
-                            (1.0F - gate_transition.white_mix),
-                        /*visible_threshold=*/1.0F,
-                        fog_murk_);
+  // The light layer hides at <= 1.0, the weapon layer at <= 0.
+  if (sprite.has_light && !sprite.light.frames.empty()) {
+    const ShipSpriteFog fog =
+        NovaShip_EffectLayerFog(state.bugfixes, ship, ShipEffectLayer::Light);
+    const float level =
+        std::min(NovaShip_CapEffectLevelByFog(ship.light_intensity, fog.amount),
+                 cloak.effect_cap) *
+        effect_fade;
+    if (level > 1.0F) {
+      draw_layer(sprite.light, frame, ShipEffectLayerOptions(level, fog));
+    }
   }
-  if (sprite.has_weapon) {
-    DrawShipEffectLayer(
-        platform.renderer(),
-        sprite.weapon,
-        frame,
-        hull_x,
-        hull_y,
-        camera_x,
-        camera_y,
-        viewport_w,
-        viewport_h,
-        std::min(ship.weapon_sprite_flash_level, cloak.weapon_cap) *
-            (1.0F - gate_transition.white_mix),
-        /*visible_threshold=*/0.0F,
-        fog_murk_);
+  if (sprite.has_weapon && !sprite.weapon.frames.empty()) {
+    const ShipSpriteFog fog =
+        NovaShip_EffectLayerFog(state.bugfixes, ship, ShipEffectLayer::Weapon);
+    const float level =
+        std::min(NovaShip_CapEffectLevelByFog(ship.weapon_sprite_flash_level,
+                                              fog.amount),
+                 cloak.weapon_cap) *
+        effect_fade;
+    if (level > 0.0F) {
+      draw_layer(sprite.weapon, frame, ShipEffectLayerOptions(level, fog));
+    }
   }
-  // Alt overlay sheet (sh\x8an AltImageID), an ordinary blend over the hull.
+  // Alt overlay sheet (sh\x8an AltImageID), drawn with the hull's options.
   // The frame is alternate_sprite_cycle_index * FramesPer + heading_frame,
   // advanced by NovaShip_TickSpriteAnimation.
-  if (sprite.has_alt && !sprite.alt.frames.empty() && layer_alpha > 0.0F &&
-      !cloak.hidden) {
+  if (sprite.has_alt && !sprite.alt.frames.empty() && !cloak.hidden &&
+      hull_opts.alpha_mod > 0.0F) {
     const int alt_frame =
         ComposeShipFrameIndex(ship,
                               ship.alternate_sprite_cycle_index,
                               sprite.frames_per_rotation,
                               std::max(1, sprite.alt_set_count));
-    SpriteDrawOptions opts;
-    opts.alpha_mod = layer_alpha * cloak.hull_alpha;
-    if (cloak.additive) {
-      // The alt sheet copies the hull's cloak tint/jitter (0x0042b4b0).
-      opts.additive = true;
-      opts.tint_rgb5 = cloak.hull_tint;
-    } else if (cloak.progress >= 32.0F) {
-      opts.tint_rgb5 = std::nullopt;
-    }
-    // The alt sheet copies the hull's fog amount and colour.
-    apply_hull_fog(opts);
-    DrawSprite(platform.renderer(),
-               sprite.alt,
-               alt_frame,
-               hull_x,
-               hull_y,
-               camera_x,
-               camera_y,
-               viewport_w,
-               viewport_h,
-               opts);
+    draw_layer(sprite.alt, alt_frame, hull_opts);
   }
   // Shield bubble: the sheet is loaded (ShipSpriteSet::shield) but the draw is
   // deferred. The original sets its frame and RGB tint from
@@ -1088,21 +1029,12 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
   // TODO(decomp(0x00428340)): shield-bubble sprite frame + tint draw.
 
   // The gate tint is the final ship-composite pass, above the colored layers.
-  if (gate_transition.white_mix > 0.0F && gate_transition.hull_alpha > 0.0F) {
+  if (gate_white && gate_transition.hull_alpha > 0.0F) {
     SpriteDrawOptions white_opts;
     white_opts.alpha_mod =
         gate_transition.hull_alpha * gate_transition.white_mix;
     white_opts.white_silhouette = true;
-    DrawSprite(platform.renderer(),
-               sprite.base,
-               frame,
-               ship.pos_x,
-               ship.pos_y,
-               camera_x,
-               camera_y,
-               viewport_w,
-               viewport_h,
-               white_opts);
+    draw_layer(sprite.base, frame, white_opts);
   }
 }
 

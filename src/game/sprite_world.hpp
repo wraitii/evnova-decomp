@@ -243,6 +243,12 @@ private:
   mutable std::vector<std::unique_ptr<SpriteAsset>> sets_;
 };
 
+// A colour a sprite's source is mixed toward by amount/32 (0..32).
+struct SpriteFogTint {
+  int amount = 0;
+  std::uint32_t color = 0; // 0xRRGGBB
+};
+
 // Draw options for one sprite instance, mirroring the original sprite's
 // visible/frame/anchor presentation state (Sprite_SetVisible /
 // Sprite_SetCurrentFrame / Sprite_SetPositionFromCurrentFrameAnchor).
@@ -283,19 +289,19 @@ struct SpriteDrawOptions {
   // own alpha over it. Where no silhouette is available the sprite falls back
   // to a plain source-alpha fade over `dst` (documented divergence).
   int fog_murk = 0;
+  // The sprite's fog amount (Sprite +0xAA, 0..32) set directly instead of
+  // derived from fog_murk and the camera distance. Ship layers take theirs
+  // from the visual tick (Ship.hull_fog), which is where the original
+  // computes it.
+  std::optional<int> fog_amount = std::nullopt;
   // The constant the fog mixes toward, 0xRRGGBB (the current system's
-  // BkgndColor / space colour), or the override colour below. Only consulted
+  // BkgndColor / space colour, or a ship's ionization colour). Only consulted
   // by non-additive draws with a non-zero fog amount and a silhouette.
   std::uint32_t fog_color = 0;
-  // When >= 0, the sprite's fog amount (Sprite +0xAA, 0..32) set directly
-  // instead of derived from fog_murk and the camera distance; the draw mixes
-  // toward fog_color by it. Ship_UpdateVisualState's ionization flash uses it.
-  int fog_brightness_override = -1;
   // Optional tint applied before the fog: the source is first mixed toward
-  // pre_fog_tint_color (0xRRGGBB) by level/32, then fogged as usual. Needs the
-  // frame silhouette; ignored by additive draws. 0 disables it.
-  int pre_fog_tint_level = 0;
-  std::uint32_t pre_fog_tint_color = 0;
+  // its colour by amount/32, then fogged as usual. Needs the frame
+  // silhouette; ignored by additive draws.
+  std::optional<SpriteFogTint> pre_fog_tint = std::nullopt;
   // Also apply tint_rgb5 to the fog/pre-fog colours (the original's
   // fog-then-paint order). Off, only the source is painted before the fog.
   bool paint_fog_colors = false;
@@ -338,6 +344,14 @@ struct SpriteAnchorTransform {
                                             float camera_y,
                                             float sprite_x,
                                             float sprite_y);
+
+// The same distance brightness before the 0x1f ceiling (still floored at 0).
+// Port-only: the ship running-light fog fix reads it (NovaShip_EffectLayerFog).
+[[nodiscard]] int Sprite_DistanceBrightnessUnclamped(int effective_murk,
+                                                     float camera_x,
+                                                     float camera_y,
+                                                     float sprite_x,
+                                                     float sprite_y);
 
 [[nodiscard]] SpriteAnchorTransform Sprite_AnchorToScreen(float world_x,
                                                           float world_y,

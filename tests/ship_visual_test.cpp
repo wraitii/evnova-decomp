@@ -640,4 +640,66 @@ TEST_CASE("partial cloak draws the hull jitter from the session RNG",
   CHECK(ship.cloak_jitter_y == 0);
 }
 
+TEST_CASE("NPC effect layers copy the hull fog, the lights at a third",
+          "[ship_visual]") {
+  BugFixPolicy original;
+  original.safe = false;
+  Ship ship;
+  ship.ship_instance_id = 3;
+  ship.hull_fog.murk = {31, 0x123456};
+  ship.hull_fog.murk_unclamped = 90;
+  ship.hull_fog.hull = ship.hull_fog.murk;
+
+  const ShipSpriteFog glow =
+      NovaShip_EffectLayerFog(original, ship, ShipEffectLayer::Glow);
+  CHECK(glow == ShipSpriteFog{31, 0x123456});
+  CHECK(NovaShip_EffectLayerFog(original, ship, ShipEffectLayer::Weapon) ==
+        glow);
+  // trunc(31 * 0.333) = 10: the lights never fog past 10.
+  CHECK(
+      NovaShip_EffectLayerFog(original, ship, ShipEffectLayer::Light).amount ==
+      10);
+
+  // The player's layers keep fog amount 0.
+  ship.ship_instance_id = 0;
+  CHECK(NovaShip_EffectLayerFog(original, ship, ShipEffectLayer::Glow).amount ==
+        0);
+  CHECK(
+      NovaShip_EffectLayerFog(original, ship, ShipEffectLayer::Light).amount ==
+      0);
+}
+
+TEST_CASE("safe policy fogs the running lights from the unclamped murk",
+          "[ship_visual]") {
+  const BugFixPolicy safe;
+  Ship ship;
+  ship.ship_instance_id = 3;
+  ship.hull_fog.murk = {31, 0x123456};
+  ship.hull_fog.murk_unclamped = 90;
+  ship.hull_fog.hull = ship.hull_fog.murk;
+  // trunc(90 * 0.333) = 29, past the fog cap's zero point.
+  const ShipSpriteFog light =
+      NovaShip_EffectLayerFog(safe, ship, ShipEffectLayer::Light);
+  CHECK(light.amount == 29);
+  CHECK(NovaShip_CapEffectLevelByFog(32.0F, light.amount) == 0.0F);
+  // The other layers are unchanged.
+  CHECK(NovaShip_EffectLayerFog(safe, ship, ShipEffectLayer::Glow).amount ==
+        31);
+
+  // An ionization takeover keeps the hull amount as the source.
+  ship.hull_fog.murk = {5, 0x123456};
+  ship.hull_fog.murk_unclamped = 5;
+  ship.hull_fog.hull = {16, 0xff0000};
+  CHECK(NovaShip_EffectLayerFog(safe, ship, ShipEffectLayer::Light).amount ==
+        5);
+}
+
+TEST_CASE("effect layer levels are capped at 32 - fog * 1.5", "[ship_visual]") {
+  CHECK(NovaShip_CapEffectLevelByFog(32.0F, 0) == 32.0F);
+  CHECK(NovaShip_CapEffectLevelByFog(12.5F, 10) == 12.5F);
+  // 32 - 15 * 1.5 = 9.5 truncates to 9.
+  CHECK(NovaShip_CapEffectLevelByFog(20.0F, 15) == 9.0F);
+  CHECK(NovaShip_CapEffectLevelByFog(20.0F, 31) == 0.0F);
+}
+
 } // namespace game

@@ -588,9 +588,7 @@ namespace {
 // writes the integer 0x20 - fog into the colour (see the BUGFIX below); the
 // 8-bit path writes the ionization colour instead.
 // An uncharged ship clears its ionization colour.
-void TickIonizationTint(GameState &state, Ship &ship, int hull_fog) {
-  ship.ionization_tint_level = -1;
-  ship.ionization_tint_under_murk = false;
+void TickIonizationTint(GameState &state, Ship &ship, ShipHullFog &fog) {
   if (!(ship.ionization_points > 0.0F)) {
     ship.ionization_color = 0;
     return;
@@ -603,9 +601,10 @@ void TickIonizationTint(GameState &state, Ship &ship, int hull_fog) {
       std::trunc(static_cast<double>(intensity) * 24.0 * 0.01)));
   const std::int16_t flash = static_cast<std::int16_t>(
       std::clamp<std::int16_t>(scaled, 0x10, 0x18) + RandomBelow(state, 5) - 2);
-  if (hull_fog < flash || hull_fog < 8) {
-    ship.ionization_tint_level = flash;
-    ship.ionization_tint_color = ship.ionization_color;
+  fog.ionized = true;
+  const std::int16_t murk = fog.murk.amount;
+  if (murk < flash || murk < 8) {
+    fog.hull = {flash, ship.ionization_color};
     return;
   }
   // BUGFIX(original) (BugFixPolicy::safe): 0x0042a0c5 stores the integer
@@ -613,15 +612,76 @@ void TickIonizationTint(GameState &state, Ship &ship, int hull_fog) {
   // toward near-black. The fix tints the hull by the flash first and then
   // applies the ordinary murk fog over it; off, the near-black value is kept.
   if (state.bugfixes.safe) {
-    ship.ionization_tint_level = flash;
-    ship.ionization_tint_color = ship.ionization_color;
-    ship.ionization_tint_under_murk = true;
+    fog.pre_tint = ShipSpriteFog{flash, ship.ionization_color};
     return;
   }
-  ship.ionization_tint_level = static_cast<std::int16_t>(hull_fog);
-  ship.ionization_tint_color = static_cast<std::uint32_t>(0x20 - hull_fog);
+  fog.hull.color = static_cast<std::uint32_t>(0x20 - murk);
+}
+
+// Ghidra 0x00428340 hull fog: the player's amount is 0, an NPC's
+// Frame_UpdateSpriteDistanceIntensity (0x00438db0) of its truncated position;
+// the colour is the system space colour. The ionization block then runs over
+// it.
+ShipHullFog ResolveHullFog(GameState &state, Ship &ship) {
+  ShipHullFog fog;
+  if (const System *sys = state.scenario.System(
+          static_cast<std::int16_t>(ship.current_system_id + 0x80))) {
+    fog.murk.color = sys->bkgnd_color;
+  }
+  if (ship.ship_instance_id != 0) {
+    fog.murk_unclamped = Sprite_DistanceBrightnessUnclamped(
+        NovaSystem_GetEffectiveMurkPercent(state),
+        state.player.pos_x,
+        state.player.pos_y,
+        ship.pos_x,
+        ship.pos_y);
+    fog.murk.amount =
+        static_cast<std::int16_t>(std::min(fog.murk_unclamped, 0x1f));
+  }
+  fog.hull = fog.murk;
+  TickIonizationTint(state, ship, fog);
+  return fog;
 }
 } // namespace
+
+// Ghidra 0x00428340 Ship_UpdateVisualState effect-layer fog: the glow and
+// weapon layers copy the hull's +0xAA/+0xAC; the lights scale the amount by
+// 0x00575338 = 0.333 with the x87 truncation idiom. The player's layers write
+// amount 0.
+ShipSpriteFog NovaShip_EffectLayerFog(const BugFixPolicy &bugfixes,
+                                      const Ship &ship,
+                                      ShipEffectLayer layer) {
+  ShipSpriteFog fog = ship.hull_fog.hull;
+  if (ship.ship_instance_id == 0) {
+    fog.amount = 0;
+    return fog;
+  }
+  if (layer != ShipEffectLayer::Light) {
+    return fog;
+  }
+  // BUGFIX(original) (BugFixPolicy::safe): the lights scale the hull amount,
+  // which is already clamped at 0x1f, so they bottom out at fog 10 / level 17
+  // and stay visible through any murk once the hull has faded out. The fix
+  // scales the murk before that ceiling: the lights fade out further away
+  // than the hull, and the fog cap turns them off at amount 21. An ionization
+  // takeover (the hull amount is no longer the murk's) keeps the original
+  // source.
+  int source = fog.amount;
+  if (bugfixes.safe && ship.hull_fog.hull.amount == ship.hull_fog.murk.amount) {
+    source = ship.hull_fog.murk_unclamped;
+  }
+  fog.amount = static_cast<std::int16_t>(std::min(
+      static_cast<int>(std::trunc(static_cast<float>(source) * 0.333F)), 0x1f));
+  return fog;
+}
+
+float NovaShip_CapEffectLevelByFog(float level, int fog_amount) {
+  const float cap = 32.0F - static_cast<float>(fog_amount) * 1.5F;
+  if (!(cap < level)) {
+    return level;
+  }
+  return std::max(0.0F, std::trunc(cap));
+}
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, weapon-effects + running-lights
 // slice. See the header for scope notes. Constants decoded from data: the
@@ -639,22 +699,9 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
   }
   const float scale = std::max(0.0F, elapsed_ticks);
 
-  // Hull fog amount (Sprite +0xAA): the player's is 0, an NPC's is its murk
-  // distance brightness. The ionization block may then take it over; its
-  // Range(5) roll precedes the engine-glow Range(6) roll below.
-  const int murk_fog =
-      ship.ship_instance_id == 0
-          ? 0
-          : Sprite_DistanceBrightness(NovaSystem_GetEffectiveMurkPercent(state),
-                                      state.player.pos_x,
-                                      state.player.pos_y,
-                                      ship.pos_x,
-                                      ship.pos_y);
-  TickIonizationTint(state, ship, murk_fog);
-  const int hull_fog =
-      ship.ionization_tint_level >= 0 && !ship.ionization_tint_under_murk
-          ? ship.ionization_tint_level
-          : murk_fog;
+  // The ionization block's Range(5) roll precedes the engine-glow Range(6)
+  // roll below.
+  ship.hull_fog = ResolveHullFog(state, ship);
 
   // Weapon-effects sprite flash. Weapon_FirePlayerWeaponBank /
   // Weapon_FireShipWeapons raise this to 32 when the fired weapon carries
@@ -698,18 +745,12 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
       if (level > 0x20) {
         level = 0x20;
       }
-      // NPC glow copies the hull's fog amount, ionization flash included;
-      // the player's glow keeps fog 0.
-      const int glow_fog = ship.ship_instance_id == 0 ? 0 : hull_fog;
-      const float fog_cap = 32.0F - static_cast<float>(glow_fog) *
-                                        1.5F; // k_pd_range_scalar_mult_f64
-      if (fog_cap < static_cast<float>(level)) {
-        level = static_cast<std::int16_t>(fog_cap); // trunc toward zero
-        if (level < 0) {
-          level = 0;
-        }
-      }
-      ship.engine_glow_intensity = static_cast<float>(level) / 32.0F;
+      const int glow_fog =
+          NovaShip_EffectLayerFog(state.bugfixes, ship, ShipEffectLayer::Glow)
+              .amount;
+      ship.engine_glow_intensity =
+          NovaShip_CapEffectLevelByFog(static_cast<float>(level), glow_fog) /
+          32.0F;
     }
   } else {
     ship.engine_glow_intensity = 0.0F;

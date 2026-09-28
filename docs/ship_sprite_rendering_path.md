@@ -290,9 +290,22 @@ accumulated weapon `IonizeColor` (ShipState +0xB0), so the hull is mixed
 ~50% toward the ion colour. When the murk fog is already >= 8 and >= the
 flash, the 32-bit path keeps the fog amount and writes `0x20 - fog` as the
 colour (near-black; under `BugFixPolicy::safe` the hull is ion-tinted first
-and then murk-faded, via `SpriteDrawOptions::pre_fog_tint_level`). The port rolls it in `TickIonizationTint`
-(src/game/ship_visual.cpp) and draws it through
-`SpriteDrawOptions::fog_brightness_override`.
+and then murk-faded, via `SpriteDrawOptions::pre_fog_tint`). The port rolls it in `TickIonizationTint`
+(src/game/ship_visual.cpp) into `Ship::hull_fog`, which the renderer draws
+through `SpriteDrawOptions::fog_amount`/`fog_color`.
+
+The other composite layers copy the hull's fog after the ionization block. The
+alt sheet copies the hull's brightness, paint and fog (+0xA2..+0xAC). For NPCs,
+the engine glow and weapon-effects layers copy the hull's fog amount and
+colour, and the running lights copy the colour with the amount scaled by
+`0.333` (`k_blast_ship_span_scale_f64` 0x00575338, truncated). Each of these
+layers then caps its level at `trunc(32 - fog * 1.5)`. The player's layers
+keep fog amount 0. The port resolves these in `NovaShip_EffectLayerFog` and
+`NovaShip_CapEffectLevelByFog`.
+Because the hull amount is already clamped at 0x1f, the original's lights
+never fog past 10. Under `BugFixPolicy::safe` the port scales the unclamped
+murk instead, so the lights still fade out, just later than the hull (see
+`docs/known_original_bugs.md`).
 
 ## Sprite rows / banking (verified 2026, data + Bible)
 

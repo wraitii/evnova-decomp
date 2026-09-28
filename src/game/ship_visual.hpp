@@ -89,6 +89,24 @@ NovaShip_CloakPresentation(const GameState &state,
                            const Ship &ship,
                            const NovaShipTintColor &resolved_tint);
 
+// The additive composite layers that copy the hull's fog in
+// Ship_UpdateVisualState (0x00428340).
+enum class ShipEffectLayer { Glow, Light, Weapon };
+
+// Ghidra 0x00428340 Ship_UpdateVisualState effect-layer fog. The player's
+// layers keep fog amount 0; an NPC's copy the hull's fog (Ship.hull_fog.hull,
+// ionization included), the running lights at trunc(amount * 0.333)
+// (k_blast_ship_span_scale_f64 0x00575338); under BugFixPolicy::safe the
+// lights scale the unclamped murk instead. Pure.
+[[nodiscard]] ShipSpriteFog NovaShip_EffectLayerFog(
+    const BugFixPolicy &bugfixes, const Ship &ship, ShipEffectLayer layer);
+
+// Ghidra 0x00428340 effect-layer fog cap: a layer level above
+// 32 - fog * 1.5 (0x00575348 / k_pd_range_scalar_mult_f64 0x00575340) drops
+// to trunc(32 - fog * 1.5), clamped at 0. Levels are the original's 0..32
+// tint units.
+[[nodiscard]] float NovaShip_CapEffectLevelByFog(float level, int fog_amount);
+
 // Decoded sh\x8an base-image fields (Bible names in parentheses) plus the
 // rotation metadata used to index frames by heading.
 struct ShipVisualDescriptor {
@@ -264,9 +282,9 @@ void NovaShip_TickSpriteAnimation(GameState &state,
 // light sprites when the ship is disabled) and the ship is disabled, the
 // blink result is overridden to zero so the layer goes dark. The results
 // (Ship.weapon_sprite_flash_level, Ship.light_intensity, both 0..32) feed the
-// weapon-effects and light sprite layers in the renderer. It first runs the
-// ionization block, which rolls Ship.ionization_tint_level/_color (the hull's
-// fog amount/colour override) ahead of the engine-glow flicker roll.
+// weapon-effects and light sprite layers in the renderer. It first resolves
+// Ship.hull_fog: the NPC distance murk, then the ionization block, whose
+// flicker roll precedes the engine-glow one.
 void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
                                                Ship &ship,
                                                float elapsed_ticks);

@@ -13,6 +13,15 @@
 
 namespace game {
 namespace {
+// The ionization-tinted hull fog level the visual tick rolled, or -1 when the
+// hull keeps its plain murk fog.
+int IonizationTintLevel(const Ship &ship) {
+  const ShipHullFog &fog = ship.hull_fog;
+  if (!fog.ionized) {
+    return -1;
+  }
+  return fog.pre_tint ? fog.pre_tint->amount : fog.hull.amount;
+}
 
 // Tiny JSON string builder (escaped strings, flat members).
 struct Json {
@@ -192,7 +201,7 @@ std::string ProbeState_Snapshot(const GameState &state,
     j.num("fuel", state.player.fuel_points);
     j.num("ionization_points", state.player.ionization_points);
     j.num("ionization_color", state.player.ionization_color);
-    j.num("ionization_tint_level", state.player.ionization_tint_level);
+    j.num("ionization_tint_level", IonizationTintLevel(state.player));
     j.num("max_shield", state.cached_stats.max_shield_points);
     j.num("max_armor", state.cached_stats.max_armor_points);
     j.num("fuel_capacity", state.cached_stats.fuel_capacity);
@@ -298,7 +307,7 @@ std::string ProbeState_Snapshot(const GameState &state,
               cls != nullptr ? cls->ionization_capacity : 0);
       row.num("ionization_decay_rate",
               cls != nullptr ? cls->ionization_decay_rate : 0.0F);
-      row.num("ionization_tint_level", ship.ionization_tint_level);
+      row.num("ionization_tint_level", IonizationTintLevel(ship));
       // Raw tank plus the travel/jump locks, so a probe reader can tell a
       // fuel-starved ship from one held by its recorded destination or the
       // velocity-match gate in Stellar_CanShipInitiateJumpSequence.

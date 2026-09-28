@@ -366,6 +366,16 @@ int Sprite_DistanceBrightness(int effective_murk,
                               float camera_y,
                               float sprite_x,
                               float sprite_y) {
+  return std::min(Sprite_DistanceBrightnessUnclamped(
+                      effective_murk, camera_x, camera_y, sprite_x, sprite_y),
+                  0x1f);
+}
+
+int Sprite_DistanceBrightnessUnclamped(int effective_murk,
+                                       float camera_x,
+                                       float camera_y,
+                                       float sprite_x,
+                                       float sprite_y) {
   if (effective_murk <= 0) {
     return 0;
   }
@@ -393,7 +403,7 @@ int Sprite_DistanceBrightness(int effective_murk,
       static_cast<std::uint32_t>(effective_murk) * dist_sq;
   const float fog = static_cast<float>(std::bit_cast<std::int32_t>(product)) *
                     kDistanceIntensityScale;
-  return std::clamp(static_cast<int>(std::trunc(fog)), 0, 0x1f);
+  return std::max(static_cast<int>(std::trunc(fog)), 0);
 }
 
 namespace {
@@ -409,6 +419,114 @@ std::uint8_t TintChannelToColorMod(std::int16_t channel) {
   const int raw = static_cast<std::uint16_t>(channel);
   const int scale = std::clamp(raw, 0, 0x20);
   return static_cast<std::uint8_t>(scale * 255 / 0x20);
+}
+
+// The fog amount (Sprite +0xAA, 0..32) for one draw: the explicit amount when
+// the caller resolved it, else the distance brightness derived from the murk.
+int ResolveFogAmount(const SpriteDrawOptions &opts,
+                     float camera_world_x,
+                     float camera_world_y,
+                     float world_x,
+                     float world_y) {
+  if (opts.fog_amount) {
+    return *opts.fog_amount;
+  }
+  if (opts.fog_murk <= 0) {
+    return 0;
+  }
+  return Sprite_DistanceBrightness(
+      opts.fog_murk, camera_world_x, camera_world_y, world_x, world_y);
+}
+
+// Stage 1 of BlitPixel_TintRgb15Span (0x004736c0) mixes the source toward the
+// fog colour by amount/32. Its 5-bit `>> 5` truncation zeroes the source term
+// at the 0x1f ceiling, so the top step snaps to fully fogged.
+float FogMix(int amount) {
+  if (amount <= 0) {
+    return 0.0F;
+  }
+  return amount >= 0x1f ? 1.0F : static_cast<float>(amount) / 32.0F;
+}
+
+// Draws `texture` at `alpha` (0..1) with `blend`, restoring the shared
+// texture's alpha mod and the default blend mode afterwards.
+void RenderAtAlpha(SDL_Renderer *renderer,
+                   const SdlTexture &texture,
+                   const SDL_FRect &dest,
+                   float alpha,
+                   SDL_BlendMode blend) {
+  SDL_SetTextureBlendMode(texture.get(), blend);
+  if (alpha < 1.0F) {
+    SDL_SetTextureAlphaMod(texture.get(),
+                           static_cast<std::uint8_t>(alpha * 255.0F));
+  }
+  SDL_RenderTexture(renderer, texture.get(), nullptr, &dest);
+  SDL_SetTextureAlphaMod(texture.get(), SDL_ALPHA_OPAQUE);
+  SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
+}
+
+// The fog passes under a normal (non-additive) frame. The original computes
+// `f = src*(1-a) + fog*a` and REPLACES the framebuffer for opaque pixels (it
+// fogs toward a constant, not toward dst), so the fog colour is painted
+// through the frame's silhouette first -- occluding whatever is behind, unlike
+// a source-alpha fade -- and the caller then draws the source at the returned
+// weight over it:
+//   opaque:  src*(1-a) + fog*a  == f
+// An optional pre-fog tint src*(1-t) + tint*t, then fogged by a, adds a
+// silhouette at b = t(1-a) / (1 - (1-t)(1-a)) over the fog pass, which with
+// the source at (1-t)(1-a) leaves
+//   src*(1-t)(1-a) + tint*t(1-a) + fog*a.
+// Returns the source weight; without a silhouette the draw degrades to a
+// source-alpha fade over dst (the divergence the overlap case makes visible).
+//
+// BUGFIX(original) (BugFixPolicy::safe, via paint_fog_colors):
+// BlitPixel_TintRgb15Span (0x004736c0) mixes the source toward the fog
+// colour first and multiplies the result by the hull paint, so the murk and
+// ionization colours come out painted. The fix paints only the source (the
+// colour mod on the frame texture) and fogs over it; with paint_fog_colors
+// set, the silhouette colours are painted too, as in the original.
+float DrawFogUnderlay(SDL_Renderer *renderer,
+                      const SdlTexture *fog_mask,
+                      const SDL_FRect &dest,
+                      const SpriteDrawOptions &opts,
+                      float alpha_mod,
+                      float fog_a) {
+  const float src_factor = 1.0F - fog_a;
+  if (fog_mask == nullptr || alpha_mod <= 0.0F) {
+    return src_factor;
+  }
+  const auto paint_channel =
+      [&](std::uint32_t color, int shift, std::size_t channel) {
+        const auto value = static_cast<int>((color >> shift) & 0xff);
+        if (!opts.paint_fog_colors || !opts.tint_rgb5.has_value()) {
+          return static_cast<std::uint8_t>(value);
+        }
+        return static_cast<std::uint8_t>(
+            value * TintChannelToColorMod((*opts.tint_rgb5)[channel]) / 255);
+      };
+  const auto paint_silhouette = [&](std::uint32_t color, float alpha) {
+    SDL_SetTextureColorMod(fog_mask->get(),
+                           paint_channel(color, 16, 0),
+                           paint_channel(color, 8, 1),
+                           paint_channel(color, 0, 2));
+    RenderAtAlpha(renderer, *fog_mask, dest, alpha, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureColorMod(fog_mask->get(), 255, 255, 255);
+  };
+  if (fog_a > 0.0F) {
+    paint_silhouette(opts.fog_color, alpha_mod);
+  }
+  if (!opts.pre_fog_tint || opts.pre_fog_tint->amount <= 0) {
+    return src_factor;
+  }
+  const float tint_a =
+      std::min(1.0F, static_cast<float>(opts.pre_fog_tint->amount) / 32.0F);
+  const float source_weight = (1.0F - tint_a) * src_factor;
+  const float covered = 1.0F - source_weight;
+  if (covered > 0.0F) {
+    paint_silhouette(opts.pre_fog_tint->color,
+                     alpha_mod * tint_a * src_factor / covered);
+  }
+  return source_weight;
 }
 
 // Renders one frame texture at an anchor-aligned position (shared by the asset-
@@ -449,116 +567,26 @@ void BlitFrame(SDL_Renderer *renderer,
   }
 
   const float alpha_mod = std::clamp(opts.alpha_mod, 0.0F, 1.0F);
-  int distance_brightness = 0;
-  if (opts.fog_brightness_override >= 0) {
-    distance_brightness = opts.fog_brightness_override;
-  } else if (opts.fog_murk > 0) {
-    distance_brightness = Sprite_DistanceBrightness(
-        opts.fog_murk, camera_world_x, camera_world_y, world_x, world_y);
-  }
-  // Stage 1 mixes the source toward the system space colour by d/32. The
-  // original's 5-bit `>> 5` truncation (BlitPixel_TintRgb15Span 0x004736c0)
-  // zeroes the source term at the d == 0x1f ceiling, so snap the top step to
-  // fully fogged (the source contributes nothing and the pixel becomes the
-  // space colour).
-  const float fog_a =
-      distance_brightness > 0
-          ? (distance_brightness >= 0x1f
-                 ? 1.0F
-                 : static_cast<float>(distance_brightness) / 32.0F)
-          : 0.0F;
-  const float src_factor = 1.0F - fog_a;
+  const float fog_a = FogMix(
+      ResolveFogAmount(opts, camera_world_x, camera_world_y, world_x, world_y));
 
   // Additive layers (engine glow / running lights / weapon effects): the
   // original draws `dst + f*intensity/32`, so the fog only attenuates the
   // source contribution.
   if (opts.additive) {
-    SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_ADD);
-    const float alpha = alpha_mod * src_factor;
+    const float alpha = alpha_mod * (1.0F - fog_a);
     if (alpha > 0.0F) {
-      if (alpha < 1.0F) {
-        SDL_SetTextureAlphaMod(texture.get(),
-                               static_cast<std::uint8_t>(alpha * 255.0F));
-      }
-      SDL_RenderTexture(renderer, texture.get(), nullptr, &dest);
-      SDL_SetTextureAlphaMod(texture.get(), SDL_ALPHA_OPAQUE);
+      RenderAtAlpha(renderer, texture, dest, alpha, SDL_BLENDMODE_ADD);
     }
-    SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
     return;
   }
 
-  // Normal layers: reproduce `f = src*(1-d/32) + space_color*(d/32)`, which
-  // REPLACES the framebuffer for opaque pixels (the original fogs toward a
-  // constant, not toward dst). Pass 1 paints the space colour through the
-  // frame's silhouette -- occluding whatever is behind, unlike a source-alpha
-  // fade -- then pass 2 draws the source at (1-d/32) over that silhouette.
-  //   opaque:  src*(1-a) + space*a  == f
-  // Without a silhouette this degrades to a source-alpha fade over dst (the
-  // divergence the overlap case makes visible).
-  // BUGFIX(original) (BugFixPolicy::safe, via paint_fog_colors):
-  // BlitPixel_TintRgb15Span (0x004736c0) mixes the source toward the fog
-  // colour first and multiplies the result by the hull paint, so the murk and
-  // ionization colours come out painted. The fix paints only the source (the
-  // colour mod on the frame texture) and fogs over it; with paint_fog_colors
-  // set, the silhouette colours are painted too, as in the original.
-  const auto paint_channel =
-      [&](std::uint32_t color, int shift, std::size_t channel) {
-        const auto value = static_cast<int>((color >> shift) & 0xff);
-        if (!opts.paint_fog_colors || !opts.tint_rgb5.has_value()) {
-          return static_cast<std::uint8_t>(value);
-        }
-        return static_cast<std::uint8_t>(
-            value * TintChannelToColorMod((*opts.tint_rgb5)[channel]) / 255);
-      };
-  const auto paint_silhouette = [&](std::uint32_t color, float alpha) {
-    SDL_SetTextureColorMod(fog_mask->get(),
-                           paint_channel(color, 16, 0),
-                           paint_channel(color, 8, 1),
-                           paint_channel(color, 0, 2));
-    SDL_SetTextureAlphaMod(fog_mask->get(),
-                           static_cast<std::uint8_t>(alpha * 255.0F));
-    SDL_SetTextureBlendMode(fog_mask->get(), SDL_BLENDMODE_BLEND);
-    SDL_RenderTexture(renderer, fog_mask->get(), nullptr, &dest);
-    SDL_SetTextureColorMod(fog_mask->get(), 255, 255, 255);
-    SDL_SetTextureAlphaMod(fog_mask->get(), SDL_ALPHA_OPAQUE);
-  };
-  float source_weight = src_factor;
-  if (fog_mask != nullptr && alpha_mod > 0.0F) {
-    if (fog_a > 0.0F) {
-      paint_silhouette(opts.fog_color, alpha_mod);
-    }
-    // Optional stage before the fog: src*(1-t) + tint*t, then fogged by a.
-    // Over the fog pass, a silhouette at b = t(1-a) / (1 - (1-t)(1-a))
-    // followed by the source at (1-t)(1-a) leaves
-    //   src*(1-t)(1-a) + tint*t(1-a) + space*a.
-    if (opts.pre_fog_tint_level > 0) {
-      const float tint_a =
-          std::min(1.0F, static_cast<float>(opts.pre_fog_tint_level) / 32.0F);
-      source_weight = (1.0F - tint_a) * src_factor;
-      const float covered = 1.0F - source_weight;
-      if (covered > 0.0F) {
-        paint_silhouette(opts.pre_fog_tint_color,
-                         alpha_mod * tint_a * src_factor / covered);
-      }
-    }
-  }
-
+  const float source_weight =
+      DrawFogUnderlay(renderer, fog_mask, dest, opts, alpha_mod, fog_a);
   const float alpha = alpha_mod * source_weight;
-  if (alpha <= 0.0F) {
-    return;
+  if (alpha > 0.0F) {
+    RenderAtAlpha(renderer, texture, dest, alpha, SDL_BLENDMODE_BLEND);
   }
-  SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
-  if (alpha < 1.0F) {
-    // Multiply the source by the requested intensity; restore after (kept
-    // per-draw so shared textures are not left alpha-modded).
-    SDL_SetTextureAlphaMod(texture.get(),
-                           static_cast<std::uint8_t>(alpha * 255.0F));
-    SDL_RenderTexture(renderer, texture.get(), nullptr, &dest);
-    SDL_SetTextureAlphaMod(texture.get(), SDL_ALPHA_OPAQUE);
-  } else {
-    SDL_RenderTexture(renderer, texture.get(), nullptr, &dest);
-  }
-  SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
 }
 
 // Resolves a frame image's SDL texture + native size: asset-backed images use
