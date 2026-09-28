@@ -1159,6 +1159,14 @@ constexpr SDL_Color kBoardValue{255, 255, 255, 255};
 constexpr SDL_Color kBoardDim{128, 128, 128, 255};
 constexpr SDL_Color kBoardPanelBg{0, 0, 0, 255};
 
+// DLOG default UI font. The shipped dialogs set the shared DrawContext face to
+// Geneva (DAT_00735684, family index 0) at size DAT_00735686 = 9 in
+// Ship_InitGameplayDataTables (0x004b0c20); NovaText_DrawText (0x004bc760)
+// passes that scaled value straight through as the font size to
+// FontCache_GetOrCreateFontHandle. Both the plunder window (0x00484d30) and the
+// capture dialog (0x00498110) set that pair before drawing.
+constexpr float kBoardDialogFontSize = 9.0F;
+
 // Loads a STR# 0x7d2 overlay fragment with a fallback.
 std::string LoadBoardMiscString(std::uint16_t index, std::string fallback) {
   if (auto s = NovaHud_LoadStringEntry(kMiscStr, index)) {
@@ -1377,7 +1385,7 @@ void DrawBoardWindow(SdlPlatform &platform,
                              float y,
                              const std::string &text,
                              SDL_Color color,
-                             float size = 12.0F) {
+                             float size = kBoardDialogFontSize) {
     NovaText_Draw(platform,
                   font_cache,
                   NovaFontFamily::kGeneva,
@@ -1389,12 +1397,13 @@ void DrawBoardWindow(SdlPlatform &platform,
                   text);
   };
 
-  // Title row, then the label column.
+  // Title row, then the label column. The title uses the same label colour as
+  // the row labels (SHORT_ARRAY_00733b50), not the value colour.
   draw_text(
       px,
       py + 12.0F,
       LoadBoardMiscString(kMiscTitle, "Select what to plunder from this ship:"),
-      kBoardValue);
+      kBoardLabel);
   draw_text(px,
             py + 28.0F,
             LoadBoardMiscString(kMiscCargoLabel, "Cargo:"),
@@ -1521,9 +1530,10 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
       line += ' ';
     }
     line += word;
-    if (font_cache.TextWidth(
-            NovaFontFamily::kGeneva, 11.0F, kNovaFontStyleRegular, line) >
-        max_width) {
+    if (font_cache.TextWidth(NovaFontFamily::kGeneva,
+                             kBoardDialogFontSize,
+                             kNovaFontStyleRegular,
+                             line) > max_width) {
       // Overfull: put the word on its own (or the next) line.
       if (const std::size_t cut = line.rfind(' '); cut != std::string::npos) {
         lines.push_back(line.substr(0, cut));
@@ -1665,7 +1675,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
       NovaText_Draw(platform,
                     font_cache,
                     NovaFontFamily::kGeneva,
-                    11.0F,
+                    kBoardDialogFontSize,
                     kNovaFontStyleRegular,
                     kBoardValue,
                     text_panel.x + 4.0F,

@@ -168,17 +168,21 @@ triggers mission failure when the player is boarded.
   - [6] 129..275 × 138..163 — Capture Ship (0x2b)
   UiPanel entries are 1-based: buttons = entries 1..4 then 6..7 (skipping the
   text panel at entry 5); the original hit code reads exactly that set.
-- Text panel rows (x offsets from panel left, y offsets from panel top):
-  - y+12: "Cargo:" (STR# 0x7d2 0x6d) | y+28: "Ammo:" (0x6e) | y+42: key hint
-    (DAT_0072f1cc pstring; first byte through the C-locale toupper
-    MWRuntime_ToUpper, so it draws "Credits:") |
-    y+56: "Capture Odds:" (0x6f)
+- Text panel rows (Geneva 9, the shared DLOG draw font: `DrawContext_SetFontId
+  DAT_00735684` family index 0 / `DrawContext_StoreScaledValue DAT_00735686`
+  = 9, both set by `Ship_InitGameplayDataTables` 0x004b0c20; x offsets from
+  panel left, y offsets from panel top):
+  - y+12 title "Select what to plunder from this ship:" (STR# 0x7d2 0x6d,
+    label colour `SHORT_ARRAY_00733b50`) | y+28 "Cargo:" (0x6e) |
+    y+42 credits label (DAT_0072f1cc pstring; first byte through the C-locale
+    toupper MWRuntime_ToUpper, so it draws "Credits:") | y+56 "Ammo:" (0x6f) |
+    y+70 "Energy:" (DAT_0072d9cc pstring) at x+1 and "Capture Odds:" (0x70)
+    at x+120
   - values at x+50: y+28 cargo qty "tons of" <commodity>, y+42 credits
     (grouped), y+56 ammo count + (plural|singular) weapon name (outfit
-    attribute ModType 3 = weapon, ModVal = bank id), y+70: fuel label
-    (DAT_0072d9cc pstring) at x+1, fuel qty at x+50, odds% at x+195 + "%." +
-    unlicensed note (`is_licensed_runtime == 0`: note pstring + STR# 30000
-    entry 1).
+    attribute ModType 3 = weapon, ModVal = bank id), y+70 fuel qty; odds% at
+    x+195 + "%." + unlicensed note (`is_licensed_runtime == 0`: note pstring +
+    STR# 30000 entry 1).
   - No-offer values render dimmed (color DAT_00733b56) with STR# 0x7d2 0x14f.
 - On open: roll `panic = rand(0x1a) + 0xf` (15..40), build offers, then the
   mission-ship free-outfit bonus arm.
