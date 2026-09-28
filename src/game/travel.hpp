@@ -153,12 +153,11 @@ inline constexpr int kHyperspaceWarpUpSoundKey = 128;
 // gate the probe.
 [[nodiscard]] bool NovaTravel_PlayerInJumpRange(const GameState &state);
 
-// Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence: returns true when
-// the player ship may initiate a hyperspace jump. Gates on the ship class
+// Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence: checks the ship class
 // fuel capacity being at least one jump (kJumpFuelCost) and the ship not
 // being locked onto another ship's velocity match (no NPC fleet, so that check
-// is degenerate). Fuel is consumed by the jump-completion path; this helper's
-// original implementation does not inspect the current fuel amount.
+// is degenerate). The player command also checks current fuel in
+// Ship_HandlePlayerShipCore 0x0044c207; this helper does not.
 [[nodiscard]] bool NovaTravel_CanStartJump(const GameState &state);
 
 // Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence, for an arbitrary

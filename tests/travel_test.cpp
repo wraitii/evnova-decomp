@@ -625,6 +625,30 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
   CHECK(state.player.current_system_id == 1);
 }
 
+TEST_CASE("player jump requires a full jump of current fuel") {
+  for (const float fuel : {0.0F, 99.0F, 100.0F}) {
+    CAPTURE(fuel);
+    GameState state;
+    REQUIRE(state.scenario.LoadFromArchives());
+    MakePlayerHealthy(state);
+    state.player.current_system_id = 0;
+    state.player.pos_y = -3000.0F;
+    state.player.fuel_points = fuel;
+    REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+    NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+
+    CHECK(state.travel.engaging == (fuel >= game::kJumpFuelCost));
+    CHECK(state.player.fuel_points == fuel);
+    if (fuel < game::kJumpFuelCost) {
+      CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kIdle);
+      REQUIRE(state.hud_overlay.active);
+      CHECK(state.hud_overlay.message.find("Insufficient energy") !=
+            std::string::npos);
+    }
+  }
+}
+
 // The stationary hold starts the 'Warp up' cue the moment the brake hands
 // off (the original pre-stages the sound at the stop), then the fire lands
 // once the hold passes the 30-tick engage threshold with the cue finished.

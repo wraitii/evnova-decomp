@@ -1871,10 +1871,13 @@ void NovaTravel_Tick(GameState &state,
                           // start a hyperspace jump."
     return;
   }
-  if (!NovaTravel_CanStartJump(state)) {
-    // Fuel below one jump: STR# 0x7d2 entry 0xa "Insufficient energy for
-    // hyperspace jump." (the cached string DAT_0072dccc shown at 0x0044c6b8;
-    // the 3..0xa loader block maps DAT_0072dccc to entry 0xa).
+  // Ship_HandlePlayerShipCore 0x0044c207 checks the current tank separately
+  // from Stellar_CanShipInitiateJumpSequence's class-capacity gate. Equality
+  // with the 100-point cost is enough to jump.
+  if (state.player.fuel_points < kJumpFuelCost ||
+      !NovaTravel_CanStartJump(state)) {
+    // STR# 0x7d2 entry 0xa "Insufficient energy for hyperspace jump."
+    // (the cached string DAT_0072dccc shown at 0x0044c6b8).
     overlay_denial(0xa);
     return;
   }
