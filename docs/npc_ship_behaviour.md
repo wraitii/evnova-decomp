@@ -416,8 +416,9 @@ labels.
 - State `0x14` is the hypergate/wormhole entry state. It is reached when a
   selected travel stellar carries the restricted-lane flags; mode `0x02`
   approaches that stellar, then the state branch hands off through mode
-  `0x17`. The handoff may clear velocity for bookkeeping, but has no visible
-  brake/spin-up phase: the NPC enters/transfers and vanishes.
+  `0x17`. The handoff clears velocity and arms a 16-tick fade to transparent
+  white; the NPC transfers when that timer expires. There is no mode-`0x04`
+  hyperjump spin-up phase.
 - State `0x15` is the emergence hold at the destination. For animated
   hypergates, the SDL renderer hides the arriving hull while the gate advances
   through its opening frames, then reveals it at the CustPicID transition into

@@ -63,6 +63,11 @@ struct ShipEmergencePresentation {
 [[nodiscard]] ShipEmergencePresentation
 NovaShip_EmergencePresentation(const Ship &ship);
 
+// Ghidra 0x00428340 Ship_UpdateVisualState: an NPC in control mode 0x17 fades
+// from its normal hull to transparent white during gate/wormhole entry.
+[[nodiscard]] ShipEmergencePresentation
+NovaShip_GateEntryPresentation(const Ship &ship);
+
 // The flight scene's presentation geometry: the full-window scene placement
 // at the flight-scene scale `F`, plus the authored gameplay viewport (window
 // minus the drawn cockpit-strip reserve, divided by `F`). Both the world draw

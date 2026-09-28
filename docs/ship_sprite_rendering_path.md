@@ -162,6 +162,16 @@ colored effect layers return with the hull colour so they cannot obscure the
 initial pure-white silhouette. The SDL renderer uses an alpha-preserving white
 silhouette texture for the hull tint.
 
+### State-0x14 hypergate entry
+
+When an NPC reaches a hypergate or wormhole, state 0x14 arms control mode
+0x17 and a 16-tick timer. `Ship_UpdateVisualState` (0x00428340) sets hull
+transparency to `32 - 2 * timer` (0 opaque, 32 clear), raises the white
+distance tint to `min(2 * transparency, 32)`, and removes the ship when the
+timer drops below one tick. The SDL renderer holds the NPC at the gate through
+that fade, then completes its existing destination transfer and state-0x15
+emergence. The player's restricted travel uses its separate screen flash path.
+
 ## Decoder
 
 `RleSpriteSheet_Decode16` (src/rle_sprite_sheet.cpp) already decodes the same

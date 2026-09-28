@@ -85,7 +85,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00414550	Weapon_FireShipWeapons	src/game/weapon.cpp	90%	gameplay,audio,moddata,bugfix
 0x004152E0	Ship_IssueEscortOrders	src/game/ship_ai.cpp	100%	moddata
 0x004156A0	Ship_ReacquireSquadLeader	src/game/escort_formation.cpp	100%	moddata
-0x004159A0	Ship_IsShipInAiControlMode0x17		0%	
+0x004159A0	Ship_IsShipInAiControlMode0x17	src/game/spaceflight_view.cpp	100%	verify
 0x004159C0	Ship_IsShipInAiState0x15	src/game/ship_ai.cpp	100%	
 0x004159E0	Ship_EnterShipAiState0x15_EmergeFromHypergate	src/game/ship_ai.cpp	80%	gameplay
 0x00415AD0	Stellar_IsShipHeadingToStellarInAiState0x01Or0x14		0%	

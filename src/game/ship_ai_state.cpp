@@ -386,20 +386,23 @@ void NovaAi_UpdateShipState(GameState &state,
       ship.ai_control_mode = 2;
       ship.ai_maneuver_timer_ms = -1.0F;
     } else {
+      const bool finished_entry =
+          ship.ai_control_mode == 0x17 && ship.ai_maneuver_timer_ms <= 0.0F;
+      const bool starting_entry = ship.ai_control_mode != 0x17;
       // At the gate/wormhole entry point, the original clears velocity as part
-      // of the handoff, then propagates entry to any active escorts. This is
-      // not a visible mode-4 brake/spin-up phase: the NPC transfers/vanishes.
+      // of the handoff, then fades the hull over 16 normalized ticks.
       ship.vel_x = 0.0F;
       ship.vel_y = 0.0F;
       ship.ai_control_mode = 0x17;
-      if (!(ship.ai_maneuver_timer_ms >= 0.0F) ||
+      if (starting_entry || !(ship.ai_maneuver_timer_ms >= 0.0F) ||
           ship.ai_maneuver_timer_ms > 16.0F) {
         ship.ai_maneuver_timer_ms = 16.0F;
       }
       // Escort propagation (Ship_UpdateShipAiState state 0x14 successor loop):
       // any active ship whose squad_leader_ship_slot == this ship is ordered to
       // jump with it. TODO(decomp): confirm formation-offset propagation.
-      for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      for (std::size_t slot = 1; starting_entry && slot < GameState::kMaxShips;
+           ++slot) {
         Ship &other = state.ShipAt(slot);
         if (!other.is_active ||
             other.ship_instance_id == ship.ship_instance_id) {
@@ -420,16 +423,16 @@ void NovaAi_UpdateShipState(GameState &state,
         other.ai_state_code = 0x14;
         other.ai_control_mode = 0;
       }
-      // Gameplay-visible NPC gate/wormhole transfer. The original state
-      // machine only arms control mode 0x17 here; the actual system transfer
-      // runs in a separate jump-presentation path outside
-      // Ship_UpdateShipAiState. The clean-room reconstruction performs that
-      // transfer inline via NovaAi_CompleteNpcJump as soon as state 0x14
-      // reaches the gate. A persistent failure (no paired hyperlink in the
-      // current system) would leave the ship parked in mode 0x17. This is a
-      // hot path, so a TODO comment stands in for runtime logging.
+      // The original visual updater deactivates the departing hull once the
+      // timer drops below one tick. The port completes the paired-system
+      // transfer at that point so its destination emergence still runs.
       // TODO(decomp): locate the original out-of-line transfer path.
-      (void)NovaAi_CompleteNpcJump(state, ship);
+      if (finished_entry && !NovaAi_CompleteNpcJump(state, ship)) {
+        // The original visual updater clears an NPC at timer < 1 even when
+        // the surrounding jump path cannot place it in another system.
+        ship.is_active = false;
+        ship.squad_leader_ship_slot = -1;
+      }
     }
     return;
   }

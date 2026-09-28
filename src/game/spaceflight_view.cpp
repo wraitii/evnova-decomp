@@ -770,6 +770,22 @@ ShipEmergencePresentation NovaShip_EmergencePresentation(const Ship &ship) {
           .white_mix = std::min(ticks / 8.0F, 1.0F)};
 }
 
+// @port 0x004159A0 100% verify
+// Ghidra 0x004159A0 Ship_IsShipInAiControlMode0x17 runs inline here;
+// 0x00428340 Ship_UpdateVisualState supplies the fade and white tint.
+ShipEmergencePresentation NovaShip_GateEntryPresentation(const Ship &ship) {
+  if (ship.ship_instance_id == 0 || ship.ai_control_mode != 0x17) {
+    return {};
+  }
+  constexpr float kFadeTicks = 16.0F;
+  const float ticks = std::clamp(ship.ai_maneuver_timer_ms, 0.0F, kFadeTicks);
+  // brightness_level = 32 - 2 * timer (0 opaque, 32 clear); the original
+  // 16-bit space tint becomes white as distance_brightness reaches 32.
+  return {.visible = ticks > 0.0F,
+          .hull_alpha = ticks / kFadeTicks,
+          .white_mix = std::min((kFadeTicks - ticks) / 8.0F, 1.0F)};
+}
+
 bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
                                        GameState &state) {
   // The player uses the same per-class sprite cache as the NPCs; a class
@@ -895,19 +911,20 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
       sprite.frames_per_rotation <= 0) {
     return;
   }
-  const ShipEmergencePresentation emergence =
-      NovaShip_EmergencePresentation(ship);
-  if (!emergence.visible) {
+  const ShipEmergencePresentation gate_transition =
+      ship.ai_control_mode == 0x17 ? NovaShip_GateEntryPresentation(ship)
+                                   : NovaShip_EmergencePresentation(ship);
+  if (!gate_transition.visible) {
     return;
   }
   const int frame = ComposeShipFrameIndex(ship,
                                           ComposeShipBaseRow(state, ship, *cls),
                                           sprite.frames_per_rotation,
                                           sprite.row_count);
-  // All colored layers (glow/lights/weapon/alt) fade out as the white
-  // emergence silhouette takes over; the white pass is drawn last so it hides
-  // the colored layers instead of the reverse.
-  const float layer_alpha = emergence.hull_alpha * (1.0F - emergence.white_mix);
+  // Colored layers fade as the white gate silhouette takes over. The white
+  // hull pass draws last so effect layers do not obscure it.
+  const float layer_alpha =
+      gate_transition.hull_alpha * (1.0F - gate_transition.white_mix);
 
   // Cloak render slice (Ship_UpdateVisualState 0x00428340 0x0042b0b2..). A
   // fully cloaked hull the player cannot reveal has hull/alt skipped (hull
@@ -963,7 +980,7 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
     // original's 0..32 tint units, so compare in the same scale.
     opts.alpha_mod =
         std::min(ship.engine_glow_intensity, cloak.effect_cap / 32.0F) *
-        (1.0F - emergence.white_mix);
+        (1.0F - gate_transition.white_mix);
     opts.additive = true;
     ApplyFog(opts);
     DrawSprite(platform.renderer(),
@@ -991,7 +1008,7 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
                         viewport_w,
                         viewport_h,
                         std::min(ship.light_intensity, cloak.effect_cap) *
-                            (1.0F - emergence.white_mix),
+                            (1.0F - gate_transition.white_mix),
                         /*visible_threshold=*/1.0F,
                         fog_murk_);
   }
@@ -1007,7 +1024,7 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
         viewport_w,
         viewport_h,
         std::min(ship.weapon_sprite_flash_level, cloak.weapon_cap) *
-            (1.0F - emergence.white_mix),
+            (1.0F - gate_transition.white_mix),
         /*visible_threshold=*/0.0F,
         fog_murk_);
   }
@@ -1048,12 +1065,11 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
   // tick's shield arm is not reconstructed yet.
   // TODO(decomp(0x00428340)): shield-bubble sprite frame + tint draw.
 
-  // Emergence tint is the final ship-composite pass. Drawing it after the
-  // ordinary glow/light/weapon/alt layers is essential: putting those colored
-  // layers on top makes the nominally white reveal visibly colored.
-  if (emergence.white_mix > 0.0F && emergence.hull_alpha > 0.0F) {
+  // The gate tint is the final ship-composite pass, above the colored layers.
+  if (gate_transition.white_mix > 0.0F && gate_transition.hull_alpha > 0.0F) {
     SpriteDrawOptions white_opts;
-    white_opts.alpha_mod = emergence.hull_alpha * emergence.white_mix;
+    white_opts.alpha_mod =
+        gate_transition.hull_alpha * gate_transition.white_mix;
     white_opts.white_silhouette = true;
     DrawSprite(platform.renderer(),
                sprite.base,
