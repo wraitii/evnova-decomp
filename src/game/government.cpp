@@ -962,10 +962,10 @@ void NovaShip_ScanPlayerForContraband(GameState &state,
   if (RandomBelow(state, 100) > 75) {
     return;
   }
-  // Hyperspace-committed guard: skip once the player's jump hold has passed
-  // its onset (the original gates on hyperspace_jump_timer > 0, which the port
-  // tracks as TravelState::JumpPhase::kSpinUp; the Ship field is dormant here).
-  if (state.travel.jump_phase == TravelState::JumpPhase::kSpinUp &&
+  // Hyperspace-committed guard: skip once the player's jump has passed the
+  // tunnel onset (Ghidra 0x00401800: hyperspace_jump_timer > 0, not disabled,
+  // jump progress > DOUBLE_00575008, 0.0 like the tunnel onset).
+  if (player.hyperspace_jump_timer > 0.0F &&
       !NovaAiShip_IsDisabled(state, player) &&
       NovaTravel_PlayerPastJumpOnset(state)) {
     return;

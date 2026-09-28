@@ -358,10 +358,9 @@ TEST_CASE("scan voice cues map to the original transition-table slots",
 
 TEST_CASE("hyperspace-committed player is not scanned (NovaTravel_Tick)",
           "[government][contraband][integration]") {
-  // The original guard gates on ShipState.hyperspace_jump_timer > 0, the jump
-  // hold clock. The port tracks the hold as TravelState::JumpPhase::kSpinUp, so
-  // drive a real engage through NovaTravel_Tick rather than touching the
-  // dormant Ship field.
+  // The guard gates on ShipState.hyperspace_jump_timer > 0 plus the tunnel
+  // onset, so drive a real engage through NovaTravel_Tick: it writes the
+  // timer and advances the tunnel clock the onset test reads.
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   state.scenario.governments[0].smug_penalty = 10;
@@ -383,7 +382,7 @@ TEST_CASE("hyperspace-committed player is not scanned (NovaTravel_Tick)",
   game::NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.engaging);
   // Hold the 'Warp up' voice active so the jump cannot fire before the ramp
-  // onset; advance to the stationary hold and then past the onset threshold.
+  // onset; advance to the spin-up and then past the onset threshold.
   for (int f = 0; f < 1200 && state.travel.jump_phase !=
                                   game::TravelState::JumpPhase::kSpinUp;
        ++f) {

@@ -16,12 +16,11 @@ Reverse-engineering + reimplementation note for the government smuggling scan.
   `NovaRandom_Range(100)` draw, accepting ≤ 75.
 - Hyperspace-committed guard: if the player's `hyperspace_jump_timer > 0` and
   the player is not disabled, the scan is skipped once the jump tunnel has
-  passed its onset. In the port the hold phase is `TravelState::JumpPhase::kSpinUp`,
-  which also seeds and advances `Ship::hyperspace_jump_timer` (2.0 at hold-begin,
-  incremented each 30 Hz tick, 0x0044c548/0x0044c70a), so gating on the phase is
-  equivalent to the original's field test; it delegates to
-  `NovaTravel_PlayerPastJumpOnset` (same ramp schedule as the tunnel movement
-  block: `elapsed60hz * multiplier / (duration * 0.01) − 35 / multiplier > 0`).
+  passed its onset. The port reads the same field (the jump brake holds it at
+  1.0, spin-up seeds 2.0 and adds each 30 Hz tick, 0x0044c548/0x0044c70a) and
+  delegates the onset test to `NovaTravel_PlayerPastJumpOnset` (same ramp
+  schedule as the tunnel movement block:
+  `elapsed60hz * multiplier / (duration * 0.01) − 35 / multiplier > 0`).
   The class `jump_duration_multiplier` is decoded from the shp Flags word by the
   loader (`NovaData_LoadScenarioResourceTables` 0x004bd3c0): bit0 → 0.7, else
   bit1 → 1.3, else bit2 → 1.6, else 1.0; all ×1.3, floored at 0.5. It scales
