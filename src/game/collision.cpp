@@ -615,7 +615,8 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
           responder_govt != target_govt) {
         eligible = false;
       }
-      if (NovaGovernment_GetPolicyFlag(state.scenario, responder_govt, 0)) {
+      if (NovaGovernment_HasRankPrivilege(
+              state.scenario, responder_govt, RankPrivilege::kNoAutoAttack)) {
         eligible = false;
       }
       if (!NovaGovernment_AreGovtsAllied(
@@ -1223,8 +1224,10 @@ void Ship_ApplyDamageToShip(GameState &state,
           if (attacker->faction_or_government_id >= 0 &&
               attacker->faction_or_government_id < 0x100 &&
               NovaShip_IsInPlayerSquad(state, *attacker) &&
-              NovaGovernment_GetPolicyFlag(
-                  state.scenario, attacker->faction_or_government_id, 0)) {
+              NovaGovernment_HasRankPrivilege(
+                  state.scenario,
+                  attacker->faction_or_government_id,
+                  RankPrivilege::kNoAutoAttack)) {
             should_retarget = false;
           }
         }

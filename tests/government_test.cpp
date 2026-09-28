@@ -377,14 +377,14 @@ TEST_CASE("outfit-derived state marks governments and rebuilds policy flags",
   state.scenario.ranks[0].government_id = 0;
   state.scenario.ranks[0].flags = 0x100;
   game::NovaOutfit_RecomputeOutfitDerivedState(state);
-  CHECK(state.scenario.governments[0].policy_flags[0] == 1);
-  CHECK(state.scenario.governments[1].policy_flags[0] == 1);
-  CHECK(state.scenario.governments[1].policy_flags[1] == 0);
+  CHECK(state.scenario.governments[0].rank_privileges.no_auto_attack);
+  CHECK(state.scenario.governments[1].rank_privileges.no_auto_attack);
+  CHECK(state.scenario.governments[1].rank_privileges.always_land == false);
 
   // Deactivating the rank clears the flags again.
   state.scenario.ranks[0].active = false;
   game::NovaOutfit_RecomputeOutfitDerivedState(state);
-  CHECK(state.scenario.governments[0].policy_flags[0] == 0);
+  CHECK(state.scenario.governments[0].rank_privileges.no_auto_attack == false);
 }
 
 // Game_ResetReputationAndAvailability (0x004b4220): only ever raises a

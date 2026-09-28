@@ -252,8 +252,8 @@ void NovaOutfit_RefreshContrabandScanLatches(GameState &state) {
 // cargo/junk clamps, jamming reset, cloak-latch reset, outfit-derived
 // government latches (ModType 0x2c/0x30), the carried-bomb class and
 // detonation-timer seed (Bible ModType 47 "bomb" / 50 "nonlethal bomb"),
-// government policy_flags clear/rebuild from active ranks, mining-scoop latch +
-// cargo-capacity gate, the contraband-scan latches
+// government rank_privileges clear/rebuild from active ranks, mining-scoop
+// latch + cargo-capacity gate, the contraband-scan latches
 // (NovaOutfit_RefreshContrabandScanLatches), and the recently-hit timer reset.
 // TODO(decomp): the remaining eager arms are not ported -- license clamp
 // (unlicensed -> max shield/armor 1.0) and junk-derived flags; the murk
@@ -301,7 +301,7 @@ void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
   // list contains the outfit's ModVal. ModType 0x2c is the reinforcement
   // inhibitor (ModVal -1 inhibits reinforcements player-wide), ModType 0x30
   // the IFF scrambler. The original never clears these two latches, so they
-  // stay sticky across recomputes (only policy_flags is rebuilt below).
+  // stay sticky across recomputes (only rank_privileges is rebuilt below).
   const auto mark_matching_governments = [&state](std::int16_t mod_val,
                                                   auto &&mark) {
     if (mod_val == -1) {
@@ -360,13 +360,14 @@ void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
   if (state.bomb_outfit_class != 0 && state.bomb_detonation_timer <= 0.0F) {
     state.bomb_detonation_timer = static_cast<float>(RandomBelow(state, 100));
   }
-  // Ghidra 0x0046d4b0: clear every government's two policy flags, then rebuild
-  // them from the active ranks. A rank with flags 0x100/0x200 and an
+  // Ghidra 0x0046d4b0: clear every government's two rank privileges, then
+  // rebuild them from the active ranks. A rank with flags 0x100/0x200 and an
   // affiliated government marks every allied government (0x100 ->
-  // policy_flags[0], 0x200 -> policy_flags[1]). This is the writer that the
-  // Government_GetPolicyFlag consumers (target acquisition, starmap) read.
+  // rank_privileges.no_auto_attack, 0x200 -> rank_privileges.always_land). This
+  // is the writer that the Government_HasRankPrivilege consumers (target
+  // acquisition, starmap) read.
   for (Government &govt : state.scenario.governments) {
-    govt.policy_flags = {0, 0};
+    govt.rank_privileges = {};
   }
   for (const RankDef &rank : state.scenario.ranks) {
     if (!rank.active || !rank.defined || (rank.flags & 0x300U) == 0U ||
@@ -379,12 +380,12 @@ void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
                                          rank.government_id)) {
         continue;
       }
-      auto &flags = state.scenario.governments[g].policy_flags;
+      auto &privileges = state.scenario.governments[g].rank_privileges;
       if ((rank.flags & 0x100U) != 0U) {
-        flags[0] = 1;
+        privileges.no_auto_attack = true;
       }
       if ((rank.flags & 0x200U) != 0U) {
-        flags[1] = 1;
+        privileges.always_land = true;
       }
     }
   }

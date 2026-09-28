@@ -2056,7 +2056,7 @@ TEST_CASE("combat-odds player contribution is suppressed for rank-friendly "
 
   // Player holds a rank/commission with government 0 -> policy flag 0 set.
   state.scenario.governments.resize(1);
-  state.scenario.governments[0].policy_flags[0] = 1;
+  state.scenario.governments[0].rank_privileges.no_auto_attack = true;
 
   game::Ship &npc = state.ShipAt(1);
   npc.is_active = true;
@@ -2082,7 +2082,7 @@ TEST_CASE("combat-odds player contribution is suppressed for rank-friendly "
   CHECK(npc.ai_odds_score == Catch::Approx(0.0F));
 
   // Clearing the flag re-enables it: 2 * 100 / 100 = 2.0.
-  state.scenario.governments[0].policy_flags[0] = 0;
+  state.scenario.governments[0].rank_privileges.no_auto_attack = false;
   game::NovaAi_UpdateShipCombatOddsScore(state, npc);
   CHECK(npc.ai_odds_score == Catch::Approx(2.0F));
 }

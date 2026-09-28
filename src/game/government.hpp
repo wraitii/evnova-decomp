@@ -51,17 +51,15 @@ namespace game {
 [[nodiscard]] bool NovaGovernment_DoGovtsShareClass(
     const ScenarioData &scenario, std::int16_t govt_a, std::int16_t govt_b);
 
-// Ghidra 0x0046e860 Government_GetGovernmentPolicyFlag. Reads one of the two
-// per-government boolean policy flags (Government.policy_flags, GovtDef
-// +0x84). flag_index must be 0 or 1; out-of-range government ids read 0.
-// Flag 0 gates player target acquisition (Ship_IsShipAcquirableAsTarget
-// 0x0040faa0) and several aggro/relation decisions. The writer is
-// Outfit_RecomputeOutfitDerivedState (0x0046d4b0), which clears both flags and
-// rebuilds them from active ranks (flag 0x100 -> flag 0, 0x200 -> flag 1) for
-// every government allied with the rank's affiliated government.
-[[nodiscard]] bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
-                                                std::int16_t govt_id,
-                                                int flag_index);
+enum class RankPrivilege { kNoAutoAttack = 0, kAlwaysLand = 1 };
+
+// Ghidra 0x0046e860 Government_HasRankPrivilege. Active rank flags
+// 0x100/0x200 grant these privileges to governments allied with the rank's
+// government. Outfit_RecomputeOutfitDerivedState rebuilds the flags;
+// out-of-range government ids have no privilege.
+[[nodiscard]] bool NovaGovernment_HasRankPrivilege(const ScenarioData &scenario,
+                                                   std::int16_t govt_id,
+                                                   RankPrivilege privilege);
 
 // Ghidra 0x004629E0 Government_IsCandidateHostileToTargeter. Whether `ship` is
 // a hostile target for a stellar defense battery. `stellar` is the targeter and
@@ -88,7 +86,8 @@ NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
 // disposed toward the player; consumed by the comm/hail/taunt and ship-update
 // paths, not only assistance requests. False while the ship keeps pressing its
 // own target; true when the ship belongs to the player's squad
-// (squad_leader_ship_slot == 0), its government policy flag 0 is set, or it
+// (squad_leader_ship_slot == 0), its government grants no-auto-attack rank
+// protection, or it
 // has no faction at all. A live mission-fleet ship likes the player only while
 // its mission is active with ShipGoal 3/4 and ShipBehav 1. Otherwise the
 // player's current system government is resolved against the ship's faction: a

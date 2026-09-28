@@ -483,8 +483,9 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
           state.ShipAt(static_cast<std::size_t>(ally.primary_target_ship_slot));
       if ((ally.primary_target_ship_slot == 0 ||
            ally_target.squad_leader_ship_slot == 0) &&
-          NovaGovernment_GetPolicyFlag(
-              state.scenario, ship.faction_or_government_id, 0)) {
+          NovaGovernment_HasRankPrivilege(state.scenario,
+                                          ship.faction_or_government_id,
+                                          RankPrivilege::kNoAutoAttack)) {
         continue;
       }
       if (!NovaAiShip_CanEngageTargetUnderCloakRules(
@@ -552,7 +553,8 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
       const std::int16_t near_radius =
           static_cast<std::int16_t>(ship.random_ai_render_cadence * 600);
       const bool player_near =
-          !NovaGovernment_GetPolicyFlag(state.scenario, faction, 0) &&
+          !NovaGovernment_HasRankPrivilege(
+              state.scenario, faction, RankPrivilege::kNoAutoAttack) &&
           std::fabs(ship.pos_x - state.player.pos_x) <=
               static_cast<float>(near_radius) &&
           std::fabs(ship.pos_y - state.player.pos_y) <=
@@ -632,7 +634,8 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
           if ((govt_flags & 0x0040U) == 0U &&
               NovaAiShip_CanEngageTargetUnderCloakRules(
                   state, state.player, ship) &&
-              !NovaGovernment_GetPolicyFlag(state.scenario, faction, 0) &&
+              !NovaGovernment_HasRankPrivilege(
+                  state.scenario, faction, RankPrivilege::kNoAutoAttack) &&
               (faction != system_govt || system_rep < 1)) {
             ++count;
             flagged[0] = true;
@@ -698,7 +701,8 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
     // 0x0040ece3 IFF-scrambler / policy player shield: clear a flagged player
     // before the common tail.
     if (govt.iff_scrambler_active ||
-        NovaGovernment_GetPolicyFlag(state.scenario, faction, 0)) {
+        NovaGovernment_HasRankPrivilege(
+            state.scenario, faction, RankPrivilege::kNoAutoAttack)) {
       flagged[0] = false;
     }
 

@@ -199,7 +199,7 @@ SDL_Color StellarDisplayColor(const GameState &state,
     const bool policy_blocked =
         st->government_id >= 0 && st->government_id < 0x100 &&
         state.scenario.governments[static_cast<std::size_t>(st->government_id)]
-                .policy_flags[1] != 0;
+            .rank_privileges.always_land;
     const std::int16_t threshold = st->min_status;
     bool classify_by_rep =
         threshold == 0x7fff || (rep < threshold && threshold > -0x7fff);

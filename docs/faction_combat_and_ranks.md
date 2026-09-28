@@ -80,6 +80,22 @@ same-govt on deactivate, `0x0004` destroy/disable, `0x0008` permanent,
 `0x0040` any crime, `0x0100` no auto-attack, `0x0200` always land,
 `0x0400` battle assistance, `0x0800` allied repair/refuel.
 
+The executable applies `0x0100` and `0x0200` to **allied governments**, not
+only the affiliated government named in the Bible's flag descriptions.
+`Outfit_RecomputeOutfitDerivedState` loads the rank's government at
+`0x0046dc26`, pushes it and the government-loop index, and calls
+`Government_AreGovtsAllied` at `0x0046dc30`. On success, rank flag `0x0100`
+sets GovtDef +0x84 (`0x0046df56`); flag `0x0200` sets +0x85
+(`0x0046dc6a`). Code names these `RankPrivilege::kNoAutoAttack` and
+`RankPrivilege::kAlwaysLand`; Ghidra retains the indexed `rank_privileges`
+bytes and accessor `Government_HasRankPrivilege` (`0x0046e860`).
+
+For example, Member of the Guild of Bounty Hunters (rank resource 146,
+slot 18, flags `0x0d00`) grants no-auto-attack protection through government
+21's class 13. Aurora explicitly lists class 13 among its allies, so this
+rank protects the player from Auroran automatic acquisition too. This is
+broader than the Bible wording but faithful to the binary.
+
 ## PropagateFactionCombatInfluenceToNearbySystems
 
 Recursive reputation flood (`0x400` bytes). Per call:

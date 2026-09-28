@@ -839,12 +839,13 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                 static_cast<std::int16_t>(stellar->government_id + 0x80))
           : nullptr;
   if (denied && gov != nullptr) {
-    // Government policy-flag override (Government_GetGovernmentPolicyFlag
+    // Rank landing privilege override (Government_HasRankPrivilege
     // index 1): a set flag clears the denial. The GovtDef +0x83 byte gate
     // (field_0x83 != 0 -> not denied) is not modelled (no clean-room field;
     // TODO(decomp)).
-    if (NovaGovernment_GetPolicyFlag(
-            state.scenario, stellar->government_id, 1)) {
+    if (NovaGovernment_HasRankPrivilege(state.scenario,
+                                        stellar->government_id,
+                                        RankPrivilege::kAlwaysLand)) {
       denied = false;
     }
   }

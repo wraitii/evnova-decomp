@@ -605,7 +605,7 @@ TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
 
   SECTION("aimed hit ignores player squad policy suppression") {
     state.scenario.governments.resize(1);
-    state.scenario.governments[0].policy_flags[0] = 1;
+    state.scenario.governments[0].rank_privileges.no_auto_attack = true;
     attacker.faction_or_government_id = 0;
 
     Ship_ApplyDamageToShip(state,
@@ -629,7 +629,7 @@ TEST_CASE("targeted escort hits make NPCs retaliate", "[collision][aggro]") {
 
   SECTION("incidental hit honors player squad policy suppression") {
     state.scenario.governments.resize(1);
-    state.scenario.governments[0].policy_flags[0] = 1;
+    state.scenario.governments[0].rank_privileges.no_auto_attack = true;
     attacker.faction_or_government_id = 0;
 
     Ship_ApplyDamageToShip(state,

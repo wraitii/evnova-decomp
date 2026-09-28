@@ -170,8 +170,9 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
     // may acquire a candidate only when the candidate's government does not
     // carry the player's rank/commission (flag 0 clear) and the candidate is
     // actively threatening the player squad.
-    if (NovaGovernment_GetPolicyFlag(
-            state.scenario, candidate.faction_or_government_id, 0)) {
+    if (NovaGovernment_HasRankPrivilege(state.scenario,
+                                        candidate.faction_or_government_id,
+                                        RankPrivilege::kNoAutoAttack)) {
       return false;
     }
     return NovaTargeting_IsThreatToPlayerSquad(state, candidate);

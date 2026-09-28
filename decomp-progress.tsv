@@ -504,7 +504,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046E790	System_FindSystemContainingStellar	src/game/targeting.cpp	100%	
 0x0046E840	NoSys_NoOp_0046e840		0%	
 0x0046E850	NoSys_NoOp_0046e850		0%	
-0x0046E860	Government_GetGovernmentPolicyFlag	src/game/government.cpp	95%	gameplay
+0x0046E860	Government_HasRankPrivilege	src/game/government.cpp	95%	gameplay
 0x0046E8E0	NovaUi_DestroyWindowGuarded		0%	
 0x0046E910	Outfit_ComputeOutfitPurchasePrice	src/game/scenario_data.cpp	100%	
 0x0046E950	Outfit_ComputeOutfitPurchaseMass	src/game/scenario_data.cpp	100%	

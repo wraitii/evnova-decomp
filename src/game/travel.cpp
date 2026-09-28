@@ -2228,7 +2228,8 @@ bool NovaTravel_PlayerMeetsStellarAccess(const GameState &state,
     }
   }
   if (!eligible && stellar->government_id != -1 &&
-      NovaGovernment_GetPolicyFlag(state.scenario, stellar->government_id, 1)) {
+      NovaGovernment_HasRankPrivilege(
+          state.scenario, stellar->government_id, RankPrivilege::kAlwaysLand)) {
     eligible = true;
   }
   return eligible;

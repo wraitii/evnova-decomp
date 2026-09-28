@@ -36,13 +36,12 @@ The binary mixes two different patterns, and the port mirrors both:
 | Cargo overflow | capacity < total → scale all 6 bins by `capacity/total` (x87 truncation) + inventory dirty | done |
 | Negative clamps | bins (+0x7a) and `g_junk_defs` counts (+0x22) → 0 | done |
 | Cloak latches | `cloak_scanner_reveal_screen/radar`, `cloak_damage_deactivate_latch` = -1 | done |
-| Government clear | all 0x100 govts' `policy_flags[0..1] = 0` | done |
-| Rank flags | active rank (flags 0x100/0x200, allied govt) → `policy_flags` | done |
+| Government clear | all 0x100 govts' `rank_privileges[0..1] = 0` | done |
+| Rank flags | active rank (flags 0x100/0x200, allied govt) → `rank_privileges` | done |
 | Tail | `recently_hit_timer = -1.0` (done); `distance_intensity_scale = System_GetEffectiveMurkPercent()` (port computes on demand in `NovaSystem_GetEffectiveMurkPercent`, see docs/system_murk_rendering.md) | done |
 
-Note: the `policy_flags` writer here is the one `src/game/government.cpp` and
-`src/game/scenario_data.hpp` currently mark as "writer not identified"; this
-function is that writer.
+`Outfit_RecomputeOutfitDerivedState` rebuilds the rank privileges consumed
+by `Government_HasRankPrivilege` for targeting and landing decisions.
 
 ## Callers
 
@@ -77,7 +76,7 @@ and `Stellar_HandleStellarEntryAndExit` once after
 `NovaOutfit_RecomputeOutfitDerivedState` (`src/game/outfit.cpp`) is the
 clean-room hook (renamed from `OutfitMarkStatsDirty`). It currently does the
 stat-cache invalidation, the cargo-overflow scaling and negative clamps, the
-contraband latches, the government latches and `policy_flags` rebuild, the
+contraband latches, the government latches and `rank_privileges` rebuild, the
 carried-bomb class + detonation-timer seed, the jamming reset, the cloak-latch
 reset, the mining-scoop arm, and the recently-hit timer reset. The remaining
 eager arms above (license clamp, junk-derived flags) are TODO and tracked at
@@ -125,4 +124,4 @@ deliberate laziness divergence gets a marker and a tracker note.
 
 Note on the sticky government latches: the original sets `reinforcement_inhibited`
 (+0x82) and `iff_scrambler_active` (+0x83) but the recompute's clear loop only
-zeroes `policy_flags` (+0x84/+0x85). The port reproduces that quirk.
+zeroes `rank_privileges` (+0x84/+0x85). The port reproduces that quirk.

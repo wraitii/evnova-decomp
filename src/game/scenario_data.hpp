@@ -1361,20 +1361,18 @@ struct Government {
   std::uint8_t theme_red = 0, theme_green = 0, theme_blue = 0;
   std::uint8_t ship_red = 0, ship_green = 0, ship_blue = 0;
 
-  // Two per-government boolean policy flags (GovtDef +0x84, provisional).
-  // Government_GetGovernmentPolicyFlag (0x0046e860) reads policy_flags[index]
-  // for index 0/1; flag 0 gates player target acquisition
-  // (Ship_IsShipAcquirableAsTarget 0x0040faa0: a candidate with flag 0 set is
-  // acquirable) and several aggro/relation decisions. The writer is
-  // Outfit_RecomputeOutfitDerivedState (0x0046d4b0): it clears both flags and
-  // sets them for every government allied with an active rank carrying the
-  // 0x100/0x200 rank flags.
-  std::array<std::uint8_t, 2> policy_flags{}; // GovtDef +0x84/+0x85
+  // Player rank privileges: [0] no auto-attack, [1] always land.
+  // Outfit_RecomputeOutfitDerivedState clears/rebuilds these for governments
+  // allied with active ranks carrying flags 0x100/0x200 respectively.
+  struct RankPrivileges {
+    bool no_auto_attack = false; // GovtDef +0x84
+    bool always_land = false;    // GovtDef +0x85
+  } rank_privileges;
 
   // GovtDef +0x82. Set by Outfit_RecomputeOutfitDerivedState (0x0046d4b0)
   // when the player owns a ModType 0x2c outfit whose ModVal matches one of
   // this government's Class1-4 values: this government's reinforcements are
-  // inhibited. The original never clears the latch (only policy_flags is
+  // inhibited. The original never clears the latch (only rank_privileges is
   // rebuilt), so it stays sticky once set; kept as a quirk.
   bool reinforcement_inhibited = false;
 

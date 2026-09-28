@@ -103,7 +103,8 @@ SDL_Color Stellar_RadarDisplayColor(const GameState &state, const Stellar &st) {
   // policy flag 1 admits the player, else the reputation ladder.
   if ((st.availability_flags & 0x1000U) != 0U) {
     if (st.government_id != -1 &&
-        NovaGovernment_GetPolicyFlag(state.scenario, st.government_id, 1)) {
+        NovaGovernment_HasRankPrivilege(
+            state.scenario, st.government_id, RankPrivilege::kAlwaysLand)) {
       return kIffStellarFriendly;
     }
     return StellarReputationColor(state, st);
@@ -118,7 +119,8 @@ SDL_Color Stellar_RadarDisplayColor(const GameState &state, const Stellar &st) {
     return kIffStellarHazard;
   }
   if (st.government_id != -1 &&
-      NovaGovernment_GetPolicyFlag(state.scenario, st.government_id, 1)) {
+      NovaGovernment_HasRankPrivilege(
+          state.scenario, st.government_id, RankPrivilege::kAlwaysLand)) {
     return kIffStellarFriendly;
   }
   return StellarReputationColor(state, st);

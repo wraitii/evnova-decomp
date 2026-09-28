@@ -182,19 +182,23 @@ bool NovaGovernment_DoGovtsShareClass(const ScenarioData &scenario,
 }
 
 // @port 0x0046e860 95% gameplay
-// Ghidra 0x0046E860 Government_GetGovernmentPolicyFlag.
-bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
-                                  std::int16_t govt_id,
-                                  int flag_index) {
+// Ghidra 0x0046E860 Government_HasRankPrivilege.
+bool NovaGovernment_HasRankPrivilege(const ScenarioData &scenario,
+                                     std::int16_t govt_id,
+                                     RankPrivilege privilege) {
   if (govt_id < 0 || govt_id >= 0x100 ||
       static_cast<std::size_t>(govt_id) >= scenario.governments.size()) {
     return false;
   }
-  if (flag_index < 0 || flag_index >= 2) {
-    return false;
+  const auto &privileges =
+      scenario.governments[static_cast<std::size_t>(govt_id)].rank_privileges;
+  switch (privilege) {
+  case RankPrivilege::kNoAutoAttack:
+    return privileges.no_auto_attack;
+  case RankPrivilege::kAlwaysLand:
+    return privileges.always_land;
   }
-  return scenario.governments[static_cast<std::size_t>(govt_id)]
-             .policy_flags[static_cast<std::size_t>(flag_index)] != 0;
+  return false;
 }
 
 // @port 0x004629E0 100%
@@ -252,8 +256,9 @@ bool NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
           }
         }
         if (hostile) {
-          if (NovaGovernment_GetPolicyFlag(
-                  state.scenario, stellar.government_id, 0)) {
+          if (NovaGovernment_HasRankPrivilege(state.scenario,
+                                              stellar.government_id,
+                                              RankPrivilege::kNoAutoAttack)) {
             hostile = false;
           }
           if (govt.iff_scrambler_active) {
@@ -289,8 +294,9 @@ bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
     return true;
   }
   if (ship.faction_or_government_id != -1 &&
-      NovaGovernment_GetPolicyFlag(
-          state.scenario, ship.faction_or_government_id, 0)) {
+      NovaGovernment_HasRankPrivilege(state.scenario,
+                                      ship.faction_or_government_id,
+                                      RankPrivilege::kNoAutoAttack)) {
     return true;
   }
   // Mission-fleet branch (0x0040fd72): a live mission ship aids only while its
