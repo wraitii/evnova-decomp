@@ -259,7 +259,10 @@ current system), `cargo` (credits, `capacity` = the player hull's own holds,
 `fleet_capacity` = hull + eligible escort freighters' holds, the 6 commodity
 bins and any non-zero junk), `travel`, `system`. Floats are rounded to 2 decimals; ids
 are the reimplementation's zero-based/rebased ids unless the field name says
-otherwise. Extend `ProbeState_Snapshot` as subsystems are reconstructed —
+otherwise. `summary` and `ships` also carry `tick_60hz`, the global 1/60 s
+gameplay tick (Ghidra `g_frame_tick_count_60hz`, 0x00865858), so a harness can
+align samples to simulation frames instead of wall-clock or request order.
+Extend `ProbeState_Snapshot` as subsystems are reconstructed —
 prefer small typed queries over one giant dump.
 
 ### Log tailing

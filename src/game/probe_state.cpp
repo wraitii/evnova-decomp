@@ -164,6 +164,10 @@ std::string ProbeState_Snapshot(const GameState &state,
     j.num("gameplay_speed_multiplier", state.gameplay_speed_multiplier);
     j.boolean("jump_x2_mode", state.travel.jump_x2_mode);
     j.num("jump_speed_multiplier", state.travel.jump_speed_multiplier);
+    // Global 1/60 s gameplay tick (Ghidra g_frame_tick_count_60hz, 0x00865858).
+    // Exposed so a harness can align samples to simulation frames rather than
+    // wall-clock or request order.
+    j.num("tick_60hz", state.tick_60hz);
     return j.done();
   }
 
@@ -242,6 +246,7 @@ std::string ProbeState_Snapshot(const GameState &state,
 
   if (query == "ships") {
     Json j;
+    j.num("tick_60hz", state.tick_60hz);
     JsonArr rows;
     for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
       const Ship &ship = state.ShipAt(slot);
