@@ -1253,7 +1253,7 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
   return false;
 }
 
-// @port 0x0042f270 80% gameplay,rng
+// @port 0x0042f270 85% gameplay,rng
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
   const float ticks = std::max(0.0F, elapsed_ticks);
   for (BeamHit &beam : state.beam_hit_queue) {
@@ -1309,13 +1309,19 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
         beam.target_y = shot.pos_y;
         point_defense_shot_slot = beam.target_shot_slot;
       }
-    } else if (beam_weapon != nullptr && beam_weapon->weapon_mode_code == 0) {
+    } else if (beam_weapon != nullptr) {
       // Shot_UpdateBeamHitQueue (0x0042f270) keeps a mode-0 beam on the owner's
       // current heading (falling back to the queued bearing when there is no
       // live owner) and scans for the nearest active ship inside a narrow
       // forward cone within BeamLength + ceil(trunc(frame_span*0.66)/2). A
       // hit truncates the visible endpoint to distance - frame_span*0.2;
       // with nothing in reach the beam ends exactly at BeamLength.
+      // A non-mode-0 beam only uses its target to pick the bearing (the
+      // original's target-position block overwrites the angle, never the
+      // endpoint), so it is bounded by BeamLength exactly like a mode-0 beam;
+      // an inactive recorded target kills the record. The target-position
+      // block is gated on target != -1, so a non-mode-0 beam without a
+      // recorded target falls back to the owner heading and still scans.
       // frame_span = Sprite_GetShipClassEscortFrameWidth (0x004624c0), the
       // FULL frame width (right - left) with fallback 0x4b = 75; 0.66 and 0.2
       // are the doubles DAT_005753d0 / DAT_005753d8.
@@ -1334,11 +1340,28 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
       // Deliberately not gated by BugFixPolicy.
       constexpr double kBeamReachFrameScale = 0.66;
       constexpr double kBeamTruncateFrameScale = 0.2;
+      const bool target_valid =
+          beam.target_ship_slot >= 0 &&
+          beam.target_ship_slot <
+              static_cast<std::int16_t>(GameState::kMaxShips);
       float bearing_deg = static_cast<float>(beam.firing_bearing_deg);
-      if (owner_valid) {
-        const Ship &owner =
-            state.ShipAt(static_cast<std::size_t>(beam.owner_ship_slot));
-        bearing_deg = owner.heading * (180.0F / 3.14159265358979323846F);
+      if (beam_weapon->weapon_mode_code == 0 || !target_valid) {
+        // Mode 0 never follows its target; a non-mode-0 beam with no recorded
+        // target does not have a target-position block to run either, so both
+        // keep the owner heading (queued bearing only when the owner is gone).
+        if (owner_valid) {
+          const Ship &owner =
+              state.ShipAt(static_cast<std::size_t>(beam.owner_ship_slot));
+          bearing_deg = owner.heading * (180.0F / 3.14159265358979323846F);
+        }
+      } else {
+        const Ship &target =
+            state.ShipAt(static_cast<std::size_t>(beam.target_ship_slot));
+        bearing_deg = BearingDeg(
+            beam.source_x, beam.source_y, target.pos_x, target.pos_y);
+        if (!target.is_active) {
+          beam.lifetime_ticks = -1;
+        }
       }
       const float beam_length = static_cast<float>(beam_weapon->beam_length_px);
       float visible_length = beam_length;

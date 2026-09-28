@@ -1700,6 +1700,116 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   CHECK(queued.target_y == Catch::Approx(410.0F - 100.0F));
 }
 
+// Ion Cannon geometry (wëap 0x008e: Guidance 3, BeamLength 240): a turreted
+// beam uses its recorded target only to pick the bearing.
+// Shot_UpdateBeamHitQueue (0x0042f270) still derives the visible endpoint as
+// source + polar(bearing, truncated distance) and falls back to BeamLength when
+// nothing is in reach, so an off-range turreted beam must not run to the
+// target.
+TEST_CASE("turreted beams aim at the target but stop at BeamLength",
+          "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 3;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.beam_falloff = 0x10;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F; // bearing must follow the target, not the heading
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+
+  // Target to the right, 400 px away (far beyond BeamLength 100 + 25 reach):
+  // the beam points at it but ends at BeamLength, not at the target.
+  target.pos_x = 500.0F;
+  target.pos_y = 200.0F;
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  const BeamHit &queued = state.beam_hit_queue[0];
+  CHECK(queued.target_x == Catch::Approx(200.0F));
+  CHECK(queued.target_y == Catch::Approx(200.0F));
+
+  // In reach at 60 px: the endpoint truncates to 60 - 0.2*75 = 45 px along the
+  // bearing, matching the mode-0 contact rule.
+  target.pos_x = 160.0F;
+  target.pos_y = 200.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.target_x == Catch::Approx(145.0F));
+  CHECK(queued.target_y == Catch::Approx(200.0F));
+}
+
+// A non-mode-0 beam with no recorded target still runs the collision scan: the
+// original's target-position block is gated on target != -1, so the bearing
+// falls back to the owner heading exactly like a mode-0 beam.
+TEST_CASE("turreted beams without a target scan on the owner heading",
+          "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 3;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.beam_falloff = 0x10;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F; // heading 0 points toward -y
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+
+  // No recorded target (slot -1): the beam is fired along the owner heading
+  // and a target directly ahead at 60 px truncates it to 60 - 15 = 45 px.
+  target.pos_x = 100.0F;
+  target.pos_y = 140.0F;
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  const BeamHit &queued = state.beam_hit_queue[0];
+  CHECK(queued.target_x == Catch::Approx(100.0F));
+  CHECK(queued.target_y == Catch::Approx(200.0F - 45.0F));
+
+  // A target 90 deg off the heading is outside the cone, so the beam ends at
+  // BeamLength; this proves the scan ran rather than the record stalling at
+  // the queue-time owner position.
+  target.pos_x = 160.0F;
+  target.pos_y = 200.0F;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, -1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(queued.target_x == Catch::Approx(100.0F));
+  CHECK(queued.target_y == Catch::Approx(100.0F));
+}
+
 // Regression: a beam's impact visuals belong at the contact point, not at the
 // muzzle. Shot_UpdateBeamHitQueue (0x0042f270) spawns
 // Shot_SpawnAreaImpactEffects / Weapon_SpawnWeaponImpactParticleBurst at
@@ -2014,8 +2124,11 @@ TEST_CASE("negative beam impulse arms the velocity-match producer",
   GameState state;
   state.scenario.weapons.resize(1);
   Weapon &beam = state.scenario.weapons[0];
-  beam.weapon_mode_code = 3; // non-zero, so the recorded target is used direct
-  beam.beam_length_px = 100;
+  // A turreted beam picks its bearing from the recorded target, then the
+  // 0x0042f270 contact scan truncates the visible length; the target must sit
+  // inside BeamLength + reach for the impulse to land.
+  beam.weapon_mode_code = 3;
+  beam.beam_length_px = 300;
   beam.lifetime_ticks = 10;
   beam.impact_impulse = -20;
   state.scenario.ships.resize(2);
@@ -2072,6 +2185,9 @@ TEST_CASE("negative beam impulse arms the velocity-match producer",
   CHECK((owner.vel_x != 0.0F || owner.vel_y != 0.0F));
 
   // Capability Flags 0x400 target: the impulse is suppressed and no lock arms.
+  // The scan's flags/capability 0x400 lane gate (BeamCandidateEligible) must
+  // match too, so give the weapon the same flag or the beam never contacts.
+  beam.flags = 0x0400U;
   state.scenario.ships[1].capability_flags = 0x0400U;
   owner.velocity_match_target_ship_slot = -1;
   owner.vel_x = 0.0F;
