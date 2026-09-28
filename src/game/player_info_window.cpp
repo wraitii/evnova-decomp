@@ -15,6 +15,7 @@
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
+#include "spaceflight.hpp"
 #include "starmap.hpp"
 #include "travel.hpp"
 #include "ui_dialog.hpp"
@@ -136,10 +137,13 @@ constexpr double kTurnRatePerSec = 3.0;
 // (2500). The port's thrust_raw is the raw resource accel (px/frame^2 =
 // /10000), so display = thrust_raw * 0.25.
 constexpr double kThrustDisplay = 0.25;
-// speed: Ship_ComputeShipEffectiveMaxSpeed (px/frame) * DAT_005759c8 (100)
-// [* DAT_005759d0 (2/3) when the pilot is not strict-play]. The port's
-// speed_raw is the raw resource speed (px/frame = /100), so display =
-// speed_raw [* 2/3].
+// speed: Ship_ComputeShipEffectiveMaxSpeed (px/frame) * DAT_005759c8 (100),
+// and when Strict Play is off also * DAT_005759d0 (2/3) (0x0049b1b4). The
+// effective helper already bakes in the non-strict 1.5x (DAT_005757b8), so
+// x100, x1.5 and x2/3 cancel and the panel shows the raw resource Speed plus
+// opcode-8 mods in both modes. The port does not reproduce the 1.5x flight
+// bonus (DIVERGENCE in PlayerTick_ManualFlightAndRegeneration), but the panel
+// still reports the original value.
 constexpr double kSpeedNoStrictScale = 2.0 / 3.0; // DAT_005759d0
 constexpr double kPercentScale = 100.0;           // DAT_00575958
 constexpr float kEmptyThreshold = 0.0078125F;     // DAT_00575990 (1/128)
@@ -608,9 +612,7 @@ void DrawGeneralPage(SdlPlatform &platform,
            kGridRightValueX,
            MiscString(kStrAccelRate, "Accel Rate:"),
            std::to_string(thrust));
-  const int max_speed = RoundToInt(static_cast<float>(
-      static_cast<double>(stats.speed_raw) *
-      (state.pilot.strict_play ? 1.0 : kSpeedNoStrictScale)));
+  const int max_speed = NovaPlayerInfo_DisplayedMaxSpeed(state);
   draw_row(label_y + 4 * kGridRowStride,
            kGridRightLabelX,
            kGridRightValueX,
@@ -771,6 +773,28 @@ bool RunJettisonConfirmDialog(SdlPlatform &platform,
 }
 
 } // namespace
+
+// Ghidra 0x0049a540 (the Max Speed row of NovaUi_DrawPlayerInfoWindow):
+// Ship_ComputeShipEffectiveMaxSpeed (px/frame) * DAT_005759c8 (100), and when
+// Strict Play is off also * DAT_005759d0 (2/3). The non-strict 1.5x baked into
+// the helper and the 2/3 display factor cancel, so this reports the raw
+// resource Speed + opcode-8 mods in both modes. The port does not reproduce
+// the 1.5x flight bonus (see PlayerTick_ManualFlightAndRegeneration), but this
+// still reports the original displayed value.
+int NovaPlayerInfo_DisplayedMaxSpeed(const GameState &state) {
+  const ShipClass *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  const double effective_px_per_tick =
+      ship_class != nullptr
+          ? static_cast<double>(NovaShip_ComputeEffectiveMaxSpeedPxPerTick(
+                state, state.player, *ship_class))
+          : static_cast<double>(
+                Outfit_ComputePlayerEffectiveStats(state).speed_raw) /
+                100.0;
+  return RoundToInt(static_cast<float>(
+      effective_px_per_tick * 100.0 *
+      (state.pilot.strict_play ? 1.0 : kSpeedNoStrictScale)));
+}
 
 // ---------------------------------------------------------------------------
 // @port 0x0049c050 55% ui

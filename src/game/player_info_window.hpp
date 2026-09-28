@@ -39,6 +39,12 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state);
 // STR# 138 entry rank+1.
 [[nodiscard]] int NovaPlayerInfo_CombatRankIndex(std::int32_t points);
 
+// Ghidra 0x0049a540 (the Max Speed row). The panel value is
+// Ship_ComputeShipEffectiveMaxSpeed * 100, times 2/3 when Strict Play is off;
+// the non-strict 1.5x and the 2/3 cancel, so it reports the raw Speed plus
+// opcode-8 mods. The port omits the 1.5x flight bonus but keeps this display.
+[[nodiscard]] int NovaPlayerInfo_DisplayedMaxSpeed(const GameState &state);
+
 // Outcome of one Player Info session. The original latches the jettison arm
 // as a local flag in the run loop before closing.
 struct PlayerInfoWindowResult {

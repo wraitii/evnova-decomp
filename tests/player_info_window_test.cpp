@@ -168,3 +168,31 @@ TEST_CASE("player info honors include 0x2000 outfits after ranks") {
   CHECK(two_outfits.honors.find("Courier, a medal, two ribbons") !=
         std::string::npos);
 }
+
+TEST_CASE("player info max speed reports raw speed in both strict modes") {
+  game::GameState state;
+  state.scenario.ships.resize(1);
+  state.scenario.outfits.resize(state.inventory.outfit_owned_count.size());
+  state.player.ship_class_id = 0;
+  state.scenario.ships[0].speed = 475.0F;
+  state.inventory.outfit_owned_count[0] = 1;
+  state.scenario.outfits[0].mod_type =
+      static_cast<std::int16_t>(game::OutfitEffect::kSpeed);
+  state.scenario.outfits[0].mod_val = 25; // Port & Polish
+
+  // The non-strict 1.5x flight bonus and the 2/3 display factor cancel, so
+  // both Strict Play settings report the raw resource Speed + opcode-8 mods
+  // (the pre-fix code reported 475 * 2/3 = 317 here).
+  state.pilot.strict_play = false;
+  CHECK(game::NovaPlayerInfo_DisplayedMaxSpeed(state) == 500);
+  state.pilot.strict_play = true;
+  CHECK(game::NovaPlayerInfo_DisplayedMaxSpeed(state) == 500);
+
+  // A weapon's secondary opcode-8 -1 lowers the total (Medium Blaster x2).
+  state.inventory.outfit_owned_count[1] = 2;
+  state.scenario.outfits[1].mod_type =
+      static_cast<std::int16_t>(game::OutfitEffect::kSpeed);
+  state.scenario.outfits[1].mod_val = -1;
+  state.pilot.strict_play = false;
+  CHECK(game::NovaPlayerInfo_DisplayedMaxSpeed(state) == 498);
+}

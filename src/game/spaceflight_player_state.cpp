@@ -1460,7 +1460,7 @@ bool PlayerTick_FaceTargetCommand(GameState &state,
   return true;
 }
 
-// @port 0x0044C8D0 90% gameplay,synthetic
+// @port 0x0044C8D0 90% gameplay,divergence,synthetic
 // Ghidra 0x0044C8D0 PlayerTick_ManualFlightAndRegeneration, internal umbrella
 // of Ship_HandlePlayerShipCore. Relevant synthetic CFGs: turn input
 // 0x0044C92E -> 0x0044C980; joined afterburner/thrust/glow
@@ -1519,6 +1519,13 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
 
   ShipClass effective_class;
   effective_class.accel = eff.thrust_raw;
+  // DIVERGENCE(original): Ship_ComputeShipEffectiveMaxSpeed (0x004642e0)
+  // multiplies the player cap by DAT_005757b8 = 1.5 when Strict Play is off.
+  // The port deliberately omits that bonus on the manual-flight path, so a
+  // non-strict pilot flies at the strict-play-equivalent cap. NovaShip_-
+  // ComputeEffectiveMaxSpeedPxPerTick keeps the 1.5x for its own consumers
+  // (ionization ramp, impact clamp) and NovaPlayerInfo_DisplayedMaxSpeed still
+  // reports the original panel value.
   effective_class.speed = eff.speed_raw;
   effective_class.turn_rate = eff.turn_raw;
   // Player tails of Ship_ComputeShipEffectiveThrust (0x004640a0) and

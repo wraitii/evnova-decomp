@@ -159,8 +159,10 @@ at the window top, middle tile stretched to cover the text area, bottom at
   field_0x6c), 0x101 Turn Rate (`Ship_ComputeShipMaxTurnRateDeg *
   DAT_005759b8`, rounded, + STR# 0x102 " deg/sec"), 0x103 Thrust
   (`Ship_ComputeShipEffectiveThrust * DAT_005759c0`), 0x104 Max Speed
-  (`Ship_ComputeShipEffectiveMaxSpeed * DAT_005759c8` [* `DAT_005759d0` when
-  `g_strict_play`], i.e. velocity-capped variants), credits row (0x5c right,
+  (`Ship_ComputeShipEffectiveMaxSpeed * DAT_005759c8`, times `DAT_005759d0`
+  when `g_strict_play` is off — the non-strict 1.5x flight bonus and the 2/3
+  display factor cancel, so this shows the raw Speed plus opcode-8 mods),
+  credits row (0x5c right,
   `DrawContext_DrawGroupedUInt(g_ship_states->credits)` prefixed by the
   translated key glyph `DAT_0072f1cc` + `DAT_0056d168`), plus the fleet
   value block: for each of the 0x40 escort slots (stride 0xc948) with
