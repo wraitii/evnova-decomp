@@ -1185,9 +1185,15 @@ std::string Capitalized(std::string text) {
   return text;
 }
 
-// The commodity name for a cargo type (STR# 0xfa1 entry cargo_type).
+// The commodity name for a cargo type (STR# 0xfa1 entry cargo_type). This is
+// the 0x100-stride DAT_0069d2cc Pascal-string table NovaData_LoadDisplayName-
+// PstringTables (0x004c7040) fills from STR# 0xfa1 entry cargo_type+1 with the
+// sparse `STR ` 0x238c+cargo_type override. Boarding *loot* rolls only ever use
+// types 0..5, but a mission's cargo_type_id can name any commodity up to 0xff
+// (shipped pool: 6 "*passengers", 7 "military stores"), so the full table
+// range is valid here -- the original indexes DAT_0069d2cc directly.
 std::string CargoName(const GameState &state, int cargo_type) {
-  if (cargo_type < 0 || cargo_type > 5) {
+  if (cargo_type < 0 || cargo_type > 0xff) {
     return "?";
   }
   (void)state;
@@ -1195,14 +1201,20 @@ std::string CargoName(const GameState &state, int cargo_type) {
           kCargoNameStr, static_cast<std::uint16_t>(cargo_type + 1), 0x238c)) {
     return *s;
   }
-  // Fallbacks mirror the six standard boarding commodities.
-  static constexpr const char *kFallback[6] = {"food",
+  // Fallbacks mirror the shipped STR# 0xfa1 pool (the '*'-prefixed passenger
+  // entry keeps its marker so the caller's article-suppression logic holds).
+  static constexpr const char *kFallback[8] = {"food",
                                                "industrial goods",
                                                "medical supplies",
                                                "luxury goods",
                                                "metal",
-                                               "equipment"};
-  return kFallback[static_cast<std::size_t>(cargo_type)];
+                                               "equipment",
+                                               "*passengers",
+                                               "military stores"};
+  if (cargo_type < 8) {
+    return kFallback[static_cast<std::size_t>(cargo_type)];
+  }
+  return "?";
 }
 
 // One boarding-window option button.

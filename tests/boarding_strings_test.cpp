@@ -81,7 +81,7 @@ TEST_CASE("STR# 0x7d2 hail-info fragments (1-based entries)") {
   auto entry = [](std::uint16_t entry_number) {
     return NovaHud_LoadStringEntry(0x7d2, entry_number);
   };
-  REQUIRE(entry(0xaf) == "Greetings.");     // default
+  REQUIRE(entry(0xaf) == "Greetings."); // default
   REQUIRE(entry(0xb0) == "is a good place to");
   REQUIRE(entry(0xb1) == "buy");
   REQUIRE(entry(0xb2) == "sell");
@@ -104,17 +104,22 @@ TEST_CASE("STR# 0x7d2 hail-info fragments (1-based entries)") {
   REQUIRE(NovaHud_LoadStringEntry(0xbb8, 0x32) == "Howdy.");
 }
 
-// The six standard boarding commodities (STR# 0xfa1): the original loader
-// reads commodity type n through 1-based entry n+1 (FUN_004c7040 ->
-// DAT_0069d2cc), and the port's CargoName does the same.
+// The boarding commodity names (STR# 0xfa1): the original loader reads
+// commodity type n through 1-based entry n+1 (NovaData_LoadDisplayNamePstring-
+// Tables 0x004c7040 -> DAT_0069d2cc), and the port's CargoName does the same.
+// Types 0..5 are the loot-roll commodities; 6 (passengers) and 7 (military
+// stores) are reachable through a mission's cargo_type_id and must interpolate
+// rather than render the out-of-range "?" placeholder.
 TEST_CASE("STR# 0xfa1 boarding commodity names") {
-  const char *kExpected[6] = {"food",
+  const char *kExpected[8] = {"food",
                               "industrial goods",
                               "medical supplies",
                               "luxury goods",
                               "metal",
-                              "equipment"};
-  for (std::uint16_t type = 0; type < 6; ++type) {
+                              "equipment",
+                              "*passengers",
+                              "military stores"};
+  for (std::uint16_t type = 0; type < 8; ++type) {
     auto name = game::NovaHud_LoadStringEntry(0xfa1, type + 1U);
     REQUIRE(name.has_value());
     CHECK(*name == kExpected[type]);
