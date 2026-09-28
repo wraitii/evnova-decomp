@@ -1503,6 +1503,19 @@ struct GameState {
   // return -1 arm); cleared wholesale the next time the interaction walk runs
   // in a context other than 3 (DAT_00774ae2).
   std::array<std::uint8_t, 1000> mission_interaction_shown{};
+  // Ghidra g_return_mission_list (g_mission_slot_list[1]) removals: an
+  // AvailLoc offer the player accepted or declined is shifted out of the
+  // persistent lane-1 list (Mission_RunAvailLocOffers 0x00448670) and stays
+  // out until Mission_EvaluateMissionLists rebuilds it. The port evaluates the
+  // lane on demand, so this mask stands in for the removal; it is cleared
+  // wherever the original rebuilds the list (Mission_RebuildReturnList).
+  std::array<std::uint8_t, 1000> mission_return_list_removed{};
+  // Ghidra g_last_system_for_ambient_rolls (0x00734c1e): the stellar the
+  // landing pass (0x00458802) last redrew the offering rolls and rebuilt the
+  // mission lists for; -1 forces the next landing to rebuild. Invalidated on
+  // system arrival, mission resolution/abort, player reset and defs load.
+  // Holds the landed context's 0x80-based stellar id.
+  std::int16_t last_offer_list_stellar = -1;
   // In-game calendar (g_current_game_year_month/g_current_game_day). Seeded
   // by the new-game flow (real clock date with year + 250) and advanced once
   // per NovaMission_TickDailyWorldUpdate call.

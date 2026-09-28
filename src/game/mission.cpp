@@ -2046,8 +2046,7 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
       .carrying_resources = false;
   state.active_mission_runtime_flags[static_cast<std::size_t>(mission_slot)]
       .is_active = false;
-  // The original also invalidates g_last_system_for_ambient_rolls (0xffff);
-  // the clean-room ambient-roll cache latch is not modelled (TODO(decomp)).
+  state.last_offer_list_stellar = -1; // g_last_system_for_ambient_rolls
 }
 
 // Applies the Bible CompGovt/CompReward "competing government" reputation
@@ -2152,7 +2151,7 @@ void Mission_ResolveMissionSuccess(GameState &state,
                                      /*include_relations=*/true);
   NovaGovernment_ApplyReputationCreditDelta(state,
                                             mission.resource_delta_or_cost);
-  // Ambient-roll latch invalidation is not modelled (TODO(decomp)).
+  state.last_offer_list_stellar = -1; // g_last_system_for_ambient_rolls
 }
 
 // @port 0x00440930 93% ui
@@ -2303,7 +2302,7 @@ void Mission_FailMissionSlotQuick(GameState &state,
   if (mission.can_abort) {
     Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
   }
-  // Ambient-roll latch invalidation is not modelled (TODO(decomp)).
+  state.last_offer_list_stellar = -1; // g_last_system_for_ambient_rolls
 }
 
 // @port 0x00447D90 100% bugfix
@@ -2380,6 +2379,20 @@ void Mission_RerollOfferingRolls(GameState &state) {
   state.mission_targets_dirty = true;
 }
 
+void Mission_RebuildReturnList(GameState &state) {
+  state.mission_return_list_removed.fill(0);
+}
+
+void Mission_RefreshOfferListsOnLanding(GameState &state,
+                                        std::int16_t stellar_id) {
+  if (state.last_offer_list_stellar != stellar_id ||
+      state.last_offer_list_stellar < 0) {
+    Mission_RerollOfferingRolls(state);
+    Mission_RebuildReturnList(state);
+  }
+  state.last_offer_list_stellar = stellar_id;
+}
+
 // Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs, runtime half. The
 // definition table itself is rebuilt by ScenarioData::LoadFromArchives (which
 // mirrors the same 1000-entry, id-0x80-strided decode); this reproduces the
@@ -2394,8 +2407,7 @@ void Mission_RerollOfferingRolls(GameState &state) {
 // g_offer_random_bypass_flag. None are ever set by the shipped binary, so the
 // port always takes the load+reset path.
 void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
-  // g_last_system_for_ambient_rolls = -1: the clean-room ambient-roll cache
-  // latch is not modelled (see Mission_ClearMisnSlotAssignments).
+  state.last_offer_list_stellar = -1; // g_last_system_for_ambient_rolls
   state.in_flight = false;
   state.mission_speaker_ship_slot = -1;
   // g_travel_destination_window = 0 and g_starmap_selected_system_id = -1
@@ -2413,6 +2425,7 @@ void Mission_ResetRuntimeStateOnMissionDefsLoad(GameState &state) {
   state.control.persisted_bit_bytes.fill(0);
   // DAT_00773eed[1000] = 0; DAT_00774ae2 = -1.
   state.mission_interaction_shown.fill(0);
+  state.mission_return_list_removed.fill(0);
   state.mission_interaction_context = -1;
 }
 
@@ -2457,6 +2470,7 @@ bool Mission_RunAvailLocOffers(
     }
     if (state.scenario.missions[static_cast<std::size_t>(def)].avail_location ==
             context &&
+        state.mission_return_list_removed[static_cast<std::size_t>(def)] == 0 &&
         state.mission_interaction_shown[static_cast<std::size_t>(def)] == 0) {
       candidate = def;
       break;
@@ -2467,12 +2481,15 @@ bool Mission_RunAvailLocOffers(
   }
 
   const MissionOfferResult result = run_offer(candidate);
-  if (result != MissionOfferResult::kAccepted) {
-    // The original removes an ordinary decline from the current return list;
-    // its -1 activation-failure arm also latches the definition as shown.
-    // Since the port rebuilds that list on demand, the shown latch represents
-    // both cases until the interaction context resets it.
+  if (result == MissionOfferResult::kActivationFailed) {
+    // The -1 arm latches the definition as shown; the latch clears on the
+    // next context change away from 3.
     state.mission_interaction_shown[static_cast<std::size_t>(candidate)] = 1;
+  } else {
+    // Accept and decline shift the entry out of g_return_mission_list, so a
+    // declined offer stays gone until the list is rebuilt (landing at a new
+    // stellar, or a mission success), not merely until the context changes.
+    state.mission_return_list_removed[static_cast<std::size_t>(candidate)] = 1;
   }
   // Recheck timer: DAT_00776af4 = NovaTime_GetTickCount60Hz() +
   // NovaRandom_Range(30) + 30, in 1/60 s ticks. Refresh the port's shared
@@ -2866,8 +2883,9 @@ void Mission_TickReactionSlotsForTravelInteraction(
   }
   if (resolved_a_success) {
     // Side-effect call: refreshes availability and the resolved-locator
-    // cache.
+    // cache, and rebuilds the return list (restoring declined offers).
     (void)Mission_EvaluateMissionLists(state);
+    Mission_RebuildReturnList(state);
   }
   state.travel_destination_window_open = false;
 }

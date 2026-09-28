@@ -245,9 +245,9 @@ bool Stellar_Dock(GameState &state,
   // that in the launch tail, after the interaction loop returns -- see
   // Stellar_Launch.
 
-  // Offering rolls redraw on landing too (Stellar_HandleStellarEntryAndExit
-  // 0x00458802 arm).
-  Mission_RerollOfferingRolls(state);
+  // Offering rolls redraw and the lists rebuild on landing at a new stellar
+  // (Stellar_HandleStellarEntryAndExit 0x00458802 arm).
+  Mission_RefreshOfferListsOnLanding(state, stellar_id);
 
   ctx.stellar_id = stellar_id;
   ctx.landed = true;

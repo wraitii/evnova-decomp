@@ -997,6 +997,39 @@ TEST_CASE("declined mission offer is suppressed for the current context") {
   CHECK(offer_count == 1);
 }
 
+// Regression for Ghidra 0x00448670 / 0x00458802: a decline shifts the offer
+// out of g_return_mission_list, which a context change does not restore; only
+// a list rebuild does (landing at a different stellar, or after any arrival).
+TEST_CASE("declined outfitter offer stays gone until the list is rebuilt") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.avail_location = 6;
+  definition.avail_random = 100;
+
+  int offer_count = 0;
+  const auto decline = [&](std::int16_t) {
+    ++offer_count;
+    return MissionOfferResult::kDeclined;
+  };
+
+  Mission_RefreshOfferListsOnLanding(state, 0x80);
+  CHECK(Mission_RunAvailLocOffers(state, 6, 100, decline));
+  // Visiting another service window changes the context and clears the
+  // shown latches, but the removal from the return list persists.
+  CHECK_FALSE(Mission_RunAvailLocOffers(state, 4, 200, decline));
+  CHECK_FALSE(Mission_RunAvailLocOffers(state, 6, 300, decline));
+  // Relanding at the same stellar does not rebuild the list.
+  Mission_RefreshOfferListsOnLanding(state, 0x80);
+  CHECK_FALSE(Mission_RunAvailLocOffers(state, 6, 400, decline));
+  CHECK(offer_count == 1);
+  // Landing elsewhere rebuilds it.
+  Mission_RefreshOfferListsOnLanding(state, 0x81);
+  CHECK(Mission_RunAvailLocOffers(state, 6, 500, decline));
+  CHECK(offer_count == 2);
+}
+
 // Regression for the Trade Center arm of Ghidra 0x00448670: this uses its
 // own AvailLoc 4 lane, so tutorial follow-ups must not be limited to the
 // Spaceport's AvailLoc 3 pass.

@@ -828,6 +828,10 @@ void NovaShip_ResetPlayerShipState(GameState &state) {
     state.reinforcement_countdown[static_cast<std::size_t>(
         state.player.current_system_id)] = -1.0F;
   }
+  // Ghidra 0x004b4196: g_last_system_for_ambient_rolls = -1, so the first
+  // landing after a reset/new-game/load rebuilds the offering rolls and the
+  // mission lists.
+  state.last_offer_list_stellar = -1;
 
   NovaOutfit_RecomputeOutfitDerivedState(state);
   const PlayerEffectiveStats effective =

@@ -642,9 +642,10 @@ void RespawnResetPlayerShipState(GameState &state) {
 
   // Ghidra 0x004b39f2..0x004b3a05 seeds this travel-dialog selector here.
   state.travel.interaction_action_index_b = RandomBelow(state, 0x800);
-  // TODO(decomp(0x004b3350)) skipped: DAT_007353f4, g_last_system_for_ambient_
-  // rolls, _g_playerSelfDestructCountdown, bribe_random_latch, DAT_00596d32/33
-  // and g_travel_countdown - not modelled yet.
+  // TODO(decomp(0x004b3350)) skipped: DAT_007353f4,
+  // _g_playerSelfDestructCountdown, bribe_random_latch, DAT_00596d32/33 and
+  // g_travel_countdown - not modelled yet.
+  state.last_offer_list_stellar = -1; // g_last_system_for_ambient_rolls
   state.travel.selected_stellar_id = -1;
   state.travel.engage_timer = -1;
   state.travel.travel_hint_state = 0x7fff; // hint latch (0x004b3a3b)

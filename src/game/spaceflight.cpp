@@ -1003,6 +1003,9 @@ void PlayerTick_JumpArrivalBlock(
   // cooldown (Rand(0x1e)+0x1e) on every arrival.
   state.ambient_traffic_escalation_cooldown =
       static_cast<std::int16_t>(RandomBelow(state, 0x1e) + 0x1e);
+  // Ghidra 0x0044f80c: g_last_system_for_ambient_rolls = -1, so the next
+  // landing rebuilds the mission lists.
+  state.last_offer_list_stellar = -1;
   Mission_RerollOfferingRolls(state);
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
   if (restricted_arrival.has_value()) {

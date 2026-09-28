@@ -1450,6 +1450,10 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   }
 
   PilotFileApply(record, state);
+  // Ghidra 0x004cb5a8: PilotFile_LoadSave zeroes g_last_system_for_ambient_
+  // rolls directly, so the first landing after a load redraws the offering
+  // rolls and rebuilds the mission lists regardless of the prior session.
+  state.last_offer_list_stellar = -1;
   static_cast<void>(RecordLastPilotPath(path));
 
   // Recreate the two saved player-fleet classes after the persistent state is

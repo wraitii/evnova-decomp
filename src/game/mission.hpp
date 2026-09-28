@@ -298,6 +298,21 @@ void Mission_TickShipInteractionReactions(
 // pilot starts.
 void Mission_RerollOfferingRolls(GameState &state);
 
+// Ghidra 0x0043cf00 Mission_EvaluateMissionLists, return-list half: the
+// original rebuilds g_return_mission_list from scratch, restoring every
+// AvailLoc offer Mission_RunAvailLocOffers shifted out. The port evaluates the
+// lanes on demand, so this only clears the removal mask; call it where the
+// original evaluates (landing refresh, landing-gate success arm).
+void Mission_RebuildReturnList(GameState &state);
+
+// Ghidra 0x00458802 (inside Stellar_HandleStellarEntryAndExit): on landing,
+// redraw the offering rolls and rebuild the mission lists only when the landed
+// stellar differs from g_last_system_for_ambient_rolls (or it is -1), then
+// record it. Relanding at the same stellar keeps both, so a declined offer is
+// not re-shown. `stellar_id` is the landed context's 0x80-based id.
+void Mission_RefreshOfferListsOnLanding(GameState &state,
+                                        std::int16_t stellar_id);
+
 // Ghidra 0x0043bbb0 NovaResources_LoadMisnResourceDefs, runtime half. The
 // m\xefsn definition decode itself runs inline in
 // ScenarioData::LoadFromArchives (which owns the 1000-entry table); this resets
