@@ -79,8 +79,8 @@ constexpr std::uint16_t kPromptStr = 0xbb8;
 // them to Resource_LoadStringEntry / Resource_DrawStringEntry).
 constexpr std::uint16_t kMiscStr = 0x7d2;
 // STR# 0x44c: the shipped stellar-class descriptor fragments ("[Class M]",
-// "[Ice Moon]", ...) used when the stellar's own destination desc resource is
-// absent (0x00480030: FUN_004c73b0(link_a_id + 7000) fallback).
+// "[Ice Moon]", ...) used when the stellar-class `STR ` override is absent
+// (0x00480030: NovaResources_CopyStringResource(link_a_id + 7000) fallback).
 constexpr std::uint16_t kStellarClassStr = 0x44c;
 
 // STR# 0x96 button-label entries (1-based; the original indexes the
@@ -906,13 +906,16 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                          : LoadButtonLabel(kBtnDemandTribute, "Demand Tribute");
   frame.name = stellar->name;
 
-  // Destination description (0x00480030): the desc resource keyed at
-  // link_a_id + 7000, falling back to the shipped stellar-class fragment
-  // STR# 0x44c at link_a_id + 1.
-  if (const auto desc = NovaResource_LoadDescription(
+  // Destination description (0x00480030): the sparse `STR ` single-string
+  // override keyed at link_a_id + 7000, falling back to the shipped
+  // stellar-class fragment STR# 0x44c at link_a_id + 1. This is the graphic
+  // Type + 7000 (not the stellar's own landing desc, which is keyed by the
+  // spob id); the shipped data ships no `STR ` resources, so the class
+  // fragment is the normal result.
+  if (const auto desc = NovaResources_LoadStringResource(
           static_cast<std::uint16_t>(stellar->link_a_id + 7000));
-      desc && !desc->text.empty()) {
-    frame.description = desc->text;
+      desc && !desc->empty()) {
+    frame.description = *desc;
   } else {
     frame.description = NovaHud_LoadStringEntry(
                             kStellarClassStr,
