@@ -716,7 +716,7 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
       if (clear_command) {
         // Slot-8 variant resets the plotted-jump latch to idle.
         state.player.travel_transfer_mode = -1;
-        state.travel.travel_slot = -1;
+        NovaTravel_SetPlayerTravelSlot(state, -1);
         state.travel.hyperspace_mode = false;
       }
       if (hyperspace_command && state.player.travel_transfer_mode != 3) {
@@ -724,7 +724,7 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
         // syncs from the plotted starmap route (0x0044de28).
         state.travel.hyperspace_mode = true;
         state.player.travel_transfer_mode = 3;
-        state.travel.travel_slot = -1;
+        NovaTravel_SetPlayerTravelSlot(state, -1);
         NovaStarmap_SyncTravelSelectionFromRoute(state);
       }
     }
@@ -1317,6 +1317,9 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
       // Stellar_RunDockAndLaunchSequence tail (0x00456323): the "leaving
       // <stellar> on <date>" overlay shows as the player departs.
       NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
+      // Stellar_HandleStellarEntryAndExit resumes once the dock sequence
+      // returns: population rebuild, route re-arm and ambush roll.
+      Stellar_FinishLaunchEntry(state);
     }
     // Docking blocked the loop for the whole landing; freeze gameplay
     // time across it (launch re-enters flight with a fresh clock).

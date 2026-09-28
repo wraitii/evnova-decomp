@@ -387,28 +387,24 @@ void Stellar_Launch(GameState &state) {
   // 0x00456256: DAT_00597974 = tick60 - 60 re-arms the cursor-anchored
   // travel-selection sprite. TODO(decomp(0x00439280)) skipped: that sprite
   // channel is not reconstructed.
-  // The launch clears the no-asteroids latch set on landing (the original does
-  // this through the spaceflight loop's transition reconciliation plus the
-  // every-tick Asteroid_Spawn('\x01') ring, which is not yet ported) and
-  // rebuilds the current system's drifting field around the repositioned
-  // player.
-  NovaAsteroid_InitSystem(state);
+}
 
-  // Stellar_HandleStellarEntryAndExit 0x00458304: the post-launch cleanup
-  // drops the player's primary ship target just before the vacant-ship sweep,
-  // so a recycled NPC slot cannot leave a stale reticle on an unrelated fresh
-  // ship after the population rebuild below.
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, ordinary-landing slice
+// after Stellar_RunDockAndLaunchSequence returns (see the header).
+void Stellar_FinishLaunchEntry(GameState &state) {
+  // 0x00458304: drop the player's primary ship target just before the
+  // vacant-ship sweep, so a recycled NPC slot cannot leave a stale reticle on
+  // an unrelated fresh ship after the population rebuild below.
   state.player.primary_target_ship_slot = -1;
   state.ship_reticle_pulse = 0.0F;
-  // Stellar_HandleStellarEntryAndExit 0x0045830a: reseed the ambient-traffic
-  // escalation cooldown (Rand(0x1e)+0x1e) alongside the vacant-ship sweep.
+  // 0x0045830a: reseed the ambient-traffic escalation cooldown
+  // (Rand(0x1e)+0x1e) alongside the vacant-ship sweep.
   state.ambient_traffic_escalation_cooldown =
       static_cast<std::int16_t>(RandomBelow(state, 0x1e) + 0x1e);
 
-  // Stellar_HandleStellarEntryAndExit 0x00458a47..0x00458bd2 performs the
-  // vacant-ship sweep and System_RebuildInitialNpcAndMissionPopulation only
-  // after Stellar_RunDockAndLaunchSequence returns. Missions accepted in the
-  // Spaceport loop must therefore participate in this rebuild.
+  // 0x0045831f..0x004583d7: the vacant-ship sweep and
+  // System_RebuildInitialNpcAndMissionPopulation(cur, 1). Missions accepted in
+  // the Spaceport loop must therefore participate in this rebuild.
   NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
   // Ghidra 0x0041af90: the normal launch caller passes flag=1. Adopt attached
   // escorts before mission fleets and ambient ships; this also refills their
@@ -423,7 +419,22 @@ void Stellar_Launch(GameState &state) {
       /*copy_player_heading=*/true,
       static_cast<std::uint32_t>(state.gameplay_now_ms));
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
+
+  // 0x004583de..0x004583f5, the tail shared with restricted travel: display
+  // refresh, clear the travel slot (+0x6C), re-arm the jump from the plotted
+  // starmap route, then the mission-ship ambush roll.
+  NovaTargeting_UpdateStellarAvailability(state);
+  NovaTravel_SetPlayerTravelSlot(state, -1);
+  NovaStarmap_SyncTravelSelectionFromRoute(state);
+  Mission_TrySpawnMissionShipAmbush(state);
   NovaStellar_ResetAnimationsAfterEntry(state, -1);
+
+  // The launch clears the no-asteroids latch set on landing and rebuilds the
+  // current system's drifting field around the repositioned player. The
+  // original does this through the spaceflight loop's transition
+  // reconciliation plus the every-tick Asteroid_Spawn('\x01') ring (not yet
+  // ported), so its rolls follow this whole slice.
+  NovaAsteroid_InitSystem(state);
 }
 
 // Stellar_HandleStellarEntryAndExit 0x0045850f..0x00458670 and the hypergate

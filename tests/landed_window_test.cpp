@@ -891,8 +891,10 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   CHECK(state.player.armor_points == 2.0F);
 
   // Launch tail (0x00455f99..0x00456268): reposition + velocity kill,
-  // shield/armor refill to the effective maxima, daily world tick.
+  // shield/armor refill to the effective maxima, daily world tick; then the
+  // driver's post-launch slice (0x004582e4) rebuilds the population.
   game::Stellar_Launch(state);
+  game::Stellar_FinishLaunchEntry(state);
   CHECK(state.player.pos_x == 123.0F);
   CHECK(state.player.pos_y == -456.0F);
   CHECK(state.player.vel_x == 0.0F);
@@ -1008,6 +1010,7 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
   }
 
   game::Stellar_Launch(state);
+  game::Stellar_FinishLaunchEntry(state);
 
   bool found_derelict = false;
   for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
@@ -1049,6 +1052,7 @@ TEST_CASE("derelict spawns at launch after a pre-accept arrival population") {
   REQUIRE(state.control.bits.test(9208));
 
   game::Stellar_Launch(state);
+  game::Stellar_FinishLaunchEntry(state);
 
   bool found_derelict = false;
   for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
@@ -1058,6 +1062,53 @@ TEST_CASE("derelict spawns at launch after a pre-accept arrival population") {
     }
   }
   CHECK(found_derelict);
+}
+
+// Stellar_HandleStellarEntryAndExit 0x004583ea/0x004583f0: after a landing the
+// launch clears the travel slot and re-arms the plotted-jump mode from the
+// first route hop, undoing the land command's stellar-navigation mode 2.
+TEST_CASE("launch re-arms the hyperspace jump from the plotted route") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  constexpr std::int16_t kRautherionSystem = 166 - 0x80;
+  state.player.current_system_id = kRautherionSystem;
+  state.player.ship_class_id = 0;
+  const game::System *sys = state.scenario.System(166);
+  REQUIRE(sys != nullptr);
+  std::size_t slot = 0;
+  while (slot < sys->links.size() && sys->links[slot] < 0x80) {
+    ++slot;
+  }
+  REQUIRE(slot < sys->links.size());
+  const auto hop = static_cast<std::int16_t>(sys->links[slot] - 0x80);
+  state.travel.starmap_route[0] = kRautherionSystem;
+  state.travel.starmap_route[1] = hop;
+  state.player.travel_transfer_mode = 2;
+  state.player.ai_secondary_target_slot = 0x80;
+
+  game::Stellar_FinishLaunchEntry(state);
+
+  CHECK(state.player.travel_transfer_mode == 3);
+  CHECK(state.travel.travel_slot == static_cast<std::int16_t>(slot));
+  CHECK(state.travel.starmap_destination_system_id == hop);
+  // ShipState +0x6C carries the adjacency slot in flight.
+  CHECK(state.player.ai_secondary_target_slot ==
+        static_cast<std::int16_t>(slot));
+}
+
+TEST_CASE("launch without a plotted route leaves the jump disarmed") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 166 - 0x80;
+  state.player.ship_class_id = 0;
+  state.player.travel_transfer_mode = 2;
+  state.travel.travel_slot = 3;
+
+  game::Stellar_FinishLaunchEntry(state);
+
+  CHECK(state.player.travel_transfer_mode == 2);
+  CHECK(state.travel.travel_slot == -1);
+  CHECK(state.player.ai_secondary_target_slot == -1);
 }
 
 // DAT_007d4c0d (0x0048ea70): a stellar with a zero TechLevel and no positive

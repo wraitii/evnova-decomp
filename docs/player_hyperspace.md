@@ -93,7 +93,10 @@ hold-clock block and the 0x0044F414 slow damp.
 ## Port mapping (src/game/travel.cpp, `NovaTravel_Tick`)
 
 - `JumpPhase::kBrake`: `stopped = fast_jump || (|trunc(vel_x)| < 2 &&
-  |trunc(vel_y)| < 2)`. A fast-jump hull enters the hold on the first tick
+  |trunc(vel_y)| < 2)`. Every braking frame stamps `ai_mode_start_time_ms`
+  and `ai_station_hold_timer = 1.0` (0x0044F27A/0x0044F280), so the
+  timer-positive gates (weapons, cloak, clear-target, hails, escort hold, the
+  HUD's highlighted "Hyperspace" title in 0x0045E400) apply from engage. A fast-jump hull enters the hold on the first tick
   after engage. A non-fast-jump inertialess hull takes the 0x0044F0E3 arm:
   decay the maintained scalar `speed` by `Ship_ComputeShipEffectiveThrust *
   tick_scale`, floor at zero, then steer velocity toward `heading * speed`
@@ -132,22 +135,32 @@ hold-clock block and the 0x0044F414 slow damp.
   `g_player_speed_cap_x` scalar clamp, the fire-restricted
   `g_inertialess_fire_restricted_speed_damp` (0x005755E0) double 0.985 decay,
   and the speed-proportional engine-glow ramp (`fade_glow()` is a placeholder,
-  marked `TODO(decomp)` in travel.cpp). The brake entry also does not stamp
-  `ai_mode_start_time_ms` (0x0044F27A) or `ai_station_hold_timer = 1.0`
-  (0x0044F280) as the original does.
+  marked `TODO(decomp)` in travel.cpp).
 - **The port's ordinary brake omits one original write.** The original
   0x0044F127 arm writes `ai_desired_heading_deg` (+0x68) = the reverse bearing
   at 0x0044F184. The port's ordinary `kBrake` computes that same angle for its
   turn but never assigns it to `player.ai_desired_heading_deg`. The only known
   consumer of a leader's field is the mode-0xD escort heading mirror, which
   requires `leader.ai_station_hold_timer > 1.0`; the brake holds the timer at
-  exactly 1.0 (original) or `<= 0` (port), so the mirror never reads it during
+  exactly 1.0, so the mirror never reads it during
   the brake. No escort effect is established -- this is an unmodelled field
   write, not a known behavioral regression.
 
+## Travel slot (+0x6C)
+
+The mode-3 adjacency slot lives in ShipState `ai_secondary_target_slot`
+(+0x6C), which escorts copy while the player's timer is positive (0x00404A91
+leader-jump-prep arm; the escort-command hold). The port keeps the slot in
+`TravelState::travel_slot` and mirrors it into `player.ai_secondary_target_slot`
+through `NovaTravel_SetPlayerTravelSlot`, except while docked, when that field
+is the dock stellar the launch tail repositions from (the original's docked map
+windows save/restore it).
+
 ## Tests
 
-`tests/travel_test.cpp`: "fast-jump class skips the brake and keeps momentum",
+`tests/travel_test.cpp`: "jump brake holds the station timer at 1.0 and
+mirrors the slot", "docked travel-slot writes leave the dock stellar in
++0x6C", "fast-jump class skips the brake and keeps momentum",
 "owned fast-jump outfit grants the capability", "defined but unowned fast-jump
 outfit does not grant", "fast-jump in an alternate ModType with ModVal 0
 grants", "fast-jump is still denied inside the no-jump range", "inertialess

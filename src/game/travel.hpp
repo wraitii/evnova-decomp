@@ -331,6 +331,15 @@ void NovaSystem_OnSystemEntered(GameState &state,
 void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
                                           std::int16_t zero_based_system_id);
 
+// Writes the player's travel slot (0..15 adjacency index, or -1). The original
+// keeps it in ShipState +0x6C, which escorts copy while the player's
+// station-hold timer runs (Ship_UpdateShipAiState 0x00404a91,
+// Ship_UpdateEscortCommandState), so the port mirrors it into
+// player.ai_secondary_target_slot. While docked that field is the dock stellar
+// the launch tail repositions from; the original's docked map windows save and
+// restore it, so a docked write only updates TravelState.
+void NovaTravel_SetPlayerTravelSlot(GameState &state, std::int16_t slot);
+
 // Plots `destination_zero_based` (a system selected in the galaxy starmap) as
 // the player's next-jump destination. Finds the current system's travel slot
 // whose linked destination matches and stores the resolved slot + stellar on

@@ -1850,12 +1850,12 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
           if (hit == state.player.current_system_id) {
             // Re-selecting the current system disarms the plotted jump
             // (0x004a4e70 slot clear via the adjacency-scan miss).
-            state.travel.travel_slot = -1;
+            NovaTravel_SetPlayerTravelSlot(state, -1);
             state.travel.starmap_destination_system_id = -1;
           } else if (!NovaTravel_PlotStarmapDestination(state, hit)) {
             // A plain click arms the travel slot when the system is directly
             // linked and clears it otherwise (0x004a5840).
-            state.travel.travel_slot = -1;
+            NovaTravel_SetPlayerTravelSlot(state, -1);
           }
         }
         break;

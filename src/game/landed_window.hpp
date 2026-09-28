@@ -220,8 +220,19 @@ void Player_RefuelShipWithCredits(GameState &state);
 // pilot, rolls a random launch heading, resets the travel selection, and
 // wipes the transient shot pool. The caller then shows the departure overlay
 // (0x00456323, NovaHud_ShowLaunchDepartureMessage) and resyncs its frame
-// clock (the original zeroes g_avg_frame_tick_scale at 0x00456174).
+// clock (the original zeroes g_avg_frame_tick_scale at 0x00456174), and
+// finally runs Stellar_FinishLaunchEntry.
 void Stellar_Launch(GameState &state);
+
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, ordinary-landing slice
+// after Stellar_RunDockAndLaunchSequence returns (0x004582e4..0x004583f5):
+// primary-target clear, ambient-traffic cooldown roll, vacant-ship sweep and
+// the flag-1 population rebuild, then the tail shared with restricted travel
+// (0x004583de: stellar display refresh, travel slot cleared, jump re-armed
+// from the plotted starmap route, mission-ship ambush roll), then the stellar
+// animation reset. Runs after the departure overlay so the RNG draws keep the
+// original order (the overlay's variant roll at 0x00456323 comes first).
+void Stellar_FinishLaunchEntry(GameState &state);
 
 // Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, post-entry stellar
 // animation reset (0x0045850f..0x00458670): after every land-command entry

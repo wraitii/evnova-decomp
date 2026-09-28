@@ -128,7 +128,7 @@ RouteMapClickResult RouteMap_HandleClick(GameState &state,
   auto clear_selection = [&] {
     // 0x0044e200: mode 3, slot -1 (selection cleared), dirty flag, overlay
     // refresh + click sound (transition table entry 2).
-    state.travel.travel_slot = -1;
+    NovaTravel_SetPlayerTravelSlot(state, -1);
     state.travel.starmap_destination_system_id = -1;
     state.travel.destination_system_id = -1;
     state.player.travel_transfer_mode = 3;
@@ -176,7 +176,7 @@ RouteMapClickResult RouteMap_HandleClick(GameState &state,
     }
     // 0x0044e452: slot = adjacency index, mode 3, dirty flag, overlay
     // refresh + click sound.
-    state.travel.travel_slot = static_cast<std::int16_t>(slot);
+    NovaTravel_SetPlayerTravelSlot(state, static_cast<std::int16_t>(slot));
     state.travel.starmap_destination_system_id = dest;
     state.travel.destination_system_id = dest;
     state.player.travel_transfer_mode = 3;

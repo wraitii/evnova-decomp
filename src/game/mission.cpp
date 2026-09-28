@@ -2935,6 +2935,9 @@ void Mission_ShowMissionShipAnnouncement(GameState &state,
 void Mission_TrySpawnMissionShipAmbush(GameState &state) {
   // Gate: the ambush personality (pers slot 0x3fe) must be defined by the
   // scenario (present + loaded latch; PersDef +0x620/+0x623).
+  if (state.scenario.pers_defs.size() <= 0x3fe) {
+    return;
+  }
   const PersDef &ambusher =
       state.scenario.pers_defs[static_cast<std::size_t>(0x3fe)];
   if (!ambusher.alive || !ambusher.loaded_latch) {

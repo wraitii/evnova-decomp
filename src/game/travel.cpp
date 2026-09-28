@@ -438,7 +438,7 @@ void FireJump(GameState &state) {
   // The plotted starmap destination and travel engagement are consumed by the
   // fire; the spaceflight loop re-spawns the starfield/asteroids for the new
   // system when it observes just_completed.
-  t.travel_slot = -1;
+  NovaTravel_SetPlayerTravelSlot(state, -1);
   // @port 0x0044F660 50% gameplay,ui,synthetic
   // Ghidra 0x0044f660 PlayerTick_SystemTransitionAndArrival (synthetic region
   // of 0x0044aa70): destination transfer, arrival state, discovery, the arrival
@@ -740,7 +740,7 @@ bool NovaTravel_CompleteRestrictedTravel(GameState &state,
                                 : GameState::ScreenFlashMode::kInstant;
   state.travel.starmap_route.fill(-1);
   state.travel.starmap_route[0] = destination_system;
-  state.travel.travel_slot = -1;
+  NovaTravel_SetPlayerTravelSlot(state, -1);
   state.travel.starmap_destination_system_id = -1;
   state.travel.destination_system_id = -1;
   state.travel.selected_stellar_id = -1;
@@ -857,6 +857,13 @@ bool NovaTravel_PlayerInJumpRange(const GameState &state) {
   return true;
 }
 
+void NovaTravel_SetPlayerTravelSlot(GameState &state, std::int16_t slot) {
+  state.travel.travel_slot = slot;
+  if (!state.system_transition_active) {
+    state.player.ai_secondary_target_slot = slot;
+  }
+}
+
 // Ghidra 0x004a8080 NovaUi_SyncTravelSelectionFromStarmapRoute.
 // ---------------------------------------------------------------------------
 // Plots a galaxy-map destination as the next jump target.
@@ -888,7 +895,7 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
   // g_travel_selected_stellar_id = -1 in PlayerTick_HyperspaceCommand): the
   // travel reticle hides and the nav panel switches to the Hyperspace
   // destination display.
-  t.travel_slot = static_cast<std::int16_t>(slot);
+  NovaTravel_SetPlayerTravelSlot(state, static_cast<std::int16_t>(slot));
   t.destination_system_id = destination_zero_based;
   // Plotted-jump mode latch (0x004a491e): the accent line and the jump HUD
   // read travel_transfer_mode == 3.
@@ -1392,7 +1399,7 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
     slots[count++] = static_cast<int>(slot);
   }
   if (count == 0) {
-    t.travel_slot = -1;
+    NovaTravel_SetPlayerTravelSlot(state, -1);
     t.destination_system_id = -1;
     t.starmap_destination_system_id = -1;
     return -1; // current system has no travelable links
@@ -1416,7 +1423,7 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
       static_cast<std::int16_t>(sys->links[static_cast<std::size_t>(slot)] -
                                 0x80));
 
-  t.travel_slot = static_cast<std::int16_t>(slot);
+  NovaTravel_SetPlayerTravelSlot(state, static_cast<std::int16_t>(slot));
   t.starmap_destination_system_id = dest;
   t.destination_system_id = dest;
   // Cycle latches plotted-jump mode 3 like the starmap arm (0x0044dea7);
@@ -1584,8 +1591,7 @@ void NovaTravel_Tick(GameState &state,
     // Ghidra 0x0044f127 PlayerTick_JumpTurnaroundContinuation (synthetic region
     // of 0x0044aa70): ordinary hyperspace-engage turnaround/braking. Partial
     // coverage: the downstream 0x0044cffe manual tails (speed-cap clamp, 0.985
-    // fire-restricted decay, glow ramp) are unported here and the brake frame
-    // does not stamp ai_station_hold_timer = 1.0.
+    // fire-restricted decay, glow ramp) are unported here.
     case TravelState::JumpPhase::kBrake: {
       // Pre-fire turn-around, mirroring the jump dispatch in
       // Ship_HandlePlayerShipCore (0x0044c195 engage / 0x0044fff0 continuation
@@ -1607,6 +1613,14 @@ void NovaTravel_Tick(GameState &state,
           (std::abs(std::trunc(player.vel_x)) < kStoppedRoundedVel &&
            std::abs(std::trunc(player.vel_y)) < kStoppedRoundedVel);
       if (!stopped) {
+        // BrakeEntry 0x0044f275..0x0044f280: every braking frame stamps the
+        // jump clock and holds the station-hold timer at 1.0, so the
+        // timer-positive gates (weapons, cloak, clear-target, hails, escort
+        // hold, the HUD's highlighted Hyperspace title) apply from engage
+        // while staying below the hold-begin guard (<= 1.0) and the escort
+        // spin-up gates (> 1.0).
+        player.ai_mode_start_time_ms = state.tick_60hz;
+        player.ai_station_hold_timer = 1.0F;
         // Inertialess jump brake (Ghidra 0x0044f0e3): decay scalar speed
         // (+0x48) by Ship_ComputeShipEffectiveThrust * tick scale, floored at
         // zero, then shared 0x0044cffe/0x0043b020 steering toward
@@ -2024,7 +2038,7 @@ void NovaStarmap_SyncTravelSelectionFromRoute(GameState &state) {
     }
     if (NovaSystem_ResolveVisibleForTravel(
             state, static_cast<std::int16_t>(link - 0x80)) == first_hop) {
-      t.travel_slot = static_cast<std::int16_t>(slot);
+      NovaTravel_SetPlayerTravelSlot(state, static_cast<std::int16_t>(slot));
       t.starmap_destination_system_id = first_hop;
       // Route re-arm (0x004a8080) also latches plotted-jump mode 3 and
       // clears the stellar selection.
@@ -2169,7 +2183,7 @@ void NovaStarmap_ClearRoute(GameState &state) {
   route[0] = state.player.current_system_id;
   // The original also disarms the plotted jump and resets the selection to
   // the current system (0x004a3aa0 action-8 branch).
-  state.travel.travel_slot = -1;
+  NovaTravel_SetPlayerTravelSlot(state, -1);
   state.travel.starmap_destination_system_id = -1;
 }
 

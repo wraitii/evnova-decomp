@@ -625,6 +625,39 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
   CHECK(state.player.current_system_id == 1);
 }
 
+// Ghidra 0x0044f275..0x0044f280: each braking frame stamps the jump clock and
+// holds the station-hold timer at 1.0; the plotted adjacency slot is the
+// player's ShipState +0x6C, which escorts copy while that timer is positive.
+TEST_CASE("jump brake holds the station timer at 1.0 and mirrors the slot") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  state.player.vel_x = 8.0F;
+  state.player.fuel_points = 500;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+  REQUIRE(state.travel.travel_slot >= 0);
+  CHECK(state.player.ai_secondary_target_slot == state.travel.travel_slot);
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  state.tick_60hz = 1234;
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+  CHECK(state.player.ai_station_hold_timer == 1.0F);
+  CHECK(state.player.ai_mode_start_time_ms == 1234U);
+}
+
+TEST_CASE("docked travel-slot writes leave the dock stellar in +0x6C") {
+  GameState state;
+  state.system_transition_active = true;
+  state.player.ai_secondary_target_slot = 0x85;
+  game::NovaTravel_SetPlayerTravelSlot(state, 3);
+  CHECK(state.travel.travel_slot == 3);
+  CHECK(state.player.ai_secondary_target_slot == 0x85);
+}
+
 TEST_CASE("player jump requires a full jump of current fuel") {
   for (const float fuel : {0.0F, 99.0F, 100.0F}) {
     CAPTURE(fuel);
