@@ -36,12 +36,6 @@ struct GameState;
 struct Ship;
 class HudRenderer;
 
-struct StellarAnimationState {
-  int current_frame = 0;
-  int previous_frame = 0;
-  float frame_accumulator = 0.0F;
-};
-
 // Pure frame-state half of Ghidra 0x0042cd10 Stellar_UpdateStellarSprites.
 // elapsed_30hz_ticks is the original normalized tick scale, not milliseconds.
 void NovaStellar_AdvanceAnimationFrame(GameState &state,
@@ -274,16 +268,6 @@ public:
   // 0x00462390 on the loaded set); the HUD renderer gets read access here.
   [[nodiscard]] SpriteStore &sprite_store() { return sprite_store_; }
 
-  // Current animation frame index for a stellar's ambient sprite (0 for
-  // single-frame bodies / bodies of other systems). Read by the destination-
-  // interaction window so its thumbnail shows the same frame the system view
-  // does (Ghidra: the g_stellar_ambient_sprites current-frame draw in
-  // NovaUi_DrawTravelDestinationInteractionWindow 0x004812c0).
-  [[nodiscard]] int StellarCurrentFrame(std::int16_t stellar_id) const {
-    const auto it = stellar_anims_.find(stellar_id);
-    return it != stellar_anims_.end() ? it->second.current_frame : 0;
-  }
-
 private:
   // Effective system murk (0-100), recomputed once per Draw from
   // NovaSystem_GetEffectiveMurkPercent and pushed into every world sprite's
@@ -384,13 +368,6 @@ private:
                       int viewport_h,
                       float camera_x,
                       float camera_y);
-
-  // One animated stellar's frame-stepping runtime state (the original keeps
-  // these on StellarDef sprite_current_frame / sprite_previous_frame /
-  // sprite_frame_accumulator, +0x476/+0x478/+0x490). Initial: current and
-  // previous both 0, accumulator 0.
-  // stellar id (resource id) -> runtime animation state for animated stellars.
-  std::map<std::int16_t, StellarAnimationState> stellar_anims_;
 
   // Draws the current system's stellar bodies (planets/stations) at their
   // world positions relative to the player camera.

@@ -882,6 +882,16 @@ struct Weapon {
 // to 0x58c (Nirvana), so the table must not stop at 0x580.
 inline constexpr std::size_t kStellarTableSize = 0x800;
 
+// A stellar's ambient-sprite frame-stepping state (Ghidra StellarDef
+// sprite_current_frame +0x476 / sprite_previous_frame +0x478 /
+// sprite_frame_accumulator +0x490), advanced by Stellar_UpdateStellarSprites
+// (0x0042cd10) and reset after every land-command entry (0x00457580).
+struct StellarAnimationState {
+  int current_frame = 0;
+  int previous_frame = 0;
+  float frame_accumulator = 0.0F;
+};
+
 // Ghidra StellarDef (g_stellar_defs, entries indexed by stellar id minus
 // 0x80). One planet/station/object in a system.
 struct Stellar {
@@ -1058,11 +1068,20 @@ struct Stellar {
   std::int16_t domination_days = 0;
   std::uint8_t defense_fleet_mounted = 0;
 
-  // Current ambient-sprite animation frame (Ghidra StellarDef +0x476,
-  // sprite_current_frame). The renderer's AdvanceStellarAnimation
-  // (Stellar_UpdateStellarSprites 0x0042cd10) publishes the frame here so the
-  // collision layer can bind the same frame's mask.
-  std::int16_t sprite_current_frame = 0;
+  // Ambient-sprite animation state (StellarDef +0x476/+0x478/+0x490). It
+  // lives here rather than in the view so the land-command driver can reset
+  // it (NovaStellar_ResetAnimationsAfterEntry).
+  StellarAnimationState animation;
+  // Cached spin-set frame count (StellarDef +0x474, sprite_frame_count). Ship_
+  // InitGameplayDataTables (0x004b0c20) seeds 1; the display refresh
+  // (0x00432470) re-caches it only while the stellar is in the current
+  // system, so a gate never displayed this session still reads 1.
+  std::int16_t sprite_frame_count = 1;
+  // The frame the ambient sprite shows (its Sprite_SetCurrentFrame value):
+  // animation.current_frame while the stellar animates, 0 otherwise
+  // (0x0042cd10). The renderer publishes it so the collision layer binds the
+  // same frame's mask.
+  std::int16_t displayed_sprite_frame = 0;
   // OnDestroy control-bit expression (Ghidra StellarDef +0x266, sp\x9ab
   // payload +0x246). Run when a planet-type weapon destroys the body; the
   // original also re-arms it through Mission_ExecuteReactionScript.

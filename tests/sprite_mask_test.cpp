@@ -622,7 +622,7 @@ TEST_CASE("stellar mask refresh binds the shipped ambient frame",
   Stellar &stellar = state.scenario.stellars[0];
   stellar.link_a_id = static_cast<std::int16_t>(spin_id - 1000);
   stellar.link_b_id = -1;
-  stellar.sprite_current_frame = 1;
+  stellar.displayed_sprite_frame = 1;
 
   NovaCollision_RefreshCollisionMasks(state);
   REQUIRE(stellar.collision_mask.HasMask());

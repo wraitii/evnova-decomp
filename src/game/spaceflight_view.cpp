@@ -1646,10 +1646,17 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
         sprite_store_.Spin(platform.renderer(),
                            static_cast<std::uint16_t>(
                                NovaTargeting_StellarSpriteLinkId(*st) + 1000));
-    if (!set || set->frame_count < 2) {
-      continue; // no animated set / single-frame body stays static
+    Stellar *const stellar = state.scenario.StellarMutable(nav);
+    if (!set || stellar == nullptr) {
+      continue;
     }
-    StellarAnimationState &anim = stellar_anims_[nav];
+    // The display refresh (0x00432470) caches the assigned set's frame count
+    // in StellarDef +0x474; the entry reset reads it for the arrival gate.
+    stellar->sprite_frame_count = static_cast<std::int16_t>(set->frame_count);
+    if (set->frame_count < 2) {
+      continue; // single-frame body stays static
+    }
+    StellarAnimationState &anim = stellar->animation;
     const int frame_count = set->frame_count;
     const bool active = NovaTargeting_IsStellarActive(*st);
     const bool animate_when_active =
@@ -1667,13 +1674,11 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
       NovaStellar_AdvanceAnimationFrame(
           state, *st, frame_count, engaged, frame_time_ms * 0.03F, anim);
     }
-    // Publish the frame the view draws into the StellarDef-equivalent field
-    // (Ghidra StellarDef +0x476) so NovaCollision_RefreshCollisionMasks binds
-    // the matching collision mask for this and the next tick.
-    if (Stellar *const mutable_stellar = state.scenario.StellarMutable(nav)) {
-      mutable_stellar->sprite_current_frame =
-          static_cast<std::int16_t>(animate ? anim.current_frame : 0);
-    }
+    // Publish the shown frame (the ambient sprite's Sprite_SetCurrentFrame:
+    // frame 0 while not animating) so the draw and
+    // NovaCollision_RefreshCollisionMasks bind the same frame.
+    stellar->displayed_sprite_frame =
+        static_cast<std::int16_t>(animate ? anim.current_frame : 0);
   }
 }
 
@@ -1724,22 +1729,20 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
     }
 
     // Prefer the real spin planet sprite; fall back to a tinted disc. Animated
-    // stellars use the frame advanced by AdvanceStellarAnimation (keyed by the
-    // stellar id), which also publishes it to Stellar.sprite_current_frame for
-    // the collision refresh; the link_a/link_b set choice is shared with the
-    // collision refresh via NovaTargeting_StellarSpriteLinkId so the drawn art
-    // and the collision mask never disagree.
+    // stellars use the frame AdvanceStellarAnimation publishes to
+    // Stellar.displayed_sprite_frame, which the collision refresh also binds;
+    // the link_a/link_b set choice is shared with the collision refresh via
+    // NovaTargeting_StellarSpriteLinkId so the drawn art and the collision mask
+    // never disagree.
     const SpriteAsset *set =
         sprite_store_.Spin(platform.renderer(),
                            static_cast<std::uint16_t>(
                                NovaTargeting_StellarSpriteLinkId(*st) + 1000));
     if (set && !set->frames.empty()) {
-      int frame_idx = 0;
-      const auto anim_it = stellar_anims_.find(nav);
-      if (anim_it != stellar_anims_.end()) {
-        frame_idx =
-            std::clamp(anim_it->second.current_frame, 0, set->frame_count - 1);
-      }
+      const int frame_idx =
+          std::clamp(static_cast<int>(st->displayed_sprite_frame),
+                     0,
+                     set->frame_count - 1);
       SpriteDrawOptions options;
       ApplyFog(options);
       DrawSprite(platform.renderer(),

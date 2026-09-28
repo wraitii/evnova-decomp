@@ -423,6 +423,35 @@ void Stellar_Launch(GameState &state) {
       /*copy_player_heading=*/true,
       static_cast<std::uint32_t>(state.gameplay_now_ms));
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
+  NovaStellar_ResetAnimationsAfterEntry(state, -1);
+}
+
+// Stellar_HandleStellarEntryAndExit 0x0045850f..0x00458670 and the hypergate
+// destination arm 0x00458c76..0x00458ce6 (see the header).
+void NovaStellar_ResetAnimationsAfterEntry(
+    GameState &state, std::int16_t hypergate_destination_stellar_id) {
+  for (Stellar &stellar : state.scenario.stellars) {
+    stellar.animation.current_frame = 0;
+    stellar.animation.previous_frame = 0;
+    stellar.displayed_sprite_frame = 0;
+  }
+  if (hypergate_destination_stellar_id < 0x80) {
+    return;
+  }
+  Stellar *const gate =
+      state.scenario.StellarMutable(hypergate_destination_stellar_id);
+  if (gate == nullptr) {
+    return;
+  }
+  // The frame count is the +0x474 cache, not the live set: a gate never shown
+  // this session still holds the seeded 1 and so starts closed.
+  gate->animation.current_frame = gate->sprite_frame_count - 1;
+  gate->animation.previous_frame = gate->animation.current_frame;
+  gate->animation.frame_accumulator =
+      -static_cast<float>(gate->animation_dwell_time);
+  // The display refresh right after (0x00432470) shows +0x476 on the sprite.
+  gate->displayed_sprite_frame =
+      static_cast<std::int16_t>(gate->animation.current_frame);
 }
 
 // ---------------------------------------------------------------------------

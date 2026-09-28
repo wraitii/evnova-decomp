@@ -1378,3 +1378,55 @@ TEST_CASE("landed control set strings run the full mission engine",
   CHECK(state.control.ControlBit(42));
   CHECK(state.player.ship_class_id == 165 - 0x80);
 }
+
+// Stellar_HandleStellarEntryAndExit 0x0045850f..0x00458670: every land-command
+// entry rewinds all stellar animations to frame 0 (accumulator kept).
+TEST_CASE("land-command entry rewinds every stellar animation",
+          "[landed_window][stellar]") {
+  game::GameState state;
+  state.scenario.stellars.resize(2);
+  for (game::Stellar &stellar : state.scenario.stellars) {
+    stellar.sprite_frame_count = 8;
+    stellar.animation = {
+        .current_frame = 5, .previous_frame = 6, .frame_accumulator = 1.5F};
+    stellar.displayed_sprite_frame = 5;
+  }
+
+  game::NovaStellar_ResetAnimationsAfterEntry(state, -1);
+
+  for (const game::Stellar &stellar : state.scenario.stellars) {
+    CHECK(stellar.animation.current_frame == 0);
+    CHECK(stellar.animation.previous_frame == 0);
+    CHECK(stellar.animation.frame_accumulator == Catch::Approx(1.5F));
+    CHECK(stellar.displayed_sprite_frame == 0);
+  }
+}
+
+// 0x00458c76..0x00458ce6: a hypergate transfer starts the destination gate on
+// its last cached frame, holding it for an extra -AnimDelay dwell.
+TEST_CASE("hypergate entry opens the destination gate on its last frame",
+          "[landed_window][stellar]") {
+  game::GameState state;
+  state.scenario.stellars.resize(3);
+  game::Stellar &source = state.scenario.stellars[0];
+  source.sprite_frame_count = 8;
+  source.animation = {.current_frame = 4, .previous_frame = 4};
+  game::Stellar &destination = state.scenario.stellars[1];
+  destination.sprite_frame_count = 8;
+  destination.animation_dwell_time = 3;
+  // Never shown this session: the +0x474 cache still holds the seeded 1.
+  game::Stellar &unseen = state.scenario.stellars[2];
+  unseen.animation_dwell_time = 3;
+
+  game::NovaStellar_ResetAnimationsAfterEntry(state, 0x81);
+
+  CHECK(source.animation.current_frame == 0);
+  CHECK(destination.animation.current_frame == 7);
+  CHECK(destination.animation.previous_frame == 7);
+  CHECK(destination.animation.frame_accumulator == Catch::Approx(-3.0F));
+  CHECK(destination.displayed_sprite_frame == 7);
+
+  game::NovaStellar_ResetAnimationsAfterEntry(state, 0x82);
+  CHECK(unseen.animation.current_frame == 0);
+  CHECK(unseen.animation.frame_accumulator == Catch::Approx(-3.0F));
+}

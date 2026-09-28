@@ -403,7 +403,6 @@ void DrawNegotiationDialog(SdlPlatform &platform,
                            SDL_Texture *backdrop,
                            SDL_Texture *planet_art,
                            const Stellar &stellar,
-                           std::int16_t stellar_id,
                            const NegotiationFrame &frame,
                            int hovered_slot) {
   SDL_Renderer *renderer = platform.renderer();
@@ -484,14 +483,16 @@ void DrawNegotiationDialog(SdlPlatform &platform,
   // looks the stellar up in the ambient sprite pool and centres its current
   // spin frame by half-span, clipped only to the window surface --
   // 0x004812c0). The port resolves the same frame through the shared spin-set
-  // store (link_a_id + 1000) + the view's animation state; the docked-screen
+  // store (link_a_id + 1000) + the stellar's shown frame; the docked-screen
   // planet PICT is a logged port-only fallback for missing spin sets.
   bool drew_sprite = false;
   const SpriteAsset *spin_set = view.sprite_store().Spin(
       renderer, static_cast<std::uint16_t>(stellar.link_a_id + 1000));
   if (spin_set != nullptr && !spin_set->frames.empty()) {
-    const int frame_idx = std::clamp(
-        view.StellarCurrentFrame(stellar_id), 0, spin_set->frame_count - 1);
+    const int frame_idx =
+        std::clamp(static_cast<int>(stellar.displayed_sprite_frame),
+                   0,
+                   spin_set->frame_count - 1);
     const SpriteFrame &sprite_frame =
         spin_set->frames[static_cast<std::size_t>(frame_idx)];
     if (sprite_frame.texture != nullptr) {
@@ -1055,7 +1056,6 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                           backdrop ? backdrop->get() : nullptr,
                           planet_art ? planet_art->get() : nullptr,
                           *stellar,
-                          stellar_id,
                           frame,
                           -1);
   };
@@ -1277,7 +1277,6 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                           backdrop ? backdrop->get() : nullptr,
                           planet_art ? planet_art->get() : nullptr,
                           *stellar,
-                          stellar_id,
                           frame,
                           hovered);
     platform.Present();

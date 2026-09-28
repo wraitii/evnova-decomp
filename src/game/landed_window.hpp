@@ -223,6 +223,17 @@ void Player_RefuelShipWithCredits(GameState &state);
 // clock (the original zeroes g_avg_frame_tick_scale at 0x00456174).
 void Stellar_Launch(GameState &state);
 
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit, post-entry stellar
+// animation reset (0x0045850f..0x00458670): after every land-command entry
+// (dock and launch, hypergate or wormhole) every stellar's ambient animation
+// returns to frame 0, previous frame 0; the dwell accumulator is kept. On a
+// hypergate transfer (0x00458c76..0x00458ce6) the destination gate then starts
+// on its last cached frame with the accumulator at -AnimDelay, so it holds
+// open for two dwells and closes behind the arriving player. Pass -1 when
+// there is no hypergate destination.
+void NovaStellar_ResetAnimationsAfterEntry(
+    GameState &state, std::int16_t hypergate_destination_stellar_id);
+
 // Refuels the player ship toward its effective fuel capacity. Mirrors the
 // landed fuel service: the player pays a per-unit price for the fuel added,
 // clamped so credits never go negative; capacity comes from the effective

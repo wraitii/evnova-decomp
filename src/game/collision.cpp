@@ -494,8 +494,10 @@ void RefreshCollisionMasks(GameState &state) {
       if (frame_count <= 0) {
         continue;
       }
-      const int frame = std::clamp(
-          static_cast<int>(stellar->sprite_current_frame), 0, frame_count - 1);
+      const int frame =
+          std::clamp(static_cast<int>(stellar->displayed_sprite_frame),
+                     0,
+                     frame_count - 1);
       BindEntityMask(stellar->collision_mask,
                      store.Spin(spin_id, frame),
                      frame,

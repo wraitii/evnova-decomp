@@ -1274,6 +1274,13 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
                                 state,
                                 platform.gameplay_ticks_ms(),
                                 RestrictedTravelArrival{destination, kind});
+    // 0x0045850f: the entry reset runs after the arrival population; only a
+    // hypergate (Stellar_EnterHypergate's result) opens its destination gate.
+    NovaStellar_ResetAnimationsAfterEntry(
+        state,
+        kind == RestrictedTravelKind::kHypergate
+            ? destination
+            : static_cast<std::int16_t>(-1));
     return LandCommandResult::kBlockedFrame;
   }
   LandedContext ctx;
