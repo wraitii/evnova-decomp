@@ -302,7 +302,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00451940	PlayerTick_InteractionCloakAndStatus	src/game/spaceflight.cpp	45%	gameplay,license,synthetic
 0x00454910	Ship_HandlePlayerTargetActionCommand	src/game/spaceflight.cpp	65%	gameplay,audio
 0x00455150	Weapon_FirePlayerWeaponBank	src/game/weapon.cpp	88%	gameplay,audio,bugfix
-0x00455E10	Stellar_RunDockAndLaunchSequence	src/game/landed_window.cpp	70%	rendering
+0x00455E10	Stellar_RunDockAndLaunchSequence	src/game/landed_window.cpp	70%	rendering,bugfix
 0x00456480	Stellar_EnterHypergate	src/game/travel.cpp	65%	gameplay,rendering
 0x00456CA0	Stellar_EnterWormhole	src/game/travel.cpp	75%	rng,rendering
 0x00457580	Stellar_HandleStellarEntryAndExit	src/game/landed_window.cpp	60%	gameplay,cadence,rendering
@@ -637,7 +637,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0048D5A0	NovaUi_TradeCenterCycleSelection	src/game/trade_center.cpp	95%	gameplay
 0x0048D6F0	NovaUi_RedrawTradeCenterWindow	src/game/docked_trade_dialog.cpp	85%	ui
 0x0048E970	NovaUi_LoadTravelOverlaySprites		0%	
-0x0048EA70	NovaUi_RunOutfitterInteractionLoop	src/game/docked_store_dialog.cpp	65%	gameplay
+0x0048EA70	NovaUi_RunOutfitterInteractionLoop	src/game/docked_store_dialog.cpp	65%	gameplay,bugfix
 0x004909A0	OutfitterMenu_FUN_004909a0		0%	
 0x00490C70	NovaUi_RedrawOutfitterMenu	src/game/docked_store_dialog.cpp	100%	
 0x00491950	NovaLanded_CanBuyOutfit	src/game/landed_store.cpp	100%	

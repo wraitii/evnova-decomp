@@ -99,6 +99,7 @@ Per the discord.
 * **Duplicate `përs` resources are treated as one person with increased appearance chance.** 
 * **Projectile falloff also controls visual fading** — positive values fade out and negative values fade in. 
 * **Mission-offering `përs` ships evaluate the player's legal status in the current system**, not their own government's relationship with the player. 
+* (fixed) **The auto-refueller (ModType 19) only tops up on arrival.** `Player_RefuelShipWithCredits` (0x004250f0) runs once before the Spaceport opens; the outfitter exit (0x0048ea70) only clamps meters down and the launch tail refills shields/armor but not fuel. Fuel capacity gained during the visit, or a refueller bought during it, stays unfilled until the next landing. Fixed under `BugFixPolicy::safe`: the same paid top-up also runs on outfitter close and at launch.
 * **Landing/takeoff always advances one day**, regardless of ship type. 
 * **Any amount of outfitter buying/selling costs one additional day.** 
 * **Buying a ship costs four days.** 

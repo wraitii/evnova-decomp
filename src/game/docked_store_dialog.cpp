@@ -1410,7 +1410,12 @@ RunShipPurchaseConfirmation(SdlPlatform &platform,
 
 } // namespace
 
-// @port 0x0048ea70 65% gameplay
+// @port 0x0048ea70 65% gameplay,bugfix
+// BUGFIX(original): the outfitter exit only clamps meters down and never
+// re-runs the arrival auto-refuel (Player_RefuelShipWithCredits 0x004250f0),
+// so fuel capacity or a refueller bought during the visit stays unfilled.
+// NovaLanded_CloseOutfitterSession re-runs the paid top-up under
+// BugFixPolicy::safe; Stellar_Launch repeats it at launch.
 // TODO(decomp): in-loop starmap/mission-computer re-entry
 // actions, exact STR label resources, pressed-button tracking. Ghidra
 // 0x0048ea70 NovaUi_RunOutfitterInteractionLoop and 0x00492f30

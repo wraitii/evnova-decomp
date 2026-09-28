@@ -128,11 +128,16 @@ void Player_RefuelShipWithCredits(GameState &state) {
   }
 }
 
-// @port 0x00455E10 70% rendering
+// @port 0x00455E10 70% rendering,bugfix
 // ---------------------------------------------------------------------------
 // Ghidra 0x00455e10 Stellar_RunDockAndLaunchSequence: arrival half.
 // The launch half is Stellar_Launch. The fee gate/deduction below is
 // Stellar_HandleStellarEntryAndExit (0x00457580) behavior folded in here.
+// BUGFIX(original): the arrival auto-refuel (Player_RefuelShipWithCredits
+// 0x004250f0) is the only paid top-up in the original, so fuel capacity or a
+// refueller acquired during a visit stays unfilled. The same paid top-up is
+// re-run on outfitter close (NovaLanded_CloseOutfitterSession, 0x0048ea70 exit)
+// and at launch (Stellar_Launch) under BugFixPolicy::safe.
 // ---------------------------------------------------------------------------
 bool Stellar_Dock(GameState &state,
                   LandedContext &ctx,
@@ -316,6 +321,11 @@ void Stellar_Launch(GameState &state) {
   state.player.armor_points = effective.max_armor_points;
   state.cached_stats = effective;
   state.stat_cache_valid = true;
+  // BUGFIX(original): the original never re-runs the arrival auto-refuel
+  // (0x004250f0) at launch, so a refueller-equipped ship could leave with
+  // fuel capacity gained during the visit (outfit or ship change) unfilled.
+  if (state.bugfixes.safe)
+    Player_RefuelShipWithCredits(state);
   // 0x00456033: the single daily world tick runs at LAUNCH, after the
   // interaction loop -- the Spaceport's mission gate therefore saw the
   // pre-landing date when failing overdue deadlines.

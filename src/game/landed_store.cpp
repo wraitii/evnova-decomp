@@ -4,6 +4,7 @@
 #include "compatibility.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
+#include "landed_window.hpp"
 #include "log.hpp"
 #include "mission.hpp"
 #include "mission_script.hpp"
@@ -866,6 +867,11 @@ void NovaLanded_CloseOutfitterSession(GameState &state) {
       std::min(state.player.shield_points, stats.max_shield_points);
   state.player.armor_points =
       std::min(state.player.armor_points, stats.max_armor_points);
+  // BUGFIX(original): the auto-refueller only runs on arrival (0x004250f0), so
+  // fuel capacity bought, or a refueller bought, during this visit is left
+  // empty until the next landing. Re-run the paid top-up here and at launch.
+  if (state.bugfixes.safe)
+    Player_RefuelShipWithCredits(state);
 }
 
 // Ghidra DAT_007d4bbc / DAT_007d4bc0 (set in NovaUi_RunTravelDestination-
