@@ -397,6 +397,20 @@ int Sprite_DistanceBrightness(int effective_murk,
 }
 
 namespace {
+// Decode one raw SpriteDrawOptions::tint_rgb5 channel to SDL's 0..255 color
+// mod. The original base-hull scale is `channel - base_transparency` in the
+// RGB555 blitter, clamped to the 0x20 neutral (BlitPixel_TintRgb15Span
+// 0x004736c0 / SpriteRleCommandStream_BlitTintedRgb15 0x00472900). The port
+// does not yet model base_transparency and cannot express a channel's additive
+// overflow, so this traces the multiplicative part only: values at or above
+// 0x20 become the 0x20 neutral, and the government 8-bit<<8 colors therefore
+// render untinted rather than boosted.
+std::uint8_t TintChannelToColorMod(std::int16_t channel) {
+  const int raw = static_cast<std::uint16_t>(channel);
+  const int scale = std::clamp(raw, 0, 0x20);
+  return static_cast<std::uint8_t>(scale * 255 / 0x20);
+}
+
 // Renders one frame texture at an anchor-aligned position (shared by the asset-
 // and sprite-based DrawSprite overloads so the placement/alpha logic lives in
 // exactly one place). `texture` is the frame's SDL handle; `fog_mask` is the
@@ -435,11 +449,13 @@ void BlitFrame(SDL_Renderer *renderer,
   }
 
   const float alpha_mod = std::clamp(opts.alpha_mod, 0.0F, 1.0F);
-  const int distance_brightness =
-      opts.fog_murk > 0
-          ? Sprite_DistanceBrightness(
-                opts.fog_murk, camera_world_x, camera_world_y, world_x, world_y)
-          : 0;
+  int distance_brightness = 0;
+  if (opts.fog_brightness_override >= 0) {
+    distance_brightness = opts.fog_brightness_override;
+  } else if (opts.fog_murk > 0) {
+    distance_brightness = Sprite_DistanceBrightness(
+        opts.fog_murk, camera_world_x, camera_world_y, world_x, world_y);
+  }
   // Stage 1 mixes the source toward the system space colour by d/32. The
   // original's 5-bit `>> 5` truncation (BlitPixel_TintRgb15Span 0x004736c0)
   // zeroes the source term at the d == 0x1f ceiling, so snap the top step to
@@ -479,23 +495,55 @@ void BlitFrame(SDL_Renderer *renderer,
   //   opaque:  src*(1-a) + space*a  == f
   // Without a silhouette this degrades to a source-alpha fade over dst (the
   // divergence the overlap case makes visible).
-  if (fog_a > 0.0F && fog_mask != nullptr && alpha_mod > 0.0F) {
-    const std::uint8_t fr =
-        static_cast<std::uint8_t>((opts.fog_color >> 16) & 0xff);
-    const std::uint8_t fg =
-        static_cast<std::uint8_t>((opts.fog_color >> 8) & 0xff);
-    const std::uint8_t fb = static_cast<std::uint8_t>(opts.fog_color & 0xff);
-    SDL_SetTextureColorMod(fog_mask->get(), fr, fg, fb);
+  // BUGFIX(original) (BugFixPolicy::safe, via paint_fog_colors):
+  // BlitPixel_TintRgb15Span (0x004736c0) mixes the source toward the fog
+  // colour first and multiplies the result by the hull paint, so the murk and
+  // ionization colours come out painted. The fix paints only the source (the
+  // colour mod on the frame texture) and fogs over it; with paint_fog_colors
+  // set, the silhouette colours are painted too, as in the original.
+  const auto paint_channel =
+      [&](std::uint32_t color, int shift, std::size_t channel) {
+        const auto value = static_cast<int>((color >> shift) & 0xff);
+        if (!opts.paint_fog_colors || !opts.tint_rgb5.has_value()) {
+          return static_cast<std::uint8_t>(value);
+        }
+        return static_cast<std::uint8_t>(
+            value * TintChannelToColorMod((*opts.tint_rgb5)[channel]) / 255);
+      };
+  const auto paint_silhouette = [&](std::uint32_t color, float alpha) {
+    SDL_SetTextureColorMod(fog_mask->get(),
+                           paint_channel(color, 16, 0),
+                           paint_channel(color, 8, 1),
+                           paint_channel(color, 0, 2));
     SDL_SetTextureAlphaMod(fog_mask->get(),
-                           static_cast<std::uint8_t>(alpha_mod * 255.0F));
+                           static_cast<std::uint8_t>(alpha * 255.0F));
     SDL_SetTextureBlendMode(fog_mask->get(), SDL_BLENDMODE_BLEND);
     SDL_RenderTexture(renderer, fog_mask->get(), nullptr, &dest);
     SDL_SetTextureColorMod(fog_mask->get(), 255, 255, 255);
     SDL_SetTextureAlphaMod(fog_mask->get(), SDL_ALPHA_OPAQUE);
-    SDL_SetTextureBlendMode(fog_mask->get(), SDL_BLENDMODE_BLEND);
+  };
+  float source_weight = src_factor;
+  if (fog_mask != nullptr && alpha_mod > 0.0F) {
+    if (fog_a > 0.0F) {
+      paint_silhouette(opts.fog_color, alpha_mod);
+    }
+    // Optional stage before the fog: src*(1-t) + tint*t, then fogged by a.
+    // Over the fog pass, a silhouette at b = t(1-a) / (1 - (1-t)(1-a))
+    // followed by the source at (1-t)(1-a) leaves
+    //   src*(1-t)(1-a) + tint*t(1-a) + space*a.
+    if (opts.pre_fog_tint_level > 0) {
+      const float tint_a =
+          std::min(1.0F, static_cast<float>(opts.pre_fog_tint_level) / 32.0F);
+      source_weight = (1.0F - tint_a) * src_factor;
+      const float covered = 1.0F - source_weight;
+      if (covered > 0.0F) {
+        paint_silhouette(opts.pre_fog_tint_color,
+                         alpha_mod * tint_a * src_factor / covered);
+      }
+    }
   }
 
-  const float alpha = alpha_mod * src_factor;
+  const float alpha = alpha_mod * source_weight;
   if (alpha <= 0.0F) {
     return;
   }
@@ -548,20 +596,6 @@ const SdlTexture *ResolveFrameMask(const SpriteFrameImage &image) {
         .white_silhouette.get();
   }
   return nullptr;
-}
-
-// Decode one raw SpriteDrawOptions::tint_rgb5 channel to SDL's 0..255 color
-// mod. The original base-hull scale is `channel - base_transparency` in the
-// RGB555 blitter, clamped to the 0x20 neutral (BlitPixel_TintRgb15Span
-// 0x004736c0 / SpriteRleCommandStream_BlitTintedRgb15 0x00472900). The port
-// does not yet model base_transparency and cannot express a channel's additive
-// overflow, so this traces the multiplicative part only: values at or above
-// 0x20 become the 0x20 neutral, and the government 8-bit<<8 colors therefore
-// render untinted rather than boosted.
-std::uint8_t TintChannelToColorMod(std::int16_t channel) {
-  const int raw = static_cast<std::uint16_t>(channel);
-  const int scale = std::clamp(raw, 0, 0x20);
-  return static_cast<std::uint8_t>(scale * 255 / 0x20);
 }
 
 // Applies/clears the optional source tint around one frame draw. The scope is

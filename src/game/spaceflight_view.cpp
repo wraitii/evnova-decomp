@@ -957,7 +957,28 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
     hull_opts.tint_rgb5 =
         std::array<std::int16_t, 3>{tint.red, tint.green, tint.blue};
   }
-  ApplyFog(hull_opts);
+  // Ionization flash (Ship_UpdateVisualState's ionization block): the hull's
+  // fog amount and colour become the level/colour the visual tick rolled. The
+  // gate transition later overwrites both with its white fade, so it wins.
+  const bool ionization_tint =
+      ship.ionization_tint_level >= 0 && gate_transition.white_mix <= 0.0F;
+  const auto apply_hull_fog = [&](SpriteDrawOptions &opts) {
+    ApplyFog(opts);
+    // Safe policy: paint, then ionization tint, then murk. Off, the fog
+    // colours are painted too (the original's fog-then-paint order).
+    opts.paint_fog_colors = !state.bugfixes.safe;
+    if (!ionization_tint) {
+      return;
+    }
+    if (ship.ionization_tint_under_murk) {
+      opts.pre_fog_tint_level = ship.ionization_tint_level;
+      opts.pre_fog_tint_color = ship.ionization_tint_color;
+      return;
+    }
+    opts.fog_brightness_override = ship.ionization_tint_level;
+    opts.fog_color = ship.ionization_tint_color;
+  };
+  apply_hull_fog(hull_opts);
   if (!cloak.hidden && hull_opts.alpha_mod > 0.0F) {
     DrawSprite(platform.renderer(),
                sprite.base,
@@ -1047,7 +1068,8 @@ void SpaceflightView::DrawShipSprite(SdlPlatform &platform,
     } else if (cloak.progress >= 32.0F) {
       opts.tint_rgb5 = std::nullopt;
     }
-    ApplyFog(opts);
+    // The alt sheet copies the hull's fog amount and colour.
+    apply_hull_fog(opts);
     DrawSprite(platform.renderer(),
                sprite.alt,
                alt_frame,

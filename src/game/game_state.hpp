@@ -347,7 +347,8 @@ struct Ship {
   // disable bookkeeping predicates.
   std::int8_t boarded_target_latch = 0;
   // Ghidra ShipState field_0xB0. Weapon on-hit ionization colors are ORed
-  // here by Weapon_ApplyWeaponOnHitEffects; the status renderer is deferred.
+  // here by Weapon_ApplyWeaponOnHitEffects; Ship_UpdateVisualState tints the
+  // hull with it while ionized and clears it once the charge drains.
   std::uint32_t ionization_color = 0;
 
   // Ghidra ShipState +0xAC: 60 Hz tick (NovaTime_GetTickCount60Hz) the ship
@@ -665,6 +666,16 @@ struct Ship {
   // The movement code also writes a provisional level/24 here, but the visual
   // tick overwrites it before the frame is drawn.
   float engine_glow_intensity = 0.0F;
+  // Ionization hull tint, recomputed each frame in
+  // NovaShip_TickWeaponSpriteAndRunningLights (Ship_UpdateVisualState's
+  // ionization block). While ionized it replaces the hull sprite's
+  // distance-fog amount (Sprite +0xAA, 0..32) and fog colour (Sprite +0xAC,
+  // 0xRRGGBB); -1 leaves the ordinary murk fog in place.
+  std::int16_t ionization_tint_level = -1;
+  std::uint32_t ionization_tint_color = 0;
+  // Set when the tint is applied before the murk fog instead of replacing it
+  // (the BugFixPolicy::safe arm of the heavy-murk case).
+  bool ionization_tint_under_murk = false;
 
   // Per-turret-group quadrant rotation state (next barrel to fire), -1 until
   // the first shot chooses a random quadrant (Weapon_SelectTurretQuadrant

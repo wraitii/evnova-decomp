@@ -262,6 +262,9 @@ are the reimplementation's zero-based/rebased ids unless the field name says
 otherwise. `summary` and `ships` also carry `tick_60hz`, the global 1/60 s
 gameplay tick (Ghidra `g_frame_tick_count_60hz`, 0x00865858), so a harness can
 align samples to simulation frames instead of wall-clock or request order.
+`player` and each `ships` row carry `ionization_points` and
+`ionization_tint_level` (-1 when the hull is not tinted); ship rows add the
+class `ionization_capacity` and per-tick `ionization_decay_rate`.
 Each `ships` row includes `random_ai_render_cadence` and
 `player_acquisition_radius` (the signed 16-bit product of that field and 600,
 in pixels). The latter is the per-axis distance gate for reputation-based

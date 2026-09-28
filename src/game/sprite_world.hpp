@@ -284,9 +284,21 @@ struct SpriteDrawOptions {
   // to a plain source-alpha fade over `dst` (documented divergence).
   int fog_murk = 0;
   // The constant the fog mixes toward, 0xRRGGBB (the current system's
-  // BkgndColor / space colour). Only consulted by non-additive draws with
-  // fog_murk > 0 and an available silhouette.
+  // BkgndColor / space colour), or the override colour below. Only consulted
+  // by non-additive draws with a non-zero fog amount and a silhouette.
   std::uint32_t fog_color = 0;
+  // When >= 0, the sprite's fog amount (Sprite +0xAA, 0..32) set directly
+  // instead of derived from fog_murk and the camera distance; the draw mixes
+  // toward fog_color by it. Ship_UpdateVisualState's ionization flash uses it.
+  int fog_brightness_override = -1;
+  // Optional tint applied before the fog: the source is first mixed toward
+  // pre_fog_tint_color (0xRRGGBB) by level/32, then fogged as usual. Needs the
+  // frame silhouette; ignored by additive draws. 0 disables it.
+  int pre_fog_tint_level = 0;
+  std::uint32_t pre_fog_tint_color = 0;
+  // Also apply tint_rgb5 to the fog/pre-fog colours (the original's
+  // fog-then-paint order). Off, only the source is painted before the fog.
+  bool paint_fog_colors = false;
   // When provided, this per-frame anchor (in frame-local pixels, measured from
   // the frame's top-left) is used instead of the frame's stored anchor. This is
   // how a shot's gun-fire point or a non-centred ship frame positions itself:

@@ -190,6 +190,9 @@ std::string ProbeState_Snapshot(const GameState &state,
     j.num("shield", state.player.shield_points);
     j.num("armor", state.player.armor_points);
     j.num("fuel", state.player.fuel_points);
+    j.num("ionization_points", state.player.ionization_points);
+    j.num("ionization_color", state.player.ionization_color);
+    j.num("ionization_tint_level", state.player.ionization_tint_level);
     j.num("max_shield", state.cached_stats.max_shield_points);
     j.num("max_armor", state.cached_stats.max_armor_points);
     j.num("fuel_capacity", state.cached_stats.fuel_capacity);
@@ -288,6 +291,14 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("speed", ship.speed);
       row.num("shield", ship.shield_points);
       row.num("armor", ship.armor_points);
+      // Ionization charge against the class capacity (IonizeMax) and decay
+      // (Deionize * 0.01 per tick), plus the hull tint rolled from it.
+      row.num("ionization_points", ship.ionization_points);
+      row.num("ionization_capacity",
+              cls != nullptr ? cls->ionization_capacity : 0);
+      row.num("ionization_decay_rate",
+              cls != nullptr ? cls->ionization_decay_rate : 0.0F);
+      row.num("ionization_tint_level", ship.ionization_tint_level);
       // Raw tank plus the travel/jump locks, so a probe reader can tell a
       // fuel-starved ship from one held by its recorded destination or the
       // velocity-match gate in Stellar_CanShipInitiateJumpSequence.

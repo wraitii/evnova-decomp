@@ -2678,6 +2678,9 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                                 weapon->impact_effect_id,
                                 weapon->splash_radius,
                                 true);
+    // Beam contact ionizes the target unattenuated (impact_pos NULL), between
+    // the area impact and the particle burst (0x0042f270).
+    ApplyWeaponOnHitEffects(target, *weapon, std::nullopt);
     // Beam hits use scatter 0x19 (Shot_UpdateBeamHitQueue 0x0042f270); the
     // projectile contact paths use 0x14.
     NovaEffects_SpawnWeaponImpactBurstForWeapon(

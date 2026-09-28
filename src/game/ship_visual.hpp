@@ -264,7 +264,9 @@ void NovaShip_TickSpriteAnimation(GameState &state,
 // light sprites when the ship is disabled) and the ship is disabled, the
 // blink result is overridden to zero so the layer goes dark. The results
 // (Ship.weapon_sprite_flash_level, Ship.light_intensity, both 0..32) feed the
-// weapon-effects and light sprite layers in the renderer.
+// weapon-effects and light sprite layers in the renderer. It first runs the
+// ionization block, which rolls Ship.ionization_tint_level/_color (the hull's
+// fog amount/colour override) ahead of the engine-glow flicker roll.
 void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
                                                Ship &ship,
                                                float elapsed_ticks);

@@ -283,6 +283,17 @@ loaded into `SpaceflightView::ShipSpriteSet::shield` but its draw stays
 deferred (the `shield_bubble_flash_intensity` tint/frame arm is not
 reconstructed).
 
+Ionization tint (Ghidra 0x00429ff0 in `Ship_UpdateVisualState`): while a
+ship's ionization intensity is >= 0.33, its hull (and alt sheet) fog amount
+(Sprite +0xAA) becomes a flickering 14..18 and its fog colour (+0xAC) the
+accumulated weapon `IonizeColor` (ShipState +0xB0), so the hull is mixed
+~50% toward the ion colour. When the murk fog is already >= 8 and >= the
+flash, the 32-bit path keeps the fog amount and writes `0x20 - fog` as the
+colour (near-black; under `BugFixPolicy::safe` the hull is ion-tinted first
+and then murk-faded, via `SpriteDrawOptions::pre_fog_tint_level`). The port rolls it in `TickIonizationTint`
+(src/game/ship_visual.cpp) and draws it through
+`SpriteDrawOptions::fog_brightness_override`.
+
 ## Sprite rows / banking (verified 2026, data + Bible)
 
 All basic sprite sets live in the SAME `rl\x91D` resource named by
