@@ -29,7 +29,7 @@ void Ship_UpdateEscortFormations(GameState &state, Ship &leader, bool snap);
 // stored formation offset (game_state Ship::formation_offset_x/y): snap=true
 // teleports position onto the offset; snap=false creeps per axis at
 // effective thrust * 10 px/tick inside an 8 px deadzone, suppressed while
-// ai_station_hold_timer > 0. No-op when the resolved target slot is invalid.
+// hyperspace_jump_timer > 0. No-op when the resolved target slot is invalid.
 void Ship_MoveShipTowardFormationOffset(GameState &state,
                                         Ship &ship,
                                         bool snap_to_offset,
@@ -66,7 +66,7 @@ void NovaShip_ResetToDefaultCombatState(GameState &state,
 // the rest run Ship_ResetShipToDefaultCombatState (0x0041e240; refill=true
 // also restores shields/armor and weapon stock, the original's flag != 0).
 // The wedge then snaps around the player, and when the player's
-// ai_station_hold_timer != 0 (jump arrival windows it at -999, 0x0044fa83 /
+// hyperspace_jump_timer != 0 (jump arrival windows it at -999, 0x0044fa83 /
 // 0x0044faa2) each attached ship is pushed ~891.7 px behind its own heading
 // and flung forward at 50 px/tick: escorts stream in behind the jumping
 // player. With refill=true the formation snap runs a second time at the end,

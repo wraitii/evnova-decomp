@@ -390,7 +390,7 @@ TEST_CASE("state 2 mode 4 applies the jump ramp directly to position") {
   ship.ship_instance_id = 1;
   ship.ai_state_code = 2;
   ship.ai_control_mode = 4;
-  ship.ai_station_hold_timer = 1.0F;
+  ship.hyperspace_jump_timer = 1.0F;
   ship.ai_desired_heading_deg = 0;
   ship.ai_mode_start_time_ms = 0;
   state.tick_60hz = 200;
@@ -423,7 +423,7 @@ TEST_CASE("state 2 mode 4 jump ramp scales with the class multiplier") {
   ship.ship_instance_id = 1;
   ship.ai_state_code = 2;
   ship.ai_control_mode = 4;
-  ship.ai_station_hold_timer = 1.0F;
+  ship.hyperspace_jump_timer = 1.0F;
   ship.ai_desired_heading_deg = 0;
   ship.ai_mode_start_time_ms = 0;
   state.tick_60hz = 200;
@@ -446,14 +446,14 @@ TEST_CASE("state 2 mode 4 player-led escort uses the player clock and offset") {
   cls.jump_duration_multiplier = 0.91F; // ignored by the player-led arm
   state.scenario.ships.push_back(TestShipClass());
   state.player.ship_class_id = 0;
-  state.player.ai_station_hold_timer = 2.0F;
+  state.player.hyperspace_jump_timer = 2.0F;
   state.player.ai_mode_start_time_ms = 0;
   ship.is_active = true;
   ship.ship_instance_id = 1;
   ship.squad_leader_ship_slot = 0;
   ship.ai_state_code = 2;
   ship.ai_control_mode = 4;
-  ship.ai_station_hold_timer = 1.0F;
+  ship.hyperspace_jump_timer = 1.0F;
   ship.ai_desired_heading_deg = 0;
   ship.ai_mode_start_time_ms = 999;
   state.tick_60hz = 200;
@@ -466,7 +466,7 @@ TEST_CASE("state 2 mode 4 player-led escort uses the player clock and offset") {
 
   // Below the passive-decay gate the player-led arm is inert.
   ship.pos_y = 0.0F;
-  state.player.ai_station_hold_timer = 1.0F;
+  state.player.hyperspace_jump_timer = 1.0F;
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
   CHECK(ship.pos_y == Catch::Approx(0.0F));
 }
@@ -486,7 +486,7 @@ TEST_CASE("state 2 mode 4 jump ramp applies the x2 clock scales") {
   ship.ship_instance_id = 1;
   ship.ai_state_code = 2;
   ship.ai_control_mode = 4;
-  ship.ai_station_hold_timer = 1.0F;
+  ship.hyperspace_jump_timer = 1.0F;
   ship.ai_desired_heading_deg = 0;
   ship.ai_mode_start_time_ms = 0;
   state.tick_60hz = 200;
@@ -498,7 +498,7 @@ TEST_CASE("state 2 mode 4 jump ramp applies the x2 clock scales") {
   // Player-led (squad_leader_ship_slot == 0).
   state.scenario.ships.push_back(TestShipClass());
   state.player.ship_class_id = 0;
-  state.player.ai_station_hold_timer = 2.0F;
+  state.player.hyperspace_jump_timer = 2.0F;
   state.player.ai_mode_start_time_ms = 0;
   ship.pos_y = 0.0F;
   ship.squad_leader_ship_slot = 0;
@@ -944,7 +944,7 @@ TEST_CASE("state 2 mode 4 ramps engine glow with its departure step") {
   ship.ship_instance_id = 1;
   ship.ai_state_code = 2;
   ship.ai_control_mode = 4;
-  ship.ai_station_hold_timer = 1.0F;
+  ship.hyperspace_jump_timer = 1.0F;
   ship.ai_desired_heading_deg = 0;
   ship.ai_mode_start_time_ms = 0;
   state.tick_60hz = 200;

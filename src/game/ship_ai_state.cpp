@@ -160,7 +160,7 @@ void NovaAi_UpdateShipState(GameState &state,
     if (ship.ai_maneuver_timer_ms <= 0.0F) {
       // The original clears the state and then falls through to the rest of
       // the machine on the same tick (no return): the dead-target clear, the
-      // station-hold preserve gate (which zeroes the timer for state 0), and
+      // jump-timer preserve gate (which zeroes the timer for state 0), and
       // the trailing state-0 arm all still run. The maneuver-timer gate
       // catches the other branch.
       ship.ai_state_code = 0;
@@ -192,14 +192,15 @@ void NovaAi_UpdateShipState(GameState &state,
     }
   }
 
-  // The station-hold timer (states 0xb/2/3) is the only one that persists it.
+  // The hyperspace jump timer (states 0xb/2/3) is the only one that persists
+  // it.
   {
     const std::int16_t st = ship.ai_state_code;
     if (st != 0xb && st != 2 && st != 3) {
-      ship.ai_station_hold_timer = 0.0F;
+      ship.hyperspace_jump_timer = 0.0F;
     }
   }
-  if (ship.ai_station_hold_timer > 0.0F) {
+  if (ship.hyperspace_jump_timer > 0.0F) {
     if (ship.squad_leader_ship_slot == 0) {
       ship.ai_state_code = 0xb;
     } else if (ship.primary_target_ship_slot == -1) {
@@ -264,7 +265,7 @@ void NovaAi_UpdateShipState(GameState &state,
     if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, target, ship)) {
       if (ship.ai_behavior_code > 2) {
         ship.ai_control_mode = 1;
-        ship.ai_station_hold_timer = 0.0F;
+        ship.hyperspace_jump_timer = 0.0F;
         ship.ai_secondary_target_slot = -1;
         if (!std::isfinite(ship.target_engagement_patience_timer) ||
             ship.target_engagement_patience_timer <= 0.0F) {
@@ -299,9 +300,9 @@ void NovaAi_UpdateShipState(GameState &state,
       // Restricted travel stellar (hypergate/wormhole): begin a jump sequence.
       ship.ai_state_code = 0x14;
     } else {
-      // The original clears the station-hold timer here as well as in the
+      // The original clears the hyperspace jump timer here as well as in the
       // per-state preserve gate above (redundant, but part of state 1).
-      ship.ai_station_hold_timer = 0.0F;
+      ship.hyperspace_jump_timer = 0.0F;
       // Distances to the travel stellar.
       const float dx = static_cast<float>(target->pos_x) - ship.pos_x;
       const float dy = static_cast<float>(target->pos_y) - ship.pos_y;
@@ -372,7 +373,7 @@ void NovaAi_UpdateShipState(GameState &state,
         StellarByResourceId(state, ship.ai_secondary_target_slot);
     const float target_x = target ? static_cast<float>(target->pos_x) : 0.0F;
     const float target_y = target ? static_cast<float>(target->pos_y) : 0.0F;
-    ship.ai_station_hold_timer = 0.0F;
+    ship.hyperspace_jump_timer = 0.0F;
     const float dx = target_x - ship.pos_x;
     const float dy = target_y - ship.pos_y;
     const std::int16_t full_width =
@@ -492,7 +493,7 @@ void NovaAi_UpdateShipState(GameState &state,
       ship.ai_control_mode = 4;
     } else if (target == 0) {
       // Hold near the player.
-      if (state.player.ai_station_hold_timer <= 0.0F) {
+      if (state.player.hyperspace_jump_timer <= 0.0F) {
         ship.primary_target_ship_slot = -1;
         ship.ai_secondary_target_slot = -1;
         ship.ai_state_code = 0;
@@ -598,7 +599,7 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Follow/hold (state 6): damp toward stop. ----
   if (ship.ai_state_code == 6) {
-    ship.ai_station_hold_timer = 0.0F;
+    ship.hyperspace_jump_timer = 0.0F;
     ship.ai_control_mode = 1;
     return;
   }
@@ -680,7 +681,7 @@ void NovaAi_UpdateShipState(GameState &state,
   // Ship_DeactivateVacantShipsAndTally sweep at system entry/landing (or the
   // escape-pod transition) removes the vacant NPC slot.
   if (ship.ai_state_code == 8) {
-    ship.ai_station_hold_timer = -999.0F;
+    ship.hyperspace_jump_timer = kHyperspaceJumpTimerArrived;
     ship.ai_control_mode = 10;
     return;
   }
@@ -849,10 +850,10 @@ void NovaAi_UpdateShipState(GameState &state,
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
     if (entry_state == 3) {
-      if (ship.ai_station_hold_timer > 0.0F) {
+      if (ship.hyperspace_jump_timer > 0.0F) {
         if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <=
             kCentreRangeSq) {
-          ship.ai_station_hold_timer = 0.0F;
+          ship.hyperspace_jump_timer = 0.0F;
           ship.ai_control_mode = 3;
         } else {
           ship.ai_control_mode = 4;
@@ -1014,7 +1015,7 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Assist/response combat approach (state 0xc). ----
   if (ship.ai_state_code == 0xc) {
-    ship.ai_station_hold_timer = 0.0F;
+    ship.hyperspace_jump_timer = 0.0F;
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = 0;
     const Ship &player = state.player;
@@ -1024,7 +1025,7 @@ void NovaAi_UpdateShipState(GameState &state,
     const float inner = (kTurnRadiusBase - turn) * kAssistInnerTurnRadiusScale;
     const float dx = std::abs(ship.pos_x - player.pos_x);
     const float dy = std::abs(ship.pos_y - player.pos_y);
-    if (state.player.ai_station_hold_timer > 0.0F) {
+    if (state.player.hyperspace_jump_timer > 0.0F) {
       ship.ai_state_code = 0xb;
     } else if (!NovaAiShip_CanEngageTargetUnderCloakRules(
                    state, state.player, ship)) {
@@ -1039,7 +1040,7 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Boarding / disabled-target pursuit (state 0xd). ----
   if (ship.ai_state_code == 0xd) {
-    ship.ai_station_hold_timer = 0.0F;
+    ship.hyperspace_jump_timer = 0.0F;
     const std::int16_t target_slot = ship.primary_target_ship_slot;
     if (target_slot < 0 || ship.ai_maneuver_timer_ms > 0.0F ||
         !state.SlotInRange(static_cast<std::size_t>(target_slot))) {

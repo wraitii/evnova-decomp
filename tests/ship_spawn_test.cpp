@@ -187,7 +187,7 @@ TEST_CASE("fleet lead spawner shapes the ship from the fleet def") {
     // No adjacent restricted stellar: the original enters the ordinary
     // polar state-0x08 arrival/slowdown phase.
     CHECK(ship.ai_state_code == 0x08);
-    CHECK(ship.ai_station_hold_timer == Catch::Approx(-999.0F));
+    CHECK(ship.hyperspace_jump_timer == Catch::Approx(-999.0F));
     CHECK(ship.pos_x != Catch::Approx(0.0F));
     CHECK(ship.pos_y != Catch::Approx(0.0F));
     CHECK(std::abs(ship.vel_x) + std::abs(ship.vel_y) > 0.0F);

@@ -228,8 +228,8 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
   if (firing_bank.cooldown > 0.0F) {
     return; // still cooling down
   }
-  if (player.ai_station_hold_timer != 0.0F) {
-    return; // the original requires an exactly-zero station-hold timer
+  if (player.hyperspace_jump_timer != 0.0F) {
+    return; // the original requires an exactly-zero hyperspace jump timer
   }
 
   const std::int16_t mode = w->weapon_mode_code;
@@ -537,7 +537,7 @@ bool QueuePointDefenseBeamHit(GameState &state,
 // @port 0x0043A310 100%
 // Ghidra 0x0043a310 Weapon_SelectTurretTargetWithinArc.
 void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
-  if (ship.ai_station_hold_timer > 0.0F) {
+  if (ship.hyperspace_jump_timer > 0.0F) {
     return;
   }
   const bool player = ship.ship_instance_id == 0;

@@ -34,10 +34,9 @@ constexpr std::int16_t kLeaderSpanFallback =
 constexpr std::int16_t kFollowerSpanFallback =
     0x4b; // Sprite_GetShipClassEscortFrameWidth
 // System_RebuildInitialNpcAndMissionPopulation (0x0041af90) escort scatter.
-constexpr float kScatterDistanceStart = 45.0F;      // FLOAT_0057524c
-constexpr float kScatterDistanceStep = 1.165F;      // DOUBLE_00575250
-constexpr float kScatterLaunchSpeed = 50.0F;        // FLOAT_0057522c
-constexpr float kJumpArrivalHoldSentinel = -999.0F; // 0xc479c000
+constexpr float kScatterDistanceStart = 45.0F; // FLOAT_0057524c
+constexpr float kScatterDistanceStep = 1.165F; // DOUBLE_00575250
+constexpr float kScatterLaunchSpeed = 50.0F;   // FLOAT_0057522c
 
 float HeadingDeg(const Ship &ship) { return ship.heading / kDegToRad; }
 
@@ -172,8 +171,8 @@ void Ship_MoveShipTowardFormationOffset(GameState &state,
                                         Ship &ship,
                                         bool snap_to_offset,
                                         float elapsed_ticks) {
-  // A ship holding station does not creep (the snap variant ignores the hold).
-  if (!snap_to_offset && ship.ai_station_hold_timer > 0.0F) {
+  // A ship mid-jump does not creep (the snap variant ignores this).
+  if (!snap_to_offset && ship.hyperspace_jump_timer > 0.0F) {
     return;
   }
   const std::int16_t resolved = ship.resolved_squad_leader_ship_slot;
@@ -314,7 +313,7 @@ void Ship_ReacquireSquadLeader(GameState &state, Ship &ship) {
         cls != nullptr ? cls->default_ai_behavior : ship.ai_behavior_code;
     ship.ai_state_code = 0x13;
     ship.ai_control_mode = 0;
-    ship.ai_station_hold_timer = -1.0F;
+    ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
     return;
   }
   if (replacement == ship.ship_instance_id) {
@@ -322,7 +321,7 @@ void Ship_ReacquireSquadLeader(GameState &state, Ship &ship) {
     // combat state when governments match, otherwise it disengages.
     ship.ai_behavior_code =
         cls != nullptr ? cls->default_ai_behavior : ship.ai_behavior_code;
-    ship.ai_station_hold_timer = -1.0F;
+    ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
     // The original reads the stale leader slot here (the slot's data remains
     // even when the ship is gone).
     const Ship &old_leader = state.ShipAt(static_cast<std::size_t>(stale));
@@ -356,7 +355,7 @@ void Ship_ReacquireSquadLeader(GameState &state, Ship &ship) {
   if (ship.ai_behavior_code == 5) {
     ship.ai_behavior_code = 6;
   }
-  if (ship.ai_station_hold_timer < 0.0F) {
+  if (ship.hyperspace_jump_timer < 0.0F) {
     ship.ai_state_code = 0x13;
   }
 }
@@ -517,10 +516,10 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
     }
   }
   Ship_UpdateEscortFormations(state, state.player, /*snap=*/true);
-  // Jump arrival: the player core sets its station-hold timer to -999 around
+  // Jump arrival: the player core sets its hyperspace jump timer to -999 around
   // the rebuild (0x0044fa83 / 0x0044faa2), which arms this scatter -- escorts
   // stream in behind the player at full speed instead of sitting on the wedge.
-  if (state.player.ai_station_hold_timer != 0.0F) {
+  if (state.player.hyperspace_jump_timer != 0.0F) {
     float term = kScatterDistanceStart;
     float distance = 0.0F;
     while (term > 0.0F) {
@@ -535,7 +534,7 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
       const float heading_deg = static_cast<float>(RoundHeadingDeg(ship));
       AddPolar(
           (heading_deg + 180.0F) * kDegToRad, distance, ship.pos_x, ship.pos_y);
-      ship.ai_station_hold_timer = kJumpArrivalHoldSentinel;
+      ship.hyperspace_jump_timer = kHyperspaceJumpTimerArrived;
       ship.ai_mode_start_time_ms = 0;
       AddPolar(
           heading_deg * kDegToRad, kScatterLaunchSpeed, ship.vel_x, ship.vel_y);

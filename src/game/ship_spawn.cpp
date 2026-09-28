@@ -96,7 +96,7 @@ void PlaceMissionFleetRespawn(GameState &state, Ship &ship, float bearing) {
   ship.vel_x = 0.0F;
   ship.vel_y = 0.0F;
   ship.speed = 0.0F;
-  ship.ai_station_hold_timer = -999.0F;
+  ship.hyperspace_jump_timer = kHyperspaceJumpTimerArrived;
   ship.ai_mode_start_time_ms = state.tick_60hz;
   AddArrivalSlowdownVelocity(ship);
   ship.arrival_monitor_elapsed_ticks = 0.0F;
@@ -104,14 +104,14 @@ void PlaceMissionFleetRespawn(GameState &state, Ship &ship, float bearing) {
   ship.arrival_monitor_warning_logged = false;
   NovaLog::Info(
       "NPC mission arrival monitor armed: slot={} class={} behavior={} "
-      "state={} control={} speed={:.2f} station_hold={:.2f}",
+      "state={} control={} speed={:.2f} jump_timer={:.2f}",
       ship.ship_instance_id,
       ship.ship_class_id,
       ship.ai_behavior_code,
       ship.ai_state_code,
       ship.ai_control_mode,
       std::hypot(ship.vel_x, ship.vel_y),
-      ship.ai_station_hold_timer);
+      ship.hyperspace_jump_timer);
 }
 
 void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
@@ -1659,7 +1659,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
 // @port 0x0041af90 100%
 // Ghidra 0x0041af90 System_RebuildInitialNpcAndMissionPopulation, ambient
 // population slice. The full original is spread across this function plus
-// NovaSystem_RestorePlayerEscorts (escort adoption/station-hold scatter) and
+// NovaSystem_RestorePlayerEscorts (escort adoption/arrival scatter) and
 // NovaSystem_RestoreMissionFleets (mission-fleet restore); call sites run them
 // in the original order. This slice performs exactly avg_ships attempts and the
 // eight personality rolls. The ordinary-dude branch calls the low-level spawner
@@ -2202,7 +2202,7 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.ai_behavior_code = 5;
   ship.faction_or_government_id = launcher.faction_or_government_id;
   ship.travel_transfer_mode = -1;
-  ship.ai_station_hold_timer = 0.0F;
+  ship.hyperspace_jump_timer = 0.0F;
   ship.ai_state_code = 0;
   ship.ai_control_mode = 0;
   ship.boarded_target_latch = 0;

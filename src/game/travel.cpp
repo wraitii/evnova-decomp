@@ -76,7 +76,7 @@ constexpr float kTurnDamp = 0.985F;
 // port doubles it so the initial slowdown reads harder.
 constexpr float kBrakeThrustScale = 2.0F;
 
-// Slow-phase velocity damp per 30 Hz tick during the stationary hold
+// Slow-phase velocity damp per 30 Hz tick during the stationary spin-up
 // (g_hyperspace_slow_phase_velocity_damp 0x5755f8, double 0.98006866),
 // gentler than the turn-around's 0.99204.
 constexpr float kSlowPhaseVelDamp = 0.98006866F;
@@ -103,8 +103,8 @@ constexpr float kTurnAroundAlignDeg = 20.0F;
 // the original's wall-clock NovaTime_GetTickCount60Hz, not the probe's
 // accelerated tick counter (see NovaTravel_JumpWallClockScale). x2 also
 // selects the shorter noengine cue.
-// For a mult=1 stock ship: onset (progress > 0) at tick 127 = 2.12 s into the
-// hold, the min(progress, 50) px/tick cap at tick 309 = 5.16 s, and the fire
+// For a mult=1 stock ship: onset (progress > 0) at tick 127 = 2.12 s into
+// spin-up, the min(progress, 50) px/tick cap at tick 309 = 5.16 s, and the fire
 // lands when the cue (whose duration is 1/multiplier of its base length)
 // finishes at tick 364 = 6.07 s for multiplier 1.0 -- a couple of seconds of
 // stationary alignment, then the
@@ -129,22 +129,22 @@ constexpr float kTunnelSpeedCap =
 // 0x0046ab00; SDL receives the multiplier as playback speed so the ramp
 // schedule and cue-gated fire stay aligned.
 
-// The stationary hold must run at least this many 30 Hz ticks before the fire
-// (g_hyperspace_engage_hold_30hz 0x5755a8, float 30.0 -- 30 Hz ticks because
-// the hold timer accumulates g_avg_frame_tick_scale = elapsed_ms * 0.03;
-// 30 ticks = 1.0 s). The fire additionally waits for the 'Warp up' cue to
+// The stationary spin-up must run at least this many 30 Hz ticks before the
+// fire (g_hyperspace_min_spin_up_ticks_30hz 0x5755a8, float 30.0 -- 30 Hz ticks
+// because the jump timer accumulates g_avg_frame_tick_scale = elapsed_ms *
+// 0.03; 30 ticks = 1.0 s). The fire additionally waits for the 'Warp up' cue to
 // finish (the caller reports the live voice count; see NovaTravel_Tick).
-constexpr float kEngageHoldTicks = 30.0F;
+constexpr float kMinSpinUpTicks = 30.0F;
 
 // In-tunnel alignment window (deg): the hull must face the jump bearing within
 // max(class turn rate, 30.0) for the tunnel ramp to apply (the tunnel block of
 // Ship_HandlePlayerShipCore; the 30.0 floor is the literal 0x41f00000 used when
-// the class turn rate does not exceed g_hyperspace_engage_hold_30hz).
+// the class turn rate does not exceed g_hyperspace_min_spin_up_ticks_30hz).
 constexpr float kTunnelAlignDeg = 30.0F;
 
 // The stopped test for the turn-around handoff: the original's jump dispatch
 // treats |round(vel_x)| < 2 && |round(vel_y)| < 2 (px/tick, ShipState +0x20)
-// as "come to a stop", at which point the hold begins.
+// as "come to a stop", at which point the spin-up begins.
 constexpr float kStoppedRoundedVel = 2.0F;
 
 // Arrival position hurl (px) along the departure map bearing + 180 from the
@@ -226,7 +226,7 @@ std::string FormatArrivalCountWord(int count, bool translate_first) {
 // port equivalent -- the HUD repaints per frame), and the current overlay
 // message (e.g. the 'not yet far enough away' denial) is cleared by a 1-tick
 // empty overwrite. The latch updates whenever the jump is armed -- including
-// while engaged, where the cue itself is suppressed (hold timer > 0). The
+// while engaged, where the cue itself is suppressed (jump timer > 0). The
 // original never resets the latch on arrival; it only re-arms/clears while a
 // jump is armed, so the port mirrors the stale-latch behavior.
 void TickJumpRangeCue(GameState &state) {
@@ -283,7 +283,7 @@ void FireJump(GameState &state) {
   // white frame) and the 'Warp out' sound (snd 130), latched for the
   // spaceflight loop (which owns SdlAudio) -- the flash and the boom land on
   // the same frame. The Mac arrival also runs _FadeWhiteOut (a 1.5 s
-  // CoreGraphics display fade) from the hold-end top block; the loop honours
+  // CoreGraphics display fade) from the spin-up-end top block; the loop honours
   // it through screen_flash_mode == kFadeOut.
   state.screen_flash_intensity = 1.0F;
   state.screen_flash_mode = GameState::ScreenFlashMode::kFadeOut;
@@ -357,7 +357,7 @@ void FireJump(GameState &state) {
   // (0x0044f4cd) and then adds a polar velocity at
   // Math_BearingFromPointToPoint(cur,dest) + 180 (0x0044f5ae), magnitude
   // g_hyperspace_engage_velocity_hurl 1350, and resets velocity to max speed
-  // along the ship's heading (which the hold aligned onto the map travel
+  // along the ship's heading (which spin-up aligned onto the map travel
   // bearing) -- "at full speed into the new system", streaking past the
   // center in normal flight.
   const auto *dest_sys = state.scenario.System(
@@ -517,13 +517,13 @@ void FireJump(GameState &state) {
   t.engaging = false;
   t.jump_phase = TravelState::JumpPhase::kIdle;
   t.tunnel_elapsed_60hz = 0.0F;
-  t.hold_audio_latch = false;
+  t.warp_up_cue_done = false;
   t.warp_up_started = false;
   t.jump_heading_rad = 0.0F;
-  // The jump hold is over. The arrival handler later windows this to -999 for
-  // the escort scatter before zeroing it; reset here so direct callers (tests)
-  // do not leave the player station-held.
-  player.ai_station_hold_timer = -1.0F;
+  // The jump spin-up is over. The arrival handler later windows this to -999
+  // for the escort scatter before zeroing it; reset here so direct callers
+  // (tests) do not leave the player mid-jump.
+  player.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,7 +598,7 @@ namespace {
 // is the engine cue normally and the shorter noengine cue in x2. Reads the
 // engage-time latch (TravelState::jump_speed_multiplier / jump_x2_mode) so a
 // mid-jump x2/probe toggle cannot change the schedule. Shared by the disabled
-// collapse, the hold's fade trigger and tunnel cap, and the contraband scan's
+// collapse, spin-up's fade trigger and tunnel cap, and the contraband scan's
 // jump-onset guard.
 float PlayerJumpProgress(const GameState &state) {
   const TravelState &t = state.travel;
@@ -1441,7 +1441,7 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
 
 // Advances the hyperspace flash by one render frame. kFadeIn and kFadeOut are
 // the Mac 1.5 s _FadeWhiteIn/_FadeWhiteOut display fades. kBuildup is the
-// pre-trigger hold state; the Mac scalar only requests the fade once when it
+// pre-trigger spin-up state; the Mac scalar only requests the fade once when it
 // becomes positive. kInstant is the original ~60 ms one-frame fallback for
 // the wormhole and the disabled-jump collapse.
 void NovaTravel_AdvanceScreenFlash(GameState &state, float frame_time_ms) {
@@ -1496,7 +1496,7 @@ void NovaTravel_Tick(GameState &state,
     Ship &player = state.player;
 
     // Jump-sequence clock (60 Hz ticks since the mode stamp): stamped at the
-    // engage and re-stamped when the stationary hold begins (ai_mode_start_
+    // engage and re-stamped when the stationary spin-up begins (ai_mode_start_
     // time_ms, 0x0044c4e9), read by both the tunnel ramp and the collapse.
     t.tunnel_elapsed_60hz += frame_time_ms * (kHyperspaceTickHz / 1000.0F);
 
@@ -1504,17 +1504,17 @@ void NovaTravel_Tick(GameState &state,
     // Ghidra 0x0044b037 PlayerTick_HyperspaceExitGate (synthetic region of
     // 0x0044aa70): becoming disabled between engage and fire aborts the jump.
     // The gate is ported; TODO(decomp): whether the Mac abort path reaches the
-    // hold-end _FadeWhiteOut.
+    // spin-up-end _FadeWhiteOut.
     // Disabled-jump collapse (Ship_HandlePlayerShipCore 0x0044b037 gate).
     // Becoming disabled any time between the engage and the fire aborts the
-    // jump on that frame: hold timer = -1, the 'Warp up' cue is cancelled,
+    // jump on that frame: jump timer = -1, the 'Warp up' cue is cancelled,
     // the centered 'boom' effect 0x32 queues (white flash + Warp out sound),
     // and STR# 0x7d2 0x23 overlays. NO system change -- the ship stays in
     // the current system. The exit velocity clause only applies once the
     // tunnel ramp had begun (progress past the onset threshold): velocity is
     // zeroed then set to min(progress, max speed) along the heading; earlier
     // in the sequence the velocity is left as-is (the turnaround damping has
-    // it near zero). The hold accumulator freezing (0x0044c940) is subsumed
+    // it near zero). The spin-up accumulator freezing (0x0044c940) is subsumed
     // by the abort.
     if (NovaAiShip_IsDisabled(state, player)) {
       const float progress = PlayerJumpProgress(state);
@@ -1530,7 +1530,7 @@ void NovaTravel_Tick(GameState &state,
       }
       // The centered 'boom' effect 0x32 (white flash + Warp out sound). The
       // Windows build does not fade here; the Mac top block only runs
-      // _FadeWhiteOut once ai_station_hold_timer <= 0, so this abort keeps the
+      // _FadeWhiteOut once hyperspace_jump_timer <= 0, so this abort keeps the
       // legacy one-frame flash (TODO(decomp): confirm the Mac abort path).
       state.screen_flash_intensity = 1.0F;
       state.screen_flash_mode = GameState::ScreenFlashMode::kInstant;
@@ -1539,9 +1539,9 @@ void NovaTravel_Tick(GameState &state,
       t.jump_phase = TravelState::JumpPhase::kIdle;
       t.engaging = false;
       t.tunnel_elapsed_60hz = 0.0F;
-      t.hold_audio_latch = false;
+      t.warp_up_cue_done = false;
       t.warp_up_started = false;
-      player.ai_station_hold_timer = -1.0F;
+      player.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
       // The plotted destination stays armed (the original keeps travel_
       // transfer_mode 3 and the secondary target); the player can re-engage
       // once repaired.
@@ -1601,11 +1601,11 @@ void NovaTravel_Tick(GameState &state,
       // within the facing window (max(class turn + 1, 20) deg -- a gate, not a
       // turn speed) applies effective thrust back along it to stop the ship.
       // Ends at the original's |trunc(vel_x)| < 2 && |trunc(vel_y)| < 2 stop
-      // test -- the hold begins and the 'Warp up' cue pre-stages there
+      // test -- the spin-up begins and the 'Warp up' cue pre-stages there
       // (0x0044c4e9).
       // Ship_CheckSpecialLoadoutCapability (0x0044c4db, Ghidra 0x0046d080):
       // a hull with class Flags2 0x0020 or the ModType-37 fast-jumping outfit
-      // skips the per-axis stop requirement and enters the hold directly.
+      // skips the per-axis stop requirement and enters spin-up directly.
       // Ordinary hulls still compare |trunc(vel)| < 2 on both axes.
       const bool fast_jump = NovaOutfit_HasFastJumpCapability(state, player);
       const bool stopped =
@@ -1614,13 +1614,13 @@ void NovaTravel_Tick(GameState &state,
            std::abs(std::trunc(player.vel_y)) < kStoppedRoundedVel);
       if (!stopped) {
         // BrakeEntry 0x0044f275..0x0044f280: every braking frame stamps the
-        // jump clock and holds the station-hold timer at 1.0, so the
+        // jump clock and holds the jump timer at 1.0, so the
         // timer-positive gates (weapons, cloak, clear-target, hails, escort
-        // hold, the HUD's highlighted Hyperspace title) apply from engage
-        // while staying below the hold-begin guard (<= 1.0) and the escort
+        // spin-up, the HUD's highlighted Hyperspace title) apply from engage
+        // while staying below the spin-up begin guard (<= 1.0) and the escort
         // spin-up gates (> 1.0).
         player.ai_mode_start_time_ms = state.tick_60hz;
-        player.ai_station_hold_timer = 1.0F;
+        player.hyperspace_jump_timer = 1.0F;
         // Inertialess jump brake (Ghidra 0x0044f0e3): decay scalar speed
         // (+0x48) by Ship_ComputeShipEffectiveThrust * tick scale, floored at
         // zero, then shared 0x0044cffe/0x0043b020 steering toward
@@ -1668,24 +1668,24 @@ void NovaTravel_Tick(GameState &state,
           player.pos_y += player.vel_y * ticks;
         }
       } else {
-        // Stopped: begin the stationary hold. The original seeds the station-
-        // hold timer to 2.0 (0x0044c548), stamps the 60 Hz jump clock
-        // (ai_mode_start_time_ms at 0x0044c54f) and pre-stages the 'Warp up'
-        // cue. The timer doubles as the hold clock and the flag the escort
-        // jump sync (Ship_SyncJumpStateToSquad) and the player-led jump
+        // Stopped: begin the stationary spin-up. The original seeds the
+        // jump timer to kPlayerJumpSpinUpSeed (0x0044c548), stamps the 60 Hz
+        // jump clock (ai_mode_start_time_ms at 0x0044c54f) and pre-stages the
+        // 'Warp up' cue. The timer doubles as the jump timer and the flag the
+        // escort jump sync (Ship_SyncJumpStateToSquad) and the player-led jump
         // spin-up (Ship_HandleShip 0x00433050) read, so it MUST stay positive
-        // while the hold runs.
-        t.jump_phase = TravelState::JumpPhase::kHold;
-        player.ai_station_hold_timer = 2.0F;
+        // while spin-up runs.
+        t.jump_phase = TravelState::JumpPhase::kSpinUp;
+        player.hyperspace_jump_timer = kPlayerJumpSpinUpSeed;
         player.ai_mode_start_time_ms = state.tick_60hz;
-        t.hold_audio_latch = false;
-        // The hold-begin block re-stamps the tunnel clock; the schedule runs
+        t.warp_up_cue_done = false;
+        // The spin-up begin block re-stamps the tunnel clock; the schedule runs
         // from here.
         t.tunnel_elapsed_60hz = 0.0F;
         state.screen_flash_intensity = 0.0F;
         state.screen_flash_mode = GameState::ScreenFlashMode::kBuildup;
         state.screen_flash_fade_in_started = false;
-        // The hold-begin block also latches the flight-hint state to 0x7fff
+        // The spin-up begin block also latches the flight-hint state to 0x7fff
         // (Ship_HandlePlayerShipCore 0x0044c561), arming the launch departure
         // message for every landing until a pre-jump landing consumes it.
         t.travel_hint_state = 0x7fff;
@@ -1696,12 +1696,12 @@ void NovaTravel_Tick(GameState &state,
       }
       break;
     }
-    case TravelState::JumpPhase::kHold: {
-      // Ghidra 0x0044c705: every tick of the engage hold opens with the squad
-      // sync (Ship_SyncJumpStateToSquad) -- escorts with no stellar attachment
-      // copy the leader's hold clock, drop their target (-2 sentinel) and
-      // enter AI state 0x0B, holding formation until the jump fires. They
-      // transfer systems at arrival via escort adoption, not here.
+    case TravelState::JumpPhase::kSpinUp: {
+      // Ghidra 0x0044c705: every tick of the engage spin-up opens with the
+      // squad sync (Ship_SyncJumpStateToSquad) -- escorts with no stellar
+      // attachment copy the leader's jump timer, drop their target (-2
+      // sentinel) and enter AI state 0x0B, holding formation until the jump
+      // fires. They transfer systems at arrival via escort adoption, not here.
       NovaAi_SyncJumpStateToSquad(state, player, state.tick_60hz);
       // @port 0x00467e60 100% divergence
       // DIVERGENCE(original): the Windows build calls the bare-RET
@@ -1722,17 +1722,17 @@ void NovaTravel_Tick(GameState &state,
         state.screen_flash_intensity = 0.0F;
         state.screen_flash_mode = GameState::ScreenFlashMode::kFadeIn;
       }
-      // Stationary alignment hold (the hold branch of the disabled
+      // Stationary alignment spin-up (branch of the disabled
       // window, decompile around 0x0044f3d0): velocity damps by
       // g_hyperspace_slow_phase_velocity_damp (0.98007) per tick, the hull
       // turns onto the map-space bearing toward the destination system (the
       // per-frame ai_desired_heading_deg = Bearing(cur,dest) re-aim at
       // LAB_0044edfd) at the class turn rate, and the engine glow fades. The
-      // fire lands once the hold passes g_hyperspace_engage_hold_30hz (30
+      // fire lands once spin-up passes g_hyperspace_min_spin_up_ticks_30hz (30
       // ticks) AND the 'Warp up' cue is no longer active
       // (NovaAudio_CountActiveByHandle latch, g_playerHyperspaceAudioLatch).
       // Ship_CheckSpecialLoadoutCapability (0x0044c72e, Ghidra 0x0046d080):
-      // fast-jump hulls keep their momentum through the hold -- the slow-phase
+      // fast-jump hulls keep their momentum through spin-up -- the slow-phase
       // velocity damp only runs for ordinary hulls.
       const bool fast_jump = NovaOutfit_HasFastJumpCapability(state, player);
       const bool inertialess = NovaPlayer_IsInertialess(state);
@@ -1751,7 +1751,7 @@ void NovaTravel_Tick(GameState &state,
       // Align onto the jump heading at the class turn rate. The original
       // stores the integer map bearing in the player's ai_desired_heading_deg
       // (0x0044eeb3) and turns through the shared auto-turn arm; the escorts'
-      // mode-0xD spin-up mirrors that field, so it must be live while the hold
+      // mode-0xD spin-up mirrors that field, so it must be live while spin-up
       // runs (a stale/zero value sends them to the leader-desired fallback and
       // they point straight up).
       int jump_heading_deg = static_cast<int>(
@@ -1763,9 +1763,9 @@ void NovaTravel_Tick(GameState &state,
           t.jump_heading_rad,
           std::max(std::round(state.cached_stats.turn_raw * 0.1F), 1.0F));
       // Shared manual-flight inertialess tail (Ghidra 0x0044cffe ->
-      // 0x0044d05b, PlayerTick_InertialessSteering): the engaged hold still
+      // 0x0044d05b, PlayerTick_InertialessSteering): the engaged spin-up still
       // reaches it, so an inertialess hull -- including fast-jump+inertialess
-      // -- steers its velocity toward heading*speed while the hold turns onto
+      // -- steers its velocity toward heading*speed while spin-up turns onto
       // the jump bearing. It runs after the slow damp and after the auto-turn,
       // and before position integration, matching the original frame order.
       // TODO(decomp): the shared tail's g_player_speed_cap_x scalar clamp,
@@ -1779,25 +1779,25 @@ void NovaTravel_Tick(GameState &state,
       player.pos_x += player.vel_x * ticks;
       player.pos_y += player.vel_y * ticks;
 
-      player.ai_station_hold_timer += ticks;
+      player.hyperspace_jump_timer += ticks;
       // @port 0x0044D371 45% gameplay,synthetic
       // Ghidra 0x0044d371 PlayerTick_HyperspaceProgressBranch (synthetic region
-      // of 0x0044aa70): hold/fire audio cadence. Escape-pod/disabled cases
+      // of 0x0044aa70): spin-up/fire audio cadence. Escape-pod/disabled cases
       // remain TODO(decomp).
-      if (player.ai_station_hold_timer > kEngageHoldTicks &&
+      if (player.hyperspace_jump_timer > kMinSpinUpTicks &&
           !warp_up_sound_active) {
-        t.hold_audio_latch = true;
+        t.warp_up_cue_done = true;
       }
-      if (player.ai_station_hold_timer >= kEngageHoldTicks &&
-          t.hold_audio_latch) {
+      if (player.hyperspace_jump_timer >= kMinSpinUpTicks &&
+          t.warp_up_cue_done) {
         // Boom/arrival: full-screen flash + 'Warp out' boom + the 1350 px
         // hurl + system change (see FireJump). Control returns to normal
         // flight immediately.
         FireJump(state);
       }
-      if (t.jump_phase != TravelState::JumpPhase::kHold) {
+      if (t.jump_phase != TravelState::JumpPhase::kSpinUp) {
         // The fire landed this frame; the original's arrival block resets the
-        // hold timer before its tunnel block runs, so the tunnel motion is
+        // jump timer before its tunnel block runs, so the tunnel motion is
         // skipped on the fire frame.
         break;
       }
@@ -1806,7 +1806,7 @@ void NovaTravel_Tick(GameState &state,
       // region of 0x0044aa70). TODO(decomp): the starfield streak pass and its
       // scalar/cadence.
       // In-tunnel acceleration (the tunnel block of Ship_HandlePlayerShipCore,
-      // after the hold/fire branch): once the stopped hull faces the jump
+      // after spin-up/fire branch): once the stopped hull faces the jump
       // bearing within max(class turn, 30 deg), the position advances along
       // the heading by min(progress, 50) px/tick -- a direct position step,
       // NOT thrust into vel_x/vel_y (which stay damped near zero) -- and the
@@ -1842,7 +1842,7 @@ void NovaTravel_Tick(GameState &state,
     }
     // The original's flight tail runs after the phase machine even while
     // engaged: the range latch keeps updating, but the cue is suppressed by
-    // the hold timer (t.engaging here).
+    // the jump timer (t.engaging here).
     TickJumpRangeCue(state);
     return;
   }
@@ -1965,7 +1965,7 @@ void NovaTravel_Tick(GameState &state,
   t.jump_phase = TravelState::JumpPhase::kBrake;
   t.warp_up_started = false;
   t.tunnel_elapsed_60hz = 0.0F;
-  t.hold_audio_latch = false;
+  t.warp_up_cue_done = false;
   // Latch the scheduler state for the whole jump: the wall-clock ramp scale
   // and the x2 cue/offset choice must not change if the probe multiplier is
   // toggled mid-sequence (the cue already playing fixes the wall duration).
@@ -2364,7 +2364,7 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
 bool NovaTravel_PlayerPastJumpOnset(const GameState &state) {
   // Same ramp schedule as the in-tunnel movement block (travel.cpp ~line
   // 1229). tunnel_elapsed_60hz is the port's authoritative player jump clock
-  // (1/60 s ticks since the hold began), standing in for the original's
+  // (1/60 s ticks since spin-up began), standing in for the original's
   // NovaTime_GetTickCount60Hz() - ai_mode_start_time_ms; PlayerJumpProgress
   // applies the x2 offset scale and the accelerated-clock wall-time recovery.
   return PlayerJumpProgress(state) > kJumpProgressOnsetThreshold;

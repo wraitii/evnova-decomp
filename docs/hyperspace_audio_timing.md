@@ -47,7 +47,7 @@ In the i386 slice of the original Mac executable
 float 1.5 (`0x3fc00000`). They fade between 0 and 1, with white RGB.
 `_HandlePlayer` at `0x683f1..0x68404` starts the fade only when the scalar is
 positive and the fade-active flag is clear. `0x6840b..0x6841f` resets the
-scalar and starts fade-out after the hold ends. The scalar is a trigger,
+scalar and starts fade-out after the spin-up ends. The scalar is a trigger,
 not continuously sampled opacity.
 
 The Mac `_AdjustWarpSoundSpeed` (`0x5ecc`) also writes a reciprocal into the
@@ -76,7 +76,7 @@ an explicit start blend of 1.0 and end blend of 0.0 over 1.5 s. Thus the
 requested sequence is partial fade-in, full-white start of fade-out, then
 reveal. The exact visual response to overlapping asynchronous fades remains
 an OS behavior to validate; these are the arguments and ordering in the binary.
-The hold-end fade call occurs on the following player update, so system-load
+The spin-up-end fade call occurs on the following player update, so system-load
 time and update cadence can also change the visible peak.
 
 ## Unused Windows ramp

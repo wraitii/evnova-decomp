@@ -132,7 +132,7 @@ PlayerTick_ManualFlightAndRegeneration(GameState &state,
 // Ghidra 0x0044aa70 face-target command (0x0044c0b1 -> 0x0044c18a, binding
 // slot 7; default DIK 0x1e = A, resolved through the persisted table by the
 // flight loop -- see FlightInput::face_target). While held with the
-// station-hold timer idle, stores the
+// hyperspace jump timer idle, stores the
 // integer heading to face in player.ai_desired_heading_deg and returns true
 // to arm the manual-flight auto-turn: the primary ship target wins unless the
 // 0x38/0x6f arm modifier is held, which -- like having no ship target --

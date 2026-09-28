@@ -223,7 +223,7 @@ TEST_CASE("escort loss uses the original caller-specific cargo denominator",
   state.scenario.ships[2].cargo_holds = 2000;
   state.player.ship_class_id = 0;
   state.player.current_system_id = 0;
-  state.player.ai_station_hold_timer = 0;
+  state.player.hyperspace_jump_timer = 0;
   state.player.credits = 0;
   Ship &lost = MakeEscort(state, 1, 1);
   Ship &survivor = MakeEscort(state, 2, 2);

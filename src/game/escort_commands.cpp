@@ -76,11 +76,11 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
 }
 
 // The order-feedback phrase after a dispatch (0x0045cbxx tail): the "-ing"
-// forms while the player's station-hold timer has expired, the "will ..."
+// forms while the player's hyperspace jump timer has expired, the "will ..."
 // forms otherwise; Attack splits on whether the player has a valid target.
 [[nodiscard]] std::string OrderPhrase(const GameState &state,
                                       std::int16_t command) {
-  const bool ready = state.player.ai_station_hold_timer <= 0.0F;
+  const bool ready = state.player.hyperspace_jump_timer <= 0.0F;
   std::uint16_t entry = 0;
   if (ready) {
     switch (command) {

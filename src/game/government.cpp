@@ -963,9 +963,9 @@ void NovaShip_ScanPlayerForContraband(GameState &state,
     return;
   }
   // Hyperspace-committed guard: skip once the player's jump hold has passed
-  // its onset (the original gates on ai_station_hold_timer > 0, which the port
-  // tracks as TravelState::JumpPhase::kHold; the Ship field is dormant here).
-  if (state.travel.jump_phase == TravelState::JumpPhase::kHold &&
+  // its onset (the original gates on hyperspace_jump_timer > 0, which the port
+  // tracks as TravelState::JumpPhase::kSpinUp; the Ship field is dormant here).
+  if (state.travel.jump_phase == TravelState::JumpPhase::kSpinUp &&
       !NovaAiShip_IsDisabled(state, player) &&
       NovaTravel_PlayerPastJumpOnset(state)) {
     return;

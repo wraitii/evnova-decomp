@@ -307,9 +307,9 @@ Other decoded facts from the 0x004192d0 read:
   from STR# 30000 8+rand(6) when the killer was an Enforcer.
 - **Hit-path context**: pre-damage state capture (`local_12a` = fire-restricted,
   `local_11d` = destroyed) drives all transition gates; attacker-pers-0x3ff
-  damage scaling (×2/×3/×5 by `_DAT_0059799e` tiers 0x28/0x3d/0x5b); station-hold
+  damage scaling (×2/×3/×5 by `_DAT_0059799e` tiers 0x28/0x3d/0x5b); jump-timer
   state 0x0D forces armor-only hits; docked ships take no impulse
-  (`ai_station_hold_timer <= 0`); shields clamp to −10% of max (`_DAT_00575208`)
+  (`hyperspace_jump_timer <= 0`); shields clamp to −10% of max (`_DAT_00575208`)
   rather than zeroing.
 - Completion semantics in 0x00443c60 compare counters against
   `mission_target_count` (the untouched total): destroy `total <= a`, disable

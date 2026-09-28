@@ -1268,7 +1268,7 @@ void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship) {
         state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
-    if (dx < 1251.0F && dy < 1251.0F && ship.ai_station_hold_timer <= 0.0F) {
+    if (dx < 1251.0F && dy < 1251.0F && ship.hyperspace_jump_timer <= 0.0F) {
       ship.ai_state_code = 4;
     } else if (ship.squad_leader_ship_slot == 0) {
       ship.ai_state_code = 10;
@@ -1316,12 +1316,12 @@ void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
                      ship.faction_or_government_id);
   };
 
-  // Government hold window [-900, 0]: a non-threat-policy government drops a
-  // player-squad threat; a government with Flags 0x0004 instead turns hostile
-  // to an engageable player.
+  // Government window (kHyperspaceJumpTimerArrivedThreshold, 0]: a
+  // non-threat-policy government drops a player-squad threat; a government with
+  // Flags 0x0004 instead turns hostile to an engageable player.
   if (ship.faction_or_government_id != -1 &&
-      ship.ai_station_hold_timer > -900.0F &&
-      ship.ai_station_hold_timer <= 0.0F) {
+      ship.hyperspace_jump_timer > kHyperspaceJumpTimerArrivedThreshold &&
+      ship.hyperspace_jump_timer <= 0.0F) {
     if (const Government *govt = ship_government(); govt != nullptr) {
       if ((govt->flags_primary & 0x0004U) == 0U) {
         if ((govt->flags_primary & 0x0040U) != 0U &&
@@ -1353,7 +1353,7 @@ void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
   // and is retained for fidelity.
   if (ship.ai_state_code == 0) {
     if (ship.primary_target_ship_slot == -1) {
-      if (ship.ai_station_hold_timer <= 0.0F) {
+      if (ship.hyperspace_jump_timer <= 0.0F) {
         NovaAi_AcquirePrimaryTarget(state, ship);
         if (ship.primary_target_ship_slot == -1) {
           NovaAi_ReacquireTravelOrSettle(state, ship);
@@ -1364,33 +1364,33 @@ void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
           NovaAi_ReacquireTravelOrSettle(state, ship);
         }
       }
-    } else if (ship.ai_station_hold_timer <= 0.0F) {
+    } else if (ship.hyperspace_jump_timer <= 0.0F) {
       ship.ai_state_code = 4;
     }
   }
 
   // Threat escalation: any live hostility with a target attacks unless already
-  // retreating (3/7) or holding station.
+  // retreating (3/7) or jumping.
   if (ship.ai_hostility_accumulator > 0 &&
       ship.primary_target_ship_slot != -1 && ship.ai_state_code != 7 &&
-      ship.ai_state_code != 3 && ship.ai_station_hold_timer <= 0.0F) {
+      ship.ai_state_code != 3 && ship.hyperspace_jump_timer <= 0.0F) {
     ship.ai_state_code = 4;
   }
 
   // Travel states re-scan for a contact each tick: 1/0x14/2 (wandering /
   // jumping / standoff) promote to attack on acquisition, keeping an already
-  // held target only while not holding station. The original also tests
+  // held target only while not jumping. The original also tests
   // state != 3 and != 7 here, which are unreachable for these states.
   const std::int16_t travel_state = ship.ai_state_code;
   if (travel_state == 1 || travel_state == 0x14 || travel_state == 2) {
     if (ship.primary_target_ship_slot == -1) {
-      if (ship.ai_station_hold_timer <= 0.0F) {
+      if (ship.hyperspace_jump_timer <= 0.0F) {
         NovaAi_AcquirePrimaryTarget(state, ship);
         if (ship.primary_target_ship_slot != -1) {
           ship.ai_state_code = 4;
         }
       }
-    } else if (ship.ai_station_hold_timer <= 0.0F) {
+    } else if (ship.hyperspace_jump_timer <= 0.0F) {
       ship.ai_state_code = 4;
     }
   }
@@ -1483,7 +1483,7 @@ void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
   // 1 -> 30% shields, 2 -> 15%, 4 -> never retreats.
   if (ship.primary_target_ship_slot != -1 && ship.ai_state_code != 7 &&
       ship.ai_state_code != 3) {
-    if (ship.ai_station_hold_timer <= 0.0F) {
+    if (ship.hyperspace_jump_timer <= 0.0F) {
       ship.ai_state_code = 4;
     }
 
@@ -1631,12 +1631,12 @@ void NovaAi_UpdateBehavior0x04(GameState &state, Ship &ship) {
                      ship.faction_or_government_id);
   };
 
-  // Government hold window [-900, 0]: a non-threat-policy government drops a
-  // player-squad threat; a government with Flags 0x0004 instead turns hostile
-  // to an engageable player.
+  // Government window (kHyperspaceJumpTimerArrivedThreshold, 0]: a
+  // non-threat-policy government drops a player-squad threat; a government with
+  // Flags 0x0004 instead turns hostile to an engageable player.
   if (ship.faction_or_government_id != -1 &&
-      ship.ai_station_hold_timer > -900.0F &&
-      ship.ai_station_hold_timer <= 0.0F) {
+      ship.hyperspace_jump_timer > kHyperspaceJumpTimerArrivedThreshold &&
+      ship.hyperspace_jump_timer <= 0.0F) {
     if (const Government *govt = ship_government(); govt != nullptr) {
       if ((govt->flags_primary & 0x0004U) == 0U) {
         if ((govt->flags_primary & 0x0040U) != 0U &&
@@ -1655,11 +1655,11 @@ void NovaAi_UpdateBehavior0x04(GameState &state, Ship &ship) {
   }
 
   // Threat escalation: live hostility with a target attacks unless already
-  // retreating/combat-held (3/7/9/0xf) or holding station.
+  // retreating/combat-held (3/7/9/0xf) or jumping.
   if (ship.ai_hostility_accumulator > 0 &&
       ship.primary_target_ship_slot != -1 && ship.ai_state_code != 3 &&
       ship.ai_state_code != 7 && ship.ai_state_code != 9 &&
-      ship.ai_state_code != 0xf && ship.ai_station_hold_timer <= 0.0F) {
+      ship.ai_state_code != 0xf && ship.hyperspace_jump_timer <= 0.0F) {
     ship.ai_state_code = 4;
   }
 
@@ -1680,10 +1680,10 @@ void NovaAi_UpdateBehavior0x04(GameState &state, Ship &ship) {
     if (ship.primary_target_ship_slot == -1) {
       NovaAi_AcquirePrimaryTarget(state, ship);
       if (ship.primary_target_ship_slot != -1 &&
-          ship.ai_station_hold_timer <= 0.0F) {
+          ship.hyperspace_jump_timer <= 0.0F) {
         ship.ai_state_code = 4;
       }
-    } else if (ship.ai_station_hold_timer <= 0.0F &&
+    } else if (ship.hyperspace_jump_timer <= 0.0F &&
                state.SlotInRange(
                    static_cast<std::size_t>(ship.primary_target_ship_slot)) &&
                state

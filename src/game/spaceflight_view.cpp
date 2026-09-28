@@ -2584,9 +2584,9 @@ void SpaceflightView::DrawGameFrame(SdlPlatform &platform,
   hud.Draw(platform, state);
   // Hyperspace flash: a full-screen frame at the jump moment (the original's
   // centered effect 0x32 queued at engage, the 'boom' flash) plus the Mac
-  // progressive fade-in during the hold. White by default; the CE build forces
-  // black when `hyperspace_effects` is off (0x00872384). Drawn topmost so it
-  // also whites/blacks out the HUD, then fades as the loop decays
+  // progressive fade-in during the spin-up. White by default; the CE build
+  // forces black when `hyperspace_effects` is off (0x00872384). Drawn topmost
+  // so it also whites/blacks out the HUD, then fades as the loop decays
   // screen_flash_intensity. A neutral full-window placement keeps it covering
   // HUD and UI independent of the scene `F` scale.
   if (state.screen_flash_intensity > 0.0F) {

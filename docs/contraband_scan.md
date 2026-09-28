@@ -14,10 +14,10 @@ Reverse-engineering + reimplementation note for the government smuggling scan.
   (GovtDef +0x48) non-zero; both axis distances ≤ 100 (`FLOAT_0057501c`);
   `Ship_CanShipEngageTargetUnderCloakRules(player, ship)`; then **one**
   `NovaRandom_Range(100)` draw, accepting ≤ 75.
-- Hyperspace-committed guard: if the player's `ai_station_hold_timer > 0` and
+- Hyperspace-committed guard: if the player's `hyperspace_jump_timer > 0` and
   the player is not disabled, the scan is skipped once the jump tunnel has
-  passed its onset. In the port the hold phase is `TravelState::JumpPhase::kHold`,
-  which also seeds and advances `Ship::ai_station_hold_timer` (2.0 at hold-begin,
+  passed its onset. In the port the hold phase is `TravelState::JumpPhase::kSpinUp`,
+  which also seeds and advances `Ship::hyperspace_jump_timer` (2.0 at hold-begin,
   incremented each 30 Hz tick, 0x0044c548/0x0044c70a), so gating on the phase is
   equivalent to the original's field test; it delegates to
   `NovaTravel_PlayerPastJumpOnset` (same ramp schedule as the tunnel movement

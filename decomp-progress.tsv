@@ -39,7 +39,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004102B0	Ship_IsShipLockedOnAttackerInAiState0x04	src/game/ship_ai.cpp	100%	
 0x004102E0	Government_PropagateHostilityFromAttack	src/game/collision.cpp	100%	
 0x00410670	Ship_EnterShipAiState0x02_ClearPrimaryTarget	src/game/ship_ai.cpp	100%	
-0x004106B0	Ship_EnterShipAiState0x0B_ClearTargetsSeedHold	src/game/ship_ai.cpp	100%	
+0x004106B0	Ship_EnterShipAiState0x0B_SquadJump	src/game/ship_ai.cpp	100%	
 0x00410700	Ship_SetShipHostileToPlayer	src/game/ship_ai.cpp	100%	correctness,bugfix
 0x004107E0	Ship_EnterShipAiState0x04_TargetRandomCombatCandidate	src/game/ship_ai.cpp	100%	
 0x00410900	Ship_EnterShipAiState0x04_TargetRandomRelativeToSquadLeader	src/game/ship_ai.cpp	100%	
@@ -51,7 +51,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00410D10	Ship_EnterSquadReturnState	src/game/ship_ai.cpp	100%	
 0x00410DD0	Ship_ResetShipPrimaryAndSecondaryTargets	src/game/ship_ai.cpp	100%	
 0x00410E20	Ship_EnterShipAiState0x08_Slowdown	src/game/ship_ai.cpp	100%	
-0x00410E80	Ship_IsShipInHoldStateWithControlMode4Or0x0D	src/game/ship_ai.cpp	100%	
+0x00410E80	Ship_IsShipInJumpStateWithControlMode4Or0x0D	src/game/ship_ai.cpp	100%	
 0x00410EC0	Ship_IsShipInAiState0x08	src/game/ship_ai.cpp	100%	
 0x00410EE0	Ship_IsShipInAiControlMode0x0C	src/game/ship_ai.cpp	100%	
 0x00410F00	Ship_IsShipInAiState0x04	src/game/ship_ai.cpp	100%	

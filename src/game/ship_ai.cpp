@@ -62,8 +62,8 @@ bool NovaAiShip_IsDestroyed(const Ship &ship) { return IsShipDestroyed(ship); }
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget.
 void NovaAi_EnterState2ClearPrimaryTarget(GameState &state, Ship &ship) {
   ship.ai_state_code = 2;
-  if (ship.ai_station_hold_timer < 0.0F) {
-    ship.ai_station_hold_timer = 0.0F;
+  if (ship.hyperspace_jump_timer < 0.0F) {
+    ship.hyperspace_jump_timer = 0.0F;
   }
   ship.primary_target_ship_slot = -1;
   ship.ai_mode_start_time_ms = state.tick_60hz;
@@ -77,7 +77,7 @@ void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship) {
     ship.ai_control_mode = 0;
   }
   ship.ai_secondary_target_slot = -1;
-  ship.ai_station_hold_timer = 0.0F;
+  ship.hyperspace_jump_timer = 0.0F;
   ship.ai_forward_thrust_cmd = 0.0F;
   ship.ai_desired_speed = 0.0F;
 }
@@ -88,7 +88,7 @@ void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship) {
 // the position; the original helper owns these state and animation latches.
 void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
   ship.ai_state_code = 8;
-  ship.ai_station_hold_timer = -999.0F;
+  ship.hyperspace_jump_timer = kHyperspaceJumpTimerArrived;
   ship.waypoint_arrival_marker_a = 1;
   ship.waypoint_arrival_marker_b = 0;
   ship.turn_bank_animation_phase =
@@ -103,14 +103,14 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
   ship.arrival_monitor_warning_logged = false;
   NovaLog::Info(
       "NPC arrival monitor armed: slot={} class={} behavior={} state={} "
-      "control={} speed={:.2f} station_hold={:.2f}",
+      "control={} speed={:.2f} jump_timer={:.2f}",
       ship.ship_instance_id,
       ship.ship_class_id,
       ship.ai_behavior_code,
       ship.ai_state_code,
       ship.ai_control_mode,
       std::hypot(ship.vel_x, ship.vel_y),
-      ship.ai_station_hold_timer);
+      ship.hyperspace_jump_timer);
 }
 
 // @port 0x004159e0 80% gameplay
@@ -128,7 +128,7 @@ void NovaAi_EnterState15EmergeFromHypergate(GameState &state,
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = stellar_id;
   ship.ai_maneuver_timer_ms = 60.0F;
-  ship.ai_station_hold_timer = -1.0F;
+  ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
 
   if (stellar_id >= 0 && stellar_id < 0x800) {
     // Ghidra gates on Ship_ComputeShipFuelCapacity(ship) < 1 (0x00463a20): a
@@ -986,47 +986,49 @@ void NovaAi_UpdateShipAI(GameState &state,
   }
 
   // Ghidra 0x00401000 at 0x004011ca: mission-fleet jump-in placement does
-  // not call NovaAi_EnterState8Slowdown. It writes -999 to the station-hold
-  // timer instead, and this per-frame sentinel gate promotes the ship into
-  // the ordinary arrival slowdown before behavior dispatch. The threshold is
-  // FLOAT_00575004 (-900.0f), not the general negative-timer test.
-  const bool arrival_slowdown_sentinel = ship.ai_station_hold_timer < -900.0F;
-  // Latch the control mode before the state-0x0B hold-exit writes below can
+  // not call NovaAi_EnterState8Slowdown. It writes -999 to the hyperspace
+  // jump timer instead, and this per-frame sentinel gate promotes the ship
+  // into the ordinary arrival slowdown before behavior dispatch. The
+  // threshold is FLOAT_00575004 (kHyperspaceJumpTimerArrivedThreshold), not
+  // the general negative-timer test.
+  const bool arrival_slowdown_sentinel =
+      ship.hyperspace_jump_timer < kHyperspaceJumpTimerArrivedThreshold;
+  // Latch the control mode before the state-0x0B jump-exit writes below can
   // change it: the original picks its dispatcher arm from the entry value
   // (disasm 0x004011de/0x004011ee).
   const std::int16_t entry_control_mode = ship.ai_control_mode;
-  const bool entry_hold_control =
+  const bool entry_jump_control =
       entry_control_mode == 4 || entry_control_mode == 0xd;
 
   if (arrival_slowdown_sentinel) {
     ship.ai_state_code = 8;
     ship.ai_control_mode = 10;
-  } else if (entry_hold_control) {
+  } else if (entry_jump_control) {
     // Ghidra 0x00401000 slice (disasm 0x004016b4..0x004017ec): while parked in
-    // the formation control modes, state 0x0B (squad jump hold) exits when its
+    // the formation control modes, state 0x0B (squad jump) exits when its
     // reason disappears -- the player leader went disabled, or an NPC leader
-    // left the hold (timer <= 1.0) into combat (state 4). This arm rejoins
+    // left the jump (timer <= 1.0) into combat (state 4). This arm rejoins
     // directly at the state machine below (disasm 0x00401798 -> 0x004013d6),
     // bypassing behavior selection: that is what keeps a control-mode-4 ship
     // from re-stamping its jump spin-up clock every frame. The original also
     // skips the cadence test and the state-0x13 roll here.
-    auto exit_jump_hold = [&]() {
+    auto abort_squad_jump = [&]() {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
       ship.primary_target_ship_slot = -1;
       ship.ai_secondary_target_slot = -1;
-      ship.ai_station_hold_timer = -1.0F;
+      ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
     };
     if (ship.ai_state_code == 0xb && ship.squad_leader_ship_slot == 0 &&
         NovaAiShip_IsDisabled(state, state.player)) {
-      exit_jump_hold();
+      abort_squad_jump();
     }
     if (ship.ai_state_code == 0xb && ship.squad_leader_ship_slot > 0 &&
-        ship.ai_station_hold_timer <= 1.0F) {
+        ship.hyperspace_jump_timer <= 1.0F) {
       const Ship &leader =
           state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot));
       if (!NovaAiShip_IsDisabled(state, leader) && leader.ai_state_code == 4) {
-        exit_jump_hold();
+        abort_squad_jump();
       }
     }
   } else {
@@ -1059,7 +1061,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   // The disabled auto-guard and the behavior selection both live inside the
   // original's ordinary arm; the sentinel and control-4/0xd arms rejoin at the
   // state machine instead.
-  const bool ordinary_arm = !arrival_slowdown_sentinel && !entry_hold_control;
+  const bool ordinary_arm = !arrival_slowdown_sentinel && !entry_jump_control;
   if (restricted && ordinary_arm) {
     // Auto-guard: a disabled ship ignores the whole AI selection and just
     // holds its current state/controls; mirrors the original clearing the
@@ -1157,7 +1159,7 @@ void NovaAi_UpdateShipAI(GameState &state,
       // divergence glue; see that function for the deferred slices). The
       // State 9/0xf exclusions live inside the supervisor, matching the
       // original. A valid state-8 arrival never reaches this branch because
-      // its -999 station-hold sentinel takes the dispatcher arm above.
+      // its -999 arrival sentinel takes the dispatcher arm above.
       NovaAi_UpdateEscortAI(state, ship, now_ms);
     }
   }
@@ -1294,7 +1296,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
     }
     ship.ai_state_code = 0;
     ship.ai_control_mode = 0;
-    ship.ai_station_hold_timer = -1.0F;
+    ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
   };
   if (leader_slot == -1) {
     release_to_default();
@@ -1332,11 +1334,11 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
 
   // Leader-jump-prep arm (disasm 0x00404a91..0x00404b00): an NPC leader in a
   // follow mode (4 / 0xd) or jump prep (state 2 + mode 1) arms it, and the
-  // leader's station-hold timer being positive arms it for ANY leader row --
-  // including the player (slot 0) during the jump-engage hold, whose timer is
-  // seeded to 2.0 at hold-begin. The escort mirrors the leader's travel
-  // destination and disengages into state 0x0B (hold formation until the
-  // leader's jump fires).
+  // leader's jump timer being positive arms it for ANY leader row --
+  // including the player (slot 0) during the jump-engage spin-up, whose timer
+  // is seeded to kPlayerJumpSpinUpSeed at spin-up begin. The escort mirrors
+  // the leader's travel destination and disengages into state 0x0B (hold
+  // formation until the leader's jump fires).
   const bool leader_npc_follow_mode =
       leader_slot > 0 &&
       (leader->ai_control_mode == 4 || leader->ai_control_mode == 0xd);
@@ -1344,7 +1346,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
                                     leader->ai_state_code == 2 &&
                                     leader->ai_control_mode == 1;
   if (leader_npc_follow_mode || leader_npc_jump_prep ||
-      leader->ai_station_hold_timer > 0.0F) {
+      leader->hyperspace_jump_timer > 0.0F) {
     ship.ai_secondary_target_slot = leader->ai_secondary_target_slot;
     ship.primary_target_ship_slot = -1;
     if (leader_slot != 0 && NovaShip_IsInertialess(ship, *cls)) {
@@ -1355,7 +1357,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
       ship.ai_behavior_code = cls->default_ai_behavior;
       ship.ai_state_code = 2;
       ship.ai_control_mode = 4;
-      ship.ai_station_hold_timer = 0.0F;
+      ship.hyperspace_jump_timer = 0.0F;
       return;
     }
     ship.ai_state_code = 0xb;
@@ -1448,15 +1450,16 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
   };
 
   if (ship.ai_state_code == 0xb) {
-    // State-0x0B maintenance: the hold state owns the ship until the leader's
-    // jump fires (or the leader exits, handled by the 0x00401000 exits).
+    // State-0x0B maintenance: the squad-jump state owns the ship until the
+    // leader's jump fires (or the leader exits, handled by the 0x00401000
+    // exits).
     ship.primary_target_ship_slot = -1;
     if (leader_slot != 0 && NovaShip_IsInertialess(ship, *cls)) {
       ship.squad_leader_ship_slot = -1;
       ship.ai_behavior_code = cls->default_ai_behavior;
       ship.ai_state_code = 2;
       ship.ai_control_mode = 4;
-      ship.ai_station_hold_timer = 0.0F;
+      ship.hyperspace_jump_timer = 0.0F;
       return;
     }
     return;
@@ -1464,7 +1467,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
 
   switch (ship.escort_command_code) {
   case 1: { // attack the leader's attacker (assist)
-    ship.ai_station_hold_timer = -1.0F;
+    ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
     ship.ai_maneuver_timer_ms = -1.0F;
     if (ship.primary_target_ship_slot != -1) {
       const Ship &target =
@@ -1493,7 +1496,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
     break;
   }
   case 2: { // attack the player's target
-    ship.ai_station_hold_timer = -1.0F;
+    ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
     ship.ai_maneuver_timer_ms = -1.0F;
     if (ship.primary_target_ship_slot == -1) {
       ship.primary_target_ship_slot =
@@ -1530,7 +1533,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
     }
     [[fallthrough]];
   default: { // formation (command 0 and any undecoded command)
-    ship.ai_station_hold_timer = -1.0F;
+    ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
     ship.ai_maneuver_timer_ms = -1.0F;
     if (ship.primary_target_ship_slot != -1 &&
         !NovaWeapon_ShipWithinWeaponRangeOfTarget(
@@ -1662,12 +1665,12 @@ bool NovaAiShip_CanMaintainCloakState(const GameState &state,
     return false;
   }
   // Player-only tail: while the player is in the hyperspace spin-up/hold
-  // (ai_station_hold_timer > 0), the cloak cannot be maintained unless the
+  // (hyperspace_jump_timer > 0), the cloak cannot be maintained unless the
   // flown ship class carries Bible shïp Flags2 0x0400 ("AI ships will cloak
   // when hyperspacing"), which the original also applies to the player. The
   // original indexes g_ship_class_defs unchecked; a missing class is treated
   // as flag-clear (safe-fail).
-  if (ship.ship_instance_id == 0 && ship.ai_station_hold_timer > 0.0F) {
+  if (ship.ship_instance_id == 0 && ship.hyperspace_jump_timer > 0.0F) {
     const ShipClass *ship_class = state.scenario.Ship(
         static_cast<std::int16_t>(ship.ship_class_id + 0x80));
     if (ship_class == nullptr ||
@@ -1824,8 +1827,8 @@ bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship) {
 }
 
 // @port 0x00410e80 100%
-// Ghidra 0x00410e80 Ship_IsShipInHoldStateWithControlMode4Or0x0D.
-bool NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship) {
+// Ghidra 0x00410e80 Ship_IsShipInJumpStateWithControlMode4Or0x0D.
+bool NovaAiShip_IsShipInJumpStateWithControlMode4Or0xD(const Ship &ship) {
   const std::int16_t s = ship.ai_state_code;
   return (s == 2 || s == 3 || s == 0x0B) &&
          (ship.ai_control_mode == 4 || ship.ai_control_mode == 0x0D);
@@ -2061,7 +2064,7 @@ bool NovaAiShip_IsThreatenedByEnemyOfShip(const GameState &state,
 // Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerForAssist.
 void NovaAi_EnterState9TargetPlayerForAssist(Ship &ship) {
   ship.ai_hostility_accumulator = 0;
-  ship.ai_station_hold_timer = 0.0F;
+  ship.hyperspace_jump_timer = 0.0F;
   ship.primary_target_ship_slot = 0;
   ship.ai_state_code = 9;
   ship.ai_control_mode = 0;
@@ -2072,7 +2075,7 @@ void NovaAi_EnterState9TargetPlayerForAssist(Ship &ship) {
 // Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerForAssist.
 void NovaAi_EnterState0FTargetPlayerForAssist(Ship &ship) {
   ship.ai_hostility_accumulator = 0;
-  ship.ai_station_hold_timer = 0.0F;
+  ship.hyperspace_jump_timer = 0.0F;
   ship.primary_target_ship_slot = 0;
   ship.ai_state_code = 0x0F;
   ship.ai_control_mode = 0;
@@ -2183,29 +2186,29 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
 }
 
 // @port 0x004106b0 100%
-// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_ClearTargetsSeedHold.
-void NovaAi_EnterStateBClearTargetsSeedHold(Ship &ship,
-                                            std::uint32_t now_60hz) {
+// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_SquadJump.
+void NovaAi_EnterStateBSquadJump(Ship &ship, std::uint32_t now_60hz) {
   ship.ai_state_code = 0x0B;
   ship.ai_hostility_accumulator = 0;
   ship.primary_target_ship_slot = -1;
-  if (ship.ai_station_hold_timer <= 0.0F) {
-    ship.ai_station_hold_timer = 1.0F;
+  if (ship.hyperspace_jump_timer <= 0.0F) {
+    ship.hyperspace_jump_timer = 1.0F;
     ship.ai_mode_start_time_ms = now_60hz;
   }
 }
 
 // @port 0x00422340 100%
 // Ghidra 0x00422340 Ship_SyncJumpStateToSquad. During the squad leader's
-// jump-engage hold, copies the leader's hold clock (ai_station_hold_timer +
-// ai_mode_start_time_ms) into every active squadmate with no stellar
+// jump-engage spin-up, copies the leader's jump timer (hyperspace_jump_timer
+// + ai_mode_start_time_ms) into every active squadmate with no stellar
 // attachment, marks its primary target with the -2 sentinel, and enters AI
-// state 0x0B (clear targets / seed hold): squadmates disengage and hold
+// state 0x0B (clear targets / squad jump): squadmates disengage and hold
 // formation in lockstep while the leader charges the jump. Escorts transfer
 // systems at arrival via the escort-adoption slice of
 // System_RebuildInitialNpcAndMissionPopulation (0x0041af90), not here. Slot 0
 // (the player) is never a follower and is skipped by the original's slot-1..63
-// scan. Sole caller: Ship_HandlePlayerShipCore 0x0044c705 (jump-engage hold).
+// scan. Sole caller: Ship_HandlePlayerShipCore 0x0044c705 (jump-engage
+// spin-up).
 void NovaAi_SyncJumpStateToSquad(GameState &state,
                                  Ship &leader,
                                  std::uint32_t now_60hz) {
@@ -2216,10 +2219,10 @@ void NovaAi_SyncJumpStateToSquad(GameState &state,
         follower.defense_fleet_home_stellar_id != -1) {
       continue;
     }
-    follower.ai_station_hold_timer = leader.ai_station_hold_timer;
+    follower.hyperspace_jump_timer = leader.hyperspace_jump_timer;
     follower.ai_mode_start_time_ms = leader.ai_mode_start_time_ms;
     follower.primary_target_ship_slot = -2;
-    NovaAi_EnterStateBClearTargetsSeedHold(follower, now_60hz);
+    NovaAi_EnterStateBSquadJump(follower, now_60hz);
   }
 }
 
@@ -2348,9 +2351,9 @@ void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
       state.mission_speaker_ship_slot = -1;
     }
   }
-  // 0x004107ab gates the drop on Ship_IsShipInHoldStateWithControlMode4Or0x0D:
+  // 0x004107ab gates the drop on Ship_IsShipInJumpStateWithControlMode4Or0x0D:
   // ai_state_code must be 2/3/0x0B *and* ai_control_mode 4/0x0D.
-  if (NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(ship)) {
+  if (NovaAiShip_IsShipInJumpStateWithControlMode4Or0xD(ship)) {
     ship.ai_control_mode = 0;
   }
   ship.ai_state_code = 4;

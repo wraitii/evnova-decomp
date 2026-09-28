@@ -10,7 +10,7 @@
 // machine that the spaceflight loop ticks once a frame:
 //
 //   the jump blocks in Ship_HandlePlayerShipCore (0x0044aa70): the engage
-//     gates (0x0044c195 dispatch), the turnaround/hold physics, and the fire
+//     gates (0x0044c195 dispatch), the turnaround/spin-up physics, and the fire
 //     + arrival block at PlayerTick_HyperspaceSequenceAnchor (0x0044f3d0)
 //
 // Mapping (confirmed from the decomp + the Bible): a System's adjacency block
@@ -28,20 +28,20 @@
 //     max(class turn+1, 20) deg (a facing window, not a turn speed), ramps
 //     the engine glow by +3/tick to 24, and damps velocity by
 //     g_jump_turnaround_velocity_damp (0x5755f0, 0.99204) per 30 Hz tick.
-//   kHold -- velocity damps by g_hyperspace_slow_phase_velocity_damp
+//   kSpinUp -- velocity damps by g_hyperspace_slow_phase_velocity_damp
 //     (0x5755f8, 0.98007), the hull turns onto the map bearing toward the
 //     destination system (the per-frame re-aim at LAB_0044edfd), and the
-//     'Warp up' cue plays. The tail of the hold is the TUNNEL: once the hull
+//     'Warp up' cue plays. The tail of spin-up is the TUNNEL: once the hull
 //     faces the jump bearing within max(class turn, 30 deg) the position
 //     advances along it by min(progress, 50) px/tick with progress =
 //     elapsed_60hz*multiplier/(364*0.01) - 35/multiplier -- both the elapsed
 //     clock and the 364 duration are 1/60 s ticks (duration = the cue's own
 //     length, snd 128 frames*60/rate), so for multiplier=1 the ramp starts
-//     ~2.1 s into the hold and hits the cap at ~5.2 s -- and the engine glow
-//     overdrives +4/tick to 32 (past the normal 24). The fire lands once the
-//     hold passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks) and the
-//     cue has finished (6.08 s / multiplier) -- the boom lands as the cue
-//     resolves.
+//     ~2.1 s into spin-up and hits the cap at ~5.2 s -- and the engine glow
+//     overdrives +4/tick to 32 (past the normal 24). The fire lands once
+//     spin-up passes g_hyperspace_min_spin_up_ticks_30hz (0x5755a8, 30 ticks)
+//     and the cue has finished (6.08 s / multiplier) -- the boom lands as the
+//     cue resolves.
 //   fire -- the boom/arrival: full-screen flash + 'Warp out' cue + the
 //     position hurl 1350 px from the in-system origin (0,0) along the map
 //     bearing + 180, velocity reset to max speed along the current heading,
@@ -127,8 +127,8 @@ void NovaTravel_EmergeAttachedShipsFromGate(
 // FLOAT_kJumpFuelCost` (named 0x005755a4 in Ghidra).
 inline constexpr float kJumpFuelCost = 100.0F;
 
-// Voice tag for the 'Warp up' cue (snd 128) played at the start of the
-// stationary hold. The fire gate counts active instances of this handle
+// Voice tag for the 'Warp up' cue (snd 128) played at the start of
+// stationary spin-up. The fire gate counts active instances of this handle
 // (NovaAudio_CountActiveByHandle on g_hyperspace_sound_handle_warp_up) and
 // only fires the jump once the cue has finished; the spaceflight loop passes
 // the live count into NovaTravel_Tick.
@@ -184,12 +184,12 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 //      REVERSE of its velocity and retro-thrusts once inside the facing window
 //      max(class turn + 1, 20 deg), damping velocity by
 //      g_jump_turnaround_velocity_damp (0x5755f0, 0.9920) per 30 Hz tick.
-//  (c) kHold: velocity damps by g_hyperspace_slow_phase_velocity_damp
+//  (c) kSpinUp: velocity damps by g_hyperspace_slow_phase_velocity_damp
 //      (0x5755f8, 0.9801), the hull turns onto the map bearing toward the
 //      destination system, and the 'Warp up' cue plays. The fire lands when
-//      the hold passes 30 ticks (30 Hz) and the cue has finished
-//      (g_hyperspace_engage_hold_30hz 0x5755a8); the tunnel ramp schedule is
-//      cue-relative (see (b)/(c) notes in the NovaTravel_Tick docs below).
+//      spin-up passes 30 ticks (30 Hz) and the cue has finished
+//      (g_hyperspace_min_spin_up_ticks_30hz 0x5755a8); the tunnel ramp schedule
+//      is cue-relative (see (b)/(c) notes in the NovaTravel_Tick docs below).
 //  (d) Fire (0x0044f3d0 area): position hurls 1350 px
 //      (g_hyperspace_engage_velocity_hurl 0x57600) from the in-system origin
 //      (0,0) along the map bearing + 180 (the near side), velocity resets to
@@ -333,7 +333,7 @@ void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
 
 // Writes the player's travel slot (0..15 adjacency index, or -1). The original
 // keeps it in ShipState +0x6C, which escorts copy while the player's
-// station-hold timer runs (Ship_UpdateShipAiState 0x00404a91,
+// hyperspace jump timer runs (Ship_UpdateShipAiState 0x00404a91,
 // Ship_UpdateEscortCommandState), so the port mirrors it into
 // player.ai_secondary_target_slot. While docked that field is the dock stellar
 // the launch tail repositions from; the original's docked map windows save and
@@ -407,7 +407,7 @@ void NovaStarmap_ClearRoute(GameState &state);
 
 // `warp_up_sound_active`: true while the 'Warp up' cue voice is still playing
 // (SdlAudio::CountActiveByKey(kHyperspaceWarpUpSoundKey) > 0). The fire gate
-// waits for it to finish once the hold passes 30 ticks, mirroring the
+// waits for it to finish once spin-up passes 30 ticks, mirroring the
 // original's NovaAudio_CountActiveByHandle latch.
 void NovaTravel_Tick(GameState &state,
                      bool travel_input,
@@ -415,11 +415,11 @@ void NovaTravel_Tick(GameState &state,
                      bool warp_up_sound_active = false);
 
 // Advances the hyperspace flash by one render frame according to its mode. The
-// jump-hold build-up (kBuildup) is the pre-trigger state; once the Mac scalar
-// becomes positive, NovaTravel_Tick latches kFadeIn exactly once. kFadeIn and
-// kFadeOut run the Mac 1.5 s display fades, while kInstant keeps the original
-// ~60 ms one-frame fallback (wormhole, disabled-jump collapse). The caller
-// passes the host render-frame delta in milliseconds.
+// jump spin-up build-up (kBuildup) is the pre-trigger state; once the Mac
+// scalar becomes positive, NovaTravel_Tick latches kFadeIn exactly once.
+// kFadeIn and kFadeOut run the Mac 1.5 s display fades, while kInstant keeps
+// the original ~60 ms one-frame fallback (wormhole, disabled-jump collapse).
+// The caller passes the host render-frame delta in milliseconds.
 void NovaTravel_AdvanceScreenFlash(GameState &state, float frame_time_ms);
 
 // Consume the jump's saved travel-day count after rebuilding the arrival

@@ -278,8 +278,17 @@ struct Ship {
   // positive it suppresses turn/thrust so the ship coasts. Set to random
   // 30..59 on reversal and decremented by normalized elapsed ticks each frame.
   float ai_maneuver_timer_ms = 0.0F; // +0x4C
-  // Station-hold timer driving the hold/approach state (ai_station_hold_timer).
-  float ai_station_hold_timer = 0.0F; // +0x50
+  // Hyperspace (plotted-jump) clock; unused by hypergates/wormholes. While
+  // > 0 a jump is under way: the player's brake holds it at 1.0 and spin-up
+  // begins at kPlayerJumpSpinUpSeed (2.0); NPC control mode 4 seeds 1.0; both
+  // then add elapsed ticks. Escort mode 0xD adds 1 per raw call and squadmates
+  // copy the leader's value. 0 is idle. kHyperspaceJumpTimerCleared (-1) is
+  // written by resets, jump aborts and squad-jump exits; -4 is the escort
+  // 0xD re-aim. kHyperspaceJumpTimerArrived (-999, tested as
+  // < kHyperspaceJumpTimerArrivedThreshold) marks a hyperspace arrival and
+  // drives the state-8 slowdown and escort scatter; governments test the
+  // (-900, 0] window.
+  float hyperspace_jump_timer = 0.0F; // +0x50
   // Probe/debug-only lifecycle monitor for non-gate NPC arrivals. Spawn paths
   // arm it alongside the original 50 px/tick inward velocity; it has no
   // gameplay effect and lets rare state/control failures survive in the log.
@@ -836,19 +845,19 @@ struct TravelState {
   // Player-core BP travel-day count, charged after arrival fleet restoration
   // (0x0044fef8). Zero outside an ordinary hyperspace arrival.
   std::int16_t pending_payroll_periods = 0;
-  // Brake to a near stop, then the stationary warp-up hold (whose tail is the
-  // tunnel: the ship accelerates along the jump bearing while the Warp up cue
-  // finishes), then the fire/arrival. The fire hurls the ship 1350 px from
-  // the in-system origin at max speed and returns control to normal flight
-  // immediately; there is no post-fire tunnel in the new system.
-  enum class JumpPhase { kIdle, kBrake, kHold };
+  // Brake to a near stop, then the warp-up spin-up (whose tail is
+  // the tunnel: the ship accelerates along the jump bearing while the Warp up
+  // cue finishes), then the fire/arrival. The fire hurls the ship 1350 px
+  // from the in-system origin at max speed and returns control to normal
+  // flight immediately; there is no post-fire tunnel in the new system.
+  enum class JumpPhase { kIdle, kBrake, kSpinUp };
   JumpPhase jump_phase = JumpPhase::kIdle;
   // Whether Warp up has been started for this jump.
   bool warp_up_started = false;
   // The one-shot flight-tutorial hint state (Ghidra DAT_007cab1c, a global
   // stepped by the per-second hint overlay block of Ship_HandlePlayerShipCore
   // 0x0044aa70; -3 -> -2 -> -1 -> 0 -> 1 -> 2). Values >= 3 only occur as the
-  // 0x7fff latch set at the jump hold-begin (0x0044c561), hyperspace arrival
+  // 0x7fff latch set at jump spin-up begin (0x0044c561), hyperspace arrival
   // (0x0044f83f) and Ship_ResetPlayerShipState (0x004b3a3b; TODO(decomp) when
   // the death respawn is ported); while latched, landing shows the launch
   // departure message (Stellar_RunDockAndLaunchSequence tail 0x00456323)
@@ -856,22 +865,23 @@ struct TravelState {
   // fresh pilot starts at -3 (0xfffd, new-game state reset 0x0048a600). The
   // hint overlay texts themselves (the DAT_0072exxxcc queue) are TODO(decomp).
   std::int16_t travel_hint_state = -3;
-  // The hold-phase clock is the player ship's ai_station_hold_timer (seeded to
-  // 2.0 at hold-begin, 0x0044c548, and incremented each 30 Hz tick): the fire
-  // lands once it passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks)
-  // AND the Warp up cue has finished playing (the original's
-  // NovaAudio_CountActiveByHandle gate, mirrored through hold_audio_latch).
-  // The escort jump sync (Ship_SyncJumpStateToSquad 0x00422340) and the
-  // player-led jump spin-up (Ship_HandleShip 0x00433050) read the same field,
-  // so it cannot live as a separate travel-local.
-  bool hold_audio_latch = false;
+  // The spin-up clock is the player ship's hyperspace_jump_timer
+  // (seeded to kPlayerJumpSpinUpSeed at spin-up begin, 0x0044c548, and
+  // incremented each 30 Hz tick): the fire lands once it passes
+  // g_hyperspace_min_spin_up_ticks_30hz (0x5755a8, 30 ticks) AND the Warp up
+  // cue has finished playing (the original's NovaAudio_CountActiveByHandle
+  // gate, mirrored through warp_up_cue_done). The escort jump sync
+  // (Ship_SyncJumpStateToSquad 0x00422340) and the player-led jump spin-up
+  // (Ship_HandleShip 0x00433050) read the same field, so it cannot live as a
+  // separate travel-local.
+  bool warp_up_cue_done = false;
   // Rising-edge latch for the "entered jump range" cue (Ghidra DAT_007cab34):
   // set while a plotted (mode-3) jump is armed and the ship is far enough
   // from the system center to jump, cleared otherwise. The transition-sound
   // cue fires on the 0 -> 1 edge (see TickJumpRangeCue in travel.cpp).
   bool jump_range_cue_latch = false;
-  // Tunnel ramp clock in 1/60 s ticks, accumulated since the hold began (the
-  // original stamps ai_mode_start_time_ms when the hold starts, 0x0044c4e9,
+  // Tunnel ramp clock in 1/60 s ticks, accumulated since spin-up began (the
+  // original stamps ai_mode_start_time_ms when spin-up starts, 0x0044c4e9,
   // and reads its 60 Hz tick counter in the tunnel block -- NOT ms despite
   // the ai_mode_start_time_ms name; see NovaTime_GetTickCount60Hz). Drives
   // the in-tunnel position ramp: progress = elapsed*multiplier
@@ -1427,7 +1437,7 @@ struct GameState {
   // Full-screen flash intensity [0..1] at the hyperspace fire moment (the
   // original's centered effect 0x32 queued via
   // NovaAudio_QueueCenteredSound at jump engage -- the 'boom' white
-  // frame). During the jump hold it is driven by the Mac progressive fade-in
+  // frame). During the jump spin-up it is driven by the Mac progressive fade-in
   // scalar (see travel.cpp), then set to 1.0 when the boom fires at arrival
   // and decayed by the spaceflight loop; the in-game frame draw overlays a
   // fullscreen rect with this alpha. 0 when no flash is active.
@@ -1446,14 +1456,14 @@ struct GameState {
   // it is not re-armed from the 21 ms simulation cadence.
   enum class ScreenFlashMode {
     kNone,    // no active flash
-    kBuildup, // jump hold before the Mac _FadeWhiteIn trigger
+    kBuildup, // jump spin-up before the Mac _FadeWhiteIn trigger
     kFadeIn,  // Mac 1.5 s _FadeWhiteIn display fade-in
     kFadeOut, // Mac 1.5 s _FadeWhiteOut display fade-out
     kInstant, // one-frame boom/collapse flash, ~60 ms decay
   };
   ScreenFlashMode screen_flash_mode = ScreenFlashMode::kNone;
   // Per-jump latch for the one-shot Mac _FadeWhiteIn request. This is reset
-  // when the stationary jump hold begins; using the mode alone would re-arm
+  // when the stationary jump spin-up begins; using the mode alone would re-arm
   // the fade after another flash mode changed it.
   bool screen_flash_fade_in_started = false;
 
@@ -2010,7 +2020,7 @@ struct GameState {
   // FUN_004b0740: NovaSound_LoadDecodedById(0x80/0x81/0x82) into the jump
   // handles g_random_encounter_fleet_defs[0].availability_expression
   // +0x8c/+0x90/+0x94).
-  // snd 128 Warp up is played during the pre-jump hold; snd 129 is the
+  // snd 128 Warp up is played during the pre-jump spin-up; snd 129 is the
   // noengine/x2 variant selected when g_x2_mode_active is set; snd 130 Warp
   // out at fire/arrival. Empty means the travel state uses its fallback
   // timing.

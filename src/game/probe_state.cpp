@@ -300,7 +300,7 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("ai_control_mode", ship.ai_control_mode);
       row.num("ai_desired_speed", ship.ai_desired_speed);
       row.num("ai_forward_thrust_cmd", ship.ai_forward_thrust_cmd);
-      row.num("ai_station_hold_timer", ship.ai_station_hold_timer);
+      row.num("hyperspace_jump_timer", ship.hyperspace_jump_timer);
       row.num("ai_maneuver_timer", ship.ai_maneuver_timer_ms);
       row.num("random_ai_render_cadence", ship.random_ai_render_cadence);
       // Ship_AcquirePrimaryTargetForShip (0x0040ed37): the radius wraps

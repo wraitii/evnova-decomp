@@ -750,9 +750,9 @@ void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
                                          float /*elapsed_ticks*/) {
   Ship &player = state.player;
   NovaWeapon_SelectTurretTargetWithinArc(state, player);
-  // Fire arms require the station-hold and maneuver timers to be expired and
+  // Fire arms require the hyperspace jump and maneuver timers to be expired and
   // the ship not disabled (disabled / derelict-government gate).
-  const bool controls_live = player.ai_station_hold_timer <= 0.0F;
+  const bool controls_live = player.hyperspace_jump_timer <= 0.0F;
   const bool maneuver_done = player.ai_maneuver_timer_ms <= 0.0F;
   const bool fire_restricted = NovaAiShip_IsDisabled(state, player);
 
@@ -837,9 +837,9 @@ void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
 
 // Ghidra 0x0044aa70 cooldown-decay tail of PlayerTick_WeaponCommands: per
 // bank with ammo > 0, clamp expired cooldowns to zero, otherwise decay by the
-// frame tick scale (possibly below zero); and while the player is ionized, banks whose weapon has
-// flags_quaternary 0x20 are pinned at a 1-tick cooldown (0x3f800000),
-// disabling them until the charge decays.
+// frame tick scale (possibly below zero); and while the player is ionized,
+// banks whose weapon has flags_quaternary 0x20 are pinned at a 1-tick cooldown
+// (0x3f800000), disabling them until the charge decays.
 void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
                                               float elapsed_ticks) {
   for (std::size_t b = 0; b < kWeaponBankCount; ++b) {

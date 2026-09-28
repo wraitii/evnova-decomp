@@ -236,7 +236,7 @@ These use `g_avg_frame_tick_scale` in the original and should remain on
 
 ## Hyperspace white fade cadence
 
-The Mac jump hold computes the tunnel scalar `FLOAT_007354a0` (Windows formula
+The Mac jump spin-up computes the tunnel scalar `FLOAT_007354a0` (Windows formula
 `progress * 0.3 - 15` at `0x00450601`; Mac `(progress - 55) * 5`) and requests
 `_FadeWhiteIn` once when it becomes positive, then runs `_FadeWhiteOut` at hold
 end.
@@ -245,7 +245,7 @@ end.
 `screen_flash_mode == kFadeOut` (ordinary hyperspace fire and the hypergate
 transfer). The wormhole and the disabled-jump collapse have no display fade and
 keep the original one-frame cadence (`host_frame_time_ms / 60`,
-`screen_flash_mode == kInstant`). The hold begins in `kBuildup`; when
+`screen_flash_mode == kInstant`). The spin-up begins in `kBuildup`; when
 `(progress - 55) * 5` becomes positive, `NovaTravel_Tick` latches one
 `kFadeIn` request and the render loop advances its 1.5 s opacity transition.
 The scalar is a trigger, not continuously sampled alpha, so simulation ticks

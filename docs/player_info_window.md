@@ -54,7 +54,7 @@ the dispatch callback for the close keys).
 ## Run flow — NovaUi_RunPlayerSpecialInteractionWindow (0x00499c10)
 
 Guards (return without opening):
-`BOOL_007354a8` (a modal already active), `g_ship_states->ai_station_hold_timer`
+`BOOL_007354a8` (a modal already active), `g_ship_states->hyperspace_jump_timer`
 must be exactly +0.0 (the decompiler shows the float bits as `0x40`), and the
 death-timer field must be <= the constant at `DAT_00575990` (0.0-scale float).
 

@@ -705,7 +705,7 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
   }
   const bool travel_clear =
       (clear_command && !arm_modifier_held) || hyperspace_command;
-  if (travel_clear && state.player.ai_station_hold_timer <= 0.0F) {
+  if (travel_clear && state.player.hyperspace_jump_timer <= 0.0F) {
     if (!latches.clear_target_was_held) {
       latches.clear_target_was_held = true;
       // 0x0044ddce queues transition cue 1.
@@ -735,7 +735,7 @@ void PlayerTick_TravelSelectionCommands(GameState &state,
     }
   } else {
     // 0x0044b8b2: the shared latch releases once neither arm is active, and
-    // also when the station-hold gate blocks the travel clear.
+    // also when the jump-timer gate blocks the travel clear.
     latches.clear_target_was_held = false;
   }
   // Destination-SYSTEM cycling (Backslash / Shift+Backslash): rotate the
@@ -929,7 +929,7 @@ void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
 // Ghidra 0x0044aa70 PlayerTick_JumpArrivalBlock (0x0044fa72 -> [0x0044fd2e],
 // synthetic plan score 0.76): cross-system jump arrival -- asteroid/starfield
 // re-init, the vacant-ship sweep, escort adoption + mission-fleet restoration
-// inside the -999 station-hold window, offering rerolls, the scattered NPC
+// inside the -999 arrival window, offering rerolls, the scattered NPC
 // population and the arrival ambush, then the target/selection reset. The
 // entering-system arrival message and the escort travel-day daily tick
 // (0x0044fb2d) of the original slice remain TODO(decomp) inside; the
@@ -969,11 +969,11 @@ void PlayerTick_JumpArrivalBlock(
   // attached ships (squad_leader_ship_slot == 0) that survived the sweep
   // are adopted into the arrival system (Ship_ResetShipToDefaultCombatState
   // 0x0041e240, flag = 0: no refill on a jump), the wedge snaps around
-  // the player, and because the player core windows its station-hold
+  // the player, and because the player core windows its hyperspace jump
   // timer at -999 around the rebuild (0x0044fa83 / 0x0044faa2) each
   // attached ship is pushed ~892 px behind and flung forward at 50 px/tick
   // -- escorts stream in behind the jumping player.
-  state.player.ai_station_hold_timer = -999.0F;
+  state.player.hyperspace_jump_timer = kHyperspaceJumpTimerArrived;
   // Ghidra 0x0044fa10/0x0044fa15: the arrival random-walks the first stat
   // modifier pair and rerolls the second before the mission spawn refresh
   // (travel-day world ticks already ran in FireJump).
@@ -1032,7 +1032,7 @@ void PlayerTick_JumpArrivalBlock(
   }
   // 0x0044faa2: the -999 hold-timer window closes right after the
   // rebuild returns.
-  state.player.ai_station_hold_timer = 0.0F;
+  state.player.hyperspace_jump_timer = 0.0F;
   // The player's primary target ship lived in the departure system; the
   // vacancy sweep deactivated it (and its slot may be reused by a fresh
   // spawn), so clear the selection and the reticle pulse -- the original
@@ -1498,7 +1498,7 @@ void PlayerTick_SelfDestructCommand(GameState &state,
       const auto whole_ticks = static_cast<int>(countdown);
       if (countdown <= 120.0F && whole_ticks % 30 == 0) {
         const float seconds =
-            countdown / 30.0F; // g_hyperspace_engage_hold_30hz
+            countdown / 30.0F; // g_hyperspace_min_spin_up_ticks_30hz
         const auto whole_seconds = static_cast<int>(seconds);
         std::string text =
             NovaHud_LoadStringEntry(0x7d2, 0x181).value_or("Self destruct");
@@ -1556,7 +1556,7 @@ void PlayerTick_SelfDestructCommand(GameState &state,
 // umbrella). Command (binding 0x29, default DIK 0x16 = U, edge-latched through
 // g_playerDisableSurrenderCommandLatch): suppressed (latch cleared) while the
 // player is destroyed (death_timer_active > 0), disabled
-// (ai_station_hold_timer > 0) or fire-restricted (the port's established
+// (hyperspace_jump_timer > 0) or fire-restricted (the port's established
 // NovaAiShip_IsDisabled approximation of the parent's local fire-restriction
 // flag); on the first accepted frame, Ship_CanMaintainCloakState failing
 // plays the denied cue (table 3), otherwise the fade flips via
@@ -1576,7 +1576,7 @@ void PlayerTick_InteractionCloakAndStatus(GameState &state,
                                           float elapsed_ticks) {
   Ship &p = state.player;
   const bool destroyed = p.death_timer_active > 0.0F;
-  const bool disabled = p.ai_station_hold_timer > 0.0F;
+  const bool disabled = p.hyperspace_jump_timer > 0.0F;
   const bool fire_restricted = NovaAiShip_IsDisabled(state, p);
   if (!cloak_command_held || destroyed || disabled || fire_restricted) {
     state.cloak_command_latch = 0;
@@ -2049,13 +2049,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       // Ghidra Ship_HandlePlayerShipCore 0x0044aa70: after velocity matching
       // and before the primary-target validation the core recenters the world
-      // whenever the player is not holding station (ai_station_hold_timer <=
+      // whenever the player is not jumping (hyperspace_jump_timer <=
       // 0). The recenter is idempotent while the player is inside the +-15000
       // band. The same delta is applied to the frame-start player position the
       // ambient-star parallax reads (Ghidra g_player_frame_start_pos_x/y) so a
       // wrap is not
       // mistaken for a 25000-pixel ship jump.
-      if (state.player.ai_station_hold_timer <= 0.0F) {
+      if (state.player.hyperspace_jump_timer <= 0.0F) {
         const WorldWrapDelta wrap = RecenterSpaceObjectsForWorldWrap(state);
         if (wrap.applied()) {
           prev_x += wrap.x;
@@ -2182,7 +2182,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // PlayerTick_WeaponCycleContinuation (0x0044EAB4): primary fire loop,
       // selected-secondary fire, unfirable-bank auto-clear, the wrapped
       // secondary-bank cycle and the clear-selection arm. The original gates
-      // the fire arms on the station-hold/maneuver timers and the
+      // the fire arms on the jump-timer/maneuver timers and the
       // disabled state inside the dispatch; the port additionally
       // suspends the whole pass while the jump state machine owns the ship
       // (matching the disable restriction the original applies through the
@@ -2457,7 +2457,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // the duration scale (65536/multiplier) is folded into the SDL playback
       // rate at the play call instead.
       if (state.warp_up_sound_pending) {
-        // x2 mode stages the noengine 'Warp up.x2' cue pair (HoldTimerRamp
+        // x2 mode stages the noengine 'Warp up.x2' cue pair (SpinUpTimerRamp
         // 0x0044c5e5 selects _g_hyperspace_sound_handle_warp_up_x2 when
         // g_x2_mode_active). Use the engage-time latch so toggling x2 mid-jump
         // cannot swap the cue out from under the already-running one. Both
@@ -2577,15 +2577,15 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // missions." overlay (STR# 0x7d2 0x162, 0xf0 ticks) or opens the
       // mission-computer window (NovaUi_RunMissionComputerWindow 0x00446150).
       // Gates mirrored from 0x00451c87: the command suppresses while the player
-      // is disabled (ai_station_hold_timer > 0), a timed action is armed
+      // is disabled (hyperspace_jump_timer > 0), a timed action is armed
       // (timed_action_counter > 0), destroyed (death_timer_active > 0) or
       // within the 15-frame arrival grace -- the port's earlier travel.engaging
-      // gate (a jump's hold/zoom phases set the hold timer anyway) is subsumed
-      // by the disabled check.
+      // gate (a jump's brake/spin-up phases set the jump timer anyway) is
+      // subsumed by the disabled check.
       const bool mission_info_held = input.mission_info;
       if (!player_tick_consumed && mission_info_held &&
           !state.command_latches.mission_info_was_held &&
-          state.player.ai_station_hold_timer <= 0.0F &&
+          state.player.hyperspace_jump_timer <= 0.0F &&
           state.player.timed_action_counter <= 0 &&
           state.player.death_timer_active <= 0.0F &&
           state.arrival_command_grace_frames <= 0) {
@@ -2689,13 +2689,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         if (ship_target > 0 &&
             state.SlotInRange(static_cast<std::size_t>(ship_target))) {
           if (NovaAiShip_IsDestroyed(state.player) ||
-              state.player.ai_station_hold_timer > 0.0F) {
+              state.player.hyperspace_jump_timer > 0.0F) {
             NovaLog::Info("target-action: player disabled/destroyed; hail "
                           "ignored");
           } else {
             const Ship &target =
                 state.ShipAt(static_cast<std::size_t>(ship_target));
-            if (target.ai_station_hold_timer > 0.0F) {
+            if (target.hyperspace_jump_timer > 0.0F) {
               // Ship is launching/entering hyperspace: cannot hail.
               const bool restricted = NovaAiShip_IsDisabled(state, target);
               // Entry numbers exactly as the original passes them (1-based):
@@ -2958,7 +2958,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         std::max(0.0F, state.travel_reticle_pulse - host_frame_time_ms * 1.8F);
     // Advance the hyperspace flash at the render cadence. The mode gates the
     // rate (1.5 s Mac fade-in/fade-out vs ~60 ms one-frame fallback); travel
-    // only latches the hold fade once when its scalar crosses the threshold.
+    // only latches the spin-up fade once when its scalar crosses the threshold.
     NovaTravel_AdvanceScreenFlash(state, host_frame_time_ms);
     platform.PaceFrame();
   }

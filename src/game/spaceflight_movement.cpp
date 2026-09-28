@@ -611,7 +611,7 @@ float NovaShip_ComputeEffectiveMaxSpeedPxPerTick(const GameState &state,
 // accelerate ~50x too fast):
 //   desired == 0 : free-coast (the thrust command is applied as a per-axis
 //                  clamped step toward the max-speed projection; gated on
-//                  ai_station_hold_timer <= 0).
+//                  hyperspace_jump_timer <= 0).
 //   desired >  0 : forward thrust toward `desired` speed, per-axis clamped to
 //                  the polar projection of `desired` (Math_AddPolarVelocity-
 //                  WithClamp 0x0043b4e0).
@@ -700,7 +700,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       NovaLog::Warn(
           "NPC arrival anomaly: slot={} class={} behavior={} state={} "
           "control={} velocity={:.2f} desired={:.2f} thrust={:.3f} "
-          "station_hold={:.2f} maneuver={:.2f} age={:.2f} disabled={}",
+          "jump_timer={:.2f} maneuver={:.2f} age={:.2f} disabled={}",
           ship.ship_instance_id,
           ship.ship_class_id,
           ship.ai_behavior_code,
@@ -709,7 +709,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
           velocity,
           ship.ai_desired_speed,
           ship.ai_forward_thrust_cmd,
-          ship.ai_station_hold_timer,
+          ship.hyperspace_jump_timer,
           ship.ai_maneuver_timer_ms,
           ship.arrival_monitor_elapsed_ticks,
           fire_restricted);
@@ -1005,9 +1005,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       // Coast branch. Non-inertialess: per-axis clamped step toward the class
       // top speed (with a zero command this is a no-op). Inertialess: scalar
       // `speed` clamped at the class top speed. The original gates this branch
-      // on ai_station_hold_timer <= 0 (a ship parked at a hold point does not
+      // on hyperspace_jump_timer <= 0 (a ship mid-jump does not
       // coast-accelerate).
-      if (ship.ai_station_hold_timer <= 0.0F) {
+      if (ship.hyperspace_jump_timer <= 0.0F) {
         if (!inertialess) {
           add_polar_clamped(thrust_step, eff_max_speed);
         } else {
@@ -1082,13 +1082,13 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   }
 
   // Ghidra Ship_HandleShip (0x00433050), jump-spin-up departure block:
-  // Ship_ApplyShipAiControls arms ai_station_hold_timer in control mode 4,
+  // Ship_ApplyShipAiControls arms hyperspace_jump_timer in control mode 4,
   // but the visible departure movement is applied here. The original first
   // damps the stopped ship, then advances its position along the already-
   // aligned heading with a time-ramped jump speed; this is a position step,
   // not ordinary thrust into vel_x/vel_y.
   const bool jump_spinup_control =
-      ship.ai_station_hold_timer > 0.0F &&
+      ship.hyperspace_jump_timer > 0.0F &&
       (ship.ai_state_code == 2 || ship.ai_state_code == 3 ||
        ship.ai_state_code == 0xb) &&
       (ship.ai_control_mode == 4 || ship.ai_control_mode == 0xd) &&
@@ -1137,7 +1137,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       float jump_progress = 0.0F;
       if (ship.squad_leader_ship_slot == 0) {
         const Ship &leader = state.player;
-        if (kUnitFloat < leader.ai_station_hold_timer) {
+        if (kUnitFloat < leader.hyperspace_jump_timer) {
           const float player_multiplier =
               NovaTravel_PlayerJumpDurationMultiplier(state);
           const float elapsed_jump_60hz =

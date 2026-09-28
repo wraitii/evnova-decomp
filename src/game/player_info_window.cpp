@@ -915,10 +915,10 @@ NovaPlayerInfo_RunWindow(SdlPlatform &platform,
   PlayerInfoWindowResult result;
 
   // Guards: the original returns when a modal is already up (BOOL_007354a8),
-  // the station-hold timer is not exactly +0.0, or the death timer exceeds
+  // the hyperspace jump timer is not exactly +0.0, or the death timer exceeds
   // DAT_00575990 (1/128). The port runs modals synchronously on the flight
   // loop, so the modal latch has no counterpart.
-  if (state.player.ai_station_hold_timer != 0.0F ||
+  if (state.player.hyperspace_jump_timer != 0.0F ||
       state.player.death_timer_active > kEmptyThreshold) {
     return result;
   }

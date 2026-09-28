@@ -44,7 +44,7 @@ struct RouteMapZoomInput {
 };
 
 enum class RouteMapClickResult : std::uint8_t {
-  // Overlay down or player station-held: run normal click-to-target.
+  // Overlay down or player jumping: run normal click-to-target.
   kNotHandled,
   // Click outside the chart rect: run normal click-to-target.
   kOutside,
@@ -76,7 +76,7 @@ void RouteMap_Tick(GameState &state, const RouteMapZoomInput &input);
 // Ghidra Ship_HandlePlayerShipCore multi-exit synthetic CFG:
 // 0x0044E035 -> [0x0044BC1E, 0x0044E490], entered through
 // PlayerTick_RouteMapClickBranch at 0x0044E027. While the overlay is up and
-// ai_station_hold_timer <= 0, clicks inside the overlay rect select an adjacent
+// hyperspace_jump_timer <= 0, clicks inside the overlay rect select an adjacent
 // system as travel destination or clear the selection at the chart centre;
 // everything else keeps normal click-to-target. `window_x`/`window_y` are raw
 // window points; the shared overlay placement maps them into the authored

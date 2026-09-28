@@ -326,7 +326,7 @@ inline constexpr std::uint16_t kLaunchOn = 0x3c;
 // loop returns, i.e. as the player launches. The gate mirrors DAT_007cab1c:
 // below 3 (fresh-pilot flight-tutorial hints still active) the message is
 // skipped and the state resets to -1; at 0x7fff (latched by the jump
-// hold-begin 0x0044c561, hyperspace arrival 0x0044f83f and ship resets) the
+// spin-up begin 0x0044c561, hyperspace arrival 0x0044f83f and ship resets) the
 // message shows every launch and the state is left latched (the original's
 // JMP LAB_00456158 skips the reset). When a pending overlay message was staged
 // at landing, that buffer is shown instead (0x1f4 ticks) and the travel-hint

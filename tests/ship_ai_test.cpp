@@ -317,7 +317,7 @@ TEST_CASE("escort orders obey caller cadence and bypasses") {
 
   // The arrival sentinel has the same bypass and installs control mode 10.
   leader.ai_control_mode = 0;
-  leader.ai_station_hold_timer = -999.0F;
+  leader.hyperspace_jump_timer = -999.0F;
   escort.escort_command_code = -9;
   NovaAi_UpdateShipAI(state, leader, 0);
   CHECK(escort.escort_command_code == -9);
@@ -1326,7 +1326,7 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   CHECK(ship.ai_secondary_target_slot == stellar_id);
   CHECK(ship.primary_target_ship_slot == -1);
   CHECK(ship.ai_maneuver_timer_ms == Catch::Approx(60.0F));
-  CHECK(ship.ai_station_hold_timer == Catch::Approx(-1.0F));
+  CHECK(ship.hyperspace_jump_timer == Catch::Approx(-1.0F));
   CHECK(ship.ai_desired_speed == Catch::Approx(-30.0F));
   CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-3.0F));
   CHECK(ship.heading >= 0.0F);
@@ -1355,7 +1355,7 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   ship.ai_maneuver_timer_ms = 0.0F;
   game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
   REQUIRE(ship.ai_state_code == 8);
-  CHECK(ship.ai_station_hold_timer == Catch::Approx(-999.0F));
+  CHECK(ship.hyperspace_jump_timer == Catch::Approx(-999.0F));
   REQUIRE(ship.ai_control_mode == 10);
   game::NovaAi_ApplyControls(state, ship, 1.0F);
   CHECK(ship.ai_desired_speed == Catch::Approx(-30.0F));
@@ -1786,8 +1786,8 @@ TEST_CASE("ApplyControls mode 0xd formation release uses raw-call cadence") {
   game::Ship &follower = SpawnCombatTestShip(state, sys_idx, 0);
   follower.ai_control_mode = 0x0d;
   follower.squad_leader_ship_slot = leader.ship_instance_id;
-  follower.ai_station_hold_timer = 1.0F;
-  leader.ai_station_hold_timer = 2.0F;
+  follower.hyperspace_jump_timer = 1.0F;
+  leader.hyperspace_jump_timer = 2.0F;
   leader.heading = 0.0F;
   leader.ai_desired_heading_deg = 0;
 
@@ -1795,11 +1795,11 @@ TEST_CASE("ApplyControls mode 0xd formation release uses raw-call cadence") {
   // test precedes the increment in the original, so crossing 30 does not
   // release until the following update.
   NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.315F);
-  CHECK(follower.ai_station_hold_timer == Catch::Approx(1.5F));
+  CHECK(follower.hyperspace_jump_timer == Catch::Approx(1.5F));
 
-  follower.ai_station_hold_timer = 30.0F;
+  follower.hyperspace_jump_timer = 30.0F;
   NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.63F);
-  CHECK(follower.ai_station_hold_timer == Catch::Approx(31.0F));
+  CHECK(follower.hyperspace_jump_timer == Catch::Approx(31.0F));
   CHECK(follower.ai_control_mode == 0x0d);
   NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.63F);
   CHECK(follower.squad_leader_ship_slot == -1);
@@ -1896,7 +1896,7 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
   ship.vel_x = 0.0F;
   ship.vel_y = 0.0F;
   ship.ai_maneuver_timer_ms = 0.0F;
-  ship.ai_station_hold_timer = 0.0F;
+  ship.hyperspace_jump_timer = 0.0F;
   ship.ai_forward_thrust_cmd = eff.thrust_px_per_tick2 * 2.75F;
   ship.ai_desired_speed = eff.max_speed_px_per_tick * 1.8F;
   for (int i = 0; i < 200; ++i) {
@@ -2579,7 +2579,7 @@ TEST_CASE("state 0x08 without its arrival sentinel returns to idle") {
   ship.ai_behavior_code = 0;
   ship.ai_state_code = 8;
   ship.ai_control_mode = 10;
-  ship.ai_station_hold_timer = 0.0F;
+  ship.hyperspace_jump_timer = 0.0F;
 
   game::NovaAi_UpdateShipAI(state,
                             ship,
@@ -2591,9 +2591,9 @@ TEST_CASE("state 0x08 without its arrival sentinel returns to idle") {
 }
 
 // Mission-fleet jump-in placement leaves the ship in its existing state and
-// signals the arrival through station-hold timer -999. Frame_TickSystems must
-// call Ship_UpdateShipAI, whose <-900 prologue promotes the ship to state 8
-// and bypasses behavior dispatch until the slowdown finishes. Behavior 3 is
+// signals the arrival through hyperspace jump timer -999. Frame_TickSystems
+// must call Ship_UpdateShipAI, whose <-900 prologue promotes the ship to state
+// 8 and bypasses behavior dispatch until the slowdown finishes. Behavior 3 is
 // important here: without that bypass it immediately steals state 8 for its
 // travel/departure fallback and leaves the 50 px/tick velocity untouched.
 TEST_CASE("mission arrival sentinel keeps behavior NPC in slowdown") {
@@ -2609,7 +2609,7 @@ TEST_CASE("mission arrival sentinel keeps behavior NPC in slowdown") {
   ship.armor_points = 30.0F;
   ship.ai_behavior_code = 3;
   ship.ai_state_code = 0;
-  ship.ai_station_hold_timer = -999.0F;
+  ship.hyperspace_jump_timer = -999.0F;
   ship.heading = 0.0F;
   ship.vel_y = -50.0F;
 
@@ -3065,7 +3065,7 @@ TEST_CASE("control-mode-4 jump spin-up is not re-stamped by the capture "
   ship.ai_maneuver_timer_ms = -1.0F;
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = 1;
-  ship.ai_station_hold_timer = 2.0F;
+  ship.hyperspace_jump_timer = 2.0F;
   ship.ai_mode_start_time_ms = 0;
   ship.armor_points = 1000.0F;
   ship.fuel_points = 1000.0F;

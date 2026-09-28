@@ -477,7 +477,7 @@ TEST_CASE("plot to a hyperlink without a paired nav-def stellar still jumps") {
 
   // Pressing 'j' to completion must land in Tichel (system id 1). The ship
   // starts beyond the no-jump radius so the engage passes; the brake is short
-  // (velocity 0) and the fire lands once the hold passes 30 ticks with no
+  // (velocity 0) and the fire lands once the spin-up passes 30 ticks with no
   // 'Warp up' voice active (~1 s of frames at 16.67 ms).
   state.player.fuel_points = 500;
   state.player.pos_x = 0.0F;
@@ -577,8 +577,8 @@ TEST_CASE("destination-system cycle steps and wraps") {
 
 // The pre-fire turn-around: engaging 'j' while the ship is still moving must
 // turn the hull (toward the reverse of the velocity, i.e. back toward the jump
-// vector) and brake the velocity to the |round(vel)| < 2 stop before the hold
-// fires -- the original's jump dispatch in Ship_HandlePlayerShipCore
+// vector) and brake the velocity to the |round(vel)| < 2 stop before the
+// spin-up fires -- the original's jump dispatch in Ship_HandlePlayerShipCore
 // (0x0044c195 / 0x0044fff0). The jump still completes to the plotted
 // destination.
 TEST_CASE("jump engages with a moving ship: turns around and brakes") {
@@ -616,7 +616,7 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
 
   // Let the whole sequence run; it must still land in Tichel. The brake needs
   // ~240 ticks to slow |vel| 8 -> the |round(vel)| < 2 stop at 0.99204/tick,
-  // then the hold fires once it passes 30 ticks (~1 s) with no 'Warp up'
+  // then the spin-up fires once it passes 30 ticks (~1 s) with no 'Warp up'
   // voice active in tick-only tests.
   for (int f = 0; f < 1200 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
@@ -626,9 +626,10 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
 }
 
 // Ghidra 0x0044f275..0x0044f280: each braking frame stamps the jump clock and
-// holds the station-hold timer at 1.0; the plotted adjacency slot is the
+// holds the hyperspace jump timer at 1.0; the plotted adjacency slot is the
 // player's ShipState +0x6C, which escorts copy while that timer is positive.
-TEST_CASE("jump brake holds the station timer at 1.0 and mirrors the slot") {
+TEST_CASE(
+    "jump brake holds the hyperspace jump timer at 1.0 and mirrors the slot") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -645,7 +646,7 @@ TEST_CASE("jump brake holds the station timer at 1.0 and mirrors the slot") {
   state.tick_60hz = 1234;
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
-  CHECK(state.player.ai_station_hold_timer == 1.0F);
+  CHECK(state.player.hyperspace_jump_timer == 1.0F);
   CHECK(state.player.ai_mode_start_time_ms == 1234U);
 }
 
@@ -684,8 +685,9 @@ TEST_CASE("player jump requires a full jump of current fuel") {
 
 // The stationary hold starts the 'Warp up' cue the moment the brake hands
 // off (the original pre-stages the sound at the stop), then the fire lands
-// once the hold passes the 30-tick engage threshold with the cue finished.
-TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
+// once the spin-up passes the 30-tick minimum with the cue finished.
+TEST_CASE(
+    "jump spin-up starts Warp up then fires past the minimum spin-up ticks") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -697,12 +699,12 @@ TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
   state.stat_cache_valid = true;
   REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
 
-  // The stopped handoff enters the hold and latches the cue immediately.
+  // The stopped handoff enters the spin-up and latches the cue immediately.
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.engaging);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
   CHECK(state.travel.warp_up_started);
   CHECK(state.warp_up_sound_pending);
   state.warp_up_sound_pending = false; // consumed by the audio loop
@@ -716,14 +718,14 @@ TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
   CHECK(state.player.current_system_id == 1);
 }
 
-// Regression: the jump hold must seed the PLAYER's ai_station_hold_timer
+// Regression: the jump spin-up must seed the PLAYER's hyperspace_jump_timer
 // (0x0044c548) and stamp ai_mode_start_time_ms (0x0044c54f).
 // Ship_SyncJumpStateToSquad copies that timer to attached escorts and enters
 // them into state 0x0B, and the player-led jump spin-up in Ship_HandleShip
 // (0x00433050) reads both fields to ramp the escort's departure. Before the
-// fix the port kept the hold clock in a travel-local, so escorts stopped with
+// fix the port kept the jump timer in a travel-local, so escorts stopped with
 // the player but never aligned or jumped.
-TEST_CASE("jump hold clocks player station timer so escorts sync") {
+TEST_CASE("jump spin-up clocks the player jump timer so escorts sync") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -746,7 +748,7 @@ TEST_CASE("jump hold clocks player station timer so escorts sync") {
   escort.squad_leader_ship_slot = 0;
   escort.defense_fleet_home_stellar_id = -1;
   escort.mission_fleet_slot = -1;
-  escort.ai_station_hold_timer = -1.0F;
+  escort.hyperspace_jump_timer = -1.0F;
   escort.armor_points = 1000.0F;
   escort.shield_points = 0.0F;
 
@@ -755,14 +757,14 @@ TEST_CASE("jump hold clocks player station timer so escorts sync") {
   REQUIRE(state.travel.engaging);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
 
-  // Hold-begin seeds the timer to 2.0. The per-tick squad sync then mirrors it
-  // into the escort and enters state 0x0B.
-  CHECK(state.player.ai_station_hold_timer == Catch::Approx(2.0F));
+  // Spin-up begin seeds the timer to 2.0. The per-tick squad sync then mirrors
+  // it into the escort and enters state 0x0B.
+  CHECK(state.player.hyperspace_jump_timer == Catch::Approx(2.0F));
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  CHECK(state.player.ai_station_hold_timer > 1.0F);
-  CHECK(escort.ai_station_hold_timer > 1.0F);
+  CHECK(state.player.hyperspace_jump_timer > 1.0F);
+  CHECK(escort.hyperspace_jump_timer > 1.0F);
   CHECK(escort.ai_state_code == 0x0b);
 
   // The player's desired heading must track the map jump bearing (the original
@@ -794,13 +796,13 @@ TEST_CASE("jump hold clocks player station timer so escorts sync") {
   CHECK(std::abs(static_cast<int>(escort.ai_desired_heading_deg) -
                  expected_deg) <= 1);
 
-  // The clock keeps running through the hold (the escort spin-up reads it) and
-  // is cleared once the fire lands.
+  // The clock keeps running through the spin-up (the escort spin-up reads it)
+  // and is cleared once the fire lands.
   for (int f = 0; f < 400 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
   }
   CHECK(state.travel.just_completed);
-  CHECK(state.player.ai_station_hold_timer < 0.0F);
+  CHECK(state.player.hyperspace_jump_timer < 0.0F);
 }
 
 // The original stop gate uses the x87 FIST correction idiom to truncate each
@@ -823,7 +825,7 @@ TEST_CASE("jump stop gate truncates velocity before starting Warp up") {
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
 
-  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
   CHECK(state.warp_up_sound_pending);
 }
 
@@ -850,9 +852,9 @@ TEST_CASE("fast-jump class skips the brake and keeps momentum") {
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  // The stop gate is bypassed: the hold begins with the ship still moving and
-  // the slow-phase damp never runs.
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  // The stop gate is bypassed: the spin-up begins with the ship still moving
+  // and the slow-phase damp never runs.
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
   const float speed = std::hypot(state.player.vel_x, state.player.vel_y);
   CHECK(speed == Catch::Approx(8.0F));
   for (int f = 0; f < 10; ++f) {
@@ -896,7 +898,7 @@ TEST_CASE("owned fast-jump outfit grants the capability") {
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
 }
 
 // A merely-defined fast-jump outfit is not owned (count 0), so the ordinary
@@ -957,7 +959,7 @@ TEST_CASE("fast-jump in an alternate ModType with ModVal 0 grants") {
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
 }
 
 // The fast-jump capability does not bypass the no-jump radius around the
@@ -986,7 +988,7 @@ TEST_CASE("fast-jump is still denied inside the no-jump range") {
 // (Outfit_ShipIsInertialess 0x0046df70), not the 0x0044f127 turnaround: the
 // maintained scalar speed decays by the effective thrust step while the
 // heading and velocity direction stay fixed, then the stop gate hands off to
-// the hold.
+// the spin-up.
 TEST_CASE(
     "inertialess hull decays scalar speed without turning in the jump brake") {
   GameState state;
@@ -1028,7 +1030,7 @@ TEST_CASE(
     CHECK(state.player.heading == Catch::Approx(kHeading));
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
   }
-  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
 }
 
 // The owned inertial dampener (ModType 38, kInertialDampener) selects the same
@@ -1110,7 +1112,7 @@ TEST_CASE("inertialess jump brake floors scalar speed and steers off-heading "
 }
 
 // The fast-jump capability is tested first at 0x0044c4db, before the
-// inertialess split, so it wins: the hold begins with the ship still moving.
+// inertialess split, so it wins: the spin-up begins with the ship still moving.
 TEST_CASE("fast-jump wins over inertialess in the jump brake") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
@@ -1132,16 +1134,16 @@ TEST_CASE("fast-jump wins over inertialess in the jump brake") {
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
   CHECK(std::hypot(state.player.vel_x, state.player.vel_y) ==
         Catch::Approx(8.0F));
 }
 
 // Engaged hold: the shared manual-flight inertialess tail (Ghidra 0x0044cffe ->
 // 0x0044d05b) still runs, so a fast-jump inertialess hull steers velocity
-// toward heading*speed while the hold turns onto the jump bearing. Heading and
-// jump bearing coincide here, isolating the steering from the auto-turn.
-TEST_CASE("fast-jump inertialess hold steers off-heading velocity") {
+// toward heading*speed while the spin-up turns onto the jump bearing. Heading
+// and jump bearing coincide here, isolating the steering from the auto-turn.
+TEST_CASE("fast-jump inertialess spin-up steers off-heading velocity") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -1164,8 +1166,8 @@ TEST_CASE("fast-jump inertialess hold steers off-heading velocity") {
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
-  // Pin the jump bearing to the current heading: the hold must not turn, so
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
+  // Pin the jump bearing to the current heading: the spin-up must not turn, so
   // only the shared steering tail moves the velocity.
   state.travel.jump_heading_rad = kHeading;
 
@@ -1175,7 +1177,7 @@ TEST_CASE("fast-jump inertialess hold steers off-heading velocity") {
   // Ship_SteerVelocityTowardShipHeading step = eff_thrust * 4.0 * ticks
   // (_DAT_005754ac = 4.0). Command = heading*speed = (0, -8).
   const float step = thrust * 4.0F * ticks;
-  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kHold body
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kSpinUp body
   CHECK(state.player.vel_x == Catch::Approx(kSpeed - step));
   CHECK(state.player.vel_y == Catch::Approx(-step));
   // Inertialess hulls keep the maintained scalar authoritative; it must not be
@@ -1183,10 +1185,10 @@ TEST_CASE("fast-jump inertialess hold steers off-heading velocity") {
   CHECK(state.player.speed == Catch::Approx(kSpeed));
 }
 
-// During the hold the auto-turn runs before the shared inertialess steering
+// During the spin-up the auto-turn runs before the shared inertialess steering
 // (Ghidra 0x0044cffe -> 0x0044d05b), so the velocity chases the freshly turned
 // heading.
-TEST_CASE("fast-jump inertialess hold turns while steering velocity") {
+TEST_CASE("fast-jump inertialess spin-up turns while steering velocity") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -1209,10 +1211,10 @@ TEST_CASE("fast-jump inertialess hold turns while steering velocity") {
 
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
   state.travel.jump_heading_rad = kJumpBearing;
 
-  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kHold body
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kSpinUp body
   CHECK(state.player.heading > kHeading);
   CHECK(state.player.heading <= kJumpBearing);
   // The auto-turned heading has sin > 0, so the commanded heading*speed pulls
@@ -1222,7 +1224,7 @@ TEST_CASE("fast-jump inertialess hold turns while steering velocity") {
 }
 
 // Ordinary (non-fast, non-inertialess) holds keep the slow-phase damp.
-TEST_CASE("ordinary hold applies the slow-phase velocity damp") {
+TEST_CASE("ordinary spin-up applies the slow-phase velocity damp") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -1239,22 +1241,22 @@ TEST_CASE("ordinary hold applies the slow-phase velocity damp") {
 
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
   state.travel.jump_heading_rad = 0.0F;
 
   // g_hyperspace_slow_phase_velocity_damp (0x005755f8, double 0.98006866).
   const float ticks = 16.67F / (1000.0F / 30.0F);
   const float damp = std::pow(0.98006866F, ticks);
-  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kHold body
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kSpinUp body
   CHECK(state.player.vel_x == Catch::Approx(0.5F * damp));
   CHECK(state.player.vel_y == Catch::Approx(-0.5F * damp));
 }
 
-// A non-fast inertialess hull in the hold runs the slow damp on the velocity
+// A non-fast inertialess hull in the spin-up runs the slow damp on the velocity
 // but keeps its maintained scalar speed (+0x48): the original's 0x0044f414
 // damp writes vel_x/vel_y only, and the shared tail then steers toward
 // heading*speed. Overwriting the scalar with hypot() would decay it.
-TEST_CASE("inertialess hold keeps its maintained scalar through the damp") {
+TEST_CASE("inertialess spin-up keeps its maintained scalar through the damp") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   MakePlayerHealthy(state);
@@ -1276,10 +1278,10 @@ TEST_CASE("inertialess hold keeps its maintained scalar through the damp") {
 
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
   state.travel.jump_heading_rad = kHeading;
 
-  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kHold body
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F); // first kSpinUp body
   CHECK(state.player.speed == Catch::Approx(kSpeed));
   // The steering tail pulls the damped velocity back toward heading*speed.
   CHECK(state.player.vel_y == Catch::Approx(-kSpeed).margin(1e-4F));
@@ -1448,7 +1450,7 @@ TEST_CASE("jump fire arms the screen flash and fade-out") {
   CHECK(state.screen_flash_mode == GameState::ScreenFlashMode::kFadeOut);
 }
 
-// Mac progressive white fade-in during the jump hold: the tunnel scalar
+// Mac progressive white fade-in during the jump spin-up: the tunnel scalar
 // FLOAT_007354a0 = (progress - 55) * 5, clamped [0,100], is a one-shot trigger
 // for the 1.5 s _FadeWhiteIn (Ship_HandlePlayerShipCore 0x0044aa70 top block,
 // Mac _HandlePlayer). It is not continuously sampled opacity. The Windows
@@ -1476,7 +1478,7 @@ TEST_CASE(
                     /*travel_input=*/true,
                     16.67F,
                     /*warp_up_sound_active=*/true);
-    if (state.travel.jump_phase != game::TravelState::JumpPhase::kHold) {
+    if (state.travel.jump_phase != game::TravelState::JumpPhase::kSpinUp) {
       continue;
     }
     saw_hold = true;
@@ -1611,19 +1613,19 @@ TEST_CASE("disabled mid-jump collapses the field in the same system") {
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
 
   // Run the brake + hold with the 'Warp up' cue still "playing" so the fire
-  // cannot land before the tunnel onset (~2.12 s into the hold).
+  // cannot land before the tunnel onset (~2.12 s into the spin-up).
   for (int f = 0; f < 600; ++f) {
     NovaTravel_Tick(state,
                     /*travel_input=*/false,
                     16.67F,
                     /*warp_up_sound_active=*/true);
-    if (state.travel.jump_phase == game::TravelState::JumpPhase::kHold &&
+    if (state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp &&
         f > 200) {
       break;
     }
   }
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
-  // Past the tunnel onset (progress > 0: 127 ticks after the hold stamp).
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSpinUp);
+  // Past the tunnel onset (progress > 0: 127 ticks after the spin-up stamp).
   NovaTravel_Tick(state, false, 16.67F, true);
 
   const std::int16_t system_before = state.player.current_system_id;

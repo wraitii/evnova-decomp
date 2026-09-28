@@ -130,7 +130,7 @@ exclusive mapping.
 | `0x00` | Idle / behaviour dispatch | `0x00` | Supervisor acquires a travel point, contact, or escort task. |
 | `0x01` | Travel to stellar | `0x02`, then `0x01` | Arrive, damp below 0.35 px/tick, record stellar, re-enter idle. Restricted travel points enter `0x14`. |
 | `0x02` | Jump departure staging | `0x01`, `0x03`, `0x04` | This state does not seek the centre: while moving it brakes; inside the centre envelope mode `0x03` thrusts outward, otherwise stopped ships arm outward jump spin-up with mode `0x04`. |
-| `0x03` | Hold/approach with a primary target | varies | Station-hold timer and target validity determine the next combat or hold action. |
+| `0x03` | Hold/approach with a primary target | varies | Hyperspace jump timer and target validity determine the next combat or hold action. |
 | `0x04` | Attack engagement | `0x05`/`0x06` | Cloak-aware eligibility can brake/wait, clear the target, or fall back to travel. |
 | `0x05` | Pursue / follow a target | `0x0b`, `0x08`, `0x01` | Approaches target range, then follows/holds; brakes when cloak rules prevent engaging the leader. |
 | `0x06` | Park / settle | `0x01` | Brakes to a stop. |
@@ -138,7 +138,7 @@ exclusive mapping.
 | `0x08` | Arrival slowdown | `0x0a` | Applies the stepped high-speed slowdown command to a newly arriving NPC; the ordinary ship handler later resets it to state 0. |
 | `0x09` | Refuel / transfer service | `0x0b`, `0x01` | Approaches the primary target, stops, then transfers fuel while the target has capacity. |
 | `0x0a` | Assist response | `0x09`, `0x0b`, `0x0c` | With an engageable leader: velocity-match inside 300 px/axis, formation approach through 600 px, then long-range pursuit. When cloak rules block engagement it brakes inside 300 px and pursues outside. |
-| `0x0b` | Station hold / follow target | `0x04`, `0x0d` | Holds near a player/leader; exits if leader's hold state ends. |
+| `0x0b` | Squad jump / follow leader | `0x04`, `0x0d` | Mirrors the leader's jump timer and spins up with it; exits if the leader leaves the jump. |
 | `0x0c` | Player-oriented assist / hold | `0x09`, `0x0b`, `0x0c` | Clears ordinary targets and selects distance/velocity matching around the player. |
 | `0x0d` | Cloak-engagement wait variant | `0x01` | Uses finite patience before abandoning an unengageable target. |
 | `0x0e` | Timed coast / combat break | `0x00` | Clears targets and directly advances position along heading at `elapsed_ticks * 0.7`; returns idle when the normalized-tick timer expires. This is not an NPC jump-in state. |
@@ -326,7 +326,7 @@ field definitions and uncertainties.
 | `+0x30` | `ai_forward_thrust_cmd` | Effective raw thrust applied by the integrator. It is **not** a normalized 0–1 throttle. |
 | `+0x34` | `ai_desired_speed` | Positive: normal accelerated target speed. Negative: heading-aligned physics override that moves toward zero. |
 | `+0x4c` | `ai_maneuver_timer_ms` | Coast-through-reversal timer in normalized ticks despite the legacy `_ms` name: while positive, suppresses normal turn/thrust. It is not a braking timer. |
-| `+0x50` | `ai_station_hold_timer` | Holds/approaches a station or leader; meaningful in states `0x0b`, `0x02`, and `0x03`. |
+| `+0x50` | `hyperspace_jump_timer` | Holds/approaches a station or leader; meaningful in states `0x0b`, `0x02`, and `0x03`. |
 | `+0x64` | `cloak_fade_progress` | Cloak visual/visibility progress, 0–32; not weapon disable pressure. |
 | `+0x68` | `ai_desired_heading_deg` | Integer degrees: 0 is up, values increase clockwise. |
 | `+0x6c` | `ai_secondary_target_slot` | Polymorphic secondary ship slot or selected travel stellar resource ID. |
@@ -372,7 +372,7 @@ only the formation/leader pass and the afterburner gate consume the field.
   that offset: snap (direct position write; used at system entry and
   encounter-fleet spawning, skipping state-0x15 arrivals) or smooth per-axis
   creep at effective thrust * 10 px/tick inside an 8 px deadzone, suppressed
-  while the station-hold timer runs, damped by ionization
+  while the hyperspace jump timer runs, damped by ionization
   (1 - min(intensity, 0.8) above intensity 2.5). The combat/hold control
   modes 5/6/7/0xb/0xc/0xd call the smooth variant alongside the leader glow
   copy.
@@ -382,7 +382,7 @@ only the formation/leader pass and the afterburner gate consume the field.
   deactivated (behavior-6 cargo escorts hand cargo back first), the rest run
   `Ship_ResetShipToDefaultCombatState` (0x0041e240; the flag arm refills
   shields/armor/weapon stock), then the wedge snaps around the player. When
-  the player's station-hold timer is nonzero -- jump arrival windows it at
+  the player's hyperspace jump timer is nonzero -- jump arrival windows it at
   -999 (0x0044fa83 / 0x0044faa2) -- each attached ship is additionally pushed
   ~892 px behind its own heading and flung forward at 50 px/tick: escorts
   stream in behind the jumping player.
@@ -433,11 +433,11 @@ labels.
   immediately
   seeds the scattered `AvgShips` population. Per-tick maintenance subsequently
   replaces losses through the polar/hypergate arrival paths.
-- State `0x08` is valid only with `ai_station_hold_timer < -900`. The top-level
+- State `0x08` is valid only with `hyperspace_jump_timer < -900`. The top-level
   dispatcher clears an orphaned state `0x08` to idle before behavior dispatch;
   valid arrivals renew the exact `-999` sentinel in the state handler.
 - Mission-fleet respawns do not call the state-`0x08` entry helper directly.
-  `System_TickNpcSpawnMaintenance` seeds `ai_station_hold_timer = -999`, and
+  `System_TickNpcSpawnMaintenance` seeds `hyperspace_jump_timer = -999`, and
   the `Ship_UpdateShipAI` prologue promotes any timer below `-900` into state
   `0x08` / control `0x0a` on the next frame. That sentinel arm bypasses the
   behavior supervisor; state `0x08` restores `-999` every frame, so ordinary

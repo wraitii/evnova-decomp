@@ -388,8 +388,8 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     break;
 
   case 4: {
-    // Jump spin-up: point away from the centre and accumulate the hold timer.
-    // The original's completion block (hold timer past the class-scaled jump
+    // Jump spin-up: point away from the centre and accumulate the jump timer.
+    // The original's completion block (jump timer past the class-scaled jump
     // duration) zeroes the timer, clears the ship's system id and deactivates
     // it. The population pass then replenishes the current system, matching
     // the original's departure lifecycle.
@@ -398,15 +398,15 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     }
     ship.ai_desired_heading_deg = static_cast<std::int16_t>(
         BearingDeg(0.0F, 0.0F, ship.pos_x, ship.pos_y));
-    if (ship.ai_station_hold_timer <= 0.0F) {
-      ship.ai_station_hold_timer = 1.0F;
+    if (ship.hyperspace_jump_timer <= 0.0F) {
+      ship.hyperspace_jump_timer = 1.0F;
       ship.ai_mode_start_time_ms = state.tick_60hz;
     }
-    if (ship.ai_station_hold_timer > 1.0F &&
+    if (ship.hyperspace_jump_timer > 1.0F &&
         state.tick_60hz < ship.ai_mode_start_time_ms) {
       ship.ai_mode_start_time_ms = state.tick_60hz;
     }
-    ship.ai_station_hold_timer += elapsed_ticks;
+    ship.hyperspace_jump_timer += elapsed_ticks;
 
     // Ghidra 0x00408150 compares elapsed 60 Hz tick time
     // (NovaTime_GetTickCount60Hz() - ai_mode_start_time_ms) against
@@ -421,7 +421,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
         NovaTravel_JumpWallClockScale(state);
     if (elapsed_jump_60hz >=
         NovaTravel_JumpSequenceDuration60Hz(state) / jump_multiplier) {
-      ship.ai_station_hold_timer = 0.0F;
+      ship.hyperspace_jump_timer = 0.0F;
       ship.is_active = false;
       ship.current_system_id = -1;
       ship.ai_forward_thrust_cmd = 0.0F;
@@ -432,12 +432,12 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
 
   case 0xd: {
     // Formation hold with leader release; squad_leader_ship_slot identifies
-    // the followed leader. While the leader's station-hold timer runs (>1.0)
+    // the followed leader. While the leader's jump timer runs (>1.0)
     // the ship
     // matches the leader's spin-up: damp to a standstill (0.95, desired -4.0,
     // timer +1 raw-call unit) once the leader is within 11 deg of its own
     // desired heading;
-    // once the ship's own hold timer passes 30 and the leader is not the
+    // once the ship's own jump timer passes 30 and the leader is not the
     // player, the ship releases back to its class default behavior (state 2 /
     // mode 4). Otherwise it copies the leader's velocity and glow (formation
     // offset deferred).
@@ -452,12 +452,12 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     const Ship &leader = state.ShipAt(static_cast<std::size_t>(leader_slot));
     const float leader_heading_deg = leader.heading / kDegToRad;
     ship.ai_desired_heading_deg = static_cast<std::int16_t>(leader_heading_deg);
-    if (leader.ai_station_hold_timer > 1.0F) {
-      if (ship.ai_station_hold_timer > 1.0F &&
+    if (leader.hyperspace_jump_timer > 1.0F) {
+      if (ship.hyperspace_jump_timer > 1.0F &&
           state.tick_60hz < ship.ai_mode_start_time_ms) {
         ship.ai_mode_start_time_ms = state.tick_60hz;
       }
-      if (ship.ai_station_hold_timer > 30.0F && leader_slot != 0) {
+      if (ship.hyperspace_jump_timer > 30.0F && leader_slot != 0) {
         ship.ai_desired_heading_deg = leader.ai_desired_heading_deg;
         ship.squad_leader_ship_slot = -1;
         ship.ai_behavior_code =
@@ -472,8 +472,8 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
                          kFullCircleDeg));
       if (leader_delta < 11.0F) {
         ship.ai_secondary_target_slot = leader.ai_secondary_target_slot;
-        if (ship.ai_station_hold_timer == 0.0F) {
-          ship.ai_station_hold_timer = 1.0F;
+        if (ship.hyperspace_jump_timer == 0.0F) {
+          ship.hyperspace_jump_timer = 1.0F;
           ship.ai_mode_start_time_ms = state.tick_60hz;
         }
         ship.vel_x *= kMode1StopDamp;
@@ -481,13 +481,13 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
         ship.speed *= kMode1StopDamp;
         ship.ai_forward_thrust_cmd = 0.0F;
         ship.ai_desired_speed = -4.0F;
-        ship.ai_station_hold_timer +=
+        ship.hyperspace_jump_timer +=
             elapsed_ticks / kOriginalMaxRateFrameTicks;
       } else if (leader_delta <= eff_turn_deg) {
         ship.ai_maneuver_timer_ms = 180.0F; // normalized ticks, raw 0x43340000
       } else {
         ship.ai_desired_heading_deg = leader.ai_desired_heading_deg;
-        ship.ai_station_hold_timer = -4.0F;
+        ship.hyperspace_jump_timer = -4.0F;
       }
     } else {
       ship.vel_x = leader.vel_x;

@@ -3129,9 +3129,9 @@ void Mission_TickShipHailLadder(GameState &state,
   if (pers.hail_quote_id == -1 || !pers.alive) {
     return;
   }
-  // The player must not be station-held, the hailing ship must be visible
+  // The player must not be jumping, the hailing ship must be visible
   // to the player under the cloak rules, alive, and not under escort control.
-  if (state.player.ai_station_hold_timer > 0.0F ||
+  if (state.player.hyperspace_jump_timer > 0.0F ||
       !NovaAiShip_CanEngageTargetUnderCloakRules(state, state.player, ship) ||
       NovaAiShip_IsDestroyed(ship) || ship.ai_control_mode == 4 ||
       ship.ai_control_mode == 0x0D) {

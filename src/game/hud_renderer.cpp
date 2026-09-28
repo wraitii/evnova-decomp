@@ -678,9 +678,9 @@ void HudRenderer::DrawOverlayAndEscort(SdlPlatform &platform,
 //   * jump (mode 3): "Hyperspace" title at top+12 plus the destination
 //     system's name ("Unexplored System" while undiscovered) at top+29.
 // Titles draw in the label colour, switching to the value colour while the
-// station-hold timer runs; the jump destination draws in the value colour
+// hyperspace jump timer runs; the jump destination draws in the value colour
 // only while the ship is beyond the no-jump radius (NovaTravel_PlayerIn-
-// JumpRange, the same probe as the flight-tail range cue) or the hold has
+// JumpRange, the same probe as the flight-tail range cue) or spin-up has
 // started, and fuel covers a jump -- label colour otherwise. The port
 // derives the mode from the explicit TravelState (the original reads the
 // player ship's travel_transfer_mode latch).
@@ -702,16 +702,16 @@ void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
       state.player.travel_transfer_mode == 3) {
     // Jump sequence / plotted destination (original travel_transfer_mode ==
     // 3): the "Hyperspace" title plus the destination system's name.
-    // 0x0045e400 tests ai_station_hold_timer > 0.0 (0x005756d8): 1.0 through
-    // the brake, 2.0+ from the hold begin until arrival.
-    const bool holding = state.player.ai_station_hold_timer > 0.0F;
+    // 0x0045e400 tests hyperspace_jump_timer > 0.0 (0x005756d8): 1.0 through
+    // the brake, 2.0+ from spin-up begin until arrival.
+    const bool jumping = state.player.hyperspace_jump_timer > 0.0F;
     DrawPanelCentered(platform,
                       font,
                       font_size,
                       panel,
                       12,
                       MiscString(kMiscHyperspace),
-                      holding ? value_color : label_color);
+                      jumping ? value_color : label_color);
 
     std::int16_t destination = -1;
     if (travel.engaging) {
@@ -751,7 +751,7 @@ void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
                                  : MiscString(kMiscUnexploredSystem);
     const bool fueled = state.player.fuel_points >= 100.0F;
     const bool in_jump_range = NovaTravel_PlayerInJumpRange(state);
-    const bool dimmed = (!in_jump_range || !fueled) && !holding;
+    const bool dimmed = (!in_jump_range || !fueled) && !jumping;
     DrawPanelCentered(platform,
                       font,
                       font_size,
@@ -764,14 +764,14 @@ void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
 
   if (travel.selected_stellar_id >= 0) {
     // Travel transfer (original travel_transfer_mode == 2).
-    const bool holding = state.player.ai_station_hold_timer > 0.0F;
+    const bool jumping = state.player.hyperspace_jump_timer > 0.0F;
     DrawPanelCentered(platform,
                       font,
                       font_size,
                       panel,
                       12,
                       MiscString(kMiscStellarNavigation),
-                      holding ? value_color : label_color);
+                      jumping ? value_color : label_color);
     const Stellar *stellar = state.scenario.Stellar(travel.selected_stellar_id);
     if (stellar == nullptr || stellar->name.empty()) {
       DrawPanelCentered(platform,
@@ -1614,8 +1614,8 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
   // Ship_RunSpaceflightMode 0x00489241 and Ship_ResetPlayerShipState
   // 0x004b32bc). It is NOT the hyperspace jump: no jump/arrival path writes it,
   // so the radar keeps rendering contacts and static through the whole
-  // brake/hold/tunnel (the blink/static still advance on the 250 ms poll). The
-  // port's dock is a blocking modal, so the live flag cannot be read here;
+  // brake/spin-up/tunnel (the blink/static still advance on the 250 ms poll).
+  // The port's dock is a blocking modal, so the live flag cannot be read here;
   // NovaLanded_RunWindow passes force_empty=true for the docked HUD render.
   // It must NOT track `travel.engaging`: that wrongly blanked the radar for
   // the entire jump.

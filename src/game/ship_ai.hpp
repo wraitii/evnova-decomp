@@ -24,6 +24,13 @@
 
 namespace game {
 
+// Named sentinels for Ship::hyperspace_jump_timer (see its declaration
+// comment in game_state.hpp for the full value-range table).
+inline constexpr float kHyperspaceJumpTimerArrived = -999.0F;
+inline constexpr float kHyperspaceJumpTimerArrivedThreshold = -900.0F;
+inline constexpr float kHyperspaceJumpTimerCleared = -1.0F;
+inline constexpr float kPlayerJumpSpinUpSeed = 2.0F;
+
 // Ghidra 0x004112C0 Ship_ShowPlayerInterceptTauntIfEligible.
 void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship);
 
@@ -120,9 +127,9 @@ NovaAi_SelectRandomAdjacentDestination(GameState &state, const Ship &ship);
 
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget. Enters AI
 // state 0x02 (local jump-departure staging), clears the current primary target,
-// clamps the station-hold timer below zero, and records the current 60 Hz tick
-// count (GameState.tick_60hz) in ai_mode_start_time_ms. The state brakes while
-// moving, then selects the centre-outward mode-3/mode-4 departure path.
+// clamps the hyperspace jump timer below zero, and records the current 60 Hz
+// tick count (GameState.tick_60hz) in ai_mode_start_time_ms. The state brakes
+// while moving, then selects the centre-outward mode-3/mode-4 departure path.
 void NovaAi_EnterState2ClearPrimaryTarget(GameState &state, Ship &ship);
 
 // Ghidra 0x00410dd0 Ship_ResetShipPrimaryAndSecondaryTargets. Resets the
@@ -497,13 +504,14 @@ NovaAiShip_IsShipLockedOnAttackerInState4(const Ship &ship,
 // 0x004112a0. Small AI state/control-mode predicates used by the supervisors,
 // the escort command dispatch, and the disable-outfit logic:
 //   behavior-5 ship in state 5 (deployed fighter returning);
-//   state {2,3,0x0B} with control mode 4 or 0x0D (escort hold variants);
+//   state {2,3,0x0B} with control mode 4 or 0x0D (escort jump spin-up
+//     variants);
 //   state 0x08 (arrival slowdown); control mode 0x0C (velocity match);
 //   state 4 (combat engagement); state 2 (idle travel staging);
 //   state 0x15 (hypergate/wormhole emergence hold).
 [[nodiscard]] bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship);
 [[nodiscard]] bool
-NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship);
+NovaAiShip_IsShipInJumpStateWithControlMode4Or0xD(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiState8(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiControlModeC(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiState4(const Ship &ship);
@@ -615,22 +623,22 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
 void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
                                                          Ship &ship);
 
-// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_ClearTargetsSeedHold. Enters AI
-// state 0x0B with the primary target cleared; when the station-hold timer is
-// not running, seeds the 1.0-tick hold and stamps the 60 Hz mode start.
+// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_SquadJump. Enters AI
+// state 0x0B with the primary target cleared; when the hyperspace jump timer
+// is not running, seeds the 1.0-tick jump and stamps the 60 Hz mode start.
 // Called when a squad leader charges a jump: by Ship_SyncJumpStateToSquad
 // (0x00422340) and the leader-jump-prep arm of
 // Ship_UpdateEscortAI (0x004048a0).
-void NovaAi_EnterStateBClearTargetsSeedHold(Ship &ship, std::uint32_t now_60hz);
+void NovaAi_EnterStateBSquadJump(Ship &ship, std::uint32_t now_60hz);
 
 // Ghidra 0x00422340 Ship_SyncJumpStateToSquad. During the squad leader's
-// jump-engage hold, syncs the leader's hold clock into every active squadmate
-// without a stellar attachment: forces the -2 primary-target sentinel and
-// enters AI state 0x0B, so squadmates disengage and hold formation until the
-// jump fires. The system transfer itself happens at arrival via escort
-// adoption (System_RebuildInitialNpcAndMissionPopulation 0x0041af90), not
-// here. Slot 0 is skipped by the original scan (the player is never a
-// follower).
+// jump-engage spin-up, syncs the leader's jump timer into every active
+// squadmate without a stellar attachment: forces the -2 primary-target
+// sentinel and enters AI state 0x0B, so squadmates disengage and hold
+// formation until the jump fires. The system transfer itself happens at
+// arrival via escort adoption (System_RebuildInitialNpcAndMissionPopulation
+// 0x0041af90), not here. Slot 0 is skipped by the original scan (the player
+// is never a follower).
 void NovaAi_SyncJumpStateToSquad(GameState &state,
                                  Ship &leader,
                                  std::uint32_t now_60hz);
@@ -642,8 +650,8 @@ void NovaAi_EnterState5ReturnToSquadLeader(Ship &ship);
 
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Flips the ship hostile: sets
 // ai_state_code 0x04, clears the secondary target, targets the player, and
-// drops escort control modes 0x04/0x0D while parked in hold states
-// 2/3/0x0B (Ship_IsShipInHoldStateWithControlMode4Or0x0D, 0x00410e80). The pers
+// drops escort control modes 0x04/0x0D while parked in jump states
+// 2/3/0x0B (Ship_IsShipInJumpStateWithControlMode4Or0x0D, 0x00410e80). The pers
 // announcement arm runs first: a personality ship (pers_def_slot set, no
 // mission fleet) whose pers Flags carry 0x10 plays
 // Mission_ShowMissionShipAnnouncement once (speaker latched in

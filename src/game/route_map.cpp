@@ -101,9 +101,9 @@ RouteMapClickResult RouteMap_HandleClick(GameState &state,
                                          float window_x,
                                          float window_y) {
   auto &rm = state.route_map;
-  // 0x0044e027 gate: overlay up and the player not station-held (the x87
-  // chain proceeds only when ai_station_hold_timer <= 0.0).
-  if (!rm.overlay_visible || state.player.ai_station_hold_timer > 0.0F) {
+  // 0x0044e027 gate: overlay up and the player not jumping (the x87
+  // chain proceeds only when hyperspace_jump_timer <= 0.0).
+  if (!rm.overlay_visible || state.player.hyperspace_jump_timer > 0.0F) {
     return RouteMapClickResult::kNotHandled;
   }
   // Map the raw window point through the same placement the chart is drawn

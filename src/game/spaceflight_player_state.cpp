@@ -245,7 +245,7 @@ void DetonateBomb(GameState &state) {
   PlayerShip &p = state.player;
   p.armor_points = -1.0F;
   p.shield_points = -1.0F;
-  p.ai_station_hold_timer = -1.0F;
+  p.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
 
   std::string text;
   for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
@@ -474,7 +474,7 @@ constexpr std::int16_t kEscapePodTimedActionTicks = 0x15e;
 // Eject gate: the death presentation must be at least half spent
 // (death_timer <= ShipClass.death_delay_frames * g_bomb_damage_armor_fraction
 // DAT_00575598 = 0.5, the same global the bomb self-damage roll uses) or be
-// within g_hyperspace_engage_hold_30hz (0x5755a8, 30) ticks of ending.
+// within g_hyperspace_min_spin_up_ticks_30hz (0x5755a8, 30) ticks of ending.
 constexpr float kEjectDeathDelayScale = kBombDamageArmorFraction;
 constexpr float kEjectArmHoldTicks = 30.0F;
 // Respawn catch-up: rand(30) + 15 Mission_TickDailyWorldUpdate passes.
@@ -625,7 +625,7 @@ void RespawnResetPlayerShipState(GameState &state) {
   p.player_aggro_accumulator = 0.0F;
   p.sprite_animation_timer = 0.0F;
   p.skill_variance_scale = 1.0F;
-  p.ai_station_hold_timer = 0.0F;
+  p.hyperspace_jump_timer = 0.0F;
   p.jump_destination_system_id = -1;
   p.engine_glow_level = 0;
   p.velocity_match_target_ship_slot = -1;
@@ -922,7 +922,7 @@ void RunPlayerEjectTransform(GameState &state) {
   // mapped to the port's transition/impact tables yet.
   state.warp_up_sound_pending = false;
   state.warp_out_sound_pending = false;
-  p.ai_station_hold_timer = 0.0F;
+  p.hyperspace_jump_timer = 0.0F;
   p.death_timer_active = -1.0F;
   // The original's timed-action dispatch has already run when the eject
   // transform arms the countdown; suppress the port's timed-action tick for
@@ -1388,12 +1388,12 @@ static void TickPlayerTurnBankAnimation(GameState &state,
                p.turn_bank_animation_phase < -kBankBiasThreshold) {
       p.ai_turn_bias_dir = -1;
     }
-    // Station-hold / maneuver-lock reset arm: while the hold or a maneuver
-    // lockout is active the phase snaps to zero (station hold past the
+    // Jump-timer / maneuver-lock reset arm: while spin-up or a maneuver
+    // lockout is active the phase snaps to zero (jump timer past the
     // 30-tick engage gate) and the glow fades one step (handled by the
     // target-based glow drive below; the original decays it explicitly here).
-    if ((p.ai_maneuver_timer_ms > 0.0F || p.ai_station_hold_timer > 0.0F) &&
-        p.ai_station_hold_timer > 30.0F) {
+    if ((p.ai_maneuver_timer_ms > 0.0F || p.hyperspace_jump_timer > 0.0F) &&
+        p.hyperspace_jump_timer > 30.0F) {
       p.turn_bank_animation_phase = 0.0F;
       p.ai_turn_bias_dir = 0;
     }
@@ -1403,7 +1403,7 @@ static void TickPlayerTurnBankAnimation(GameState &state,
 // @port 0x0044C0B1 90% correctness,synthetic
 // Ghidra 0x0044aa70 face-target command (0x0044c0b1 -> 0x0044c18a, with the
 // out-of-line bearing tails at 0x0044ec90/0x0044ecb7), part of the
-// PlayerTick_WeaponCommands region. While held with the station-hold timer
+// PlayerTick_WeaponCommands region. While held with the hyperspace jump timer
 // idle the command stores the integer heading to face (Math_BearingFromPoint-
 // ToPoint from the player position, written to ai_desired_heading_deg +0x68)
 // and arms the manual-flight auto-turn (the parent's local_265 latch): the
@@ -1420,7 +1420,7 @@ bool PlayerTick_FaceTargetCommand(GameState &state,
                                   const FlightInput &input,
                                   bool arm_modifier_held) {
   PlayerShip &p = state.player;
-  if (!input.face_target || p.ai_station_hold_timer > 0.0F) {
+  if (!input.face_target || p.hyperspace_jump_timer > 0.0F) {
     return false;
   }
   const std::int16_t ship_target = p.primary_target_ship_slot;
@@ -1486,13 +1486,13 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
 
   // Ghidra Ship_HandlePlayerShipCore 0x0044aa70: the keyboard turn, reverse,
   // thrust and afterburner arms are all gated on the parent's local_251 latch
-  // (`!Ship_IsShipDisabled(p)`) and `ai_station_hold_timer <= 0`. The
+  // (`!Ship_IsShipDisabled(p)`) and `hyperspace_jump_timer <= 0`. The
   // face-target auto-turn continuation is NOT gated, so keep
   // `face_target_armed` as passed and clear only the input latches when the
   // controls are down; gravity, speed caps and position integration still run.
   const bool fire_restricted = NovaAiShip_IsDisabled(state, p);
   const bool controls_disabled =
-      fire_restricted || p.ai_station_hold_timer > 0.0F;
+      fire_restricted || p.hyperspace_jump_timer > 0.0F;
   FlightInput effective_input = input;
   if (controls_disabled) {
     effective_input.turn_left = false;
@@ -1505,7 +1505,7 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   // @port 0x0044C9AB 100% synthetic
   // Ghidra 0x0044c9ab PlayerTick_AfterburnerCommand (synthetic region of
   // 0x0044aa70): latches when the command is held on an enabled hull (the
-  // station-hold gate is folded into controls_disabled above), the player owns
+  // jump-timer gate is folded into controls_disabled above), the player owns
   // a ModType-15 outfit (0x00464760), ai_maneuver_timer_ms (+0x4c) <= 0,
   // fuel > 0 and at least one tick's burn is left. A zero-burn afterburner
   // still engages, and reverse does not block it (the reverse arm only turns).

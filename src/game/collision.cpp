@@ -522,7 +522,7 @@ void ApplyImpactImpulse(GameState &state,
                         float impact_x,
                         float impact_y,
                         std::int16_t impact_impulse) {
-  if (impact_impulse == 0 || target.ai_station_hold_timer > 0.0F) {
+  if (impact_impulse == 0 || target.hyperspace_jump_timer > 0.0F) {
     return;
   }
   const ShipClass *target_class = ShipClassFor(state, target);
@@ -1055,7 +1055,7 @@ void Ship_ApplyDamageToShip(GameState &state,
   }
 
   if (allow_aggro_updates && target.ai_behavior_code > 0 &&
-      target.ai_station_hold_timer <= 0.0F) {
+      target.hyperspace_jump_timer <= 0.0F) {
     const auto squared_distance = [](float x1, float y1, float x2, float y2) {
       const float dx = x2 - x1;
       const float dy = y2 - y1;
@@ -1081,7 +1081,7 @@ void Ship_ApplyDamageToShip(GameState &state,
     }
 
     if (should_retarget && allow_aggro_updates && target.ai_behavior_code > 0 &&
-        target.ai_station_hold_timer <= 0.0F) {
+        target.hyperspace_jump_timer <= 0.0F) {
       should_retarget = false;
       const Ship *attacker =
           attacker_valid
@@ -1218,7 +1218,7 @@ void Ship_ApplyDamageToShip(GameState &state,
             should_retarget = false;
           }
         }
-        if (target.ai_station_hold_timer > 0.0F) {
+        if (target.hyperspace_jump_timer > 0.0F) {
           should_retarget = false;
         }
         if (!suppress_retarget_logic && should_retarget &&
@@ -1278,14 +1278,14 @@ void Ship_ApplyDamageToShip(GameState &state,
       }
       // Shared post-gates: target and leader hold timers, the 0x0F control
       // mode, and the class-category mismatch.
-      if (target.ai_station_hold_timer > 0.0F) {
+      if (target.hyperspace_jump_timer > 0.0F) {
         should_retarget = false;
       } else {
         const std::int16_t leader = target.squad_leader_ship_slot;
         if (leader > 0 &&
             leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
             state.ShipAt(static_cast<std::size_t>(leader))
-                    .ai_station_hold_timer > 0.0F) {
+                    .hyperspace_jump_timer > 0.0F) {
           should_retarget = false;
         }
       }
@@ -2720,7 +2720,7 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
           // Bearing target->source with the (negative) impulse / source mass,
           // per-axis clamped to the class base speed then to the effective max
           // speed. Unlike Ship_ApplyDamageToShip's impulse block this self-lock
-          // tug has no station-hold gate and no player-afterburner 1.8x widen.
+          // tug has no jump-timer gate and no player-afterburner 1.8x widen.
           const int bearing_deg = static_cast<int>(
               BearingDeg(target.pos_x, target.pos_y, owner.pos_x, owner.pos_y));
           constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
