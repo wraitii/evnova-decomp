@@ -1906,7 +1906,10 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
     if (const auto res = NovaResource_LoadNamed(
             scenario::kOutfitResourceType, static_cast<std::uint16_t>(id))) {
       game::Outfit outfit = DecodeOutfit(res->bytes);
-      outfit.name = res->name; // record name (HUD/UI display)
+      // Loader 0x004bd3c0 runs NameString_StripSubtitleSuffix on every
+      // resource display name before storing it, so a ';'-subtitle suffix
+      // (e.g. "Rebs !assim" style annotations) never reaches the HUD.
+      outfit.name = NovaText_StripSubtitleSuffix(res->name);
       outfits[static_cast<std::size_t>(id) - 0x80] = std::move(outfit);
       ++loaded_outfits;
     }
@@ -1933,7 +1936,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
     if (const auto res = NovaResource_LoadNamed(
             scenario::kWeaponResourceType, static_cast<std::uint16_t>(id))) {
       game::Weapon weapon = DecodeWeapon(res->bytes, loader_rng);
-      weapon.name = res->name;
+      weapon.name = NovaText_StripSubtitleSuffix(res->name);
       weapons[static_cast<std::size_t>(id) - 0x80] = std::move(weapon);
       ++loaded_weapons;
     }
@@ -1953,7 +1956,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
             NovaResource_LoadNamed(scenario::kStellarResourceType,
                                    static_cast<std::uint16_t>(index + 0x80))) {
       game::Stellar st = DecodeStellar(res->bytes);
-      st.name = res->name;
+      st.name = NovaText_StripSubtitleSuffix(res->name);
       st.is_defined = true;
       stellars[index] = std::move(st);
       ++loaded_stellars;
@@ -1963,7 +1966,7 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
     if (const auto res = NovaResource_LoadNamed(
             scenario::kSystemResourceType, static_cast<std::uint16_t>(id))) {
       game::System sys = DecodeSystem(res->bytes);
-      sys.name = res->name;
+      sys.name = NovaText_StripSubtitleSuffix(res->name);
       systems[static_cast<std::size_t>(id) - 0x80] = std::move(sys);
       ++loaded_systems;
     }
@@ -2162,8 +2165,9 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
       game::Government gov = DecodeGovernment(res->bytes);
       // The record name is authoritative for the display name; the
       // target-code/comm/medium name tables come from the numeric payload
-      // strings (DecodeGovernment).
-      gov.name = res->name;
+      // strings (DecodeGovernment). The loader strips any ';'-subtitle
+      // suffix before storing it (0x004bd3c0).
+      gov.name = NovaText_StripSubtitleSuffix(res->name);
       governments[static_cast<std::size_t>(id) - 0x80] = std::move(gov);
       ++loaded_governments;
     }

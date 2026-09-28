@@ -612,7 +612,8 @@ struct ShipClass {
 // *name* (BRGR resource.map) is surfaced as `name`, not a numeric header field.
 // Offsets verified against the shipped payloads and loader 0x004bd3c0.
 struct Outfit {
-  std::string name;              // resource record name (BRGR display name)
+  // Record name with any ';'-subtitle suffix stripped (loader 0x004bd3c0).
+  std::string name;
   std::string availability_expr; // Availability (control test expression)
   std::string on_purchase_expr;  // OnPurchase (control set expression)
   std::string on_sell_expr;      // OnSell (control set expression)
@@ -699,7 +700,8 @@ inline constexpr std::size_t kWeaponBankCount = 0x100;
 // Ghidra WeaponDef (g_weapon_defs, kWeaponBankCount entries indexed by weapon
 // id minus 0x80). One projectile/beam/bay weapon.
 struct Weapon {
-  std::string name; // resource name / status-display name
+  // Record name with any ';'-subtitle suffix stripped (loader 0x004bd3c0).
+  std::string name;
 
   // Field offsets are verified against the raw w\x91ap payload bytes and the
   // original loader (0x004bd3c0) which copies each to a g_weapon_defs slot.
@@ -904,7 +906,9 @@ struct Stellar {
   static constexpr std::uint16_t kHypergate = 0x1000;
   static constexpr std::uint16_t kWormhole = 0x2000;
 
-  std::string name; // resource name
+  // Record name with any ';'-subtitle suffix stripped (loader 0x004bd3c0;
+  // Ghidra StellarDef +0x48).
+  std::string name;
 
   std::int16_t pos_x = 0; // xPos
   std::int16_t pos_y = 0; // yPos
@@ -1299,7 +1303,8 @@ struct RankDef {
 // Field names mirror the EV Nova Bible `govmnt`/`government` layout; each
 // notes the Ghidra GovtDef member (and the source payload offset) it decodes.
 struct Government {
-  std::string name; // resource record name (display / HUD label)
+  // Record name with any ';'-subtitle suffix stripped (loader 0x004bd3c0).
+  std::string name;
   std::string
       target_code; // name table (payload +0x44; g_government_name_table):
                    // the short string the target-status panel shows
@@ -1438,7 +1443,9 @@ struct Nebula {
 };
 
 struct System {
-  std::string name;       // resource name / map label
+  // Record name with any ';'-subtitle suffix stripped (Ghidra SystemDef
+  // +0xCC; loader 0x004bd3c0).
+  std::string name;
   std::int16_t pos_x = 0; // xPos
   std::int16_t pos_y = 0; // yPos
   std::array<std::int16_t, 16>

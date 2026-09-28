@@ -1681,3 +1681,18 @@ TEST_CASE("ship jump_duration_multiplier derives from chassis flags",
         Catch::Approx(JumpDurationMultiplierFromCapabilityFlags(
             shuttle->capability_flags)));
 }
+
+TEST_CASE("system record names strip the ';'-subtitle suffix",
+          "[scenario][brgr]") {
+  // The shipped scenario ships story-clone systems named like
+  // "Koria;Rebs !assim". The loader runs NameString_StripSubtitleSuffix
+  // (0x004cd230) over every record name before storing the display name
+  // (0x004bd3c0), so only "Koria" reaches the HUD, starmap, and mission text.
+  // Regression: the raw suffix leaked into the active-mission description.
+  using namespace game;
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const System *koria = data.System(0x1e3);
+  REQUIRE(koria != nullptr);
+  CHECK(koria->name == "Koria");
+}
