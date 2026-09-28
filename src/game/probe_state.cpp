@@ -4,6 +4,8 @@
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
+#include "ship_ai.hpp"
+#include "weapon.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -300,6 +302,33 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("ai_forward_thrust_cmd", ship.ai_forward_thrust_cmd);
       row.num("ai_station_hold_timer", ship.ai_station_hold_timer);
       row.num("ai_maneuver_timer", ship.ai_maneuver_timer_ms);
+      row.num("random_ai_render_cadence", ship.random_ai_render_cadence);
+      // Ship_AcquirePrimaryTargetForShip (0x0040ed37): the radius wraps
+      // through a signed short and applies independently to both axes.
+      row.num("player_acquisition_radius",
+              static_cast<std::int16_t>(ship.random_ai_render_cadence * 600));
+      row.num("weapon_ammo_readiness",
+              NovaWeapon_ClassifyAmmoReadiness(state, ship));
+      row.num("perceived_combat_strength",
+              NovaAiShip_ComputePerceivedCombatStrength(state, ship));
+      row.num("player_perceived_combat_strength",
+              NovaAiShip_ComputePerceivedCombatStrength(state, state.player));
+      row.boolean(
+          "can_engage_player_under_cloak_rules",
+          NovaAiShip_CanEngageTargetUnderCloakRules(state, state.player, ship));
+      if (const Government *govt =
+              state.scenario.GovernmentByIndex(ship.faction_or_government_id);
+          govt != nullptr) {
+        row.num("government_flags_primary", govt->flags_primary);
+        row.num("government_crime_tol", govt->crime_tol);
+        row.num("government_max_odds", govt->max_odds);
+        row.boolean("government_rank_no_auto_attack",
+                    govt->rank_privileges.no_auto_attack);
+        row.boolean("government_rank_always_land",
+                    govt->rank_privileges.always_land);
+        row.boolean("government_iff_scrambler_active",
+                    govt->iff_scrambler_active);
+      }
       row.num("primary_target_ship_slot", ship.primary_target_ship_slot);
       // Escort-order investigation: the command selected by the squad
       // supervisor, the polymorphic travel/ship target slot, and the AI's

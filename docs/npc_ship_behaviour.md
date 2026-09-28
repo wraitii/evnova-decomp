@@ -224,6 +224,54 @@ ScanMask: 0x80 prefers availability 0x2000, 0x40 prefers 0x1000, 0x20 forces
 the plain pool in strict mode) are reconstructed in
 `NovaAi_SelectRandomAdjacentTravelStellar`.
 
+## Interceptor scanning and target acquisition
+
+The interceptor supervisor (`0x00403de0`) chooses random scan targets in
+state 7, including the player. Its state-7 tail re-runs
+`Ship_AcquirePrimaryTargetForShip` (`0x0040e020`), restoring the scan target
+only if acquisition leaves the primary slot at -1 (`0x004047c0..0x004047f0`).
+Successful hostile-player selection calls `Ship_SetShipHostileToPlayer`
+(`0x00410700`), which sets state 4, secondary target -1, and primary target 0.
+A player scan target alone does not imply hostility.
+
+`Ship_UpdateShipAiState` (`0x00405590`) completes the approach within 100 px
+on both axes. An NPC target is cleared and state returns to 0. For the player,
+state and targets are cleared before `Ship_ScanPlayerForContraband`
+(`0x00401800`), whose contraband outcomes can enter state 4. Outside that
+arrival box, state 7 selects control 9. Its 200 px steering band still
+applies approach thrust and calls `Ship_EscortFireAtUnprovokedTarget`.
+The supervisor's player challenge overlay requires a matching carried
+active mission ScanMask; it is cosmetic and schedules no comm handoff.
+
+Reputation-based acquisition requires weapon readiness, cloak eligibility,
+and both axis distances within the signed 16-bit product of
+`random_ai_render_cadence * 600` (`0x0040ed37..0x0040ed3e`,
+`0x0040e443..0x0040e47f`). Allocation seeds that field with `Rand(3) XOR 2`
+(`0x00425711..0x00425728`), yielding 2, 3, or 0. Zero requires coincident
+coordinates; the random scan-target selection has no such radius gate.
+
+In a hostile foreign government's system, reputation must be strictly above
+CrimeTol (`0x0040ed9e..0x0040eda7`). The common MaxOdds filter rejects a
+candidate only when its perceived strength exceeds the acquirer's strength
+multiplied by MaxOdds; equality passes (`0x0040efb6..0x0040efe4`). Perceived
+strength (`0x00411800`) scales class Strength by shield ratio, clamped to
+25–100%, and includes active allied support without a distance gate.
+
+No-auto-attack rank privileges and IFF-scrambler protection suppress player
+acquisition even when the other gates pass. Random scanning remains
+possible. Rank privileges extend to allied governments; see
+[faction combat and ranks](faction_combat_and_ranks.md) for the producer
+and the difference from the Bible's affiliated-government wording.
+
+### Ammo-readiness boundary discrepancy
+
+`NovaWeapon_ClassifyAmmoReadiness` (`src/game/weapon_banks.cpp`) rejects fuel
+equal to the required cost via `!(fuel > required)`. The executable compares
+required against current fuel at `0x00413911..0x0041391d`; its
+`TEST AH,0x45 / JNZ` skips depletion on equality. The faithful finite
+comparison is `fuel < required`. The port and its adjacent comment need
+correction. Free-energy weapons are unaffected.
+
 ## Movement controls (`ai_control_mode`)
 
 These are low-level commands issued by the state machine. Some entries note

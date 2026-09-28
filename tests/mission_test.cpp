@@ -2279,3 +2279,104 @@ TEST_CASE("observe mission counts a cloaked mission ship only when on screen") {
     CHECK(state.active_mission_runtime_flags[0].objective_complete);
   }
 }
+
+// Regression for mission 262 "Auroran Negotiations" (Bounty Hunter2), whose
+// special-ship block is ShipCount 4 / ShipSyst -6 (follow the player) /
+// ShipBehav 0 (always attack) / ShipStart 1 (jump in after a delay).
+//
+// The fleet spawns with the spawn-time hostile target already set, but the
+// jump-in arrival slowdown (state 8) resets ai_state_code to 0 and clears the
+// target. Ship_UpdateShipAiBehavior0x03's mission-fleet arm must re-acquire
+// the player on the next ordinary frame; if it does not, the ships drift
+// targetless off screen. This test drives the real scenario spawner and AI
+// through the slowdown and asserts the fleet ends up engaging the player.
+#include "game/escort_formation.hpp"
+#include "game/ship_ai.hpp"
+#include "game/ship_spawn.hpp"
+#include "game/spaceflight.hpp"
+#include <vector>
+
+TEST_CASE("Auroran Negotiations follow fleet re-acquires the player after "
+          "arrival slowdown") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  NovaResources_EvaluateAvailability(state);
+
+  std::int16_t def_index = -1;
+  for (std::size_t i = 0; i < state.scenario.missions.size(); ++i) {
+    const auto &mission = state.scenario.missions[i];
+    if (mission.present && mission.display_name == "Auroran Negotiations") {
+      def_index = static_cast<std::int16_t>(i);
+      break;
+    }
+  }
+  REQUIRE(def_index >= 0);
+
+  state.player.current_system_id = 0;
+  state.player.is_active = true;
+  state.player.armor_points = 100.0F;
+  state.player.shield_points = 100.0F;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+
+  Mission_ResolveMissionStellarLocators(state);
+  REQUIRE(Mission_ActivateAtSlot(state, def_index));
+
+  // Drive the per-tick spawner until the main fleet has topped up to its
+  // target count (timer 100..199 plus arrival placement).
+  Mission_RearmActiveMissionTimers(state);
+  for (int tick = 0; tick < 1200; ++tick) {
+    const auto &mission = state.active_missions[0];
+    if (mission.goal_count_remaining >= mission.target_ship_count) {
+      break;
+    }
+    NovaSystem_TickNpcSpawnMaintenance(
+        state, state.player.current_system_id, 0);
+  }
+  REQUIRE(state.active_missions[0].goal_count_remaining >= 4);
+
+  std::vector<std::size_t> fleet;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (ship.is_active && ship.mission_fleet_slot == 0) {
+      fleet.push_back(slot);
+    }
+  }
+  REQUIRE(fleet.size() >= 4);
+
+  // A freshly spawned, undamaged mission hull must not read as disabled; that
+  // would suppress the behavior supervisor and clear its target every frame.
+  for (const std::size_t slot : fleet) {
+    CHECK_FALSE(NovaAiShip_IsDisabled(state, state.ShipAt(slot)));
+  }
+
+  // Run the slowdown and the frames after it. The integrator completes the
+  // negative arrival speed around tick 34, resetting the ships to state 0.
+  for (int frame = 1; frame <= 200; ++frame) {
+    Ship_TickLeaderFlags(state);
+    for (const std::size_t slot : fleet) {
+      Ship &ship = state.ShipAt(slot);
+      if (!ship.is_active) {
+        continue;
+      }
+      NovaAi_UpdateShipAI(state, ship, static_cast<std::uint32_t>(frame), 1.0F);
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      if (cls != nullptr) {
+        NovaShip_IntegrateNpcMovement(state, ship, *cls, 1.0F);
+      }
+    }
+  }
+
+  int engaged = 0;
+  for (const std::size_t slot : fleet) {
+    const Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active) {
+      continue;
+    }
+    CHECK(ship.primary_target_ship_slot == 0);
+    CHECK(ship.ai_state_code == 4);
+    ++engaged;
+  }
+  CHECK(engaged >= 4);
+}

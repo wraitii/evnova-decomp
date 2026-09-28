@@ -262,6 +262,19 @@ are the reimplementation's zero-based/rebased ids unless the field name says
 otherwise. `summary` and `ships` also carry `tick_60hz`, the global 1/60 s
 gameplay tick (Ghidra `g_frame_tick_count_60hz`, 0x00865858), so a harness can
 align samples to simulation frames instead of wall-clock or request order.
+Each `ships` row includes `random_ai_render_cadence` and
+`player_acquisition_radius` (the signed 16-bit product of that field and 600,
+in pixels). The latter is the per-axis distance gate for reputation-based
+player acquisition; zero requires matching coordinates. It does not gate
+the interceptor's random scan-target selection.
+Acquisition diagnostics also include `weapon_ammo_readiness` (0 ready,
+1 all ammo/fuel-backed banks depleted but free-energy weapons remain,
+2 no usable weapons), `perceived_combat_strength`,
+`player_perceived_combat_strength`, and `can_engage_player_under_cloak_rules`.
+For a valid government, rows include `government_flags_primary`,
+`government_crime_tol`, `government_max_odds`, `government_rank_no_auto_attack`, `government_rank_always_land`,
+and `government_iff_scrambler_active`. These report current inputs to target
+acquisition without executing acquisition or consuming RNG.
 Extend `ProbeState_Snapshot` as subsystems are reconstructed —
 prefer small typed queries over one giant dump.
 
