@@ -151,10 +151,15 @@ void NovaStellar_TickStellarDefenseBatteries(GameState &state);
 // bypasses the incidental-fire gates), false for a stray beam sweep. The
 // 0x0042f270 incidental arm passes true only when the swept hit equals the
 // beam's recorded target or the owner's current primary target.
+// `impact_x`/`impact_y` are the resolved contact point (the beam endpoint);
+// 0x0042f270 spawns the area impact / particle burst there while passing the
+// beam source to Ship_ApplyDamageToShip.
 void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                                        std::int16_t owner_ship_slot,
                                        std::int16_t target_ship_slot,
                                        std::int16_t weapon_id,
+                                       float impact_x,
+                                       float impact_y,
                                        std::int8_t impact_variant = 0,
                                        bool suppress_retarget_logic = true);
 

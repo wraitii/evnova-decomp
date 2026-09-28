@@ -1479,6 +1479,8 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
                                             beam.owner_ship_slot,
                                             direct_hit_slot,
                                             beam.weapon_id,
+                                            beam.target_x,
+                                            beam.target_y,
                                             beam.impact_variant,
                                             direct_suppress_retarget);
         }

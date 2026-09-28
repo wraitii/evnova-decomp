@@ -928,7 +928,7 @@ TEST_CASE("scripted manoeuvre targets ignore queued beam impacts",
   Ship &target = state.ShipAt(1);
   target.ai_state_code = 0x10;
 
-  NovaWeapon_ResolveDirectWeaponHit(state, 0, 1, 0);
+  NovaWeapon_ResolveDirectWeaponHit(state, 0, 1, 0, target.pos_x, target.pos_y);
 
   CHECK(target.shield_points == Catch::Approx(20.0F));
   CHECK(target.armor_points == Catch::Approx(100.0F));
@@ -951,7 +951,8 @@ TEST_CASE("targeted player beam alerts same-government warships",
   responder.ai_state_code = 0;
   responder.pers_def_slot = 0;
 
-  NovaWeapon_ResolveDirectWeaponHit(state, 0, 1, 0);
+  NovaWeapon_ResolveDirectWeaponHit(
+      state, 0, 1, 0, state.ShipAt(1).pos_x, state.ShipAt(1).pos_y);
 
   CHECK(responder.ai_state_code == 4);
   CHECK(responder.primary_target_ship_slot == 0);

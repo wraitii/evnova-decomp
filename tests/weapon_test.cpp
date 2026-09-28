@@ -1700,6 +1700,61 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
   CHECK(queued.target_y == Catch::Approx(410.0F - 100.0F));
 }
 
+// Regression: a beam's impact visuals belong at the contact point, not at the
+// muzzle. Shot_UpdateBeamHitQueue (0x0042f270) spawns
+// Shot_SpawnAreaImpactEffects / Weapon_SpawnWeaponImpactParticleBurst at
+// local_58/local_54 (source + bearing * truncated distance) while passing the
+// SOURCE (local_60) to Ship_ApplyDamageToShip. The port previously fed the
+// beam source to both, so the Thunderhead Lance sparkled at the ship that
+// fired it.
+TEST_CASE("beam impacts spawn at the contact point, not the muzzle",
+          "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 0;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.beam_falloff = 0x10;
+  beam.impact_effect_id = 0;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F; // heading 0 points toward -y
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+  target.pos_x = 100.0F;
+  target.pos_y = 140.0F; // 60 px ahead, inside the forward cone
+
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+
+  // The no-mask target uses the 75 px frame-height fallback: 60 - 15 = 45 px.
+  const BeamHit &queued = state.beam_hit_queue[0];
+  CHECK(queued.target_x == Catch::Approx(100.0F));
+  CHECK(queued.target_y == Catch::Approx(155.0F));
+
+  const ImpactEffectInstance &impact = state.impact_effect_instances[0];
+  REQUIRE(impact.anim_time >= 0.0F);
+  CHECK(impact.pos_x == Catch::Approx(queued.target_x));
+  CHECK(impact.pos_y == Catch::Approx(queued.target_y));
+  // Explicitly not the muzzle at the owner's position.
+  CHECK(impact.pos_y != Catch::Approx(owner.pos_y));
+}
+
 // Regression: Shot_UpdateBeamHitQueue (0x0042f270) has no already-resolved
 // flag, so a beam re-applies its mass/energy damage on every simulation call
 // while the target stays in the cone. The port previously resolved each beam's

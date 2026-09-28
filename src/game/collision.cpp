@@ -2632,6 +2632,8 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                                        std::int16_t owner_ship_slot,
                                        std::int16_t target_ship_slot,
                                        std::int16_t weapon_id,
+                                       float impact_x,
+                                       float impact_y,
                                        std::int8_t impact_variant,
                                        bool suppress_retarget_logic) {
   if (!ValidShipSlot(owner_ship_slot) || !ValidShipSlot(target_ship_slot) ||
@@ -2662,17 +2664,19 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
   const Weapon *weapon = WeaponForShot(state, shot);
   if (weapon != nullptr) {
     // Beam expiry routes through the same primary impact visual/audio helper
-    // as projectile contact (Ghidra 0x0042f270 -> 0x00437780).
+    // as projectile contact (Ghidra 0x0042f270 -> 0x00437780). The original
+    // spawns these at the contact point (source + bearing * truncated
+    // distance), NOT at the beam source: `local_58/local_54` in 0x0042f270.
     NovaEffects_SpawnAreaImpact(state,
-                                shot.pos_x,
-                                shot.pos_y,
+                                impact_x,
+                                impact_y,
                                 weapon->impact_effect_id,
                                 weapon->splash_radius,
                                 true);
     // Beam hits use scatter 0x19 (Shot_UpdateBeamHitQueue 0x0042f270); the
     // projectile contact paths use 0x14.
     NovaEffects_SpawnWeaponImpactBurstForWeapon(
-        state, shot.pos_x, shot.pos_y, *weapon, /*scatter=*/0x19);
+        state, impact_x, impact_y, *weapon, /*scatter=*/0x19);
     // This clean-room path resolves only the beam queue's recorded ship
     // target. The original 0x0042f270 passes true for that intended contact;
     // its still-deferred incidental beam-contact sweep passes false.
