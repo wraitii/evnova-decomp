@@ -149,10 +149,13 @@ bool NovaGovernment_AreGovtsHostileOrXenophobic(const ScenarioData &scenario,
 // Bible's "any of its class mates" wording for the 30000..30255 misn/stell
 // families; this is the community "TravelStel 30000-30255 does not work"
 // report. The shipped scenario mostly fills only Class1, so Classes 2-4 look
-// ignored. The same positional rule gates the 31000..31255 not-class families,
-// the AuxShipSyst/TravelStel/ReturnStel locators, and the PayVal
-// -39999..-30000 shared-class reputation clear. Equal ids short-circuit to
-// true and there is no derelict exclusion.
+// ignored. The same positional rule gates the 31000..31255 not-class families
+// and every share-class locator (AvailStel, ShipSyst, AuxShipSyst and
+// TravelStel/ReturnStel) plus the PayVal -39999..-30000 shared-class
+// reputation clear. Those callers differ on whether the exact target
+// government passes: AvailStel/ShipSyst/AuxShipSyst keep it (no wanted!=govt
+// guard), TravelStel/ReturnStel drop it. Equal ids short-circuit to true and
+// there is no derelict exclusion.
 bool NovaGovernment_DoGovtsShareClass(const ScenarioData &scenario,
                                       std::int16_t govt_a,
                                       std::int16_t govt_b) {

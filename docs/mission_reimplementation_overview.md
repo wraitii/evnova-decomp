@@ -83,7 +83,8 @@ cadence now matches the original: each random family proves one of its fixed
 0x0043da4c/0x0043db4d/0x0043db53: it indexes `g_system_defs` with the
 **stellar** slot (not the candidate's own system) and excludes the exact
 stellar government before `Government_AreGovtsAllied`; the 30000/31000
-class families also exclude the exact government. The port reproduces both.
+class families also exclude the exact government (in this selector only;
+AvailStel/ShipSyst/AuxShipSyst keep an exact match). The port reproduces both.
 The port's deliberate divergences are the no-candidate fallback (-1 /
 TravelStel instead of the original anchor); the -2 arm's validity check,
 which the original evaluates against the pre-scan hit (always true); and the
