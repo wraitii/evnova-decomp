@@ -644,6 +644,18 @@ bool NovaOutfit_HasCloakScannerRevealForSurface(const GameState &state,
   return false;
 }
 
+// @port 0x00464760 100%
+// Ghidra 0x00464760 Outfit_HasPlayerOwnedOutfitType0x0F_Cached (player branch;
+// NPC callers get false). The original caches the ModType-15 scan in
+// g_player_has_outfit_type_0x0f_cached until inventory changes; the port
+// rescans.
+bool Outfit_HasPlayerOwnedAfterburner(const GameState &state) {
+  if (state.cheat_mode_active) {
+    return true;
+  }
+  return Outfit_HasOwnedEffect(state, OutfitEffect::kAfterburner);
+}
+
 // @port 0x0046E060 75% gameplay
 // Ghidra 0x0046e060 Ship_GetShipFuelBurnRate.
 float Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state) {

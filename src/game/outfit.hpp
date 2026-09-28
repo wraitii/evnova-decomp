@@ -326,6 +326,11 @@ enum class CloakScannerSurface : std::uint8_t {
 // spaceflight.hpp.
 [[nodiscard]] bool NovaPlayer_IsInertialess(const GameState &state);
 
+// Whether the player can afterburn: owns an outfit with ModType 15, or the
+// cheat-mode latch is set. The original-function citation is at the
+// definition in outfit.cpp.
+[[nodiscard]] bool Outfit_HasPlayerOwnedAfterburner(const GameState &state);
+
 // Ghidra 0x0046e060 Ship_GetShipFuelBurnRate, for the player: the last
 // owned outfit encountered with opcode 15 supplies ModVal / 30 fuel per
 // original simulation tick. The original caches this result until inventory

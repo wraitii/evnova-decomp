@@ -90,6 +90,10 @@ struct PlayerMovementOptions {
   // afterburner tail's burn, but it gates the widened main-thrust clamp and the
   // 1.8x speed caps on !g_gravity_pull_active, so this suppresses those two.
   bool gravity_pull = false;
+  // BUGFIX(original) gate (BugFixPolicy::safe): scale the afterburner tail's
+  // unscaled per-call 2.75x push by elapsed time. Off replays the original
+  // fixed push once per call.
+  bool afterburner_push_frame_scaled = false;
 };
 
 // Pure free-flight physics integrator (unit-testable; no SDL). Derives stats

@@ -138,6 +138,18 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   constexpr float kAfterburnerTailThrustFactor = 2.75F; // 0x00575648
   constexpr float kAfterburnerOverspeedFactor = 1.8F;   // 0x00575610
   constexpr float kAfterburnerTailDecay = 0.99F;        // 0x00575678
+  // BUGFIX(original): unlike the normal thrust blocks (0x0045038e, 0x00450426,
+  // 0x00450480, all x g_avg_frame_tick_scale), the afterburner tail adds its
+  // thrust * 2.75 push with no frame-time scale (0x0045165c, 0x004516e8), so
+  // the original's afterburner acceleration depends on the frame rate. Under
+  // BugFixPolicy::safe the push is scaled by elapsed time with the factor
+  // raised to 2.75 / 0.63, matching the original at its 21 ms (0.63 tick)
+  // maximum call rate. Off applies the fixed push once per call.
+  const float afterburner_push_scale = opts.afterburner_push_frame_scaled
+                                           ? kAfterburnerTailThrustFactor /
+                                                 kOriginalMaxRateFrameTicks *
+                                                 std::max(0.0F, elapsed_ticks)
+                                           : kAfterburnerTailThrustFactor;
 
   PlayerMovementStats stats;
   elapsed_ticks = std::max(0.0F, elapsed_ticks);
@@ -288,8 +300,7 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
     // thrust * 2.75 (0x00575648) to the scalar speed and clamps to max * 1.8.
     // Runs regardless of the thrust key and of a gravity pull (the original
     // only suppresses the cap widening, not the burn).
-    ship.speed += stats.thrust_px_per_tick2 * kAfterburnerTailThrustFactor *
-                  elapsed_ticks;
+    ship.speed += stats.thrust_px_per_tick2 * afterburner_push_scale;
     const float afterburner_max =
         stats.max_speed_px_per_tick * kAfterburnerOverspeedFactor;
     if (ship.speed > afterburner_max) {
@@ -359,8 +370,8 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
     // fuel and glow arms of the same tail.
     const float sin_h = std::sin(ship.heading);
     const float cos_h = std::cos(ship.heading);
-    const float tail_thrust = stats.thrust_px_per_tick2 *
-                              kAfterburnerTailThrustFactor * elapsed_ticks;
+    const float tail_thrust =
+        stats.thrust_px_per_tick2 * afterburner_push_scale;
     const float tail_max =
         stats.max_speed_px_per_tick * kAfterburnerOverspeedFactor;
     const auto apply_tail_axis =

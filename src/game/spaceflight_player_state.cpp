@@ -1461,7 +1461,7 @@ bool PlayerTick_FaceTargetCommand(GameState &state,
   return true;
 }
 
-// @port 0x0044C8D0 90% gameplay,divergence,synthetic
+// @port 0x0044C8D0 90% gameplay,divergence,bugfix,synthetic
 // Ghidra 0x0044C8D0 PlayerTick_ManualFlightAndRegeneration, internal umbrella
 // of Ship_HandlePlayerShipCore. Relevant synthetic CFGs: turn input
 // 0x0044C92E -> 0x0044C980; joined afterburner/thrust/glow
@@ -1470,6 +1470,9 @@ bool PlayerTick_FaceTargetCommand(GameState &state,
 // velocity burn and speed-cap clamp now live in NovaPlayer_IntegrateMovement
 // (opts.afterburner / opts.gravity_pull); the player engine-glow state machine
 // and the inertialess scalar-speed branch remain the open gaps.
+// BUGFIX(original): the tail's 2.75x afterburner push is not frame-time scaled
+// in the original; BugFixPolicy::safe scales it (see
+// NovaPlayer_IntegrateMovement).
 void PlayerTick_ManualFlightAndRegeneration(GameState &state,
                                             const FlightInput &input,
                                             float elapsed_ticks,
@@ -1499,14 +1502,18 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
     effective_input.afterburner = false;
   }
 
-  // @port 0x0044C9AB 85% correctness,synthetic
+  // @port 0x0044C9AB 100% synthetic
   // Ghidra 0x0044c9ab PlayerTick_AfterburnerCommand (synthetic region of
-  // 0x0044aa70): capability/fuel activation and burn. Exact station-hold /
-  // maneuver gates remain approximate.
+  // 0x0044aa70): latches when the command is held on an enabled hull (the
+  // station-hold gate is folded into controls_disabled above), the player owns
+  // a ModType-15 outfit (0x00464760), ai_maneuver_timer_ms (+0x4c) <= 0,
+  // fuel > 0 and at least one tick's burn is left. A zero-burn afterburner
+  // still engages, and reverse does not block it (the reverse arm only turns).
   const float fuel_burn = Outfit_GetPlayerAfterburnerFuelBurnRate(state);
   const bool afterburner_active =
-      effective_input.afterburner && !effective_input.reverse &&
-      fuel_burn <= p.fuel_points && fuel_burn > 0.0F;
+      effective_input.afterburner && Outfit_HasPlayerOwnedAfterburner(state) &&
+      p.ai_maneuver_timer_ms <= 0.0F && p.fuel_points > 0.0F &&
+      fuel_burn <= p.fuel_points;
   // Ghidra's old name g_player_in_gravity_well is misleading: this is the
   // opcode-15 afterburner latch. Stellar_TickStellarGravityPull independently
   // sets g_gravity_pull_active, which disables the afterburner's boosted speed
@@ -1590,6 +1597,7 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   movement_opts.fire_restricted = fire_restricted;
   movement_opts.afterburner = afterburner_active;
   movement_opts.gravity_pull = gravity_present;
+  movement_opts.afterburner_push_frame_scaled = state.bugfixes.safe;
   movement_opts.speed_cap_x = state.player_speed_cap_x;
   movement_opts.speed_cap_y = state.player_speed_cap_y;
   // Capture the applied turn direction (keyboard OR auto-turn) for the bank
