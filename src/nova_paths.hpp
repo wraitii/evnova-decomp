@@ -54,6 +54,12 @@ ResolveUserSelectedInstallRoot(const std::filesystem::path &selected);
 // directory is created on demand; nullopt when it cannot be resolved.
 [[nodiscard]] std::optional<std::filesystem::path> SupportDirectory();
 
+// Installs a user-selected support folder, overriding SDL_GetPrefPath. Set by
+// tests so a save/load does not touch the developer's real per-user state;
+// pass nullopt to clear. Clears the cached resolution so the next
+// SupportDirectory() call re-resolves.
+void SetSupportDirectoryOverride(std::optional<std::filesystem::path> support);
+
 // A named child of SupportDirectory() (e.g. "Pilots", "Nova Plug-ins"),
 // created on demand. nullopt when the support folder itself is unavailable.
 [[nodiscard]] std::optional<std::filesystem::path>

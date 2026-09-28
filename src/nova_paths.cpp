@@ -81,6 +81,12 @@ std::optional<std::filesystem::path> g_install_root_override;
 std::optional<std::filesystem::path> g_install_root_cached;
 bool g_install_root_cached_valid = false;
 
+// Support-folder override (tests) and its cache. Empty means "resolve through
+// SDL_GetPrefPath".
+std::optional<std::filesystem::path> g_support_directory_override;
+std::optional<std::filesystem::path> g_support_directory_cached;
+bool g_support_directory_cached_valid = false;
+
 [[nodiscard]] std::optional<std::filesystem::path>
 NormalizeResolvedRoot(const std::filesystem::path &path) {
   std::error_code ec;
@@ -137,9 +143,24 @@ std::optional<std::filesystem::path> NovaPaths::ResolveUserSelectedInstallRoot(
 }
 
 std::optional<std::filesystem::path> NovaPaths::SupportDirectory() {
-  static const std::optional<std::filesystem::path> directory =
-      ResolveSupportDirectory();
-  return directory;
+  if (!g_support_directory_cached_valid) {
+    if (g_support_directory_override) {
+      std::error_code ec;
+      std::filesystem::create_directories(*g_support_directory_override, ec);
+      g_support_directory_cached = g_support_directory_override;
+    } else {
+      g_support_directory_cached = ResolveSupportDirectory();
+    }
+    g_support_directory_cached_valid = true;
+  }
+  return g_support_directory_cached;
+}
+
+void NovaPaths::SetSupportDirectoryOverride(
+    std::optional<std::filesystem::path> support) {
+  g_support_directory_override = std::move(support);
+  g_support_directory_cached.reset();
+  g_support_directory_cached_valid = false;
 }
 
 std::optional<std::filesystem::path>

@@ -4,6 +4,7 @@
 #include "game/new_pilot_flow.hpp"
 #include "game/nova_name_text.hpp"
 #include "game/pilot_file.hpp"
+#include "nova_paths.hpp"
 
 #include <algorithm>
 #include <array>
@@ -39,6 +40,24 @@ struct TemporaryDirectory {
     std::error_code ec;
     std::filesystem::remove_all(path, ec);
   }
+};
+
+// Points NovaPaths at a throwaway support folder for the test's lifetime so
+// PilotFileSaveGame/LoadSave's "Last Pilot" marker does not overwrite the
+// developer's real one.
+struct ScopedSupportDirectoryOverride {
+  explicit ScopedSupportDirectoryOverride(const std::filesystem::path &dir) {
+    NovaPaths::SetSupportDirectoryOverride(dir);
+  }
+
+  ~ScopedSupportDirectoryOverride() {
+    NovaPaths::SetSupportDirectoryOverride(std::nullopt);
+  }
+
+  ScopedSupportDirectoryOverride(const ScopedSupportDirectoryOverride &) =
+      delete;
+  ScopedSupportDirectoryOverride &
+  operator=(const ScopedSupportDirectoryOverride &) = delete;
 };
 
 [[nodiscard]] PilotFile SampleRecord() {
@@ -451,6 +470,8 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
           "pilot name from the path") {
   const auto dir = std::filesystem::temp_directory_path() / "evnova_pilot_test";
   std::filesystem::create_directories(dir);
+  const std::filesystem::path support_dir = dir / "support";
+  const ScopedSupportDirectoryOverride support_override{support_dir};
   const std::filesystem::path path = dir / "Test Pilot.plt";
   std::filesystem::remove(path);
 
@@ -478,7 +499,9 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   REQUIRE(PilotFileProbeExists(path) == false);
   REQUIRE(PilotFileSaveGame(dir, saved_state, p.jump_dest_stellar));
   CHECK(PilotFileProbeExists(path) == true);
-  const auto marker_path = dir / "Last Pilot";
+  // The "Last Pilot" marker lives in the Pilots save folder, matching the
+  // original's "Pilots:Last Pilot" (PilotFile_RecordLastPilotPath).
+  const auto marker_path = support_dir / "Pilots" / "Last Pilot";
   REQUIRE(std::filesystem::is_regular_file(marker_path));
   {
     std::ifstream marker(marker_path, std::ios::binary);
@@ -599,6 +622,12 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
   if (!std::filesystem::is_directory(fixture_dir)) {
     SKIP("optional docs/assets/pilots fixtures are not installed");
   }
+
+  // Loading a fixture rewrites the "Last Pilot" marker, so isolate the
+  // support folder from the developer's real one.
+  TemporaryDirectory support_dir{std::filesystem::temp_directory_path() /
+                                 "evnova-pilot-fixture-support-framing"};
+  const ScopedSupportDirectoryOverride support_override{support_dir.path};
 
   struct FixtureExpectation {
     std::string_view file;
@@ -865,6 +894,7 @@ TEST_CASE("pilot save stores the 0-based stellar index, not a resource id") {
   const auto dir =
       std::filesystem::temp_directory_path() / "evnova_pilot_index_test";
   std::filesystem::create_directories(dir);
+  const ScopedSupportDirectoryOverride support_override{dir / "support"};
   const auto path = dir / "Index Pilot.plt";
   std::filesystem::remove(path);
 
@@ -884,7 +914,6 @@ TEST_CASE("pilot save stores the 0-based stellar index, not a resource id") {
   CHECK(loaded.player.pos_y == static_cast<float>(departure->pos_y));
 
   PilotFileDelete(path);
-  std::filesystem::remove(dir / "Last Pilot");
 }
 
 TEST_CASE("pilot save directory mirrors the Nova Pilots subfolder",

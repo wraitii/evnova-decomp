@@ -61,13 +61,20 @@ void WriteBoundedCString(std::vector<std::byte> &bytes,
 
 // @port 0x004C7D40 100%
 // Ghidra 0x004c7d40 PilotFile_RecordLastPilotPath: writes the NUL-terminated
-// pilot path to EVNova.ini [130] S4 ("Pilots:Last Pilot"); called after a
-// successful save and load. The port writes the marker beside the save file
-// via PilotFileSaveDirectory.
+// pilot path to `g_pilots_path_prefix` + EVNova.ini [130] S4, i.e. the "Last
+// Pilot" file inside the configured Pilots folder ("Pilots:Last Pilot");
+// called after a successful save and load. The port always targets
+// PilotFileSaveDirectory(), so loading a .plt from outside the Pilots folder
+// no longer drops a stray marker beside it.
 [[nodiscard]] bool
-RecordLastPilotPath(const std::filesystem::path &marker_dir,
-                    const std::filesystem::path &pilot_path) {
-  const auto marker_path = marker_dir / kLastPilotMarkerName;
+RecordLastPilotPath(const std::filesystem::path &pilot_path) {
+  const auto marker_dir = PilotFileSaveDirectory();
+  if (!marker_dir) {
+    NovaLog::Error("pilot marker: no Pilots folder to record '{}'",
+                   pilot_path.string());
+    return false;
+  }
+  const auto marker_path = *marker_dir / kLastPilotMarkerName;
   std::ofstream marker(marker_path, std::ios::binary | std::ios::trunc);
   const std::string saved_path = pilot_path.string();
   marker.write(saved_path.c_str(),
@@ -1262,7 +1269,7 @@ bool PilotFileSaveGame(const std::filesystem::path &pilots_dir,
   }
   NovaLog::Debug(
       "pilot save: wrote {} bytes to '{}'", bytes.size(), path.string());
-  return RecordLastPilotPath(pilots_dir, path);
+  return RecordLastPilotPath(path);
 }
 
 // @port 0x004CB260 99% correctness,divergence
@@ -1443,7 +1450,7 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   }
 
   PilotFileApply(record, state);
-  static_cast<void>(RecordLastPilotPath(path.parent_path(), path));
+  static_cast<void>(RecordLastPilotPath(path));
 
   // Recreate the two saved player-fleet classes after the persistent state is
   // live. Invalid class rows are skipped and make the successful load report
@@ -1614,17 +1621,20 @@ void PilotFileDelete(const std::filesystem::path &path) {
 }
 
 // @port 0x004CA120 90% gameplay
-// Ghidra 0x004ca120 PilotData_AutoresumeLastPilot: reads Last Pilot from the
-// SDL writable per-user preference path after staged startup loading; resolves
-// the saved path, runs the original pre-load NovaShip_ResetPlayerShipState, and
-// auto-activates only an exact-success load. Repaired (-0x2e) pilots are left
-// inactive for explicit Open Pilot handling. Remaining: reputation reset and
-// post-load region-event/mission reaction schedule reseeding.
+// Ghidra 0x004ca120 PilotData_AutoresumeLastPilot: reads the "Last Pilot"
+// marker from the configured Pilots folder after staged startup loading;
+// resolves the saved path, runs the original pre-load
+// NovaShip_ResetPlayerShipState, and auto-activates only an exact-success load.
+// Repaired (-0x2e) pilots are left inactive for explicit Open Pilot handling.
+// Remaining: reputation reset and post-load region-event/mission reaction
+// schedule reseeding.
 PilotLoadError PilotData_AutoresumeLastPilot(GameState &state) {
   const auto save_directory = PilotFileSaveDirectory();
   if (!save_directory) {
     return PilotLoadError::kMissingOrEmptyFile;
   }
+  // The marker sits in the Pilots folder beside the saves (the original's
+  // "Pilots:Last Pilot"), not beside the prefs.
   const std::filesystem::path marker = *save_directory / kLastPilotMarkerName;
   if (!PilotFileProbeExists(marker)) {
     return PilotLoadError::kMissingOrEmptyFile;

@@ -253,12 +253,11 @@ enum class PilotLoadError : int {
   kRepairsApplied = -0x2e, // 0xffffffd2: restored with fallbacks (see log)
 };
 
-// Writable directory used by the SDL port for pilot saves and the Last Pilot
-// marker. This is the per-user support folder's "Pilots" child (see
-// nova_paths.hpp); it is created on demand. The original used its configured
-// Pilots folder (Prefs_SetPilotsPathPrefix 0x004bd0c0 builds "Pilots:" from
-// EVNova.ini [130] S3); the per-user location is a deliberate platform
-// divergence.
+// Writable directory used by the SDL port for pilot saves. This is the
+// per-user support folder's "Pilots" child (see nova_paths.hpp); it is created
+// on demand. The original used its configured Pilots folder
+// (Prefs_SetPilotsPathPrefix 0x004bd0c0 builds "Pilots:" from EVNova.ini [130]
+// S3); the per-user location is a deliberate platform divergence.
 [[nodiscard]] std::optional<std::filesystem::path> PilotFileSaveDirectory();
 
 // Serialize PilotFile into the .plt byte layout. Mirrors PilotFile_SaveGameCore
@@ -291,9 +290,10 @@ PilotFileDeserialize(std::span<const std::byte> bytes, PilotFile &out);
 // jump_dest_stellar is the 0-based g_stellar_defs index of the player's
 // current jump/travel destination (see PilotFileSerialize; rebase a resource
 // id with PilotFileStellarIndexFromResourceId first). Returns false on I/O
-// failure. Also writes the "Last Pilot" marker file in the same directory
-// (PilotFile_RecordLastPilotPath 0x004c7d40; EVNova.ini [130] S4, not STR#
-// 0x82).
+// failure. Also writes the "Last Pilot" marker inside the Pilots save folder
+// (PilotFile_RecordLastPilotPath 0x004c7d40; the original's
+// "Pilots:Last Pilot" = g_pilots_path_prefix + EVNova.ini [130] S4, not
+// STR# 0x82).
 [[nodiscard]] bool PilotFileSaveGame(const std::filesystem::path &pilots_dir,
                                      const GameState &state,
                                      std::int16_t jump_dest_stellar);
@@ -313,8 +313,8 @@ PilotFileLoadSave(const std::filesystem::path &path, GameState &state);
 // removes the file when it exists.
 void PilotFileDelete(const std::filesystem::path &path);
 
-// Ghidra 0x004ca120 PilotData_AutoresumeLastPilot. Finds the stock "Last
-// Pilot" marker in the Pilots directory and loads the referenced .plt.
+// Ghidra 0x004ca120 PilotData_AutoresumeLastPilot. Finds the "Last Pilot"
+// marker in the Pilots save folder and loads the referenced .plt.
 [[nodiscard]] PilotLoadError PilotData_AutoresumeLastPilot(GameState &state);
 
 } // namespace game
