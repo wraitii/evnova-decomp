@@ -93,6 +93,13 @@ bool IsHypergateAnimationEngaged(const GameState &state,
 struct Viewport {
   int w = kViewportWidth;
   int h = kViewportHeight;
+  // Full authored window width for the world draw. The gameplay camera stays
+  // centred on the play area (`w`, window minus the cockpit strip), but the
+  // world itself is drawn across the whole window and the strip is composited
+  // over it. `full_w` only widens the background/cull extent so any region the
+  // strip leaves exposed shows the flight scene; camera centring, spawning and
+  // gameplay picking still use `w` and are unchanged.
+  int full_w = kViewportWidth;
 };
 
 // During the jump the ship stays screen-centred; the camera is the plain
@@ -109,7 +116,9 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
 // radar; the SDL port has no saved-backdrop offscreen surface.
 [[nodiscard]] Viewport CurrentViewport(const SdlPlatform &platform) {
   const FlightSceneGeometry geometry = FlightSceneGeometryFor(platform);
-  return {geometry.viewport_w, geometry.viewport_h};
+  return {geometry.viewport_w,
+          geometry.viewport_h,
+          static_cast<int>(std::lround(geometry.placement.authored_size.x))};
 }
 
 // Ghidra Ship_UpdateVisualState (0x00428340) frame composition: the displayed
@@ -1164,7 +1173,10 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
     // When the sheet is unavailable we keep frame 0 (fallback point draw).
     const int frame_count = star_frame_count > 0 ? star_frame_count : 1;
     s.frame = RandomBelow(state.rng, frame_count);
-    // Random world offset within the (player-centred) viewport.
+    // Random world offset within the (player-centred) play area. Kept to the
+    // play-area bound so the shared session PRNG consumes the same stream as
+    // before; the star draw wraps over `full_w`, so the extended field still
+    // fills as the player moves (see DrawBackground).
     const auto rx = static_cast<float>(RandomBelow(state.rng, vp.w));
     const auto ry = static_cast<float>(RandomBelow(state.rng, vp.h));
     s.pos_x = rx + state.player.pos_x - static_cast<float>(vp.w) / 2.0F;
@@ -1201,6 +1213,11 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 // @port 0x0042e590 85% rendering,divergence
 // DIVERGENCE(original): the 8-bit-depth star path (brightness=t, tint=0) is
 // not modelled; the port always uses the 16bpp additive-tint path.
+// DIVERGENCE(original): the world is drawn and the ambient-star field wrapped
+// across the full window width so the columns underneath the right-hand
+// cockpit strip show the flight scene where the 194x767 art leaves them
+// exposed (a port-only window geometry; the original's HUD art fills the
+// screen height). Gameplay stays centred on the play area.
 // Frame_UpdateViewportWrapBackgroundSprites [0x0042e590]
 // (+ the sprite-world draw in Frame_SpaceflightLoop scope 2) renders the stars.
 // Each star draws its randomly-chosen frame of the 16-frame star-field sprite
@@ -1250,6 +1267,14 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
                 static_cast<int>(static_cast<double>(star_murk) * 0.9), 2, 0x1d)
           : 0;
   const Viewport vp = CurrentViewport(platform);
+  // Wrap the ambient-star field over the full window width (`full_w`) while
+  // keeping the player-centred phase (the camera is offset by half the reserved
+  // strip width). The port's play area (`w`) stops at the cockpit strip, so
+  // without this the region the strip leaves exposed below a taller window
+  // reads as a flat starless band instead of space.
+  const float star_field_w = static_cast<float>(std::max(vp.w, vp.full_w));
+  const float star_camera_x =
+      state.player.pos_x + (star_field_w - static_cast<float>(vp.w)) * 0.5F;
   const SpriteAsset *sheet = StarFieldSheet(platform);
   for (const auto &s : ambient_stars_) {
     if (!s.active) {
@@ -1272,21 +1297,22 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
                  s.frame,
                  s.pos_x,
                  s.pos_y,
-                 state.player.pos_x,
+                 star_camera_x,
                  state.player.pos_y,
-                 vp.w,
+                 static_cast<int>(std::lround(star_field_w)),
                  vp.h,
                  opts);
       continue;
     }
     // Fallback when the star-field sheet is unavailable: a small single-pixel
     // point (matches a 5px sprite scaled for the 400px viewport).
-    const float wx = std::fmod((s.pos_x - state.player.pos_x) + vp.w / 2,
-                               static_cast<float>(vp.w));
+    const float raw_x =
+        (s.pos_x - state.player.pos_x) + static_cast<float>(vp.w) / 2.0F;
+    const float wx = std::fmod(raw_x, star_field_w);
     const float wy = std::fmod((s.pos_y - state.player.pos_y) + vp.h / 2,
                                static_cast<float>(vp.h));
     SDL_RenderPoint(renderer,
-                    wx < 0.0F ? wx + static_cast<float>(vp.w) : wx,
+                    wx < 0.0F ? wx + star_field_w : wx,
                     wy < 0.0F ? wy + static_cast<float>(vp.h) : wy);
   }
 }
@@ -1665,7 +1691,7 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
     }
     const int cx = (st->pos_x - static_cast<int>(camera_x)) + vp.w / 2;
     const int cy = (st->pos_y - static_cast<int>(camera_y)) + vp.h / 2;
-    if (cx < -160 || cx > vp.w + 160 || cy < -160 || cy > vp.h + 160) {
+    if (cx < -160 || cx > vp.full_w + 160 || cy < -160 || cy > vp.h + 160) {
       continue;
     }
     // Pick an 8-bit tint: the stellar's government (decoded) if present,
@@ -1977,7 +2003,7 @@ void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
     const float world_y = static_cast<float>(particle.pos_y) / 256.0F;
     const float screen_x = world_x - camera_x + half_w;
     const float screen_y = world_y - camera_y + half_h;
-    if (screen_x < 0.0F || screen_x >= static_cast<float>(vp.w) ||
+    if (screen_x < 0.0F || screen_x >= static_cast<float>(vp.full_w) ||
         screen_y < 0.0F || screen_y >= static_cast<float>(vp.h)) {
       continue;
     }
