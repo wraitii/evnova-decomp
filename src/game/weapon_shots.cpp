@@ -1253,7 +1253,7 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
   return false;
 }
 
-// @port 0x0042f270 85% gameplay,rng
+// @port 0x0042f270 88% gameplay,rng
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
   const float ticks = std::max(0.0F, elapsed_ticks);
   for (BeamHit &beam : state.beam_hit_queue) {
@@ -1362,6 +1362,26 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
         if (!target.is_active) {
           beam.lifetime_ticks = -1;
         }
+      }
+      // Ghidra 0x0042f270: a positive shot_random_spread (Bible "Inaccuracy")
+      // adds a fresh random offset to the resolved bearing on every full tick.
+      // `local_30` feeds both the visible endpoint and the collision cone, so
+      // the same jittered angle drives both. This is what makes the Ion Cannon
+      // (spread 4, mode 3) shimmer instead of drawing one fixed line. Gated on
+      // mode != 10 (point defense); the original draws even when the scan
+      // finds no candidate. The offset is added into a 16-bit bearing, so a
+      // result past 360 or below 0 is kept unwrapped (trig is periodic, but
+      // the cone test compares the raw signed difference); preserved exactly.
+      // The port recomputes the endpoint once per TickBeamHitQueue call rather
+      // than once per raw full tick, so the draw count still diverges when a
+      // call batches several raw ticks (kept under the rng tag).
+      if (beam_weapon->weapon_mode_code != 10 && beam_weapon->inaccuracy > 0) {
+        const int offset =
+            static_cast<int>(RandomBelow(
+                state, static_cast<int>(beam_weapon->inaccuracy) * 2)) -
+            beam_weapon->inaccuracy;
+        bearing_deg = static_cast<float>(
+            static_cast<std::int16_t>(static_cast<int>(bearing_deg) + offset));
       }
       const float beam_length = static_cast<float>(beam_weapon->beam_length_px);
       float visible_length = beam_length;

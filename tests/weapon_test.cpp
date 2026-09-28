@@ -1756,6 +1756,80 @@ TEST_CASE("turreted beams aim at the target but stop at BeamLength",
   CHECK(queued.target_y == Catch::Approx(200.0F));
 }
 
+// Regression: Ghidra 0x0042f270 adds a per-tick random offset to the resolved
+// beam bearing whenever shot_random_spread (Bible "Inaccuracy") is positive and
+// the mode is not 10. That jittered angle drives both the visible endpoint and
+// the collision cone; it is what makes the Ion Cannon (wëap 0x8e, mode 3,
+// spread 4) shimmer instead of drawing one fixed line. The port previously
+// used the exact source->target bearing every tick.
+TEST_CASE("beam spread jitters the bearing every tick", "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 3;
+  beam.beam_length_px = 240;
+  beam.lifetime_ticks = 100;
+  beam.beam_falloff = 0x10;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F;
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+  target.pos_x = 400.0F; // due +x (bearing 90 deg), 300 px away
+  target.pos_y = 200.0F;
+
+  // Zero spread: the endpoint is exactly BeamLength along the fixed bearing.
+  beam.inaccuracy = 0;
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(state.beam_hit_queue[0].target_x == Catch::Approx(340.0F));
+  CHECK(state.beam_hit_queue[0].target_y == Catch::Approx(200.0F));
+
+  // Ion Cannon spread 4: repeated ticks must wander off the straight line, yet
+  // stay inside the +/-4 deg cone at BeamLength.
+  constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+  const float max_off_axis = 240.0F * std::sin(4.0F * kDegToRad);
+  beam.inaccuracy = 4;
+  int off_axis = 0;
+  for (int i = 0; i < 64; ++i) {
+    state.beam_hit_queue[0] = BeamHit{};
+    REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+    NovaWeapon_TickBeamHitQueue(state, 1.0F);
+    const BeamHit &b = state.beam_hit_queue[0];
+    const float dx = b.target_x - 100.0F;
+    const float dy = b.target_y - 200.0F;
+    CHECK(std::sqrt(dx * dx + dy * dy) == Catch::Approx(240.0F).margin(0.01F));
+    CHECK(std::abs(dy) <= max_off_axis + 1.0F);
+    if (std::abs(dy) > 0.5F) {
+      ++off_axis;
+    }
+  }
+  CHECK(off_axis > 0);
+
+  // Mode 10 is exempt: the endpoint stays on the exact bearing.
+  beam.weapon_mode_code = 10;
+  beam.inaccuracy = 4;
+  state.beam_hit_queue[0] = BeamHit{};
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(state.beam_hit_queue[0].target_x == Catch::Approx(340.0F));
+  CHECK(state.beam_hit_queue[0].target_y == Catch::Approx(200.0F));
+}
+
 // A non-mode-0 beam with no recorded target still runs the collision scan: the
 // original's target-position block is gated on target != -1, so the bearing
 // falls back to the owner heading exactly like a mode-0 beam.
