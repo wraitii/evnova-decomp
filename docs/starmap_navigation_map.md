@@ -36,6 +36,7 @@ Opened from:
   starmap sub-flow.
 - `0x00456480` `Stellar_EnterHypergate` — Bible Flags2 `0x1000` hypergate
   travel: linked-destination choice through the map followed by transfer.
+  See "Hypergate mode" below.
 - `0x00456ca0` `Stellar_EnterWormhole` — Bible Flags2 `0x2000` wormhole
   travel: random linked destination, or another unlinked wormhole when every
   HyperLink field is unused.
@@ -167,10 +168,11 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   draw for visited systems only (zoom-gated, plus always for the selected
   system — the label pass does NOT accept the reveal latch), and unknown
   systems (invisible twin groups, or groups whose NCB fails) have no marker,
-  no label, cannot be clicked and are excluded from search. There is NO
-  keyboard cycle on the original's map (Tab/Backslash do nothing — the pane
-  action's 0x2a/0x36 commands are LShift/RShift, i.e. Shift+click route
-  editing). Far-flung unknown systems therefore don't stagger the view either.
+  no label, cannot be clicked and are excluded from search. Far-flung unknown
+  systems therefore don't stagger the view either. Tab/Backslash are handled
+  by the window's event filter (see "Tab / Backslash" below), not the pane
+  action (whose 0x2a/0x36 commands are LShift/RShift, i.e. Shift+click route
+  editing).
 - Markers are true solid discs (filled triangle-fan via the geometry path), so the
   node sits exactly on its system position; link endpoints share the same panel
   origin as the markers (the raw world projection is offset by the panel origin),
@@ -240,9 +242,7 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   The accepted hit is then resolved through the visibility twin chain
   (0x0046b920).
 - Shift+click edits the *plotted route* (Ghidra 0x004a47cc; the pane-action
-  commands 0x2a/0x36 are LShift/RShift — Tab/Backslash have NO map function,
-  an earlier clean-room "destination-ring cycle" was an invention and was
-  removed): reset when the hit is on the current system's discovery slot,
+  commands 0x2a/0x36 are LShift/RShift): reset when the hit is on the current system's discovery slot,
   truncate when it slot-matches a plotted hop (that hop and everything after
   are cleared, then the hit is re-appended by the fall-through tail/append
   logic, so the route ends AT the clicked hop — verified against the
@@ -412,10 +412,61 @@ and are skipped.
   `BugFixPolicy::safe`, where `starmap_detail::ChooseNebulaTier` requires the
   image to cover both dimensions (see `docs/known_original_bugs.md`).
 - Multi-hop plotted routes exist (Shift+click route editing, green route
-  chain, route → travel-target sync on close and on jump arrival), but the
-  mission-info window's destination-window sub-flow (DAT_007354a6 route mode)
-  is still not reconstructed.
+  chain, route → travel-target sync on close and on jump arrival).
+- The plain-map Tab/Backslash jump-slot advance (event filter 0x004a7710) is
+  not ported; the hypergate-mode cycle is.
 - No mission-highlight icons / mission jump planning.
 - No licence-seed easter-egg branch.
 - Pan/zoom are keyboard-driven; no drag-to-pan / wheel zoom yet.
 - The map only inspects/selects; the actual jump stays with `NovaTravel_Tick`.
+
+## Hypergate mode
+
+`Stellar_EnterHypergate` (0x00456480) first clears `travel_transfer_mode` and
+`ai_secondary_target_slot`, so the plotted jump is disarmed. It returns -1
+silently when `Stellar_CountValidLinkedStellarDestinations` finds no
+HyperLink1-8 entry. Otherwise it sets `g_starmap_hypergate_mode` (0x007354a6)
+= 1 and `g_starmap_hypergate_source_stellar_id` (0x007354ce) = the gate, runs
+`NovaUi_RunStarmapWindow`, then clears both. The transfer happens only when
+the map leaves `travel_transfer_mode == 4` with a system in
+`ai_secondary_target_slot` that one of the links resolves to. Otherwise it
+shows STR# 2002 0x32 and returns -1, and the caller (0x00457580) clears
+`g_travel_selected_stellar_id` and the engage timer.
+
+While the mode is set, the map behaves like this:
+
+- **Linked set.** Each HyperLink's stored `system_id` (or
+  `System_FindSystemContainingStellar` when out of range) is resolved through
+  `System_ResolveVisibleSystemForTravel`. The click gate, the header and the
+  spokes all use this set.
+- **Clicks** (0x004a45be / 0x004a464b; Shift bypass 0x004a48cf, pick
+  written at 0x004a4e05). Only linked systems and the current system are
+  hit-tested. A linked system is accepted outright; the current system goes
+  through the normal gate. Shift is ignored. A linked hit sets
+  `travel_transfer_mode` 4 and `ai_secondary_target_slot` = the system; any
+  other hit sets both to -1. The jump slot is never touched.
+- **Tab / Backslash** (event filter `NovaUi_StarmapWindowEventFilter`
+  0x004a74f0, arm 0x004a7710). This cycles through
+  `System_FindSystemContainingStellar` of each link, *without* the visibility
+  resolve. Shift steps backwards, and a selection outside the list restarts
+  at the first entry. Each step sets mode 4 and the slot.
+  - The plain map's arm is different: mode 3, and the jump slot advances
+    forward to the next travel-resolvable link.
+- **Drawing** (0x004a8100):
+  - There is no route chain.
+  - All links use DAT_00733b68 grey (0x0fa0).
+  - After the current-system dot, a spoke runs from the current system to
+    each linked system: white pen 3 when selected, cyan pen 2 otherwise.
+  - Each spoke gets two 8px barbs at the destination end, at
+    bearing(destination → current) ± 45°.
+  - The spoke pass also latches `discovered_this_rebuild` on the linked
+    systems, so an unrevealed destination still gets a marker and passes the
+    click gate.
+- **Side panel and status bar** (0x004a51f0: prompt 0x004a61e1, header
+  0x004a7150). The header reads "Hypergate
+  Destination:" (0x154) for a linked selection. While the selection is the
+  current system or none, the status bar replaces Ports/Hazards with the
+  centred prompt 0x134, " - Please select a hypergate destination - ". The
+  prompt is centred on `left + right/2`.
+- **Close.** Clear Route stays disabled (DAT_007dc744 is never set), and the
+  close path skips `NovaUi_SyncTravelSelectionFromStarmapRoute`.

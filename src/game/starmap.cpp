@@ -34,11 +34,13 @@
 namespace game {
 namespace {
 
+using starmap_detail::BuildHypergateMapMode;
 using starmap_detail::BuildMappedSystems;
 using starmap_detail::BuildPoliticalOverlay;
 using starmap_detail::ChooseNebulaTier;
 using starmap_detail::DrawGalaxy;
 using starmap_detail::DrawPoliticalOverlay;
+using starmap_detail::HypergateMapMode;
 using starmap_detail::MappedSystem;
 using starmap_detail::MapView;
 using starmap_detail::PoliticalOverlay;
@@ -93,9 +95,6 @@ constexpr std::array<StarmapButtonRect, 6> kStarmapButtonRects{{
 // PTR_DAT_00575af0 are the static white and cyan triples at 0x575ad0/0x575ae8.
 constexpr SDL_Color kColorBlack{0, 0, 0, 255};
 constexpr SDL_Color kColorWhite{255, 255, 255, 255};
-// 4000 grey (DAT_00733b68) -- the link tint in the destination-window route
-// mode, which is not reconstructed; kept for reference.
-[[maybe_unused]] constexpr SDL_Color kLinkGreyDim{15, 15, 15, 255};
 constexpr SDL_Color kHeaderGrey{192, 192, 192, 255}; // 0xc000 (0x733b50)
 
 // Zoom model (g_starmap_zoom 0x005759d8, factors at 0x005759f0/f8, enable
@@ -110,6 +109,7 @@ constexpr double kZoomInStep = 0.75;       // '+' / zoom-in button
 constexpr double kZoomOutLimit = 2.0;      // zoom-out allowed while below
 constexpr double kZoomInLimit = 0.5;       // zoom-in allowed while above
 constexpr float kClickInset = 10.0F; // click hit-test rect (Rect_Inset -10)
+constexpr std::uint16_t kTabKeyCode = 0x0f; // DIK_TAB (key filter char 0x09)
 
 // Bottom button order/actions (DITL items 8,7,9,3,4,0 -> entries 9,8,10,4,5,1
 // -> NovaUi_StarmapWindowInnerLoop's action dispatch).
@@ -127,10 +127,11 @@ enum class StarmapButton : std::size_t {
 // string tables at startup from these pools; entry numbers are 1-based,
 // exactly as the original passes them to Resource_LoadStringEntry.
 struct StarmapStrings {
-  std::string ports;                        // 0x7d2 0x135 "Ports:"
-  std::string unknown;                      // 0x136 "<Unknown>"
-  std::string nav_hazards;                  // 0x137 "Navigation Hazards:"
-  std::string gravity_shear;                // 0x138
+  std::string hypergate_prompt; // 0x7d2 0x134 " - Please select a ... - "
+  std::string ports;            // 0x7d2 0x135 "Ports:"
+  std::string unknown;          // 0x136 "<Unknown>"
+  std::string nav_hazards;      // 0x137 "Navigation Hazards:"
+  std::string gravity_shear;    // 0x138
   std::array<std::string, 3> asteroid;      // 0x139-0x13b
   std::string asteroid_noun;                // 0x13c "asteroid field"
   std::array<std::string, 3> interference;  // 0x13d-0x13f
@@ -166,6 +167,8 @@ std::string LoadStringOr(std::uint16_t resource_id,
 
 StarmapStrings LoadStarmapStrings() {
   StarmapStrings s;
+  s.hypergate_prompt =
+      LoadStringOr(0x7d2, 0x134, " - Please select a hypergate destination - ");
   s.ports = LoadStringOr(0x7d2, 0x135, "Ports:");
   s.unknown = LoadStringOr(0x7d2, 0x136, "<Unknown>");
   s.nav_hazards = LoadStringOr(0x7d2, 0x137, "Navigation Hazards:");
@@ -405,7 +408,7 @@ NebulaTiers LoadNebulaTiers(SdlPlatform &platform, std::size_t nebula_index) {
   return tiers;
 }
 
-// @port 0x004A51F0 80% rendering,ui,bugfix
+// @port 0x004A51F0 82% rendering,ui,bugfix
 // Ghidra 0x004a51f0 NovaUi_RedrawStarmapWindow: the nebula backdrop pass runs
 // inline here (the surrounding chrome, overlay ordering, side panels and button
 // row live in draw_starmap; the route/marker pass is DrawGalaxy).
@@ -739,13 +742,16 @@ void DrawTextAt(SdlPlatform &platform,
 // bar (DITL item 1 / entry 2), reproducing NovaUi_RedrawStarmapWindow's
 // 0x004a6219..0x004a6d40 text layout (offsets are DITL authoring pixels,
 // scaled by the window fit). The original right-aligns the game date in the
-// status bar (NovaText_FormatDateString; now drawn).
+// status bar (NovaText_FormatDateString; now drawn). In hypergate mode the
+// status bar shows the STR# 0x7d2 0x134 prompt instead of the system details
+// until a system other than the current one is selected (0x004a61e1).
 void DrawSidePanels(SdlPlatform &platform,
                     NovaFontCache &font_cache,
                     const GameState &state,
                     const StarmapGeometry &geometry,
                     const StarmapStrings &strings,
-                    std::int16_t selected_id) {
+                    std::int16_t selected_id,
+                    const HypergateMapMode *hypergate) {
   const float s = 1.0F;
   const SDL_FRect &side = geometry.side;
   const SDL_FRect &bar = geometry.bar;
@@ -758,18 +764,59 @@ void DrawSidePanels(SdlPlatform &platform,
   const bool visited = valid_id && sys.discovery_state >= 1;
   const std::int16_t current = state.player.current_system_id;
 
+  // The game date, right-aligned in the status bar (0x004a6219's date arm).
+  const auto draw_date = [&] {
+    const std::string date_text = NovaText_FormatDateString(
+        state.date, true, state.date_prefix, state.date_suffix);
+    const float date_w = static_cast<float>(font_cache.TextWidth(
+        NovaFontFamily::kGeneva, 10.0F, kNovaFontStyleRegular, date_text));
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  10.0F,
+                  kNovaFontStyleRegular,
+                  kColorWhite,
+                  bar.x + bar.w - 10.0F * s - date_w,
+                  bar.y + 12.0F * s,
+                  date_text);
+  };
+  // Hypergate prompt (0x004a61e1): centred on left + right/2 (the original
+  // halves the bar's right edge, not its width, so it sits 4px right of
+  // centre), 24px down.
+  const bool hypergate_prompt =
+      hypergate != nullptr && (selected_id == current || selected_id == -1);
+  if (hypergate_prompt) {
+    const float prompt_w =
+        static_cast<float>(font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                                10.0F,
+                                                kNovaFontStyleRegular,
+                                                strings.hypergate_prompt));
+    DrawTextAt(platform,
+               font_cache,
+               bar.x + std::floor((bar.x + bar.w) * 0.5F) -
+                   std::floor(prompt_w * 0.5F),
+               bar.y + 24.0F * s,
+               10.0F,
+               kHeaderGrey,
+               strings.hypergate_prompt);
+    draw_date();
+  }
+
   // ---- Side column ----
   // Travel-status header (0x004a6460): the plotted-jump case reads
-  // "Destination System:", the current system "Current System:", everything
-  // else "Selected System:". The original also has a "Hypergate Destination:"
-  // case for the destination-window sub-flow (0x004a6580), which is not
-  // reconstructed here.
+  // "Destination System:", the current system "Current System:", a
+  // destination linked from the hypergate "Hypergate Destination:"
+  // (0x004a7150), everything else "Selected System:". The hypergate caller
+  // disarms the plotted jump before opening the map, so the linked case is
+  // reachable only in hypergate mode.
   std::string header = strings.selected_system;
   if (state.travel.travel_slot >= 0 &&
       state.travel.starmap_destination_system_id != -1) {
     header = strings.destination_system;
   } else if (selected_id == current) {
     header = strings.current_system;
+  } else if (hypergate != nullptr && hypergate->Links(selected_id)) {
+    header = strings.hypergate_destination;
   }
   DrawTextAt(platform,
              font_cache,
@@ -940,6 +987,9 @@ void DrawSidePanels(SdlPlatform &platform,
   }
 
   // ---- Bottom bar ----
+  if (hypergate_prompt) {
+    return;
+  }
   // "Ports:" + the usable nav stellar display names, comma-separated,
   // wrapping once (0x004a6140). Until visited the value reads "<Unknown>".
   DrawTextAt(platform,
@@ -1020,22 +1070,7 @@ void DrawSidePanels(SdlPlatform &platform,
   }
   // "Navigation Hazards:" + the composed asteroid / interference / visibility
   // description (0x004a6219 second half). "<Unknown>" until visited.
-  // The game date right-aligned in the status bar (0x004a6219's date arm).
-  {
-    const std::string date_text = NovaText_FormatDateString(
-        state.date, true, state.date_prefix, state.date_suffix);
-    const float date_w = static_cast<float>(font_cache.TextWidth(
-        NovaFontFamily::kGeneva, 10.0F, kNovaFontStyleRegular, date_text));
-    NovaText_Draw(platform,
-                  font_cache,
-                  NovaFontFamily::kGeneva,
-                  10.0F,
-                  kNovaFontStyleRegular,
-                  kColorWhite,
-                  bar.x + bar.w - 10.0F * s - date_w,
-                  bar.y + 12.0F * s,
-                  date_text);
-  }
+  draw_date();
   DrawTextAt(platform,
              font_cache,
              bar.x + 10.0F * s,
@@ -1406,14 +1441,77 @@ NovaStarmap_MarkerIcons NovaStarmap_LoadMarkerIcons(SdlPlatform &platform) {
   return icons;
 }
 
-// ---------------------------------------------------------------------------
-// @port 0x004A3AA0 85% gameplay,license
-// @port 0x004A4353 60% gameplay,ui
-// @port 0x004A9D10 50% rendering,ui
-// Ghidra 0x004a3aa0 NovaUi_RunStarmapWindow (clean-room modal loop).
-// The 0x004a9d10 NovaUi_EnableStarmapPoliticalOverlay slice is the Show/Hide
-// Borders action inline in the button switch below; hover highlighting is not
-// modelled.
+HypergateMapMode
+starmap_detail::BuildHypergateMapMode(const GameState &state,
+                                      std::int16_t source_stellar_id) {
+  HypergateMapMode mode;
+  mode.source_stellar_id = source_stellar_id;
+  const Stellar *source = state.scenario.Stellar(source_stellar_id);
+  if (source == nullptr) {
+    return mode;
+  }
+  const std::size_t system_count = state.scenario.systems.size();
+  for (const std::int16_t link : source->hyperlinks) {
+    const Stellar *target = state.scenario.Stellar(link);
+    if (target == nullptr) {
+      continue;
+    }
+    const std::int16_t containing =
+        NovaTargeting_FindSystemContainingStellar(state.scenario, link);
+    if (containing >= 0) {
+      mode.cycle_systems.push_back(containing);
+    }
+    const std::int16_t stored =
+        target->system_id >= 0 &&
+                static_cast<std::size_t>(target->system_id) < system_count
+            ? target->system_id
+            : containing;
+    const std::int16_t resolved =
+        stored >= 0 ? NovaSystem_ResolveVisibleForTravel(state, stored) : -1;
+    if (resolved >= 0 && static_cast<std::size_t>(resolved) < system_count) {
+      mode.linked_systems.push_back(resolved);
+    }
+  }
+  return mode;
+}
+
+namespace {
+
+// Ghidra 0x004a7710, the Tab / Backslash arm of
+// NovaUi_StarmapWindowEventFilter (0x004a74f0, the starmap window's event
+// filter callback; not yet a Ghidra function, so it is tracked with
+// NovaUi_RunStarmapWindow). In hypergate mode it steps the pick through the
+// linked destinations (Shift steps backwards; a selection outside the list
+// restarts at the first one).
+void HandleStarmapTabKey(const HypergateMapMode *hypergate,
+                         bool backward,
+                         std::int16_t &selected_id,
+                         std::int16_t &hypergate_choice) {
+  if (hypergate == nullptr) {
+    // TODO(decomp): the plain-map arm sets travel_transfer_mode 3, advances
+    // the jump slot to the next travel-resolvable link (forward only) and
+    // selects its system, or the current system when there is none.
+    NovaLog::Todo("starmap: Tab/Backslash jump-slot advance of the event "
+                  "filter 0x004a7710 is not ported");
+    return;
+  }
+  const std::vector<std::int16_t> &cycle = hypergate->cycle_systems;
+  if (cycle.empty()) {
+    return;
+  }
+  const auto it = std::find(cycle.begin(), cycle.end(), selected_id);
+  std::size_t index = 0;
+  if (it != cycle.end()) {
+    const auto at = static_cast<std::size_t>(it - cycle.begin());
+    index = backward ? (at == 0 ? cycle.size() - 1 : at - 1)
+                     : (at + 1) % cycle.size();
+  }
+  selected_id = cycle[index];
+  hypergate_choice = cycle[index];
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // @port 0x0049eef0 70% ui
 // TODO(decomp): the original's separate press/release tracking loop and
@@ -1423,11 +1521,20 @@ NovaStarmap_MarkerIcons NovaStarmap_LoadMarkerIcons(SdlPlatform &platform) {
 // action enables the political overlay and continues the starmap inner loop;
 // ported inline in NovaStarmap_RunWindow's button switch (toggles
 // GameState::starmap_show_borders, .prf +0x76, and rebuilds the overlay).
+// @port 0x004A3AA0 88% gameplay,license
+// @port 0x004A4353 65% gameplay,ui
+// @port 0x004A9D10 50% rendering,ui
+// Ghidra 0x004a3aa0 NovaUi_RunStarmapWindow (clean-room modal loop).
+// The 0x004a9d10 NovaUi_EnableStarmapPoliticalOverlay slice is the Show/Hide
+// Borders action inline in the button switch below; hover highlighting is not
+// modelled.
+// ---------------------------------------------------------------------------
 StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
                                     GameState &state,
                                     std::int16_t preselected_system_id,
                                     SpaceflightView *flight_view,
-                                    HudRenderer *hud) {
+                                    HudRenderer *hud,
+                                    std::int16_t hypergate_source_stellar_id) {
   const SdlPlatform::ScopedPlacement restore_placement(
       platform, platform.current_placement());
   if (state.scenario.systems.empty()) {
@@ -1439,6 +1546,25 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   // Ghidra 0x00448090: refresh the Visibility NCB / discovery state before
   // anything reads it (the original re-evaluates per frame).
   NovaResources_EvaluateAvailability(state);
+  // Hypergate mode (g_starmap_hypergate_mode, armed by Stellar_EnterHypergate
+  // 0x00456480 with the gate in g_starmap_hypergate_source_stellar_id).
+  std::optional<HypergateMapMode> hypergate_mode;
+  if (hypergate_source_stellar_id >= 0) {
+    hypergate_mode = BuildHypergateMapMode(state, hypergate_source_stellar_id);
+    // The original's spoke pass (0x004a8100) latches discovered_this_rebuild
+    // on every linked destination as it draws, so an unrevealed destination
+    // still gets a marker and passes the click gate. Latch once at open.
+    for (const std::int16_t dest : hypergate_mode->linked_systems) {
+      state.scenario.systems[static_cast<std::size_t>(dest)]
+          .discovered_this_rebuild = true;
+    }
+  }
+  const HypergateMapMode *const hypergate =
+      hypergate_mode ? &*hypergate_mode : nullptr;
+  // Hypergate pick (the original's travel_transfer_mode 4 with the system in
+  // ai_secondary_target_slot): set by a click on, or Tab to, a linked
+  // destination and reported on close; -1 when nothing linked is picked.
+  std::int16_t hypergate_choice = -1;
   const StarmapGeometry geometry = ResolveStarmapGeometry();
   const StarmapStrings strings = LoadStarmapStrings();
   auto backdrop = LoadStarmapBackdrop(platform);
@@ -1528,19 +1654,15 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   const std::vector<std::int16_t> mission_targets =
       BuildMissionTargetSystems(state);
 
-  // The mission-info window's destination-window sub-flow (route editing from
-  // a selected stellar, DAT_007354a6) is not reconstructed; the flight map
-  // always runs in the plain mode (logged divergence).
   // Runtime copy of NovaPreferences::starmap_show_borders (Ghidra
   // g_starmap_show_borders, .prf +0x76); seeded from prefs at startup and
   // synced back at the .prf save points. The port defaults it ON because its
   // overlay is cheap (the original defaulted OFF).
   bool &show_borders = state.starmap_show_borders;
 
-  // Tab / Backslash have no map function in the original: the route-editing
-  // trigger is Shift+click (pane-action commands 0x2a/0x36 = LShift/RShift,
-  // verified against 0x004a4353's action-3 branch), so the clean-room keeps no
-  // keyboard cycle.
+  // Route editing is Shift+click (pane-action commands 0x2a/0x36 =
+  // LShift/RShift, 0x004a4353's action-3 branch). Tab / Backslash go through
+  // the window's event filter (HandleStarmapTabKey).
 
   NovaLog::Info("opening galaxy starmap ({} systems, {} nebulae)",
                 state.scenario.systems.size(),
@@ -1552,12 +1674,18 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   SDL_FPoint drag_last{};
 
   const auto close_with_selection = [&]() {
+    StarmapResult r;
+    r.exit = StarmapExit::kContinue;
+    if (hypergate != nullptr) {
+      // Hypergate mode skips the route re-sync on close (0x004a4fd0) and
+      // hands Stellar_EnterHypergate the linked pick.
+      r.destination_system_id = hypergate_choice;
+      return r;
+    }
     // Ghidra 0x004a8f50 exit path: re-arm the travel slot from the plotted
     // route's first hop, then report the highlighted selection unless a route
     // re-arm took over.
     NovaStarmap_SyncTravelSelectionFromRoute(state);
-    StarmapResult r;
-    r.exit = StarmapExit::kContinue;
     if (!NovaStarmap_RouteHasHops(state) &&
         selected_id != state.player.current_system_id) {
       r.destination_system_id = selected_id;
@@ -1586,6 +1714,18 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   // redraw so the map stays visible behind the search box. `mapped` is owned
   // by the loop because the click hit-test below also reads it.
   std::vector<MappedSystem> mapped;
+  // Clear Route's enable flag (DAT_007dc744) is computed at open and never
+  // set in hypergate mode (0x004a3d28).
+  const auto route_clearable = [&] {
+    return hypergate == nullptr && NovaStarmap_RouteHasHops(state);
+  };
+  const auto handle_tab_key = [&] {
+    const bool *const held = SDL_GetKeyboardState(nullptr);
+    HandleStarmapTabKey(hypergate,
+                        held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT],
+                        selected_id,
+                        hypergate_choice);
+  };
   const auto draw_starmap = [&](std::optional<std::size_t> hovered) {
     if (flight_view != nullptr && hud != nullptr) {
       DrawLiveChrome(platform,
@@ -1616,14 +1756,17 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
                geometry,
                selected_id,
                mission_targets,
-               icons);
-    DrawSidePanels(platform, font_cache, state, geometry, strings, selected_id);
+               icons,
+               1.0F,
+               hypergate);
+    DrawSidePanels(
+        platform, font_cache, state, geometry, strings, selected_id, hypergate);
     DrawButtons(platform,
                 font_cache,
                 button_art,
                 geometry,
                 show_borders,
-                NovaStarmap_RouteHasHops(state),
+                route_clearable(),
                 static_cast<double>(view.zoom),
                 hovered);
   };
@@ -1660,6 +1803,10 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
 
       case TextKey::character: {
         const char ch = in->character;
+        if (ch == '\\') {
+          handle_tab_key();
+          break;
+        }
         if (ch == 'q' || ch == 'x') {
           return close_with_selection();
         }
@@ -1692,7 +1839,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
               // Disabled (and unclickable) unless a route is plotted, matching
               // NovaUi_DrawStarmapButtons / UiPanel_TrackSixEntryMouseSelection
               // (DAT_007dc744).
-              if (NovaStarmap_RouteHasHops(state)) {
+              if (route_clearable()) {
                 NovaStarmap_ClearRoute(state);
               }
               break;
@@ -1750,6 +1897,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
             (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_LSHIFT] != 0) ||
             (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_RSHIFT] != 0);
         std::int16_t hit = -1;
+        bool hit_linked = false;
         std::int16_t shift_tail = -1;
         if (shift) {
           for (const std::int16_t hop : state.travel.starmap_route) {
@@ -1773,8 +1921,18 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
               std::abs(mp.y - m.sy) > kClickInset) {
             continue;
           }
+          // Hypergate mode (0x004a45be / 0x004a464b) only considers the gate's
+          // linked destinations and the current system; a linked one is
+          // accepted outright.
+          const bool gate_linked =
+              hypergate != nullptr && hypergate->Links(cid);
+          if (hypergate != nullptr && !gate_linked &&
+              cid != state.player.current_system_id) {
+            continue;
+          }
           bool accept =
-              cand.discovered_this_rebuild || cid == selected_id ||
+              gate_linked || cand.discovered_this_rebuild ||
+              cid == selected_id ||
               std::any_of(mission_targets.begin(),
                           mission_targets.end(),
                           [&](std::int16_t target) { return target == cid; });
@@ -1814,6 +1972,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
           }
           if (accept) {
             hit = cid;
+            hit_linked = gate_linked;
             break;
           }
         }
@@ -1836,7 +1995,13 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
           }
           break;
         }
-        if (shift) {
+        if (hypergate != nullptr) {
+          // Hypergate mode ignores Shift and never touches the jump slot: a
+          // linked destination becomes the pick, anything else clears it
+          // (0x004a48cf skips the Shift arm; 0x004a4e05 writes the pick).
+          selected_id = hit;
+          hypergate_choice = hit_linked ? hit : -1;
+        } else if (shift) {
           // Shift-click: route editing (0x004a47cc) — reset at the current
           // system's slot, truncate at a plotted hop (the route ends AT the
           // clicked system), pop a twin of the tail, append when the hit
@@ -1864,8 +2029,13 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
       case TextKey::backspace:
         break;
 
-      case TextKey::none:
       case TextKey::physical:
+        if (in->key_code == kTabKeyCode) {
+          handle_tab_key();
+        }
+        break;
+
+      case TextKey::none:
         break;
       }
     }

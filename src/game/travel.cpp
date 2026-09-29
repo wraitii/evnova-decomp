@@ -665,7 +665,7 @@ NovaTravel_SelectWormholeDestination(GameState &state,
       0, candidates.size() - 1}(state.rng)];
 }
 
-// @port 0x00456480 65% gameplay,rendering
+// @port 0x00456480 75% gameplay,rendering
 // Ghidra 0x00456480 Stellar_EnterHypergate; destination validation after
 // NovaUi_RunStarmapWindow returns in its linked-destination mode.
 std::int16_t
@@ -2252,7 +2252,7 @@ bool NovaTravel_PlayerMeetsStellarAccess(const GameState &state,
   return eligible;
 }
 
-// @port 0x00459950 90% gameplay,ui
+// @port 0x00459950 95% gameplay,ui
 // Ghidra 0x00459950 NovaUi_UpdateTravelEngagementProgress.
 void NovaTravel_UpdateEngagementProgress(GameState &state) {
   constexpr std::int16_t kArmedTimer = 0x2ee;
@@ -2292,6 +2292,13 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
       state.pending_ui_sounds.push_back({1, 1});
       // "Cleared to dock/land" overlay (STR# 0x7d2), composing the randomly
       // rolled lead/connector/tail variants the original builds.
+      //
+      // Ghidra 0x00459950: availability_flags 0x1000 (hypergate) selects its
+      // own lead pool (0x5b/0x5c/0x5d "Cleared for hypergate entry") and
+      // skips the final-approach/welcome tail and fee line entirely; ordinary
+      // bodies split on travel_flags 0x10 (station) vs planet.  A wormhole
+      // (0x2000 only) deliberately falls through to the ordinary body arm.
+      const bool is_hypergate = (stellar->availability_flags & 0x1000U) != 0U;
       const bool is_station = (stellar->flags & 0x10U) != 0U;
       // The original interpolates g_player_ship_name (the hull's registration
       // name), NOT the system name; e.g. "<ship>, you're cleared to land."
@@ -2301,7 +2308,19 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
       };
       std::string message;
       const int lead = std::uniform_int_distribution<int>{0, 2}(state.rng);
-      if (is_station) {
+      if (is_hypergate) {
+        // Unlike the station/planet connectors, the hypergate strings carry
+        // their own trailing space, so lead==1 appends nothing after 0x5c.
+        if (lead == 0) {
+          message = text(0x5b, "Cleared for hypergate entry");
+          message += ", " + ship_name + ". ";
+        } else if (lead == 1) {
+          message = ship_name + ", " +
+                    text(0x5c, "you're cleared for hypergate entry. ");
+        } else {
+          message = text(0x5d, "You are cleared for hypergate entry. ");
+        }
+      } else if (is_station) {
         if (lead == 0) {
           message = text(0x5e, "Cleared to dock");
           message += ", " + ship_name + ". ";
@@ -2322,17 +2341,19 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
           message = text(0x63, "You are cleared to land.") + " ";
         }
       }
-      if (std::uniform_int_distribution<int>{0, 1}(state.rng) == 0) {
-        message += text(0x64, "Commence final approach.");
-      } else {
-        message += text(0x65, "Welcome to") + " " + stellar->name + ". ";
-      }
-      if (stellar->service_cost > 0 && !stellar->dominated) {
-        message += "  ";
-        message += text(is_station ? 0x67 : 0x68,
-                        is_station ? "[Docking fee is" : "[Landing fee is");
-        message += " " + std::to_string(stellar->service_cost) + " credits";
-        message += text(0x69, ".]");
+      if (!is_hypergate) {
+        if (std::uniform_int_distribution<int>{0, 1}(state.rng) == 0) {
+          message += text(0x64, "Commence final approach.");
+        } else {
+          message += text(0x65, "Welcome to") + " " + stellar->name + ". ";
+        }
+        if (stellar->service_cost > 0 && !stellar->dominated) {
+          message += "  ";
+          message += text(is_station ? 0x67 : 0x68,
+                          is_station ? "[Docking fee is" : "[Landing fee is");
+          message += " " + std::to_string(stellar->service_cost) + " credits";
+          message += text(0x69, ".]");
+        }
       }
       NovaHud_ShowOverlayMessage(state, message, 0xe0, 0xe0, 0xe0, 0xfaU);
     }

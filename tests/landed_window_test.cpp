@@ -837,6 +837,36 @@ TEST_CASE("landing approach timer arms within 250 and expires", "[travel]") {
   CHECK(state.travel.selected_stellar_id == -1);
 }
 
+TEST_CASE("hypergate clearance uses the hypergate lead and skips the fee",
+          "[travel][hud_overlay]") {
+  game::GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  game::Stellar &stellar = state.scenario.stellars[0];
+  stellar.name = "HG-Test";
+  stellar.pos_x = 0;
+  stellar.pos_y = 0;
+  stellar.flags = 0x11;                // Can land | station
+  stellar.availability_flags = 0x1000; // hypergate
+  stellar.service_cost = 500;          // original omits the fee line here
+  stellar.is_available = true;
+  stellar.system_id = 0;
+  state.player.current_system_id = 0;
+  state.player.pos_x = 100.0F;
+  state.player.pos_y = 0.0F;
+  state.player.ship_name = "Testbed";
+  state.travel.selected_stellar_id = 0x80;
+  state.travel.engage_timer = 0;
+
+  game::NovaTravel_UpdateEngagementProgress(state);
+  CHECK(state.travel.engage_timer == 0x2ee);
+  REQUIRE(state.hud_overlay.active);
+  CHECK(state.hud_overlay.message.find("hypergate") != std::string::npos);
+  CHECK(state.hud_overlay.message.find("fee") == std::string::npos);
+  CHECK(state.hud_overlay.message.find("Welcome to") == std::string::npos);
+}
+
 TEST_CASE("normal landing arrival charges once; launch restores the ship",
           "[landed_window]") {
   // SDL-free core of Stellar_RunDockAndLaunchSequence's normal-arrival

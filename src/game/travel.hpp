@@ -441,9 +441,13 @@ void NovaTravel_ProcessArrivalPayroll(
 // engage timer (state.travel.engage_timer) is incremented and armed to 0x2ee
 // the first tick the ship is within 250 px on both axes, showing the "cleared
 // to dock/land" overlay; it expires (> 0x7ff) back to -1, clearing the
-// selection. Hypergate/wormhole (availability 0x1000/0x2000) and cannot-land
-// (travel_flags 0x20) arms are deferred (the port's docking gate rejects those
-// targets anyway).
+// selection. A hypergate (availability 0x1000) shows its own "cleared for
+// hypergate entry" lead (STR# 0x7d2 0x5b/0x5c/0x5d) with no approach/welcome
+// tail and no fee line; a wormhole (0x2000 without 0x1000) falls through to
+// the station/planet arm. The cannot-land (travel_flags 0x20) arm arms the
+// approach here; the land-command edge's "No response." (STR# 0x7d2 0x35)
+// for ordinary and restricted targets is emitted by
+// Stellar_ApplyUninhabitedLandingArm (landed_window.cpp).
 void NovaTravel_UpdateEngagementProgress(GameState &state);
 
 // Ghidra 0x0046efb0 Stellar_GetJumpSequenceDuration60Hz: the hyperspace jump

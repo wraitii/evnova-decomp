@@ -2,8 +2,10 @@
 
 #include "game/starmap_internal.hpp"
 
+#include <cstdint>
 #include <initializer_list>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -68,4 +70,35 @@ TEST_CASE("starmap search only sees visible visited systems",
   state.scenario.systems[1].is_visible = false;
   CHECK(game::starmap_detail::FindBestSystemMatch(state, "sol") == -1);
   CHECK(game::starmap_detail::FindBestSystemMatch(state, "vega") == -1);
+}
+
+// Stellar_EnterHypergate's map mode: the click/spoke list resolves each
+// HyperLink target through the visibility chain, while the Tab cycle list
+// (key filter 0x004a7710) takes System_FindSystemContainingStellar as is.
+TEST_CASE("starmap hypergate mode resolves linked destinations",
+          "[starmap][hypergate]") {
+  game::GameState state = MakeSearchState({"Gate", "Beyond", "Elsewhere"});
+  state.scenario.stellars.resize(2);
+  game::Stellar &source = state.scenario.stellars[0];
+  source.is_defined = true;
+  source.system_id = 0;
+  source.availability_flags = game::Stellar::kHypergate;
+  source.hyperlinks[0] = 0x81;
+  game::Stellar &target = state.scenario.stellars[1];
+  target.is_defined = true;
+  target.system_id = 1;
+  state.scenario.systems[1].nav_defs[0] = 0x81;
+
+  const game::starmap_detail::HypergateMapMode mode =
+      game::starmap_detail::BuildHypergateMapMode(state, 0x80);
+  CHECK(mode.linked_systems == std::vector<std::int16_t>{1});
+  CHECK(mode.cycle_systems == std::vector<std::int16_t>{1});
+  CHECK(mode.Links(1));
+  CHECK_FALSE(mode.Links(2));
+
+  state.scenario.systems[1].is_visible = false;
+  const game::starmap_detail::HypergateMapMode hidden =
+      game::starmap_detail::BuildHypergateMapMode(state, 0x80);
+  CHECK(hidden.linked_systems.empty());
+  CHECK(hidden.cycle_systems == std::vector<std::int16_t>{1});
 }

@@ -1219,17 +1219,39 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
           state, LandedDenial::kTooFast, /*is_station=*/false);
       return LandCommandResult::kContinue;
     }
+    // Stellar_HandleStellarEntryAndExit 0x00458006: clear the transient HUD
+    // overlay before the hypergate/wormhole transition, mirroring the
+    // Stellar_Dock path, so the uninhabited arm's "No response." does not
+    // linger into the destination system.
+    NovaHud_ClearOverlayMessage(state);
 
     const std::int16_t source = state.travel.selected_stellar_id;
     std::int16_t destination = -1;
     RestrictedTravelKind kind = RestrictedTravelKind::kWormhole;
     if ((target->availability_flags & 0x1000U) != 0U) {
-      // Ghidra 0x00456480 Stellar_EnterHypergate: the original opens the
-      // galaxy map in linked-destination mode, then accepts only a system
-      // reached by the source's HyperLink1-8 table.
+      // Ghidra 0x00456480 Stellar_EnterHypergate: disarm the plotted jump,
+      // bail out silently when the gate has no HyperLink1-8 entry
+      // (Stellar_CountValidLinkedStellarDestinations 0x0046ebb0), otherwise
+      // open the galaxy map in hypergate mode and accept only a system
+      // reached by those links. A -1 result clears the travel selection and
+      // the engage timer in the caller (0x00457580).
       kind = RestrictedTravelKind::kHypergate;
-      const StarmapResult map = NovaStarmap_RunWindow(
-          platform, state, state.player.current_system_id, &view, nullptr);
+      state.player.travel_transfer_mode = -1;
+      NovaTravel_SetPlayerTravelSlot(state, -1);
+      state.travel.starmap_destination_system_id = -1;
+      state.travel.destination_system_id = -1;
+      const auto abandon_gate = [&state] {
+        state.travel.selected_stellar_id = -1;
+        state.travel.engage_timer = 0;
+      };
+      if (std::none_of(target->hyperlinks.begin(),
+                       target->hyperlinks.end(),
+                       [](std::int16_t link) { return link >= 0x80; })) {
+        abandon_gate();
+        return LandCommandResult::kContinue;
+      }
+      const StarmapResult map =
+          NovaStarmap_RunWindow(platform, state, -1, &view, nullptr, source);
       if (map.exit == StarmapExit::kQuit) {
         return LandCommandResult::kQuit;
       }
@@ -1245,6 +1267,7 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
             NovaHud_LoadStringEntry(0x7d2, 0x32)
                 .value_or("No hypergate destination selected."),
             static_cast<std::uint64_t>(0xfaU));
+        abandon_gate();
         return LandCommandResult::kBlockedFrame;
       }
     } else {

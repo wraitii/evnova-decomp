@@ -19,9 +19,12 @@
 // as the right-hand selected-system detail column (entry 6) and item 1 as the
 // bottom status bar (entry 2).
 //
-// Remaining divergences from the original: the destination-window route-editing
-// sub-flow (DAT_007354a6 / hypergate destination selection through the map)
-// is not reconstructed. The Show/Hide Borders preference defaults ON in the
+// Hypergate mode (g_starmap_hypergate_mode, entered from Stellar_EnterHypergate
+// 0x00456480) restricts clicks to the gate's linked destinations and the
+// current system, draws spokes to the linked destinations, dims the links,
+// hides the route, and reports the linked pick instead of arming a jump.
+// Remaining divergences from the original: the Show/Hide Borders preference
+// defaults ON in the
 // port (the original's overlay was slow/buggy and defaulted OFF); it is carried
 // on GameState::starmap_show_borders, seeded from
 // NovaPreferences::starmap_show_borders and persisted at .prf +0x76.
@@ -127,11 +130,16 @@ void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
 // clipped to the galaxy viewport, so the moving starfield shows through the
 // map like the original. Callers without a flight view (docked menus) fall
 // back to the opaque PICT backdrop.
+//
+// `hypergate_source_stellar_id` (a raw stellar id, >= 0x80) opens the map in
+// hypergate mode for that gate; the result then carries the picked linked
+// destination system, or -1 when none is picked. -1 opens the plain map.
 [[nodiscard]] StarmapResult
 NovaStarmap_RunWindow(SdlPlatform &platform,
                       GameState &state,
                       std::int16_t preselected_system_id = -1,
                       SpaceflightView *flight_view = nullptr,
-                      HudRenderer *hud = nullptr);
+                      HudRenderer *hud = nullptr,
+                      std::int16_t hypergate_source_stellar_id = -1);
 
 } // namespace game

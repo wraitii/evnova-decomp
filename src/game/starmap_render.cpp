@@ -1,7 +1,9 @@
 #include "starmap_internal.hpp"
 
 #include "../log.hpp"
+#include "../util/math.hpp"
 #include "nova_font.hpp"
+#include "nova_math.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
 
@@ -26,6 +28,9 @@ constexpr SDL_Color kColorBlack{0, 0, 0, 255};
 constexpr SDL_Color kColorWhite{255, 255, 255, 255};
 constexpr SDL_Color kColorCyan{0, 255, 255, 255};
 constexpr SDL_Color kLinkGrey{78, 78, 78, 255};
+// 0x0fa0 grey (DAT_00733b68, Settings_InitColors 0x004ad8a5): every link while
+// the map runs in hypergate mode.
+constexpr SDL_Color kLinkGreyDim{15, 15, 15, 255};
 constexpr SDL_Color kRouteGreen{0, 255, 0, 255};
 constexpr SDL_Color kJumpGreen{0, 153, 0, 255};
 constexpr SDL_Color kDestBlue{0, 0, 255, 255};
@@ -597,7 +602,7 @@ std::vector<MappedSystem> BuildMappedSystems(const GameState &state,
   return out;
 }
 
-// @port 0x004A8100 85% rendering,gameplay
+// @port 0x004A8100 88% rendering,gameplay
 // Ghidra 0x004a8100 NovaUi_DrawStarmapRoutesAndMarkers. The political overlay
 // and the nebula pass (both from 0x004a51f0) are drawn by draw_starmap before
 // this call, so this pass draws, in order: plotted-route chain (green),
@@ -605,8 +610,10 @@ std::vector<MappedSystem> BuildMappedSystems(const GameState &state,
 // space because the target needs no discovery gate), the committed-jump
 // accent (dark green), then markers
 // (background disc + status ring), the mission-target arrows and the selected
-// marker icon, the current-system cyan dot, the selection reticle and finally
-// the white system labels.
+// marker icon, the current-system cyan dot, the hypergate spokes, the
+// selection reticle and finally the white system labels. In hypergate mode
+// (`hypergate` non-null) the route chain is skipped and every link draws in
+// the dim DAT_00733b68 grey.
 void DrawGalaxy(SdlPlatform &platform,
                 NovaFontCache &font_cache,
                 const GameState &state,
@@ -616,7 +623,8 @@ void DrawGalaxy(SdlPlatform &platform,
                 std::int16_t selected_id,
                 const std::vector<std::int16_t> &mission_targets,
                 const NovaStarmap_MarkerIcons &icons,
-                float alpha) {
+                float alpha,
+                const HypergateMapMode *hypergate) {
   const auto &systems = state.scenario.systems;
   const std::int16_t current = state.player.current_system_id;
   SDL_Renderer *renderer = platform.renderer();
@@ -643,8 +651,9 @@ void DrawGalaxy(SdlPlatform &platform,
     return &mapped[static_cast<std::size_t>(id)];
   };
 
-  // Plotted-route chain (route pass of 0x004a8100; green, 2px).
-  if (NovaStarmap_RouteHasHops(state)) {
+  // Plotted-route chain (route pass of 0x004a8100; green, 2px). Hypergate
+  // mode skips it.
+  if (hypergate == nullptr && NovaStarmap_RouteHasHops(state)) {
     const auto &route = state.travel.starmap_route;
     for (std::size_t i = 0; i + 1 < route.size(); ++i) {
       const std::int16_t a = route[i];
@@ -707,7 +716,7 @@ void DrawGalaxy(SdlPlatform &platform,
       // The committed-jump slot of the current system draws dark green
       // (DAT_00733b38) while a plotted jump is armed (travel_transfer_mode
       // == 3, 0x004a8100 line-225 gate); everything else grey
-      // (DAT_00733b62).
+      // (DAT_00733b62), or dim grey (DAT_00733b68) in hypergate mode.
       const bool active_jump =
           state.player.travel_transfer_mode == 3 &&
           static_cast<std::int16_t>(i) == current &&
@@ -715,9 +724,10 @@ void DrawGalaxy(SdlPlatform &platform,
           state.travel.travel_slot <
               static_cast<std::int16_t>(sys.links.size()) &&
           sys.links[static_cast<std::size_t>(state.travel.travel_slot)] == link;
+      const SDL_Color idle = hypergate != nullptr ? kLinkGreyDim : kLinkGrey;
       draw_link(static_cast<std::int16_t>(i),
                 target,
-                active_jump ? kJumpGreen : kLinkGrey);
+                active_jump ? kJumpGreen : idle);
     }
     drawn[i] = 1;
   }
@@ -820,6 +830,34 @@ void DrawGalaxy(SdlPlatform &platform,
   if (const MappedSystem *cur = find_mapped(current);
       cur != nullptr && current >= 0) {
     DrawDisc(renderer, cur->sx, cur->sy, dot_inset, tint(kColorCyan));
+  }
+
+  // Hypergate spokes (0x004a8100, after the current-system dot): one line from
+  // the current system to each linked destination, white at pen 3 for the
+  // selected one and cyan at pen 2 otherwise, capped at the destination end
+  // by two 8px barbs at bearing(destination -> current) +/- 45 degrees.
+  if (hypergate != nullptr) {
+    const MappedSystem *cur = find_mapped(current);
+    for (const std::int16_t dest : hypergate->linked_systems) {
+      const MappedSystem *md = find_mapped(dest);
+      if (cur == nullptr || md == nullptr) {
+        continue;
+      }
+      const bool is_selected = dest == selected_id;
+      const SDL_Color color = tint(is_selected ? kColorWhite : kColorCyan);
+      const float pen = is_selected ? 3.0F : 2.0F;
+      const SDL_FPoint tip{md->sx, md->sy};
+      DrawThickLine(renderer, SDL_FPoint{cur->sx, cur->sy}, tip, pen, color);
+      constexpr float kBarbLength = 8.0F; // DAT_00575a30
+      constexpr float kDegToRad = std::numbers::pi_v<float> / 180.0F;
+      const float bearing = BearingDeg(tip.x, tip.y, cur->sx, cur->sy);
+      for (const float offset : {45.0F, 315.0F}) {
+        SDL_FPoint barb = tip;
+        evnova::util::AddPolar(
+            WrapDeg(bearing + offset) * kDegToRad, kBarbLength, barb.x, barb.y);
+        DrawThickLine(renderer, tip, barb, pen, color);
+      }
+    }
   }
 
   // Selection reticle (green corner ticks around the -8 rect).

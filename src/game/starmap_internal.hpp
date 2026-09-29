@@ -2,6 +2,7 @@
 
 #include "starmap.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -52,6 +53,34 @@ struct MappedSystem {
   float sx = 0.0F;
   float sy = 0.0F;
 };
+
+// Hypergate destination-selection mode (Ghidra g_starmap_hypergate_mode /
+// g_starmap_hypergate_source_stellar_id, armed around the map by
+// Stellar_EnterHypergate 0x00456480). `linked_systems` holds the source
+// gate's HyperLink1-8 targets resolved through
+// System_ResolveVisibleSystemForTravel (the click gate, header, spokes and the
+// exit check all compare against this). `cycle_systems` is the Tab cycle's
+// list, which the original builds from System_FindSystemContainingStellar
+// alone, without the visibility resolve (key filter 0x004a7710).
+struct HypergateMapMode {
+  std::int16_t source_stellar_id = -1;
+  std::vector<std::int16_t> linked_systems;
+  std::vector<std::int16_t> cycle_systems;
+
+  [[nodiscard]] bool Links(std::int16_t zero_based_id) const {
+    return zero_based_id >= 0 &&
+           std::find(linked_systems.begin(),
+                     linked_systems.end(),
+                     zero_based_id) != linked_systems.end();
+  }
+};
+
+// Builds the hypergate-mode link tables from the source gate's HyperLink1-8
+// (StellarDef +0x47e). Each target's system comes from its stored system_id,
+// falling back to System_FindSystemContainingStellar when that is out of
+// range; `cycle_systems` uses System_FindSystemContainingStellar alone.
+[[nodiscard]] HypergateMapMode
+BuildHypergateMapMode(const GameState &state, std::int16_t source_stellar_id);
 
 struct PoliticalOverlay {
   int width = 0;
@@ -110,6 +139,7 @@ void DrawGalaxy(SdlPlatform &platform,
                 std::int16_t selected_id,
                 const std::vector<std::int16_t> &mission_targets,
                 const NovaStarmap_MarkerIcons &icons,
-                float alpha = 1.0F);
+                float alpha = 1.0F,
+                const HypergateMapMode *hypergate = nullptr);
 
 } // namespace game::starmap_detail
