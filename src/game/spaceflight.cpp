@@ -1195,6 +1195,11 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
       state.travel.selected_stellar_id = -1;
       return LandCommandResult::kContinue;
     }
+    // Ghidra 0x00458720: the travel_flags 0x20 arm runs before the dock /
+    // hypergate / wormhole split, so an uninhabited restricted target (the
+    // common HG-* hypergates are travel_flags 0x30 = station | uninhabited)
+    // also arms the approach and shows STR# 0x7d2 0x35 ("No response.").
+    Stellar_ApplyUninhabitedLandingArm(state);
     const float arrival_axis_range =
         Stellar_MaxLandingDistance(target_sprite_full_width);
     const bool within_envelope =
@@ -2672,7 +2677,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
       // interaction pathway. It is intentionally not substituted for landing.
-      // @port 0x00454910 65% gameplay,audio
+      // @port 0x00454910 70% gameplay,audio
       // Mirrors Ship_HandlePlayerTargetActionCommand (0x00454910): with a ship
       // primary target the action opens the ship-comm dialog (DLOG 0x3ef); with
       // no target (or the 0x38/0x6f commands held) it opens the destination-
@@ -2786,8 +2791,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           NovaUi_MarkTravelAndStatusPanelsDirty(state);
           resync_frame_clock();
         } else {
-          NovaLog::Info("target-action: selected stellar cannot open its "
-                        "destination interaction");
+          // Ghidra 0x00454910 Ship_HandlePlayerTargetActionCommand: a
+          // target-action with no usable ship target plays transition cue 5.
+          // When a travel stellar was selected (mode 2) but failed the hail
+          // gate -- uninhabited (travel_flags 0x20), hypergate/wormhole
+          // (availability 0x3000), unavailable, or inactive sprite -- the
+          // original also shows STR# 0x7d2 0x35 "No response." over 0xf0
+          // frames. With no selection at all it only plays the cue.
+          state.pending_ui_sounds.push_back({5, 1});
+          if (state.player.travel_transfer_mode == 2 &&
+              state.travel.selected_stellar_id >= 0x80) {
+            if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x35)) {
+              NovaHud_ShowOverlayMessage(
+                  state, std::move(*text), static_cast<std::uint64_t>(0xf0U));
+            }
+          }
         }
       }
       // Board command ('b', edge-triggered): Player_HandleBoardTargetCommand

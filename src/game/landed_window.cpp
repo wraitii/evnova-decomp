@@ -128,6 +128,27 @@ void Player_RefuelShipWithCredits(GameState &state) {
   }
 }
 
+// Ghidra 0x00457580 Stellar_HandleStellarEntryAndExit (0x00458720): the
+// travel_flags 0x20 "uninhabited" arm. The 0x20 bit means Bible "uninhabited"
+// (no traffic control/refuelling), NOT a landing denial: the original forces
+// the engage timer armed, clears the maneuver timer, and shows STR# 0x7d2 0x35
+// ("No response.") for the landing request nobody answers. Runs before the
+// dock/hypergate/wormhole split in the original, so it applies to restricted
+// targets as well; shared here by Stellar_Dock and the land command.
+void Stellar_ApplyUninhabitedLandingArm(GameState &state) {
+  const Stellar *stellar =
+      state.scenario.Stellar(state.travel.selected_stellar_id);
+  if (stellar == nullptr || (stellar->flags & 0x20U) == 0U) {
+    return;
+  }
+  state.travel.engage_timer = 0x2ee;
+  state.player.ai_maneuver_timer_ms = 0.0F;
+  if (auto message = NovaHud_LoadStringEntry(0x7d2, 0x35)) {
+    NovaHud_ShowOverlayMessage(
+        state, std::move(*message), static_cast<std::uint64_t>(0xfaU));
+  }
+}
+
 // @port 0x00455E10 70% rendering,bugfix
 // ---------------------------------------------------------------------------
 // Ghidra 0x00455e10 Stellar_RunDockAndLaunchSequence: arrival half.
@@ -173,14 +194,7 @@ bool Stellar_Dock(GameState &state,
   // clearance wait. The original forces the engage timer to 0x2ee, clears the
   // maneuver timer, sets the selected stellar, and shows STR# 0x7d2 0x35
   // before running the same envelope/velocity gate below.
-  if ((stellar->flags & 0x20U) != 0U) {
-    state.travel.engage_timer = 0x2ee;
-    state.player.ai_maneuver_timer_ms = 0.0F;
-    if (auto message = NovaHud_LoadStringEntry(0x7d2, 0x35)) {
-      NovaHud_ShowOverlayMessage(
-          state, std::move(*message), static_cast<std::uint64_t>(0xfaU));
-    }
-  }
+  Stellar_ApplyUninhabitedLandingArm(state);
   // Stellar_HandleStellarEntryAndExit normal-arrival gate. The original runs a
   // single failure branch (0x00458de0) and picks the feedback from whether the
   // ship was inside the envelope with the approach armed:
@@ -206,6 +220,14 @@ bool Stellar_Dock(GameState &state,
     ctx.denial = LandedDenial::kTooFast;
     return false;
   }
+
+  // Stellar_HandleStellarEntryAndExit 0x00458006: the travel transition clears
+  // the transient HUD overlay (g_hud_overlay_msg_color = 0) before the dock /
+  // hypergate / wormhole split, so the uninhabited arm's "No response." does
+  // not linger over the Spaceport. Failure paths above return first and keep
+  // the message visible in flight. The restricted branch in the land command
+  // clears it at the same point.
+  NovaHud_ClearOverlayMessage(state);
 
   // Stellar_HandleStellarEntryAndExit checks affordability before it begins the
   // arrival transition, then deducts the full fee (unless the stellar is in

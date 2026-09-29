@@ -2344,7 +2344,8 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
     // original still arms the timer and (when the land-command latch is set)
     // shows STR 0x35. The port arms it here (so the approach proximity check
     // succeeds); the land-command edge's own 0x35 overlay is emitted by
-    // Stellar_Dock (landed_window.cpp).
+    // Stellar_ApplyUninhabitedLandingArm (landed_window.cpp) for ordinary and
+    // restricted targets alike.
     if (state.travel.engage_timer > 0x2ec) {
       ++state.travel.engage_timer;
     }

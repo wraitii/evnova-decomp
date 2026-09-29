@@ -191,6 +191,15 @@ Stellar_MaxLandingDistance(std::int16_t target_sprite_full_width);
 // interaction loop.
 void Player_RefuelShipWithCredits(GameState &state);
 
+// Ghidra 0x00457580 (0x00458720): the travel_flags 0x20 "uninhabited" arm,
+// shared by ordinary and restricted (hypergate/wormhole) targets. Forces the
+// approach timer to 0x2ee, clears the maneuver timer, and shows STR# 0x7d2
+// 0x35 ("No response."; an uninhabited body has no traffic control to answer
+// the landing request). Stellar_Dock runs it for ordinary bodies; the land
+// command runs it before its hypergate/wormhole branch, which bypasses
+// Stellar_Dock.
+void Stellar_ApplyUninhabitedLandingArm(GameState &state);
+
 // Ghidra 0x00455e10 Stellar_RunDockAndLaunchSequence, arrival half (the
 // clean-room split into Stellar_Dock + Stellar_Launch). After the arrival
 // envelope/approach gate above (engage timer >= 0x2ee, |vel| <= 0.75 per axis,

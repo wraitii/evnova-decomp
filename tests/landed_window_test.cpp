@@ -758,12 +758,42 @@ TEST_CASE("landing accepts an uninhabited stellar", "[landed_window]") {
   state.player.ai_maneuver_timer_ms = 500.0F; // cleared by the 0x20 arm
   state.travel.selected_stellar_id = 0x80;
   state.travel.engage_timer = 0; // no clearance pass ran
+  // The uninhabited arm's "No response." must not outlive the transition
+  // (Stellar_HandleStellarEntryAndExit 0x00458006 clears it).
+  state.hud_overlay.active = true;
+  state.hud_overlay.message = "No response.";
 
   game::LandedContext ctx;
   REQUIRE(game::Stellar_Dock(state, ctx, 96));
   CHECK(ctx.landed);
   CHECK(state.travel.engage_timer == 0x2ee);
   CHECK(state.player.ai_maneuver_timer_ms == 0.0F);
+  CHECK_FALSE(state.hud_overlay.active);
+}
+
+TEST_CASE("uninhabited landing arm is shared with restricted targets",
+          "[travel][landed_window]") {
+  game::GameState state;
+  state.scenario.stellars.resize(1);
+  game::Stellar &stellar = state.scenario.stellars[0];
+  stellar.flags = 0x30;                // station | uninhabited
+  stellar.availability_flags = 0x1000; // hypergate (bypasses Stellar_Dock)
+  stellar.is_available = true;
+  state.travel.selected_stellar_id = 0x80;
+  state.travel.engage_timer = -1;
+  state.player.ai_maneuver_timer_ms = 500.0F;
+
+  game::Stellar_ApplyUninhabitedLandingArm(state);
+  CHECK(state.travel.engage_timer == 0x2ee);
+  CHECK(state.player.ai_maneuver_timer_ms == 0.0F);
+
+  // An inhabited body is untouched by the arm.
+  stellar.flags = 0x11; // Can land | station
+  state.travel.engage_timer = -1;
+  state.player.ai_maneuver_timer_ms = 500.0F;
+  game::Stellar_ApplyUninhabitedLandingArm(state);
+  CHECK(state.travel.engage_timer == -1);
+  CHECK(state.player.ai_maneuver_timer_ms == 500.0F);
 }
 
 TEST_CASE("landing approach timer arms within 250 and expires", "[travel]") {

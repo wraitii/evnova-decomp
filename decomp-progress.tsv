@@ -300,7 +300,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00450710	PlayerTick_AuxiliaryCommands	src/game/escort_commands.cpp	45%	gameplay,ui,license,synthetic
 0x00450717	PlayerTick_IonizationAndFuelRegeneration	src/game/spaceflight_player_state.cpp	100%	divergence,synthetic
 0x00451940	PlayerTick_InteractionCloakAndStatus	src/game/spaceflight.cpp	45%	gameplay,license,synthetic
-0x00454910	Ship_HandlePlayerTargetActionCommand	src/game/spaceflight.cpp	65%	gameplay,audio
+0x00454910	Ship_HandlePlayerTargetActionCommand	src/game/spaceflight.cpp	70%	gameplay,audio
 0x00455150	Weapon_FirePlayerWeaponBank	src/game/weapon.cpp	88%	gameplay,audio,bugfix
 0x00455E10	Stellar_RunDockAndLaunchSequence	src/game/landed_window.cpp	70%	rendering,bugfix
 0x00456480	Stellar_EnterHypergate	src/game/travel.cpp	65%	gameplay,rendering
