@@ -374,7 +374,7 @@ void FireJump(GameState &state) {
   // (System_ShowSystemEventMessage); otherwise a random "Entering the /
   // Jumping into the / Arriving in the" lead (STR# 0x7d2 0x2b..0x2d), the
   // system display name, " system on " (0x30), the formatted arrival date
-  // (Stellar_FormatElapsedTravelTime -> NovaText_FormatDateString full month
+  // (NovaText_FormatLongDateString -> NovaText_FormatDateString full month
   // names), and the no-nav appendix (0x31).
   if (dest_sys != nullptr) {
     if (dest_sys->message_id != -1) {

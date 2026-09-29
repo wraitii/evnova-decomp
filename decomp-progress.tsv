@@ -416,7 +416,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004682D0	Stellar_HasAdjacentAccessibleStellarForTravelMode	src/game/starmap.cpp	100%	
 0x004683B0	NovaRandom_Range		0%	
 0x00468450	NovaText_FormatDateString	src/game/mission_text.cpp	100%	
-0x00468600	Stellar_FormatElapsedTravelTime	src/game/mission_text.cpp	70%	gameplay
+0x00468600	NovaText_FormatLongDateString	src/game/mission_text.cpp	100%	
 0x004687B0	Ship_IsShipDisabled	src/game/ship_ai.cpp	100%	
 0x004688E0	Ship_IsShipDestroyed	src/game/ship_ai.cpp	100%	
 0x00468920	Ship_CanPlayerHaveMoreEscorts	src/game/boarding_plunder.cpp	100%	

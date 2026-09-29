@@ -439,29 +439,26 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
   ReplaceMissionToken(
       result, "<SN>", active != nullptr ? special_ship_name : "[Error]");
   // <DL> (0x004444f0 active-slot arm): the runtime flags' absolute deadline
-  // date formatted with the full month names; when the deadline equals the
-  // current date the original's format buffer keeps its empty init content,
-  // so the token expands to "".
+  // date formatted with the full month names. The format buffer starts as
+  // "[Error]" and keeps it when the deadline equals the current date. A
+  // no-TimeLimit mission formats whatever the slot holds: the zero date
+  // ("<prefix> 0th, 0<suffix>", STR# 0x89 entry 0 is empty) or a previous
+  // occupant's deadline.
   if (active != nullptr && mission_id >= 0 &&
       static_cast<std::size_t>(mission_id) <
           state.active_mission_runtime_flags.size()) {
     const MissionRuntimeFlags &slot =
         state
             .active_mission_runtime_flags[static_cast<std::size_t>(mission_id)];
-    if (slot.deadline_year != 0) {
-      const GameDate deadline{
-          slot.deadline_year, slot.deadline_month, slot.deadline_day};
-      std::string deadline_text;
-      if (deadline.year != state.date.year ||
-          deadline.month != state.date.month ||
-          deadline.day != state.date.day) {
-        deadline_text = NovaText_FormatDateString(
-            deadline, false, state.date_prefix, state.date_suffix);
-      }
-      ReplaceMissionToken(result, "<DL>", deadline_text);
-    } else {
-      ReplaceMissionToken(result, "<DL>", "[Error]");
+    const GameDate deadline{
+        slot.deadline_year, slot.deadline_month, slot.deadline_day};
+    std::string deadline_text = std::string("[Error]");
+    if (deadline.year != state.date.year ||
+        deadline.month != state.date.month || deadline.day != state.date.day) {
+      deadline_text = NovaText_FormatDateString(
+          deadline, false, state.date_prefix, state.date_suffix);
     }
+    ReplaceMissionToken(result, "<DL>", deadline_text);
   } else {
     // Offer-row arm: the per-definition target block's deadline, formatted
     // the same way. The buffer keeps its "[Error]" init only when the stored
@@ -575,14 +572,13 @@ MissionDialogText Mission_LoadSelectionDialogText(const GameState &state,
 
 namespace {
 
-// @port 0x00468600 70% gameplay
-// Ghidra 0x00468600 Stellar_FormatElapsedTravelTime. TODO(decomp): the
-// offer-row <DL> arm reads the mission target-resolution table (dates not
-// tracked); elapsed-days params 3/4 are ignored by the original body too.
+// @port 0x00468600 100%
+// Ghidra 0x00468600 NovaText_FormatLongDateString.
 // Shared body of NovaText_FormatDateString (0x00468450) and
-// Stellar_FormatElapsedTravelTime (0x00468600): "MONTH DAYst, YEAR" with the
+// NovaText_FormatLongDateString (0x00468600): "MONTH DAYst, YEAR" with the
 // STR# 0x89 month table and day suffixes (st/nd/rd by last digit, th
-// otherwise, 11-13 forced back to th).
+// otherwise, 11-13 forced back to th). Both take a by-value DateTimeRec and
+// read only its year/month/day.
 [[nodiscard]] std::string FormatDateString(const GameDate &date,
                                            std::uint16_t month_entry,
                                            std::string_view prefix,
@@ -624,7 +620,7 @@ std::string NovaText_FormatDateString(const GameDate &date,
                                       std::string_view suffix) {
   // The UI sites (BBS date 0x00441620, mission-info window, starmap status
   // bar) use the abbreviated month names (STR# 0x89 entries 13-24);
-  // Stellar_FormatElapsedTravelTime (arrival message / <DL> token) uses the
+  // NovaText_FormatLongDateString (arrival message / <DL> token) uses the
   // full names (entries 1-12).
   return FormatDateString(date,
                           static_cast<std::uint16_t>(

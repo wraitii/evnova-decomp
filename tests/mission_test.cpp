@@ -1275,6 +1275,37 @@ TEST_CASE("mission wildcard expansion resolves destinations and identity") {
   CHECK(expanded.find("(<") == std::string::npos);
 }
 
+TEST_CASE("active-slot <DL> keeps a previous occupant's deadline") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.scenario.missions.resize(2);
+  for (auto &def : state.scenario.missions) {
+    def.present = true;
+    def.travel_stellar_locator = -1;
+    def.return_stellar_locator = -1;
+    def.cargo_type_resource = -1;
+    def.current_system_locator = -1;
+  }
+  state.scenario.missions[0].time_limit_days = 5;
+  state.date = GameDate{1177, 6, 20};
+  Mission_ResolveMissionStellarLocators(state);
+
+  // 0x0043f100 writes the deadline only for a TimeLimit mission and never
+  // clears it; mission end only drops is_active.
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  state.active_mission_runtime_flags[0].is_active = false;
+  REQUIRE(Mission_ActivateAtSlot(state, 1));
+  REQUIRE(state.active_missions[0].mission_template_id == 1);
+  const std::string stale =
+      Mission_ExpandMissionWildcards(state, "<DL>", false, 0);
+  INFO("stale: " << stale);
+  CHECK(stale.find("June 25th, 1177") != std::string::npos);
+
+  // A deadline equal to today keeps the "[Error]" init.
+  state.date = GameDate{1177, 6, 25};
+  CHECK(Mission_ExpandMissionWildcards(state, "<DL>", false, 0) == "[Error]");
+}
+
 TEST_CASE("per-government rank tokens resolve by government id") {
   GameState state;
   state.scenario.ranks.assign(0x80, {});

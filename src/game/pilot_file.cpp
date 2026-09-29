@@ -1504,12 +1504,16 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
     if (!state.active_mission_runtime_flags[i].is_active) {
       continue;
     }
-    const GameDate deadline = Mission_ComputeDateAfterSteps(
-        state, state.active_missions[i].time_limit_days_remaining);
-    state.active_mission_runtime_flags[i].deadline_year = deadline.year;
-    state.active_mission_runtime_flags[i].deadline_month = deadline.month;
-    state.active_mission_runtime_flags[i].deadline_day = deadline.day;
     ActiveMission &mission = state.active_missions[i];
+    // Mission_ComputeDateAfterSteps leaves the loaded deadline bytes untouched
+    // when no days remain (no TimeLimit).
+    if (mission.time_limit_days_remaining > 0) {
+      const GameDate deadline = Mission_ComputeDateAfterSteps(
+          state, mission.time_limit_days_remaining);
+      state.active_mission_runtime_flags[i].deadline_year = deadline.year;
+      state.active_mission_runtime_flags[i].deadline_month = deadline.month;
+      state.active_mission_runtime_flags[i].deadline_day = deadline.day;
+    }
     mission.mission_fleet_name.clear();
     mission.mission_text_name_b.clear();
     if (mission.special_ship_name_string_id > 0x7f &&

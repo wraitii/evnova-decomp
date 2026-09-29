@@ -457,7 +457,7 @@ void System_UpdateDisasterStates(GameState &state);
 void Mission_TickDailyWorldUpdate(GameState &state);
 
 // Ghidra 0x00468450 NovaText_FormatDateString / 0x00468600
-// Stellar_FormatElapsedTravelTime (shared body). Formats "MONTH DAYst, YEAR"
+// NovaText_FormatLongDateString (shared body). Formats "MONTH DAYst, YEAR"
 // from STR# 0x89 (st/nd/rd/th suffixes with the 11-13 -> th special case).
 // The HUD/UI sites use the abbreviated month names (entries 13-24, the
 // 0x00468450 shape); the <DL> mission token uses the full names (entries

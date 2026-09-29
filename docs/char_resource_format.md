@@ -54,7 +54,7 @@ Both date formatters use them:
 
 - `NovaText_FormatDateString` (`0x00468450`) starts with `DatePrefix` and ends with
   `DateSuffix` (abbreviated month names, STR# 0x89 entries 13-24).
-- `Stellar_FormatElapsedTravelTime` (`0x00468600`) shares the body with full month
+- `NovaText_FormatLongDateString` (`0x00468600`) shares the body with full month
   names (STR# 0x89 entries 1-12).
 
 Stock output therefore reads e.g. `June 23rd, 1177 NC`.

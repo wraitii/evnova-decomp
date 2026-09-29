@@ -1611,9 +1611,14 @@ bool Mission_ActivateAtSlot(GameState &state,
     return false;
   }
 
+  // 0x0043f100 resets only the four latches; the deadline date (+0x06..+0x12)
+  // keeps the previous occupant's bytes unless the new mission has a
+  // TimeLimit, and the <DL> token shows that stale date.
   auto &runtime = state.active_mission_runtime_flags[free_slot];
-  runtime = {};
   runtime.is_active = true;
+  runtime.is_failed = false;
+  runtime.travel_stellar_reached = false;
+  runtime.objective_complete = false;
   auto &active = state.active_missions[free_slot];
   // Deadline before flags_primary_at_accept, matching 0x0043f100 (both are
   // set before the on-accept payload runs).

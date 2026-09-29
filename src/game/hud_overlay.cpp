@@ -366,7 +366,7 @@ void NovaHud_ShowLaunchDepartureMessage(GameState &state,
     msg += *text;
   }
   msg += " ";
-  // Stellar_FormatElapsedTravelTime shape: full month names (STR# 0x89
+  // NovaText_FormatLongDateString shape: full month names (STR# 0x89
   // entries 1-12). The trailing chär/save-carried date suffix
   // (g_date_suffix, save block +0x5eee) is empty for stock pilots.
   msg += NovaText_FormatDateString(
