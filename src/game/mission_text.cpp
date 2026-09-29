@@ -12,6 +12,7 @@
 #include "outfit.hpp"
 #include "rank.hpp"
 #include "targeting.hpp"
+#include "travel.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -192,18 +193,21 @@ void ReplaceMissionToken(std::string &text,
   return stellar.name;
 }
 
-// System name for <DSY>/<RSY>. The original resolves the stellar's owning
-// system through System_ResolveVisibleSystemForTravel, then the discovery
-// slot, then System_FindSystemContainingStellar; the port's membership map is
-// already the visible-system resolution, so only the visible resolve runs
-// here; when it fails the original keeps "[Error]" (no raw-id fallback).
-// Like stellar names, an empty system name is copied verbatim.
+// System name for <DSY>/<RSY>. The original resolves the system through
+// System_ResolveVisibleSystemForTravel, then System_ResolveSystemDiscoverySlot
+// (0x004444f0 active and offer arms); the discovery-slot fallback matters for
+// a hidden system whose twin group has no visible member -- the original
+// names the visibility root while a visible-only resolve would leave
+// "[Error]". The trailing System_FindSystemContainingStellar arm is applied
+// by the caller before/at this point (the offer target table resolves it in
+// Mission_ResolveMissionStellarTargets, the active arm just above). An empty
+// system name is copied verbatim.
 [[nodiscard]] std::string MissionSystemName(const GameState &state,
                                             std::int16_t system_id) {
-  // No raw-id fallback: when visibility resolution fails the original keeps
-  // "[Error]".
-  const std::int16_t resolved =
-      Misn_ResolveVisibleSystemForTravel(state, system_id);
+  std::int16_t resolved = Misn_ResolveVisibleSystemForTravel(state, system_id);
+  if (resolved < 0) {
+    resolved = NovaSystem_ResolveDiscoverySlot(state, system_id);
+  }
   if (resolved < 0 ||
       resolved >= static_cast<std::int16_t>(state.scenario.systems.size())) {
     return "[Error]";
@@ -380,6 +384,20 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
     return_stellar = active->return_stellar_id;
     travel_system = ResolveContainingSystem(state, travel_stellar);
     return_system = ResolveContainingSystem(state, return_stellar);
+    // 0x004444f0 active arm: after the visible/discovery resolve, an unhomed
+    // stellar (system_id still -1) falls back to
+    // System_FindSystemContainingStellar; MissionSystemName below performs the
+    // visible/discovery half, so only add the find half here.
+    if (travel_system == -1 && travel_stellar >= 0) {
+      travel_system = NovaTargeting_FindSystemContainingStellar(
+          state.scenario,
+          static_cast<std::int16_t>(travel_stellar + kResourceIdBase));
+    }
+    if (return_system == -1 && return_stellar >= 0) {
+      return_system = NovaTargeting_FindSystemContainingStellar(
+          state.scenario,
+          static_cast<std::int16_t>(return_stellar + kResourceIdBase));
+    }
     cargo_type = active->cargo_type_id;
     cargo_qty = active->cargo_qty_tons;
     pay_val = active->resource_delta_or_cost;

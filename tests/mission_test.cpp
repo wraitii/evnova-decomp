@@ -1385,6 +1385,57 @@ TEST_CASE("unresolvable offer destinations fall back to the return target") {
   CHECK(expanded == "Deliver to Earth in Sol");
 }
 
+TEST_CASE("return locator -4 resolves to the anchor stellar") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = -1; // duel-style: no travel destination
+  definition.return_stellar_locator = -4;
+  state.scenario.stellars.resize(3);
+  state.scenario.stellars[2].name = "Heraan";
+  state.scenario.stellars[2].system_id = 0;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].name = "Heraan System";
+  // Docked at the offering stellar: ai_secondary_target_slot holds the
+  // 0x80-based resource id of the landed stellar (see Stellar_Dock).
+  state.in_flight = false;
+  state.player.ai_secondary_target_slot = 0x82;
+  Mission_ResolveMissionStellarLocators(state);
+  CHECK(state.mission_target_resolutions[0].return_stellar_id == 2);
+  const std::string expanded = Mission_ExpandMissionWildcards(
+      state, "before returning to <RST>", true, 0);
+  CHECK(expanded == "before returning to Heraan");
+}
+
+TEST_CASE("mission system name uses the discovery-slot fallback") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  state.scenario.missions[0].present = true;
+  state.scenario.missions[0].travel_stellar_locator = -1;
+  state.scenario.missions[0].return_stellar_locator = 0x81;
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[0].name = "Hidden";
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[1].name = "Twin";
+  state.scenario.stellars[1].system_id = 1;
+  state.scenario.systems.resize(2);
+  state.scenario.systems[0].name = "Root";
+  state.scenario.systems[0].is_visible = false;
+  state.scenario.systems[0].visibility_root_system_id = -1;
+  state.scenario.systems[1].name = "Child";
+  state.scenario.systems[1].is_visible = false;
+  state.scenario.systems[1].visibility_root_system_id = 0;
+  // The hidden twin group has no visible member, so the visible resolve
+  // returns -1 and the original falls back to System_ResolveSystemDiscovery-
+  // Slot: the visibility root (system 0), not "[Error]".
+  state.mission_target_resolutions[0].return_stellar_id = 1;
+  state.mission_target_resolutions[0].return_system_id = 1;
+  const std::string expanded =
+      Mission_ExpandMissionWildcards(state, "Back to <RST> in <RSY>", true, 0);
+  CHECK(expanded == "Back to Twin in Root");
+}
+
 TEST_CASE("string placeholder expansion handles gender blocks and quirks") {
   GameState state; // pilot defaults: male ('m' latch = g_player_is_male)
 

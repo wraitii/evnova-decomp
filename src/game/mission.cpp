@@ -116,23 +116,17 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
   return true;
 }
 
+// Ghidra 0x0046E790 System_FindSystemContainingStellar (via
+// NovaTargeting_FindSystemContainingStellar): first system whose nav list owns
+// the stellar, visible systems preferred then all. `stellar_id` is the
+// 0-based mission index; nav lists store the 0x80-based resource id.
 [[nodiscard]] std::int16_t
 FindSystemContainingStellar(const GameState &state, std::int16_t stellar_id) {
   if (stellar_id < 0) {
     return -1;
   }
-  const auto resource_id =
-      static_cast<std::int16_t>(stellar_id + kResourceIdBase);
-  for (std::size_t system_id = 0; system_id < state.scenario.systems.size();
-       ++system_id) {
-    const auto &system = state.scenario.systems[system_id];
-    if (std::find(system.nav_defs.begin(),
-                  system.nav_defs.end(),
-                  resource_id) != system.nav_defs.end()) {
-      return static_cast<std::int16_t>(system_id);
-    }
-  }
-  return -1;
+  return NovaTargeting_FindSystemContainingStellar(
+      state.scenario, static_cast<std::int16_t>(stellar_id + kResourceIdBase));
 }
 
 } // namespace
@@ -466,8 +460,15 @@ SelectMissionStellarByLocator(GameState &state,
                               std::int16_t reference,
                               std::int16_t excluded,
                               std::int16_t fallback) {
+  // Locator -4 (Bible: "the initial stellar, where the mission was
+  // accepted") and -1 fall through the original's family dispatch to
+  // `return local_1c`, where local_1c = param_2, i.e. the anchor reference --
+  // the offering/landed stellar. Returning `fallback` here made every -4
+  // ReturnStel resolve to the travel stellar, or to -1 for the missions whose
+  // TravelStel is also -1 (Duel 759..764, Defend Polaris 173/174, Test Rebel
+  // Cloaking Device 612, Put Down Uprising 878), so <RST> rendered "[Error]".
   if (locator == -1 || locator == -4) {
-    return fallback;
+    return reference;
   }
   if (locator > 0 && locator < kResourceIdBase) {
     // Out-of-family small positive locators are debug-logged and fall back.
