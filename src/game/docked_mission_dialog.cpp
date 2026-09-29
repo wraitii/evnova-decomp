@@ -783,7 +783,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
 }
 
 // ---------------------------------------------------------------------------
-// @port 0x00442510 90% ui,rendering
+// @port 0x00442510 95% ui,rendering
 // Ghidra 0x00442510 NovaUi_RunMissionOfferWindow. The 0x00447170
 // NovaUi_PollMissionOfferWindow input slice and 0x00447680
 // NovaUi_DrawMissionOfferWindow draw slice run inline in this function and its
@@ -800,7 +800,8 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
 // Button captions come from the mïsn
 // payload +0x75f/+0x77f, which the original truncates at the first
 // non-lowercase byte and replaces with STR# 0x96 entries 0x32/0x1b (accept) and
-// 0x33 (decline) when empty.
+// 0x33 (decline) when empty. The buttons are then widened to fit the longer
+// caption, and short offer text shrinks the 0x3f8 window (auto-size arm).
 
 namespace {
 
@@ -991,53 +992,6 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     }
     return SDL_FRect{};
   };
-  const SDL_FRect accept_rect = item_rect(0);  // UiPanel entry 1
-  const SDL_FRect decline_rect = item_rect(1); // UiPanel entry 2
-  // Entry 6 (DITL item 5): single accept button in the Flags 0x0004 arm
-  // (0x004a1820 reads UiPanel entry 6; 0x004a1670 hit-tests it as slot 0).
-  const SDL_FRect cannot_refuse_rect = item_rect(5);
-  // The can't-refuse arm moves the accept button to entry 6 and drops
-  // decline, so this is the rect the draw, probe registry, and hit-test use.
-  const SDL_FRect accept_button_rect =
-      normal_arm ? accept_rect : cannot_refuse_rect;
-  const SDL_FRect text_rect = item_rect(2); // UiPanel entry 3: text view
-  // Entries 9/10 (DITL items 8/9) are the text-view scroll arrows. Entry 9 is
-  // label 0x12 (STR# 0x96 entry 19 '^' = up) and entry 10 label 0x13 (entry 20
-  // '&' = down) per 0x004a1820. Actions 9/10 pass +/-10 as a content
-  // translation
-  // (+ = up); this port's ScrollBy offset grows downward, so up maps to item 8
-  // and down to item 9.
-  const SDL_FRect scroll_up_rect = item_rect(8);
-  const SDL_FRect scroll_down_rect = item_rect(9);
-  // Entry 8 (DITL item 7) is the variant PICT target in the 0x3fc arm
-  // (0x00447680: UiPanel_GetEntryInfo(window, 8)).
-  const SDL_FRect variant_rect = item_rect(7);
-
-  platform.SetPlacement(PlaceContained({win_w, win_h},
-                                       platform.logical_playfield_size(),
-                                       platform.mission_dialog_scale()));
-
-  // Publish the window's control rects to the probe harness (window-point
-  // space) so the harness can click by intent; cleared when this modal exits.
-  ProbeUiAutoClear probe_ui_guard(platform);
-  const auto publish_probe_ui = [&]() {
-    const auto probe_rect = [&](SDL_FRect rect) {
-      return platform.current_placement().ToWindowRect(rect);
-    };
-    // The active accept rect moves to entry 6 in the can't-refuse arm; the
-    // decline slot does not exist there, so it is not published.
-    std::vector<std::pair<std::string, SDL_FRect>> rects = {
-        {"window", probe_rect({0.0F, 0.0F, win_w, win_h})},
-        {"accept", probe_rect(accept_button_rect)},
-        {"text", probe_rect(text_rect)},
-        {"scroll_up", probe_rect(scroll_up_rect)},
-        {"scroll_down", probe_rect(scroll_down_rect)}};
-    if (normal_arm) {
-      rects.emplace_back("decline", probe_rect(decline_rect));
-    }
-    platform.PublishProbeUi("mission_offer", std::move(rects));
-  };
-
   // Button captions: payload +0x75f/+0x77f C-strings. 0x00442510's
   // normalisation loop increments its index by 0x100, so it walks the two
   // 256-byte caption buffers rather than the characters and only inspects each
@@ -1066,6 +1020,120 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   if (decline_caption.empty()) {
     decline_caption = NovaHud_LoadStringEntry(0x96, 0x33).value_or("No");
   }
+
+  // 0x00442510 then sizes all three button entries to the wider caption
+  // (font 0 at 12pt) + 0x28, at least 100: accept (entry 1) keeps its left
+  // edge, decline (entry 2) keeps its right edge, and the can't-refuse accept
+  // (entry 6) is re-centred on its original midpoint.
+  NovaFontCache font_cache;
+  const auto caption_width = [&](std::string_view caption) {
+    return font_cache.TextWidth(kThreeStateButtonFontFamily,
+                                kThreeStateButtonFontSize,
+                                kNovaFontStyleRegular,
+                                caption);
+  };
+  const int button_width = std::max(
+      std::max(caption_width(accept_caption), caption_width(decline_caption)) +
+          0x28,
+      100);
+  SDL_FRect accept_rect = item_rect(0); // UiPanel entry 1
+  accept_rect.w = static_cast<float>(button_width);
+  SDL_FRect decline_rect = item_rect(1); // UiPanel entry 2
+  decline_rect.x += decline_rect.w - static_cast<float>(button_width);
+  decline_rect.w = static_cast<float>(button_width);
+  // Entry 6 (DITL item 5): single accept button in the Flags 0x0004 arm
+  // (0x004a1820 reads UiPanel entry 6; 0x004a1670 hit-tests it as slot 0).
+  SDL_FRect cannot_refuse_rect = item_rect(5);
+  {
+    // Rect_Inset by -(width / 2) around the truncated midpoint (C division).
+    const int left = static_cast<int>(cannot_refuse_rect.x - origin.x);
+    const int right = left + static_cast<int>(cannot_refuse_rect.w);
+    const int center = (left + right) / 2;
+    const int half = button_width / 2;
+    cannot_refuse_rect.x = origin.x + static_cast<float>(center - half);
+    cannot_refuse_rect.w = static_cast<float>(2 * half);
+  }
+  SDL_FRect text_rect = item_rect(2); // UiPanel entry 3: text view
+  // Entries 9/10 (DITL items 8/9) are the text-view scroll arrows. Entry 9 is
+  // label 0x12 (STR# 0x96 entry 19 '^' = up) and entry 10 label 0x13 (entry 20
+  // '&' = down) per 0x004a1820. Actions 9/10 pass +/-10 as a content
+  // translation
+  // (+ = up); this port's ScrollBy offset grows downward, so up maps to item 8
+  // and down to item 9.
+  SDL_FRect scroll_up_rect = item_rect(8);
+  SDL_FRect scroll_down_rect = item_rect(9);
+  // Entry 8 (DITL item 7) is the variant PICT target in the 0x3fc arm
+  // (0x00447680: UiPanel_GetEntryInfo(window, 8)).
+  const SDL_FRect variant_rect = item_rect(7);
+  SDL_FRect window_rect{origin.x, origin.y, win_w, win_h};
+
+  // Shared read-only text view (NovaTextView 0x004bcd90) over DITL entry 3.
+  NovaTextScrollView view(font_cache, text, text_rect);
+  // Auto-size arm (0x00442510 runs it before the button sizing): when the
+  // wrapped text height (view +0x1c) is shorter than entry 3 and the 0x3f8
+  // layout is in use, the measurement is clamped to 0x30 and
+  // shrink = entry-3 height - measured - 0x10. Entries 1/2/6 move up by the
+  // shrink and entry 3's bottom rises; the scroll arrows (entries 9/10) stay
+  // put. The window loses `shrink` of height and then drops by
+  // trunc(shrink * 0.3) (DAT_00575518, double). The original works in
+  // window-local coordinates, so the drop carries every entry with it; the
+  // port's rects are absolute within the authored DLOG canvas, so each rect
+  // takes the drop explicitly.
+  const int measured_text_height = static_cast<int>(view.text_height());
+  if (!art_variant_mode &&
+      measured_text_height < static_cast<int>(text_rect.h)) {
+    const int shrink = static_cast<int>(text_rect.h) -
+                       std::max(measured_text_height, 0x30) - 0x10;
+    const float shift = static_cast<float>(shrink);
+    accept_rect.y -= shift;
+    decline_rect.y -= shift;
+    cannot_refuse_rect.y -= shift;
+    text_rect.h -= shift;
+    window_rect.h -= shift;
+    // x87: FILD shrink, FMUL by the double 0.3, FST to float, then the ftol
+    // fix-up truncates that float toward zero.
+    const float drop =
+        std::trunc(static_cast<float>(static_cast<double>(shrink) * 0.3));
+    for (SDL_FRect *rect : {&window_rect,
+                            &accept_rect,
+                            &decline_rect,
+                            &cannot_refuse_rect,
+                            &text_rect,
+                            &scroll_up_rect,
+                            &scroll_down_rect}) {
+      rect->y += drop;
+    }
+    view.SetViewRect(text_rect);
+  }
+  // The can't-refuse arm moves the accept button to entry 6 and drops
+  // decline, so this is the rect the draw, probe registry, and hit-test use.
+  const SDL_FRect accept_button_rect =
+      normal_arm ? accept_rect : cannot_refuse_rect;
+
+  platform.SetPlacement(PlaceContained({win_w, win_h},
+                                       platform.logical_playfield_size(),
+                                       platform.mission_dialog_scale()));
+
+  // Publish the window's control rects to the probe harness (window-point
+  // space) so the harness can click by intent; cleared when this modal exits.
+  ProbeUiAutoClear probe_ui_guard(platform);
+  const auto publish_probe_ui = [&]() {
+    const auto probe_rect = [&](SDL_FRect rect) {
+      return platform.current_placement().ToWindowRect(rect);
+    };
+    // The active accept rect moves to entry 6 in the can't-refuse arm; the
+    // decline slot does not exist there, so it is not published.
+    std::vector<std::pair<std::string, SDL_FRect>> rects = {
+        {"window", probe_rect(window_rect)},
+        {"accept", probe_rect(accept_button_rect)},
+        {"text", probe_rect(text_rect)},
+        {"scroll_up", probe_rect(scroll_up_rect)},
+        {"scroll_down", probe_rect(scroll_down_rect)}};
+    if (normal_arm) {
+      rects.emplace_back("decline", probe_rect(decline_rect));
+    }
+    platform.PublishProbeUi("mission_offer", std::move(rects));
+  };
 
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
   // Variant < 0x80: main 0x214a + top strip 0x2149 + bottom strip 0x214b.
@@ -1099,9 +1167,6 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   }
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
-  NovaFontCache font_cache;
-  // Shared read-only text view (NovaTextView 0x004bcd90) over DITL entry 3.
-  NovaTextScrollView view(font_cache, text, text_rect);
   NovaTextScrollHold scroll_hold;
   // 0x00442510's accept arm (action 1): activate, then
   // Mission_ActivateMissionAtSlot (0x0043f100) shows the Brief/LoadCarg
@@ -1144,11 +1209,11 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
         MakeAcceptanceSink(platform, state, render_background));
     return MissionOfferResult::kDeclined;
   };
-  // @port 0x00447680 68% ui,rendering
+  // @port 0x00447680 75% ui,rendering
   // One window frame over the docked backing store. The original's draw
   // callback (NovaUi_DrawMissionOfferWindow 0x00447680) fills the
-  // window, blits the main art top-anchored (clipped), then the top and
-  // bottom strips.
+  // (possibly auto-sized) window, blits the main art below the top strip,
+  // the top strip, and the bottom-anchored strip, all clipped to the window.
   auto draw_frame = [&]() {
     platform.SetPlacement(PlaceWindow(platform.logical_playfield_size()));
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
@@ -1164,60 +1229,51 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     platform.SetPlacement(PlaceContained({win_w, win_h},
                                          platform.logical_playfield_size(),
                                          platform.mission_dialog_scale()));
-    const SDL_FRect window{origin.x, origin.y, win_w, win_h};
-    SDL_SetRenderDrawColor(platform.renderer(), 16, 40, 72, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(platform.renderer(), &window);
+    // 0x00447680 fills the window with PTR_DAT_00575acc (black), then blits
+    // the art clipped to the window.
+    SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(platform.renderer(), &window_rect);
+    const auto blit = [&](const std::unique_ptr<SdlTexture> &texture,
+                          const SDL_FRect &dst) {
+      if (texture != nullptr) {
+        SDL_RenderTexture(platform.renderer(), texture->get(), nullptr, &dst);
+      }
+    };
+    const auto texture_size = [](const std::unique_ptr<SdlTexture> &texture) {
+      SDL_FPoint size{0.0F, 0.0F};
+      if (texture != nullptr) {
+        SDL_GetTextureSize(texture->get(), &size.x, &size.y);
+      }
+      return size;
+    };
+    const SDL_Rect window_clip{static_cast<int>(window_rect.x),
+                               static_cast<int>(window_rect.y),
+                               static_cast<int>(window_rect.w),
+                               static_cast<int>(window_rect.h)};
+    SDL_SetRenderClipRect(platform.renderer(), &window_clip);
     if (art_variant_mode) {
-      // Single art backdrop 0x2150 filling the window, then the variant PICT
-      // into entry 8 (0x00447680).
-      if (art_variant != nullptr) {
-        float w = 0.0F;
-        float h = 0.0F;
-        SDL_GetTextureSize(art_variant->get(), &w, &h);
-        const SDL_FRect variant_backdrop{
-            origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
-        SDL_RenderTexture(platform.renderer(),
-                          art_variant->get(),
-                          nullptr,
-                          &variant_backdrop);
-      }
-      if (art_variant_pict != nullptr) {
-        SDL_RenderTexture(platform.renderer(),
-                          art_variant_pict->get(),
-                          nullptr,
-                          &variant_rect);
-      }
+      // Single art backdrop 0x2150 stretched to the window rect, then the
+      // variant PICT into entry 8 (0x00447680).
+      blit(art_variant, window_rect);
+      blit(art_variant_pict, variant_rect);
     } else {
-      if (art_main != nullptr) {
-        float w = 0.0F;
-        float h = 0.0F;
-        SDL_GetTextureSize(art_main->get(), &w, &h);
-        const SDL_FRect main_rect{
-            origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
-        SDL_RenderTexture(
-            platform.renderer(), art_main->get(), nullptr, &main_rect);
-      }
-      if (art_top != nullptr) {
-        float w = 0.0F;
-        float h = 0.0F;
-        SDL_GetTextureSize(art_top->get(), &w, &h);
-        const SDL_FRect top_rect{
-            origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
-        SDL_RenderTexture(
-            platform.renderer(), art_top->get(), nullptr, &top_rect);
-      }
-      if (art_bottom != nullptr) {
-        float w = 0.0F;
-        float h = 0.0F;
-        SDL_GetTextureSize(art_bottom->get(), &w, &h);
-        const SDL_FRect bottom_rect{origin.x,
-                                    origin.y + win_h - std::min(h, win_h),
-                                    std::min(w, win_w),
-                                    std::min(h, win_h)};
-        SDL_RenderTexture(
-            platform.renderer(), art_bottom->get(), nullptr, &bottom_rect);
-      }
+      // Main art 0x214a sits below the top strip 0x2149 (offset by the
+      // strip's height), then the top strip at the window top, then the
+      // bottom strip 0x214b anchored to the window bottom, painting over the
+      // main art's overhang once the window has shrunk.
+      const SDL_FPoint top = texture_size(art_top);
+      const SDL_FPoint main = texture_size(art_main);
+      const SDL_FPoint bottom = texture_size(art_bottom);
+      blit(art_main,
+           SDL_FRect{window_rect.x, window_rect.y + top.y, main.x, main.y});
+      blit(art_top, SDL_FRect{window_rect.x, window_rect.y, top.x, top.y});
+      blit(art_bottom,
+           SDL_FRect{window_rect.x,
+                     window_rect.y + window_rect.h - bottom.y,
+                     bottom.x,
+                     bottom.y});
     }
+    SDL_SetRenderClipRect(platform.renderer(), nullptr);
 
     // Text view: dark fill + wrapped offer text, scrolled inside a clip to
     // the view rect; the arrow buttons are runtime-drawn (0x004a1820).

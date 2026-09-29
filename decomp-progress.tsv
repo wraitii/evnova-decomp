@@ -234,7 +234,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00440BF0	Mission_FailMissionSlotQuick	src/game/mission.cpp	95%	gameplay
 0x00440C90	NovaUi_PollMissionBbsWindow	src/game/docked_mission_dialog.cpp	72%	ui
 0x00441B40	Mission_CheckMissionShipInteractionEligibility	src/game/mission.cpp	85%	gameplay,divergence
-0x00442510	NovaUi_RunMissionOfferWindow	src/game/docked_mission_dialog.cpp	90%	ui,rendering
+0x00442510	NovaUi_RunMissionOfferWindow	src/game/docked_mission_dialog.cpp	95%	ui,rendering
 0x00443760	Mission_TickShipInteractionReactions	src/game/mission.cpp	100%	
 0x00443780	Mission_TickReactionSlotsForTravelInteraction	src/game/mission.cpp	95%	gameplay
 0x004438D0	Mission_ProcessInteractionReactionSlotResources	src/game/mission.cpp	92%	ui
@@ -246,7 +246,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00446770	NovaUi_PollMissionComputerWindow	src/game/docked_mission_dialog.cpp	65%	ui
 0x00446E00	NovaUi_DrawMissionComputerWindow	src/game/docked_mission_dialog.cpp	70%	ui,rendering
 0x00447170	NovaUi_PollMissionOfferWindow	src/game/docked_mission_dialog.cpp	85%	ui,divergence
-0x00447680	NovaUi_DrawMissionOfferWindow	src/game/docked_mission_dialog.cpp	68%	ui,rendering
+0x00447680	NovaUi_DrawMissionOfferWindow	src/game/docked_mission_dialog.cpp	75%	ui,rendering
 0x00447A30	Mission_DoesSystemMatchMissionLocator	src/game/mission.cpp	95%	gameplay
 0x00447D90	Mission_ResolveMisnSlot	src/game/mission.cpp	100%	bugfix
 0x00447F00	System_IsSystemVisible	src/game/travel.cpp	100%	
@@ -939,8 +939,8 @@ address	name	impl_file	reimpl_pct	comment
 0x004D17E0	NovaMouse_GetWindowRelativePosition		0%	Mouse minus current window record origin. 0% unported.
 0x004D1810	FUN_004d1810		0%	
 0x004D1890	FUN_004d1890		0%	
-0x004D18B0	FUN_004d18b0		0%	
-0x004D1A30	FUN_004d1a30		0%	
+0x004D18B0	UiWindow_ResizeBackingStore		0%	
+0x004D1A30	UiWindow_OffsetPosition		0%	
 0x004D1A60	NovaList_Create	src/game/nova_list_control.hpp	35%	ui
 0x004D1B40	NovaUtil_FreeNestedHeapBufferFieldsAndRelease		0%	
 0x004D1D40	NovaList_ScrollSelectionIntoView	src/game/nova_list_control.cpp	100%	
