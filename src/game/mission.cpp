@@ -3127,6 +3127,9 @@ bool Mission_HandleAcceptedShipInteraction(GameState &state,
   replacement.vel_y = target.vel_y;
   replacement.heading = target.heading;
   if (mission.ship_goal == 3) {
+    // Faithful to 0x00454910: the hail replacement gets no squad_leader link
+    // here, so it does not read as an escort until a system rebuild respawns
+    // it (see docs/known_original_bugs.md, "not linked as a player escort").
     NovaShip_EnterSquadReturnState(state, replacement);
   }
   target.is_active = false;

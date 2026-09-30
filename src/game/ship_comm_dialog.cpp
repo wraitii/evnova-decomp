@@ -245,8 +245,10 @@ constexpr std::uint16_t kMsgNoResponse = 1;    // "No response."
 constexpr std::uint16_t kMsgWhatDoYouWant = 2; // "What is it you want?"
 constexpr std::uint16_t kMsgWhatCanIDo = 4;    // "What can I do for you?"
 constexpr std::uint16_t kMsgWhatCanIDoSir = 5; // "What can I do for you, sir?"
-constexpr std::uint16_t kMsgCantAfford = 0xc;  // "Yeah, come back when you
-                                               // actually have some money."
+// Prompt 8 (mission ShipGoal 3): "Glad to see you, " + the player ship name.
+constexpr std::uint16_t kMsgGladToSeeYou = 8;
+constexpr std::uint16_t kMsgCantAfford = 0xc;      // "Yeah, come back when you
+                                                   // actually have some money."
 constexpr std::uint16_t kMsgStopWastingTime = 0xd; // "Stop wasting my time."
 constexpr std::uint16_t kMsgNoTrouble = 0xe;  // "You're not in any trouble."
 constexpr std::uint16_t kMsgImBusy = 0x10;    // "I'm busy."
@@ -1295,7 +1297,7 @@ bool NovaEscortManagement_ApplyAction(GameState &state,
 // ---------------------------------------------------------------------------
 // The ship-comm modal
 // ---------------------------------------------------------------------------
-// @port 0x0047e470 78% ui
+// @port 0x0047e470 82% ui
 // TODO(decomp): fleet-def branches and full hail-info assembly are deferred.
 bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                                 GameState &state,
@@ -1400,15 +1402,31 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                                target.faction_or_government_id,
                                govt_bribes_player);
 
-  // Mission-fleet escort latch (local_20): needs the random-encounter fleet
-  // defs (not modelled) -- stays false (TODO(decomp)).
-  const bool mission_escort = false;
+  // Active mission-fleet slot, if any (0x0047e470 reads these fields through
+  // g_active_misn for the mission branch below).
+  const ActiveMission *mission =
+      target.mission_fleet_slot >= 0 &&
+              static_cast<std::size_t>(target.mission_fleet_slot) <
+                  state.active_missions.size() &&
+              state
+                  .active_mission_runtime_flags[static_cast<std::size_t>(
+                      target.mission_fleet_slot)]
+                  .is_active
+          ? &state.active_missions[static_cast<std::size_t>(
+                target.mission_fleet_slot)]
+          : nullptr;
+
+  // Mission-fleet escort latch (local_20): a live mission whose special ships
+  // protect the player (ShipBehav 1). It suppresses the escort-release
+  // button/action for mission escorts.
+  const bool mission_escort = mission != nullptr && mission->ship_behavior == 1;
 
   // ---- Initial prompt (the branch ladder before LAB_0047ec2e) --------------
   // Default: the hail-open message. Fire-restricted or special-mask ships keep
-  // it; keep-pressing ships get the hostile "What is it you want?"; ships with
-  // an AI target get the hail-open / hostile pick by government-aid
-  // eligibility; behavior 5 -> sir-hail, behavior 6 -> friendly hail.
+  // it; mission-fleet ships take the ShipGoal/ShipBehav branch; keep-pressing
+  // ships get the hostile "What is it you want?"; ships with an AI target get
+  // the hail-open / hostile pick by government-aid eligibility; behavior 5 ->
+  // sir-hail, behavior 6 -> friendly hail.
   std::string status;
   if (auto s = LoadCommPrompt(random_index, kMsgHailOpen)) {
     status = *s;
@@ -1417,7 +1435,31 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   }
   const bool fire_restricted = NovaAiShip_IsDisabled(state, target);
   if (!fire_restricted && !special_mask) {
-    if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
+    if (target.mission_fleet_slot != -1) {
+      // Mission-fleet branch: the mission's ShipGoal/ShipBehav pick the prompt
+      // independent of the squad-leader/AI-behavior ladder. ShipGoal 3
+      // (escort) appends the player ship name; ShipBehav 1 then overrides
+      // with the friendly hail.
+      if (mission != nullptr) {
+        if (mission->ship_goal == 0) {
+          status =
+              LoadCommPrompt(random_index, kMsgWhatDoYouWant).value_or(status);
+        } else if (mission->ship_goal == 3) {
+          status =
+              LoadCommPrompt(random_index, kMsgGladToSeeYou).value_or(status);
+          status += state.player.ship_name;
+          status += ".";
+        }
+        if (mission->ship_behavior == 0) {
+          status =
+              LoadCommPrompt(random_index, kMsgWhatDoYouWant).value_or(status);
+        }
+        if (mission->ship_behavior == 1) {
+          status =
+              LoadCommPrompt(random_index, kMsgWhatCanIDo).value_or(status);
+        }
+      }
+    } else if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
       status = LoadCommPrompt(random_index, kMsgWhatDoYouWant).value_or(status);
     } else if (target.squad_leader_ship_slot != 0) {
       status = NovaShip_DoesShipLikePlayer(state, target)

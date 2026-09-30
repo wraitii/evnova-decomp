@@ -581,7 +581,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0047E1E0	NovaUi_DrawBarGamblingWindow		0%	Draw callback of the bar gambling window 0x0047dc50. Not yet ported.
 0x0047E2D0	NovaHud_ShowOverlayMessage	src/game/hud_overlay.cpp	80%	ui
 0x0047E430	NovaHud_ShowCachedOverlayMessage	src/game/hud_overlay.cpp	85%	ui
-0x0047E470	NovaUi_RunTargetShipCommWindow	src/game/ship_comm_dialog.cpp	78%	ui
+0x0047E470	NovaUi_RunTargetShipCommWindow	src/game/ship_comm_dialog.cpp	82%	ui
 0x0047F9C0	NovaUi_RunTravelDestinationBribeWindow		0%	
 0x0047FA40	NovaUi_PollTargetShipCommWindow		0%	
 0x0047FB70	NovaUi_DrawTargetShipCommWindow	src/game/ship_comm_dialog.cpp	80%	ui
