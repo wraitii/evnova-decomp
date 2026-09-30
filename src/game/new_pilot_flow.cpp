@@ -328,12 +328,11 @@ void Stub_LoadScenarioResourceTables(GameState &state, bool ship_animations) {
 void ResetNewGameStateBits(GameState &state) {
   // Game_ResetNewGameState zeroes the whole g_nova_control_bits array
   // (0x004b477e loop): a second new game must not inherit the previous
-  // pilot's story/mission control bits. Gender and the license `registered`
-  // flag are separate globals and stay untouched, so preserve them here.
-  // Re-seed the clean-room ferry baseline (b311).
+  // pilot's story/mission control bits, and the original seeds no story bit.
+  // Gender and the license `registered` flag are separate globals and stay
+  // untouched, so preserve them here.
   state.control.bits.reset();
   state.control.persisted_bit_bytes.fill(0);
-  state.control.SetControlBit(311, true);
   state.control.map_grant_latch = false;
   state.control.record_grant_latch = false;
   state.intro_played = false;
@@ -1108,11 +1107,10 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
     record.weapon_ammo[bank] = state.player.weapon_banks[bank].ammo;
   }
   record.outfit_owned_count = state.inventory.outfit_owned_count;
-  // Carry the reset control-bit table (Game_ResetNewGameState zeroes it, then
-  // the clean-room ferry baseline b311 is re-seeded). Without this the fresh
-  // record's all-zero block would clear the bits on PilotFileApply before the
-  // character template's OnStart script runs. Mirrors PilotFileCollectFromState
-  // (0x004c7dd0 saver).
+  // Carry the reset control-bit table (Game_ResetNewGameState zeroes it).
+  // Without this the fresh record's all-zero block would clear the bits on
+  // PilotFileApply before the character template's OnStart script runs.
+  // Mirrors PilotFileCollectFromState (0x004c7dd0 saver).
   for (std::size_t i = 0; i < record.control_bits.size(); ++i) {
     const std::uint8_t persisted = state.control.persisted_bit_bytes[i];
     record.control_bits[i] = (persisted != 0) == state.control.bits.test(i)

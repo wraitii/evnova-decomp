@@ -160,9 +160,11 @@ TEST_CASE("scenario ferry missions expose their decoded availability fields") {
   // Tichel's BBS advertises the concrete source stellar carried by the
   // mission definition rather than the containing system. The first Ferry
   // (Mu'Randa) is an AvailLoc-3 (spaceport-dialog) definition gated by
-  // AvailRating 600, so simulate the plot-stage player and expect it on the
-  // services lane (page_one) once the source stellar is selected.
+  // AvailRating 600 and the Polaris40 completion bit b311, so simulate the
+  // plot-stage player and expect it on the services lane (page_one) once the
+  // source stellar is selected.
   state.player_combat_rating_points = 1000;
+  state.control.SetControlBit(311, true);
   state.travel.selected_stellar_id = first_link;
   const auto at_tichel = Mission_EvaluateMissionLists(state);
   CHECK(std::any_of(at_tichel.page_one.begin(),

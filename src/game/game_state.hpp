@@ -755,13 +755,6 @@ struct PilotControlState {
   bool map_grant_latch = false;    // DAT_007d4c08
   bool record_grant_latch = false; // DAT_007d4c09
 
-  // Fresh pilots begin with the ordinary passenger-ferry service enabled.
-  // Shipped ferry missions use (P0 & b311) & !b312; b312 is a later
-  // progression/lockout bit. This is provisional until the full pilot-control
-  // block is restored from save data, but keeps the baseline mission board
-  // usable in the clean-room runtime.
-  PilotControlState() { SetControlBit(311, true); }
-
   [[nodiscard]] bool ControlBit(std::uint32_t bit) const {
     return bit < kControlBitCount && bits.test(bit);
   }
