@@ -67,9 +67,26 @@ constexpr std::size_t kRedAlertGameplaySoundIndex = 370 - 200;
 
 namespace {
 
-// Frame_TickSystems preserves the original scope order. Unimplemented scopes
-// intentionally do nothing; logging them per frame would overwhelm diagnostics.
-void Stub_PlayerCore(GameState &state) { (void)state; }
+// scope 10 "player" (ProfileScope 0xa). The original runs
+// Frame_ResetNavigationOverrideLatch, clears g_gravity_pull_active, then
+// Ship_HandlePlayerShipCore + Ship_UpdateVisualState on the player. The port
+// runs the core in the spaceflight loop ahead of this tick, so this helper
+// owns only the player's Ship_UpdateVisualState slice. TODO(decomp): the two
+// scope-10 prologue writes are not yet relocated here.
+void TickSystems10_Player(GameState &state, float elapsed_ticks) {
+  // Ship_UpdateVisualState (0x00428340) runs on the player immediately after
+  // the core. For the player this seeds the death presentation (x3,
+  // g_player_death_timer_scale 0x00575378), drives the Explode1 debris cascade,
+  // and runs the Explode2 finale/boom that deactivates the hull.
+  NovaShip_TickDestroyedShipVisualState(state, state.player, elapsed_ticks);
+  // The player's Ship_UpdateVisualState weapon-flash fade and running-lights
+  // blink.
+  if (state.player.is_active) {
+    NovaShip_TickWeaponSpriteAndRunningLights(
+        state, state.player, elapsed_ticks);
+    NovaShip_TickSpriteAnimation(state, state.player, elapsed_ticks);
+  }
+}
 
 // Ghidra scope 9 of Frame_TickSystems (0x004186b0). The original splits
 // weapon contact into the sprite-overlap callbacks Ship_HandleSpritePair-
@@ -78,7 +95,7 @@ void Stub_PlayerCore(GameState &state) { (void)state; }
 // Shot_ResolveCollisions (0x00437e20) in this scope. The stellar contact
 // branch and the beam-vs-asteroid arm of Shot_UpdateBeamHitQueue remain
 // deferred.
-void Stub_Collisions(GameState &state) {
+void TickSystems9_Collisions(GameState &state) {
   NovaWeapon_ResolveDirectShotCollisions(state);
   NovaWeapon_ResolveProjectileCollisions(state);
   // The original's sprite layer also pairs ships against the freeflight-object
@@ -90,29 +107,29 @@ void Stub_Collisions(GameState &state) {
 // reconstructed member is the radar proximity-scan roll
 // (Frame_RollProximityScanDetection 0x0045d030, g_proximity_scan_detected),
 // which drives the radar panel's interference static.
-void Stub_DrawStatus(GameState &state) {
+void TickSystems12_DrawStatus(GameState &state) {
   Frame_RollProximityScanDetection(state);
 }
 
-// Ghidra scope 6 parts 1 & 2 of Frame_TickSystems (0x004186b0). Part 1 ran the
-// per-frame targeting setup (Ship_EscortFireAtUnprovokedTarget etc.);
-// part 2 is the per-ship AI decision stage -- the top-level Ship_UpdateShipAI
-// (0x00401000) listed in the plan. The clean-room equivalent is
-// NovaAi_UpdateShipAI (src/game/ship_ai.cpp), which dispatches the behavior
-// supervisors + the Ship_UpdateShipAiState state machine + the
-// Ship_ApplyShipAiControls bridge for every active, non-player ship in the
-// current system. The original's earlier scope-6 pass only refreshes target
-// bookkeeping; it must not run this full state/control update a second time.
-void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
+// scope 6 "AI routines", first entry (disassembly 0x004188b2). The leader-flag
+// pass runs after scope 0xc and before scope 0xb: it snapshots every ship's
+// squad_leader_ship_slot, clears the +0xC0/+0xC1/+0xC2 flags, reacquires dead
+// leaders, and marks the target/formation/resolved-target owners.
+void TickSystems6_LeaderFlags(GameState &state) { Ship_TickLeaderFlags(state); }
+
+// scope 6 "AI routines", second entry (disassembly 0x00418e0d). The per-ship
+// AI decision stage -- the top-level Ship_UpdateShipAI (0x00401000). The
+// clean-room equivalent is NovaAi_UpdateShipAI (src/game/ship_ai.cpp), which
+// dispatches the behavior supervisors + the Ship_UpdateShipAiState state
+// machine + the Ship_ApplyShipAiControls bridge for every active, non-player
+// ship in the current system. Runs after scope 0xb so the spawn/threat passes
+// have completed; the state/control update must not run twice.
+void TickSystems6_AiRoutines(GameState &state, float elapsed_ticks) {
   const std::int16_t current_system = state.player.current_system_id;
   // now_ms backs the AI mode/formation timers and must be monotonic across
   // frames; the original reads its global millisecond tick source here.
   const std::uint32_t now_ms =
       static_cast<std::uint32_t>(state.gameplay_now_ms);
-  // Frame_TickSystems (0x004186b0) scope-6 leader-flag pass: snapshot AI
-  // targets, reacquire dead leaders, and refresh the +0xC0/+0xC1/+0xC2
-  // leader bytes that gate the per-frame escort formation updates.
-  Ship_TickLeaderFlags(state);
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
     if (!ship.is_active || ship.current_system_id != current_system) {
@@ -128,8 +145,8 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
       // Do NOT clear vel_x/vel_y here. Ship_HandleShip (0x00433050) integrates
       // a wreck's position from its residual velocity and only applies the
       // 0.995 fire-restricted damp, so destroyed hulls coast out instead of
-      // stopping dead. The ship pass (Stub_HandleShips) runs after this pass
-      // and performs that integration.
+      // stopping dead. The ship pass (TickSystems45_HandleShip) runs after this
+      // pass and performs that integration.
       continue;
     }
     // Frame_TickSystems calls Ship_UpdateShipAI for every active NPC in the
@@ -144,25 +161,21 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
   }
 }
 
-// Ghidra scope 0xb of Frame_TickSystems (0x004186b0): the per-tick in-system
-// NPC/reactivity pass. The original runs: Mission_TickShipInteractionReactions,
-// NovaFrame_UpdateCombatChatter, Frame_TickHudOverlayAndRouteMapTimers,
-// Ship_TallyInboundWeaponThreat, then System_TickNpcSpawnMaintenance
-// (encounter fleets + random dude ships up to the system's avg_ships cap) and
-// Asteroid_Spawn('\x01') (the asteroid ring), before clearing the
-// g_ai_misc_event_flag / g_ai_target_refresh_needed latches.
+// scope 0xb "misc handlers2" (disassembly 0x00418dc2): the per-tick in-system
+// NPC/reactivity pass. The original runs Mission_TickShipInteractionReactions,
+// Frame_UpdateCombatChatter, Frame_TickHudOverlayAndRouteMapTimers,
+// Ship_TallyInboundWeaponThreat, System_TickNpcSpawnMaintenance (encounter
+// fleets + random dude ships up to the system's avg_ships cap) and
+// Asteroid_Spawn('\x01') (the asteroid ring), then clears
+// g_ai_misc_event_flag / g_ai_target_refresh_needed.
 //
-// This pass performs the mission interaction-reaction slice (0x00443760) and
-// the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance, which spawns
-// encounter-fleet leads / random dude ships toward avg_ships).
-// The overlay helper's HUD expiry and route-map deadline are represented by
-// their wall-clock state elsewhere in the port. The asteroid ring spawn and
-// g_ai_target_refresh_needed latch are still absent; g_ai_misc_event_flag is
-// cleared here (the original also clears g_ai_target_refresh_needed).
-void Stub_TickReactionsAndNpcSpawns(GameState &state,
-                                    SdlAudio &audio,
-                                    float elapsed_ticks,
-                                    const MissionDebriefSink &debrief) {
+// The port performs the mission interaction-reaction slice (0x00443760) and
+// the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance). The asteroid
+// ring spawn and g_ai_target_refresh_needed latch are still absent.
+void TickSystems11_MiscHandlers2(GameState &state,
+                                 SdlAudio &audio,
+                                 float elapsed_ticks,
+                                 const MissionDebriefSink &debrief) {
   // Frame_MeasureFrameTiming (0x00432ea0) admits one original spaceflight
   // iteration per 21 ms. Scope 0xb contains discrete counters and RNG draws,
   // so replay whole calls instead of tying them to the presentation rate.
@@ -175,19 +188,22 @@ void Stub_TickReactionsAndNpcSpawns(GameState &state,
         static_cast<std::uint32_t>(state.gameplay_now_ms);
     Mission_TickShipInteractionReactions(state, now_ms, debrief);
     NovaFrame_UpdateCombatChatter(state, audio);
+    // Frame_TickHudOverlayAndRouteMapTimers (0x0042f1b0) runs per raw call;
+    // the route-map deadline half lives in route_map.cpp.
+    NovaHud_TickOverlay(state);
     NovaWeapon_TallyInboundWeaponThreat(state);
-    // This countdown is normalized by g_avg_frame_tick_scale in the original;
-    // one replayed 21 ms call therefore contributes 0.63 normalized ticks.
-    NovaSystem_UpdateReinforcementCountdown(state, kOriginalMaxRateFrameTicks);
     NovaSystem_TickNpcSpawnMaintenance(
         state, state.player.current_system_id, now_ms);
-    // Frame_TickSystems scope 0xb clears the AI event latches after the spawn
-    // maintenance (0x00418df7).
+    // Scope 0xb clears the AI event latches after the spawn maintenance
+    // (0x00418df7).
     state.ai_misc_event_flag = false;
   }
 }
 
-void Stub_CalcAiOdds(GameState &state) {
+// scope 0x14 "calc AI odds" (disassembly 0x00418e6c). DIVERGENCE(original):
+// the original recomputes one stale active ship per tick (marks the next slot
+// -1 and breaks); the port recomputes every active in-system ship each tick.
+void TickSystems20_CalcAiOdds(GameState &state) {
   const std::int16_t current_system = state.player.current_system_id;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
@@ -197,12 +213,12 @@ void Stub_CalcAiOdds(GameState &state) {
   }
 }
 
-// Ghidra scope 7 of Frame_TickSystems -> Shot_HandleShot (0x00435830). Shot
-// movement/lifetime/cooldown bookkeeping runs here, after scope 9
-// collision checks, matching the original phase order.
-void Stub_HandleShots(GameState &state,
-                      float elapsed_ticks,
-                      const NovaPreferences &prefs) {
+// scope 7 "HandleShot" -> Shot_HandleShot (0x00435830). Shot
+// movement/lifetime/cooldown bookkeeping runs here, after the full-tick scopes
+// and before the ship pass, matching the original phase order.
+void TickSystems7_HandleShot(GameState &state,
+                             float elapsed_ticks,
+                             const NovaPreferences &prefs) {
   NovaWeapon_TickShots(state, elapsed_ticks, &prefs);
 }
 
@@ -306,7 +322,7 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
 // DIVERGENCE(original): g_playerShipPresentationDirty is replaced by the
 // immediate-mode HUD redraw, and the 21 ms raw-call cadence is replayed via
 // the shared elapsed/0.63 tick scale.
-void Stub_HandleShips(GameState &state, float elapsed_ticks) {
+void TickSystems45_HandleShip(GameState &state, float elapsed_ticks) {
   const std::int16_t current_system = state.player.current_system_id;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
@@ -513,33 +529,47 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
   }
 }
 
-void Stub_MiscHandlers(GameState &state, bool run_full_tick) {
-  // Ghidra Frame_TickSystems scope 8 itself runs on reduced ticks too; its
-  // individual members decide whether frozen gameplay advances. This port has
-  // no separate frozen-state latch, and its only reduced-tick caller is the
-  // frozen transition path, so run_full_tick is presently the scheduling
-  // surrogate. The reimplemented member here is
-  // Stellar_HandleShipStellarCrash (0x0043aed0), immediately after the
-  // gravity pull in the original ordering. Stellar animation itself lives in
-  // the SDL view (AdvanceStellarAnimation).
+// scope 8 "misc handlers" (disassembly 0x00419047). The original runs 15
+// passes; the port currently owns the reinforcement countdown, the
+// defense-battery pass, and the fatal-crash pass here, and advances the
+// remaining animation/simulation members in SpaceflightView (see
+// AdvanceAnimations, a partial stand-in still to be decomposed).
+// TODO(decomp): relocate Stellar_UpdateStellarSprites, the reticles,
+// Frame_AnchorX2IndicatorSprite, Stellar_TickStellarGravityPull (NPC side) and
+// Stellar_TickTravelCountdownSprite into this scope.
+void TickSystems8_MiscHandlers(GameState &state,
+                               float elapsed_ticks,
+                               bool run_full_tick) {
+  // Scope 8 itself runs on reduced ticks too; its individual members decide
+  // whether frozen gameplay advances. This port has no separate frozen-state
+  // latch, so run_full_tick is presently the scheduling surrogate.
+  // System_UpdateRandomEncounterCountdown (0x0043a020) is normalized by
+  // g_avg_frame_tick_scale, so the normalized tick is fed directly rather than
+  // replayed through the scope-0xb raw-call accumulator.
+  NovaSystem_UpdateReinforcementCountdown(state, elapsed_ticks);
   if (run_full_tick) {
-    // Scope 8 order around the stellar passes: Stellar_UpdateStellarSprites
-    // (renderer), Stellar_TickStellarDefenseBatteries (0x0042d890), then the
-    // gravity pull / fatal crash passes. The ambient sprite update is owned by
-    // the SDL view.
+    // In the original order Stellar_TickStellarDefenseBatteries (0x0042d890)
+    // precedes the gravity pull / fatal-crash passes.
     NovaStellar_TickStellarDefenseBatteries(state);
     NovaStellar_HandleShipStellarCrash(state);
   }
 }
 
-void Stub_BeamHitQueue(GameState &state, float elapsed_ticks) {
+void TickSystems_BeamHitQueue(GameState &state, float elapsed_ticks) {
   NovaWeapon_TickBeamHitQueue(state, elapsed_ticks);
 }
 
-// @port 0x004186b0 20% gameplay,cadence
-// Ghidra 0x004186b0 Frame_TickSystems. Reconstructs only the *structure*:
-// the scope ordering and the run_full_tick gate. Each scope is a loud stub
-// (see above). Called full before drawing and reduced during transitions.
+// @port 0x004186b0 40% gameplay,cadence
+// Ghidra 0x004186b0 Frame_TickSystems. Clean-room skeleton of the simulation
+// orchestrator. The scope ids are the ProfileScope slots declared in
+// Frame_SpaceflightLoop (0x00417600); the call order matches the decompile
+// (profile scopes are not execution order beyond the source layout):
+//   10 player -> 9 collisions
+//   [run_full_tick] 0xc DrawStatus -> 6 LeaderFlags -> 0xb MiscHandlers2
+//                   -> 6 AiRoutines -> 0x14 CalcAiOdds
+//   7 HandleShot -> 4/5 HandleShip -> 8 MiscHandlers -> BeamHitQueue tail
+// Scope 6 is entered twice. The stellar +0x47 target pass between scope 7 and
+// scope 4/5 is not ported.
 void NovaFrame_TickSystems(GameState &state,
                            SdlAudio &audio,
                            bool run_full_tick,
@@ -556,42 +586,27 @@ void NovaFrame_TickSystems(GameState &state,
   // spaceflight frame loop): the latch suppresses the duplicate destruction
   // overlay within one frame only.
   state.player_disable_message_shown = false;
-  // scope 10 "player": always runs.
-  Stub_PlayerCore(state);
-  // Ship_UpdateVisualState (0x00428340) runs on the player immediately after
-  // the core in Frame_TickSystems scope 10. For the player this seeds the
-  // death presentation (x3, g_player_death_timer_scale 0x00575378), drives the
-  // Explode1 debris cascade, and runs the Explode2 finale/boom that deactivates
-  // the hull. The live player core runs in the spaceflight loop ahead of this
-  // call, so the scope-10 ordering is preserved.
-  NovaShip_TickDestroyedShipVisualState(state, state.player, elapsed_ticks);
-  // The player's Ship_UpdateVisualState weapon-flash fade and running-lights
-  // blink (scope 10).
-  if (state.player.is_active) {
-    NovaShip_TickWeaponSpriteAndRunningLights(
-        state, state.player, elapsed_ticks);
-    NovaShip_TickSpriteAnimation(state, state.player, elapsed_ticks);
-  }
+  // scope 10 "player": always runs. The player core runs in the spaceflight
+  // loop ahead of this call, so this scope owns the player's visual pass.
+  TickSystems10_Player(state, elapsed_ticks);
   // scope 9 "collisions": always runs.
-  Stub_Collisions(state);
+  TickSystems9_Collisions(state);
 
   if (run_full_tick) {
-    Stub_DrawStatus(
-        state); // Full-tick proximity-scan roll (original scope 0xc).
-    Stub_TickReactionsAndNpcSpawns(
-        state, audio, elapsed_ticks, debrief); // scope 0xb
-    // The first original scope-6 pass only refreshes target
-    // flags/reacquisition; the full clean-room AI update belongs here, once,
-    // after spawning.
-    Stub_AiRoutines(state, elapsed_ticks);
-    Stub_CalcAiOdds(state); // scope 0x14
+    TickSystems12_DrawStatus(state); // proximity-scan roll
+    // Scope 6 is entered twice: the leader-flag pass runs before scope 0xb,
+    // the per-ship AI update after it.
+    TickSystems6_LeaderFlags(state);
+    TickSystems11_MiscHandlers2(state, audio, elapsed_ticks, debrief);
+    TickSystems6_AiRoutines(state, elapsed_ticks);
+    TickSystems20_CalcAiOdds(state);
   }
 
   // Always-run scopes that keep advancing during frozen transitions.
-  Stub_HandleShots(state, elapsed_ticks, prefs); // scope 7
-  Stub_HandleShips(state, elapsed_ticks);        // scope 4/5
-  Stub_MiscHandlers(state, run_full_tick);       // scope 8
-  Stub_BeamHitQueue(state, elapsed_ticks);
+  TickSystems7_HandleShot(state, elapsed_ticks, prefs);
+  TickSystems45_HandleShip(state, elapsed_ticks);
+  TickSystems8_MiscHandlers(state, elapsed_ticks, run_full_tick);
+  TickSystems_BeamHitQueue(state, elapsed_ticks);
 }
 
 // @port 0x0044AA70 47% gameplay,ui,rendering
@@ -1648,9 +1663,10 @@ void PlayerTick_InteractionCloakAndStatus(GameState &state,
 // @port 0x00417600 15% gameplay,cadence,rendering
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
 // phase skeleton (setup + full first tick, then per-frame pre-draw/sim,
-// drawing, post-draw) and the run_full_tick freeze gate. Simulation is still
-// yielded to NovaFrame_TickSystems's stubs, but the rendering is live: stellar
-// bodies, the parallax starfield and the player's rotating ship are drawn.
+// drawing, post-draw) and the run_full_tick freeze gate. Simulation runs
+// through NovaFrame_TickSystems's scope helpers; the rendering is live:
+// stellar bodies, the parallax starfield and the player's rotating ship are
+// drawn.
 // Integrates the player's heading/throttle from the live keyboard into the
 // PlayerShip. This is a lightweight stand-in for Ship_HandlePlayerShipCore's
 // movement. Player steering, thrust, afterburner fuel burn, stellar gravity,
@@ -2924,19 +2940,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       if (!player_tick_consumed) {
         PlayerTick_IonizationAndFuelRegeneration(state, frame_time_ms);
       }
-      // Expire any transient HUD overlay message once its wall-clock deadline
-      // passes (the draw path is const over state).
-      NovaHud_TickOverlay(state);
-      const float delta_x = state.player.pos_x - prev_x;
-      const float delta_y = state.player.pos_y - prev_y;
-      prev_x = state.player.pos_x;
-      prev_y = state.player.pos_y;
-      // Unified per-frame world animation pass: advances the ambient starfield
-      // by the ship's movement delta (NovaEffects_UpdateAmbientStarParticles)
-      // and steps each animated stellar one animation segment
-      // (Stellar_UpdateStellar- Sprites), both on the single frame_time_ms
-      // cadence (see the header).
-      view.AdvanceAnimations(platform, state, frame_time_ms, delta_x, delta_y);
       // Re-derive visibility + stellar availability each tick
       // (NovaResources_EvaluateAvailability 0x00448090 runs per frame in the
       // original's flight loop, refreshing is_visible from the Visibility NCBs
@@ -2946,8 +2949,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // in flight.
       NovaResources_EvaluateAvailability(state);
 
-      // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
-      // cursor update.
+      // Ghidra scope 1 "pre-draw tasks": full TickSystems.
       NovaFrame_TickSystems(
           state,
           audio,
@@ -2964,6 +2966,24 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                 message.dialog_variant,
                 /*mission_dialog=*/true);
           });
+
+      // Ghidra scope 8 "misc handlers" / scope 0xd. MINIMAL MOVE: the original
+      // runs the scope-8 simulation members after scopes 4/5, so the unified
+      // world animation pass is relocated after TickSystems rather than
+      // decomposed yet. TODO(decomp): split the scope-8 simulation members
+      // (impact/fading/sw/freeflight/asteroid) into TickSystems8_MiscHandlers
+      // and leave the render-cadence members (stellar/ambient animation) in the
+      // drawing scope.
+      const float delta_x = state.player.pos_x - prev_x;
+      const float delta_y = state.player.pos_y - prev_y;
+      prev_x = state.player.pos_x;
+      prev_y = state.player.pos_y;
+      // Unified per-frame world animation pass: advances the ambient starfield
+      // by the ship's movement delta (NovaEffects_UpdateAmbientStarParticles)
+      // and steps each animated stellar one animation segment
+      // (Stellar_UpdateStellarSprites), both on the single frame_time_ms
+      // cadence (see the header).
+      view.AdvanceAnimations(platform, state, frame_time_ms, delta_x, delta_y);
     }
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
@@ -3016,19 +3036,20 @@ void PlayerTick_FlightTutorialHints(GameState &state,
 }
 
 // External test seam into the per-ship simulation pass (Ghidra scope 4/5 of
-// Frame_TickSystems 0x004186b0 -> Ship_HandleShip 0x00433050). Stub_HandleShips
-// lives in the anonymous namespace above; this wrapper exposes it to unit tests
-// without external linkage polluting the otherwise-internal stub set.
+// Frame_TickSystems 0x004186b0 -> Ship_HandleShip 0x00433050).
+// TickSystems45_HandleShip lives in the anonymous namespace above; this wrapper
+// gives unit tests a stable external entry point.
 void NovaShip_TickNpcShips(GameState &state, float elapsed_ticks) {
-  Stub_HandleShips(state, elapsed_ticks);
+  TickSystems45_HandleShip(state, elapsed_ticks);
 }
 
 // External test seam into the per-ship AI decision pass (Ghidra scope 6 of
 // Frame_TickSystems 0x004186b0 -> Ship_UpdateShipAI 0x00401000). Mirrors
 // NovaShip_TickNpcShips so tests can model the live AI-then-movement order
-// (Stub_AiRoutines runs before Stub_HandleShips in NovaFrame_TickSystems).
+// (TickSystems6_AiRoutines runs before TickSystems45_HandleShip in
+// NovaFrame_TickSystems).
 void NovaShip_TickNpcAi(GameState &state, float elapsed_ticks) {
-  Stub_AiRoutines(state, elapsed_ticks);
+  TickSystems6_AiRoutines(state, elapsed_ticks);
 }
 
 // ---------------------------------------------------------------------------

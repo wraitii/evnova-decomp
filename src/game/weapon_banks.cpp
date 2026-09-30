@@ -865,9 +865,10 @@ void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
 }
 
 // Ship_HandleShip 0x00433050 per-bank cooldown tail (primary site
-// Stub_HandleShips, src/game/spaceflight.cpp). Mirrors the original loop: only
-// banks with ammo > 0 decay, an ionized ship pins flags_quaternary 0x20 banks
-// at a 1-tick cooldown, and a targetless ship reloads every mode-99 launch bay.
+// TickSystems45_HandleShip, src/game/spaceflight.cpp). Mirrors the original
+// loop: only banks with ammo > 0 decay, an ionized ship pins flags_quaternary
+// 0x20 banks at a 1-tick cooldown, and a targetless ship reloads every mode-99
+// launch bay.
 void NovaWeapon_TickNpcWeaponBanks(GameState &state,
                                    Ship &ship,
                                    float elapsed_ticks) {

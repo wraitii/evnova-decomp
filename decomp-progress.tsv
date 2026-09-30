@@ -106,7 +106,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004160F0	Util_ReturnZero		0%	
 0x00416100	NovaGameSession_Run	src/nova_app.cpp	45%	gameplay,divergence
 0x00417600	Frame_SpaceflightLoop	src/game/spaceflight.cpp	15%	gameplay,cadence,rendering
-0x004186B0	Frame_TickSystems	src/game/spaceflight.cpp	20%	gameplay,cadence
+0x004186B0	Frame_TickSystems	src/game/spaceflight.cpp	40%	gameplay,cadence
 0x00419210	Frame_RefreshTransitionFrameAuxVisuals		0%	
 0x004192D0	Ship_ApplyDamageToShip	src/game/collision.cpp	100%	license
 0x0041AD50	Ship_DeactivateVacantShipsAndTally	src/game/ship_spawn.cpp	100%	

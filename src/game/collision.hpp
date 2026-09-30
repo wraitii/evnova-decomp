@@ -140,7 +140,7 @@ void NovaStellar_HandleShipStellarCrash(GameState &state);
 // within the weapon's range, then spawns one battery shot and reloads (or
 // applies the burst wrap). The original has its own gameplay-frozen guard;
 // this port currently dispatches scope 8 only on full ticks because it has no
-// separate freeze latch (see Stub_MiscHandlers).
+// separate freeze latch (see TickSystems8_MiscHandlers).
 void NovaStellar_TickStellarDefenseBatteries(GameState &state);
 
 // Ghidra Shot_QueueBeamHit / Shot_UpdateBeamHitQueue (0x00427a90/0x0042f270)

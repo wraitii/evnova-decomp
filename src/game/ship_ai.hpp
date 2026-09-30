@@ -10,7 +10,7 @@
 // escalate between states, and Ship_ApplyShipAiControls (0x00408150) finally
 // translates Ship.ai_control_mode into those concrete movement fields. Called
 // once per active NPC ship per frame from the spaceflight loop's
-// Stub_AiRoutines (Ghidra scope 6 part 2).
+// TickSystems6_AiRoutines (Ghidra scope 6, second entry).
 //
 // Convention mirrors ship_spawn.cpp: each Ghidra function maps to one top-level
 // helper with the address in a comment; NPC ships carry no outfit inventory, so

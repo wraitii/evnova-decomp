@@ -313,7 +313,7 @@ extern void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
 
 // External test seam into the per-ship simulation pass (Ghidra scope 4/5 of
 // Frame_TickSystems 0x004186b0 -> Ship_HandleShip 0x00433050 validation
-// prologue). The per-frame stub Stub_HandleShips lives in an anonymous
+// prologue). The per-frame TickSystems45_HandleShip lives in an anonymous
 // namespace in spaceflight.cpp; this wrapper gives unit tests a stable external
 // entry point. Runs the deactivation/range-reset prologue then integrates each
 // active, non-player ship of the current system through
