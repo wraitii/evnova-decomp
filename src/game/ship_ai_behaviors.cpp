@@ -1239,14 +1239,14 @@ void NovaAi_DefenseFleetPrioritizePlayerThreat(GameState &state, Ship &ship) {
   }
 }
 
-// @port 0x00402bd0 75% gameplay,audio
+// @port 0x00402bd0 100%
 // Ghidra 0x00402bd0 Ship_UpdateShipAiBehavior0x02_BraveTrader. Local/dude
 // behavior shares the travel fallback with behavior 0x01, but promotes an
 // established hostile contact once it is within the original 0x4e3-pixel
 // per-axis gate. The player-target arm enters state 10 (assist/response); other
-// contacts enter state 3. Government chatter and assistance encounter side
-// effects remain
-// TODO(decomp).
+// contacts enter state 3. The state-0 travel ladder runs unconditionally; the
+// original tests only ai_state_code (0x00402be8 TEST EBP,EBP), not an absent
+// primary target, so a state-0 ship holding a target still re-runs the ladder.
 void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     return;
@@ -1256,7 +1256,7 @@ void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship) {
     return;
   }
 
-  if (ship.ai_state_code == 0 && ship.primary_target_ship_slot == -1) {
+  if (ship.ai_state_code == 0) {
     NovaAi_ReacquireTravelOrSettle(state, ship);
   }
 

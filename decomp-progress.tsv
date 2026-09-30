@@ -4,7 +4,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00402810	Ship_ResetShipAiBehaviorRuntimeFields	src/game/ship_ai.cpp	100%	
 0x00402860	Ship_UpdateShipAiBehavior0x01_WimpyTrader	src/game/ship_ai_behaviors.cpp	100%	
 0x00402980	Ship_UpdateShipAiAsteroidMinerBehavior	src/game/ship_ai_behaviors.cpp	92%	gameplay
-0x00402BD0	Ship_UpdateShipAiBehavior0x02_BraveTrader	src/game/ship_ai_behaviors.cpp	75%	gameplay,audio
+0x00402BD0	Ship_UpdateShipAiBehavior0x02_BraveTrader	src/game/ship_ai_behaviors.cpp	100%	
 0x00402E50	Ship_UpdateShipAiBehavior0x03_Warship	src/game/ship_ai_behaviors.cpp	100%	
 0x004038B0	Ship_UpdateShipAiBehavior0x03_WarshipCapture	src/game/ship_ai_behaviors.cpp	100%	
 0x00403DE0	Ship_UpdateShipAiBehavior0x04_Interceptor	src/game/ship_ai_behaviors.cpp	100%	license

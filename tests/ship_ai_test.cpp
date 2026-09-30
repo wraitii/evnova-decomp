@@ -1554,6 +1554,41 @@ TEST_CASE("warship behavior leaves state 6 once no fighters remain") {
   CHECK(ship.ai_state_code == 6);
 }
 
+// Behavior 0x02 (0x00402bd0) state-0 travel ladder: the original gates it only
+// on ai_state_code (disasm 0x00402be8 TEST EBP,EBP), so an idle brave trader
+// that still holds a primary target must still re-run the ladder and leave
+// state 0. Regression guard for a port that wrongly skipped the ladder when a
+// target was present.
+TEST_CASE("brave-trader state-0 travel ladder runs despite a held target") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  ClearAllShips(state);
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = 0;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = -1;
+  ship.pers_def_slot = -1;
+  ship.ai_behavior_code = 2;
+  ship.ai_state_code = 0;
+  ship.primary_target_ship_slot = 0; // a live target is held
+  ship.ai_hostility_accumulator = 0; // keep the promotion arm out of the way
+  ship.jump_destination_stellar_id = -1; // not parked at a nav point
+  ship.armor_points = 1000.0F;
+
+  game::NovaAi_UpdateBehavior0x02(state, ship);
+  // Whether the ladder picks a travel stellar (state 1) or settles through the
+  // jump gate (state 2/6), it must not leave the ship idle in state 0.
+  CHECK(ship.ai_state_code != 0);
+}
+
 // Behavior 0x04 idle scan: with no acquireable weapons the primary-acquire
 // pass bails early, so the interceptor's own same-system random scan selects a
 // contact, caches it in +0x90, and enters state 7.
