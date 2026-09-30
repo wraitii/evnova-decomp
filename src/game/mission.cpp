@@ -648,13 +648,17 @@ SelectMissionStellarByLocator(GameState &state,
       // in-flight context (g_in_flight == 0); with the destination
       // window up the value falls through to the ordinary reputation compare
       // below. Unknown values past -32001 match no domination arm and fail.
+      // -32000 reads ShipState +0x6C (ai_secondary_target_slot) directly as a
+      // 0-based stellar index (0x004423a8), distinct from the
+      // g_travel_selected_stellar_ptr used by gate 0; the helper rebases the
+      // port's 0x80-based field.
       if (!state.in_flight) {
         if (def.avail_record == -32000) {
+          const std::int16_t target_index =
+              Mission_OriginalAiSecondaryTargetSlot(state);
           record_ok =
-              selected_index >= 0 &&
-              selected_index <
-                  static_cast<std::int16_t>(state.scenario.stellars.size()) &&
-              state.scenario.stellars[static_cast<std::size_t>(selected_index)]
+              StellarSlotInTable(state, target_index) &&
+              state.scenario.stellars[static_cast<std::size_t>(target_index)]
                       .dominated != 0;
         } else if (def.avail_record == -32001) {
           for (const Stellar &stellar : state.scenario.stellars) {
@@ -1416,13 +1420,19 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.drop_off_mode = definition->drop_off_mode;
   active.scan_mask = definition->scan_mask;
   active.comp_govt_id = definition->competing_government_id;
+  active.comp_reward_delta = definition->competing_reputation_delta;
   if (active.comp_govt_id < kResourceIdBase || active.comp_govt_id > 0x17f) {
     active.comp_govt_id = -1;
   } else {
     active.comp_govt_id =
         static_cast<std::int16_t>(active.comp_govt_id - kResourceIdBase);
   }
-  active.comp_reward_delta = definition->competing_reputation_delta;
+  // 0x0043f8c0: the reward is zeroed with an out-of-range CompGovt (after
+  // rebasing the only such value is -1), so an ignored CompGovt never carries
+  // a stale CompReward into the save or a consumer that skips the govt gate.
+  if (active.comp_govt_id < 0 || active.comp_govt_id > 0xff) {
+    active.comp_reward_delta = 0;
+  }
   active.on_resolve_repeat_count = definition->on_resolve_repeat_count;
   active.flags_primary = definition->flags_primary;
   active.flags_secondary = definition->flags_secondary;
@@ -2072,8 +2082,10 @@ void ApplyCompetingGovernmentReputation(GameState &state,
   if (govt < 0 || govt >= 0x100) {
     return;
   }
-  const auto count = static_cast<std::int16_t>(
-      std::min<std::size_t>(state.system_reputation.size(), 0x800));
+  const auto count =
+      static_cast<std::int16_t>(std::min({state.system_reputation.size(),
+                                          state.scenario.systems.size(),
+                                          std::size_t{0x800}}));
   for (std::int16_t i = 0; i < count; ++i) {
     const std::int16_t system_govt =
         state.scenario.systems[static_cast<std::size_t>(i)].government_id;
@@ -2178,8 +2190,10 @@ void Mission_ResolveMissionFailure(GameState &state,
     // toward zero) from every system owned by the competing government.
     const std::int16_t half_delta =
         static_cast<std::int16_t>(mission.comp_reward_delta / 2);
-    const auto count = static_cast<std::int16_t>(
-        std::min<std::size_t>(state.system_reputation.size(), 0x800));
+    const auto count =
+        static_cast<std::int16_t>(std::min({state.system_reputation.size(),
+                                            state.scenario.systems.size(),
+                                            std::size_t{0x800}}));
     for (std::int16_t i = 0; i < count; ++i) {
       const std::int16_t system_govt =
           state.scenario.systems[static_cast<std::size_t>(i)].government_id;

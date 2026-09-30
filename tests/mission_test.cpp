@@ -53,7 +53,12 @@ TEST_CASE("AvailRecord domination arms gate mission availability") {
   }
   state.scenario.missions[0].avail_record = -32000;
   state.scenario.missions[1].avail_record = -32001;
-  state.travel.selected_stellar_id = 0x80; // zero-based stellar index 0
+  // The -32000 arm reads ShipState +0x6C (ai_secondary_target_slot) directly,
+  // while gate 0 reads the travel selection; point them at different stellars
+  // so a regression to the travel source fails.
+  state.system_transition_active = true;
+  state.travel.selected_stellar_id = 0x81;      // zero-based index 1 (gate 0)
+  state.player.ai_secondary_target_slot = 0x80; // zero-based index 0 (-32000)
   state.scenario.stellars[0].is_available = true;
   state.scenario.stellars[1].is_available = true;
 
@@ -68,7 +73,7 @@ TEST_CASE("AvailRecord domination arms gate mission availability") {
     CHECK_FALSE(contains(lists.page_zero, 0));
     CHECK_FALSE(contains(lists.page_zero, 1));
   }
-  // The selected stellar is dominated: both arms match.
+  // The ai_secondary_target_slot stellar is dominated: both arms match.
   state.scenario.stellars[0].dominated = 1;
   {
     const auto lists = Mission_EvaluateMissionLists(state);
@@ -206,11 +211,30 @@ TEST_CASE(
   CHECK(active.dude_def_index == 2);
   CHECK(active.aux_ships_dude_def_index == 1);
   CHECK(active.comp_govt_id == 0);
+  CHECK(active.comp_reward_delta == -3);
   CHECK(active.current_system_id == 9);
   CHECK(active.spawn_rearm_timer == -1);
   CHECK(active.goal_count_remaining == 4);
   CHECK(state.active_mission_runtime_flags[0].flags_primary_at_accept ==
         0x8123);
+}
+
+// Ghidra 0x0043f8c0: a CompGovt outside 0x80..0x17f resolves to -1 and zeroes
+// CompReward with it, so an ignored CompGovt never carries a stale reward into
+// the save or a consumer that skips the government gate.
+TEST_CASE("mission activation zeroes CompReward for an ignored CompGovt") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.competing_government_id = 0x7f; // out of range -> ignored
+  definition.competing_reputation_delta = 42;
+  definition.travel_stellar_locator = -1;
+  definition.return_stellar_locator = -1;
+
+  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  CHECK(state.active_missions[0].comp_govt_id == -1);
+  CHECK(state.active_missions[0].comp_reward_delta == 0);
 }
 
 TEST_CASE("acceptance dialogs follow script activation order") {
