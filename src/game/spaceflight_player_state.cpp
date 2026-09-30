@@ -642,8 +642,10 @@ void RespawnResetPlayerShipState(GameState &state) {
 
   // Ghidra 0x004b39f2..0x004b3a05 seeds this travel-dialog selector here.
   state.travel.interaction_action_index_b = RandomBelow(state, 0x800);
+  // Ghidra 0x004b3a0b re-arms the bribe-offer latch on player-ship reset.
+  state.travel.bribe_random_latch = -1;
   // TODO(decomp(0x004b3350)) skipped: DAT_007353f4,
-  // _g_playerSelfDestructCountdown, bribe_random_latch, DAT_00596d32/33 and
+  // _g_playerSelfDestructCountdown, DAT_00596d32/33 and
   // g_travel_countdown - not modelled yet.
   state.last_offer_list_stellar = -1; // g_last_system_for_ambient_rolls
   state.travel.selected_stellar_id = -1;

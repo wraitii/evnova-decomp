@@ -779,7 +779,13 @@ std::int32_t NovaNegotiation_ComputeBribeCost(std::mt19937 &rng,
 // ---------------------------------------------------------------------------
 // SDL modal
 // ---------------------------------------------------------------------------
-// @port 0x00480030 92% ui
+// @port 0x00480030 100% divergence
+// DIVERGENCE(original): the modal redraws every poll instead of through the
+// original's NovaUi_FlagSelectionDialogRefresh / 0x004812c0 dirty callback, the
+// destination/backdrop artwork falls back to a flat placeholder when the spin
+// set or PICT is missing, and the debug-only NCB "dominating stellar" /
+// "releasing stellar" log is skipped. The Demand Tribute / Release and bribe
+// behaviour is faithful.
 // Ghidra 0x00480030 NovaUi_RunTravelDestinationInteractionWindow.
 NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                                                      GameState &state,
@@ -803,14 +809,19 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
 
   // Item 1: per-launch random flavour index (g_travel_interaction_random_index)
   // and the bribe-offer latch (g_travel_interaction_bribe_random_latch), both
-  // from the GameState PRNG so they are reproducible per session. The
-  // original's latch persists across windows; the port re-rolls per run
-  // (TODO(decomp): latch persistence divergence).
+  // from the GameState PRNG so they are reproducible per session. The latch is
+  // rolled once per system visit (only while negative) and stored in
+  // TravelState, so every window in the visit reuses it; a declined haggle
+  // writes 0 and the arrival/player-reset blocks re-arm it to -1.
   const std::int16_t random_index = RandomBelow(state.rng, 5);
   // Ghidra 0x00480088..0x00480098 sets action_index_a to -1 and copies it
   // into action_index_b as the destination interaction opens.
   state.travel.interaction_action_index_b = -1;
-  const int bribe_random_latch = RandomBelow(state.rng, 100);
+  if (state.travel.bribe_random_latch < 0) {
+    state.travel.bribe_random_latch =
+        static_cast<std::int16_t>(RandomBelow(state.rng, 100));
+  }
+  const int bribe_random_latch = state.travel.bribe_random_latch;
 
   // Denied latch (g_travel_interaction_denied_state): the stellar's
   // reputation_threshold gates landing against the CURRENT system's
@@ -840,13 +851,16 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                 static_cast<std::int16_t>(stellar->government_id + 0x80))
           : nullptr;
   if (denied && gov != nullptr) {
-    // Rank landing privilege override (Government_HasRankPrivilege
-    // index 1): a set flag clears the denial. The GovtDef +0x83 byte gate
-    // (field_0x83 != 0 -> not denied) is not modelled (no clean-room field;
-    // TODO(decomp)).
+    // Two landing-clearance overrides (0x004806xx): the rank privilege
+    // Government_HasRankPrivilege index 1 "Always Land", and the per-
+    // government IFF-scrambler latch (GovtDef +0x83; set by
+    // Outfit_RecomputeOutfitDerivedState when the player owns the matching
+    // ModType 0x30 outfit). Either clears the denial.
     if (NovaGovernment_HasRankPrivilege(state.scenario,
                                         stellar->government_id,
                                         RankPrivilege::kAlwaysLand)) {
+      denied = false;
+    } else if (gov->iff_scrambler_active) {
       denied = false;
     }
   }
@@ -1126,9 +1140,11 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
       state.player.ai_maneuver_timer_ms = 0.0F;
       bribe_offered = false;
     } else {
-      // Refused / closed: the haggle -- +1000, latch reset (offer stays
-      // available per the original's bribe_offered = false), status msg 6.
+      // Refused / closed: the haggle bumps the counter-offer by +1000 and
+      // writes the latch to 0, which disables bribe offers for the rest of
+      // this system visit (status msg 6).
       bribe_offered = false;
+      state.travel.bribe_random_latch = 0;
       bribe_cost += kHaggleIncrement;
       frame.status = LoadStatusVariant(random_index, kMsgBribeDeclined)
                          .value_or(frame.status);

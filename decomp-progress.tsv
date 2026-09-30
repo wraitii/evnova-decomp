@@ -136,7 +136,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00422400	ShipClass_SpawnEscortShipFromClass	src/game/ship_spawn.cpp	100%	divergence
 0x004229D0	Player_ProcessEscortFleetAtStellar	src/game/landed_store.cpp	100%	divergence
 0x004232D0	Player_ProcessEscortPayroll	src/game/landed_store.cpp	90%	gameplay,audio,ui
-0x00423540	Player_CollectStellarTribute	src/game/mission_world.cpp	90%	gameplay
+0x00423540	Player_CollectStellarTribute	src/game/mission_world.cpp	100%	
 0x004235C0	Pers_SpawnShipFromPersDef	src/game/ship_spawn.cpp	100%	
 0x00423FA0	Player_ReplaceShipWithCapturedHull	src/game/landed_store.cpp	100%	divergence
 0x00424F90	System_UpdateDisasterStates	src/game/mission_world.cpp	100%	divergence
@@ -585,7 +585,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0047F9C0	NovaUi_RunTravelDestinationBribeWindow		0%	
 0x0047FA40	NovaUi_PollTargetShipCommWindow		0%	
 0x0047FB70	NovaUi_DrawTargetShipCommWindow	src/game/ship_comm_dialog.cpp	80%	ui
-0x00480030	NovaUi_RunTravelDestinationInteractionWindow	src/game/negotiation_dialog.cpp	92%	ui
+0x00480030	NovaUi_RunTravelDestinationInteractionWindow	src/game/negotiation_dialog.cpp	100%	divergence
 0x004812C0	NovaUi_DrawTravelDestinationInteractionWindow	src/game/negotiation_dialog.cpp	90%	ui
 0x004819D0	NovaUi_BuildShipCommHailInfoText	src/game/ship_comm_dialog.cpp	90%	rng
 0x00482280	NovaUi_RunTravelDestinationPaymentWindow	src/game/negotiation_dialog.cpp	80%	ui

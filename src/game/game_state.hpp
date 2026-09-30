@@ -804,6 +804,13 @@ struct TravelState {
   // from action_index_a (-1) when the destination interaction opens. The hail
   // string-pool selector uses this signed value modulo the pool count.
   std::int16_t interaction_action_index_b = 0;
+  // Ghidra g_travel_interaction_bribe_random_latch (0x007d17dc): the bribe
+  // coin flip for the stellar destination-interaction window. Rolled once per
+  // system visit (NovaRandom_Range(100), only while negative) and reused by
+  // every window, so a value <= 0x1e locks bribe offers out for the visit; a
+  // declined haggle writes 0 and the arrival/player-reset blocks re-arm it to
+  // -1. Not persisted in pilot saves.
+  std::int16_t bribe_random_latch = -1;
   // The travel-slot index (0..15) of the travel point the player is engaging,
   // or -1 when no travel is active. Mirrors Ghidra ai_secondary_target_slot
   // used as the adjacency-slot selector. The paired destination system is

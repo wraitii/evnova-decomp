@@ -431,8 +431,10 @@ NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
 void Mission_TickDailyCronEvents(GameState &state);
 
 // Ghidra 0x00423540 Player_CollectStellarTribute. Daily tribute pass over
-// available stellars carrying the +0x46 marker. Called by
-// Mission_TickDailyWorldUpdate.
+// available stellars carrying the +0x46 marker: pays each one's Tribute and
+// bumps its day counter unless the docked body carries the 0x20
+// "always dominated" availability bit. The counter is write-only in the
+// original (pilot stelAnnoyance). Called by Mission_TickDailyWorldUpdate.
 void Player_CollectStellarTribute(GameState &state);
 
 // Ghidra 0x00424f90 System_UpdateDisasterStates. Per-game-day sweep of the

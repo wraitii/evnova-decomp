@@ -375,14 +375,17 @@ void Mission_TickDailyCronEvents(GameState &state) {
   }
 }
 
-// @port 0x00423540 90% gameplay
+// @port 0x00423540 100%
 // Ghidra 0x00423540 Player_CollectStellarTribute. Daily tribute pass: every
 // available stellar carrying the +0x46 marker (its system visible + the 0x20
-// availability bit, set by the display-state refresh) pays its Tribute value
-// (payload +0x0a, default 1000 x TechLevel) and bumps its day counter
-// (StellarDef +0x2a) unless the currently docked stellar carries the same
-// 0x20 marker. TODO(decomp): the domination flow that grants a stellar the
-// +0x46 marker is not modelled, so the pass stays idle in practice.
+// availability bit, set by the display-state refresh or the Demand Tribute
+// action) pays its Tribute value (payload +0x0a, default 1000 x TechLevel)
+// and bumps its day counter (StellarDef +0x2a) unless the currently docked
+// stellar carries the same 0x20 "always dominated" marker. The docked body
+// is the player's ai_secondary_target_slot -- that field is the dock stellar
+// while landed, and the travel selection is cleared on landing. The counter
+// is write-only in the original (persisted as the pilot format's
+// stelAnnoyance; no reader), so it only round-trips through saves.
 void Player_CollectStellarTribute(GameState &state) {
   const std::size_t count =
       std::min(state.scenario.stellars.size(), static_cast<std::size_t>(0x800));
@@ -391,8 +394,8 @@ void Player_CollectStellarTribute(GameState &state) {
     if (!stellar.is_available || !stellar.dominated) {
       continue;
     }
-    const Stellar *docked = state.scenario.Stellar(
-        static_cast<std::int16_t>(state.travel.selected_stellar_id));
+    const Stellar *docked =
+        state.scenario.Stellar(state.player.ai_secondary_target_slot);
     if (docked == nullptr || (docked->availability_flags & 0x20U) == 0U) {
       ++stellar.domination_days;
     }

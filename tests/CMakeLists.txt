@@ -7,6 +7,7 @@ add_executable(evnova_tests
     command_input_test.cpp
     contraband_scan_test.cpp
     docked_dialog_test.cpp
+    domination_test.cpp
     escort_commands_test.cpp
     escort_fleet_test.cpp
     preferences_extra_test.cpp
@@ -21,6 +22,7 @@ add_executable(evnova_tests
     impact_effects_test.cpp
     landed_window_test.cpp
     movement_test.cpp
+    negotiation_test.cpp
     mission_test.cpp
     mission_script_test.cpp
     new_pilot_dialog_test.cpp

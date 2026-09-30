@@ -489,6 +489,27 @@ TEST_CASE("plot to a hyperlink without a paired nav-def stellar still jumps") {
   CHECK(state.player.current_system_id == 1);
 }
 
+// The bribe-offer latch is re-armed on every system arrival (0x0044f81a), so a
+// declined haggle in one system does not poison the next. Regression for the
+// reset added in FireJump's arrival block.
+TEST_CASE("a jump arrival re-arms the bribe-offer latch") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0; // Kania
+  state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F;       // beyond the 1000 px no-jump radius
+  state.travel.bribe_random_latch = 0; // as a declined haggle leaves it
+
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1)); // -> Tichel
+  for (int f = 0; f < 800 && !state.travel.just_completed; ++f) {
+    NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  }
+  CHECK(state.travel.just_completed);
+  CHECK(state.travel.bribe_random_latch == -1);
+}
+
 // The destination-system cycle (the Backslash / command-0x60 channel) must
 // advance through the current system's directly-linked systems, wrapping, and
 // arm the travel slot + destination so 'j' jumps there. On a system with no

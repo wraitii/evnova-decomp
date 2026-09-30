@@ -449,6 +449,9 @@ void FireJump(GameState &state) {
   // (g_travel_engage_timer = 0xffff at 0x0044f803).
   t.selected_stellar_id = -1;
   t.engage_timer = -1;
+  // Arrival re-arms the bribe-offer latch (0x0044f81a), so the next system's
+  // first destination window rolls a fresh bribe coin flip.
+  t.bribe_random_latch = -1;
   // Arrival re-latches the flight-hint state to 0x7fff (PlayerTick_System-
   // TransitionAndArrival 0x0044f83f), keeping the launch departure message
   // armed for the system's landings.
@@ -477,8 +480,8 @@ void FireJump(GameState &state) {
   state.escort.panel_timer = 0;
   // TODO(decomp(0x0044f803)) skipped: the remaining arrival resets target
   // globals the port does not model -- g_last_system_for_ambient_rolls
-  // (0xffff), the interaction bribe latch (-1), DAT_00596d30/31 (0),
-  // g_travel_countdown (0), the HUD dirty flags (immediate-mode rendering makes
+  // (0xffff), DAT_00596d30/31 (0), g_travel_countdown (0), the HUD dirty flags
+  // (immediate-mode rendering makes
   // them moot) and the starmap-window hide (Sprite_SetVisible 0x0044f857; the
   // map is modal in the port and cannot be open during flight). The interaction
   // action index draw and the ambient-traffic escalation re-arm are ported in
