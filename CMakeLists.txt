@@ -41,6 +41,10 @@ else()
     option(EVNOVA_ENABLE_PROBE "Build the external probe/control harness" ON)
 endif()
 
+# Native host that runs port functions on state translated from microexec runs
+# of the original (tools/microexec_evnova/README.md).
+option(EVNOVA_MICROEXEC "Build the microexec port host" OFF)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -84,6 +88,9 @@ find_package(SDL3 CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 
 add_subdirectory(src)
+if(EVNOVA_MICROEXEC)
+    add_subdirectory(tools/microexec_evnova/host)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)

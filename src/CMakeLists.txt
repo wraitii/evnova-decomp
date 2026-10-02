@@ -2,14 +2,15 @@
 # propagate find_dependency(ZLIB), so resolve zlib first so the transitive
 # ZLIB::ZLIB imported target exists for SDL3_ttf's config. vcpkg's zlib port
 # builds lib as ZLIB::ZLIBSTATIC while the freetype/PNG targets reference the
-# find-module name ZLIB::ZLIB, so alias the two.
-find_package(ZLIB CONFIG REQUIRED)
+# find-module name ZLIB::ZLIB, so alias the two. GLOBAL so targets outside src/
+# (the microexec host's traced runtime copy) can link what evnova_runtime links.
+find_package(ZLIB CONFIG REQUIRED GLOBAL)
 if(NOT TARGET ZLIB::ZLIB AND TARGET ZLIB::ZLIBSTATIC)
-  add_library(ZLIB::ZLIB INTERFACE IMPORTED)
+  add_library(ZLIB::ZLIB INTERFACE IMPORTED GLOBAL)
   set_target_properties(ZLIB::ZLIB PROPERTIES
     INTERFACE_LINK_LIBRARIES ZLIB::ZLIBSTATIC)
 endif()
-find_package(SDL3_ttf CONFIG REQUIRED)
+find_package(SDL3_ttf CONFIG REQUIRED GLOBAL)
 
 add_library(evnova_runtime
     brgr_archive.cpp

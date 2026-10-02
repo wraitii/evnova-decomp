@@ -1,0 +1,177 @@
+{
+  "about": "How original state (Ghidra slot keys) maps onto the C++ port's GameState, for microexec's port comparison. Read by bridge.py; the host reflects every public port field and every @port-cited function (host/gen_reflection.py), so a port path is any GameState member path. See tools/microexec_evnova/README.md. A `skip` drops a slot the port does not read and still compares the run; an `unmapped` reason makes the run not-comparable because the port cannot be given that state. With `auto`, a slot with no explicit rule is checked against the host's port records: a field keeps its name, or a numbered field maps into the one array its stem pluralizes to (class_1 -> classes[0]); a scalar argument keeps its name (or its position), and `arg.<ptr>[*].<field>` becomes `<port param>.<field>`. Every target the host can call is compared without a `targets` entry. Only renames, skips, not-comparables and argument overrides need writing down.",
+  "auto": true,
+  "globals": {
+    "g_reaction_script_buffer": {
+      "skip": "Expression/script scratch storage is local string storage in the port; gameplay effects are compared separately."
+    },
+    "g_pers_defs": {
+      "port": "scenario.pers_defs",
+      "type": "PersDef",
+      "count": 1024,
+      "why": "Fixed 0x400 personality table indexed by resource id minus 0x80 in both implementations."
+    },
+    "g_system_reputation": {
+      "port": "system_reputation",
+      "count": 2048,
+      "why": "Per-system int16 reputation, indexed by the same zero-based system id."
+    },
+    "g_active_misn": {
+      "port": "active_missions",
+      "type": "MisnActive",
+      "count": 16,
+      "why": "Accepted mission slots retain the original indexing and ship goal/behavior fields."
+    },
+    "g_active_misn_runtime_flags": {
+      "port": "active_mission_runtime_flags",
+      "type": "MisnRuntimeFlags",
+      "count": 16,
+      "why": "Separate 20-byte runtime records for the same 16 accepted mission slots."
+    },
+    "g_random_encounter_fleet_defs": {
+      "port": "scenario.fleets",
+      "type": "RandomEncounterFleetDef",
+      "count": 256,
+      "why": "Fixed 0x100 fleet table with a 0x124 stride; government ids are zero-based in both implementations."
+    },
+    "g_system_defs_ptr[*].reinf_countdown": {
+      "port": "reinforcement_countdown[*]",
+      "why": "Mutable SystemDef +0xc8 lives in a separate per-system array in GameState."
+    },
+    "g_system_defs_ptr[*].reinf_cooldown_days": {
+      "port": "reinforcement_retrigger_delay[*]",
+      "why": "Mutable SystemDef +0xc4 lives in a separate per-system array in GameState."
+    },
+    "g_player_reinforcement_inhibit_all": {
+      "unmapped": "The assistance port recomputes ModType-44 inhibition from owned outfits instead of reading this cache; independently sampled cache bytes cannot reproduce the same port state."
+    },
+    "g_government_defs": {
+      "port": "scenario.governments",
+      "type": "GovtDef",
+      "count": 256,
+      "why": "The original table is fixed at 0x100 entries. The port sizes its vector from the data and range-checks against it, so the host sizes it to the original's extent."
+    },
+    "g_ship_states": {
+      "port": "ships_",
+      "type": "ShipState",
+      "count": 64,
+      "why": "Fixed 0x40-slot array; element 0 is the player (the port's GameState.player aliases ships_[0])."
+    },
+    "g_weapon_defs": {
+      "port": "scenario.weapons",
+      "type": "WeaponDef",
+      "count": 256,
+      "why": "0x100 entries indexed by the zero-based weapon id (the original range-checks ids against 0x100, e.g. 0x0046ea86); the port's vector is indexed by resource id - 0x80, the same index."
+    },
+    "g_ship_class_defs": {
+      "port": "scenario.ships",
+      "type": "ShipClassDef",
+      "count": 768,
+      "why": "0x300 entries indexed by the zero-based ship id; the port's vector is indexed by resource id - 0x80, the same index."
+    },
+    "g_outfit_defs": {
+      "port": "scenario.outfits",
+      "type": "OutfitDef",
+      "count": 512,
+      "why": "0x200 entries indexed by the zero-based outfit id."
+    },
+    "g_outfit_owned_count": {
+      "port": "inventory.outfit_owned_count",
+      "why": "The player's owned count per zero-based outfit id (0x200 shorts)."
+    },
+    "g_player_max_armor_cache": {
+      "unmapped": "Ship_ComputeShipMaxArmor (0x004637a0) reads the player's lazily cached max armor, while the port's NovaAi_ComputeMaxArmorPoints recomputes it from the class and outfits; the invented cache is independent of the invented class, so the run cannot be compared faithfully."
+    },
+    "g_system_defs_ptr": {
+      "port": "scenario.systems",
+      "type": "SystemDef",
+      "count": 2048,
+      "why": "Original fixed 0x800 system table; nav entries are zero-based stellar indexes."
+    },
+    "g_stellar_defs": {
+      "port": "scenario.stellars",
+      "type": "StellarDef",
+      "count": 2048,
+      "why": "Original fixed 0x800 stellar table; vector indices match original stellar indexes."
+    }
+  },
+  "types": {
+    "OutfitDef": {
+      "fields": {
+        "mod_type_1": "mod_type",
+        "mod_type_2": "alt_mod_types[0]",
+        "mod_type_3": "alt_mod_types[1]",
+        "mod_type_4": "alt_mod_types[2]",
+        "mod_val_1": "mod_val",
+        "mod_val_2": "alt_mod_vals[0]",
+        "mod_val_3": "alt_mod_vals[1]",
+        "mod_val_4": "alt_mod_vals[2]"
+      }
+    },
+    "WeaponDef": {
+      "fields": {
+        "ammo_or_energy_cost_code": "ammo_type",
+        "flags_primary": "flags",
+        "shot_sprite_set_id": "sprite_id",
+        "fire_sound_slot": "fire_sound"
+      }
+    },
+    "GovtDef": {
+      "fields": {
+        "reinforcement_inhibited": {
+          "unmapped": "The assistance port recomputes government-class inhibition from owned outfits instead of reading independently sampled cached bytes."
+        }
+      }
+    },
+    "ShipState": {
+      "fields": {
+        "weapon_banks[*].mounted_count": "weapon_banks[*].mounted",
+        "weapon_banks[*].fire_cooldown": "weapon_banks[*].cooldown",
+        "weapon_banks[*].burst_counter": "weapon_banks[*].burst"
+      }
+    },
+    "ShipClassDef": {
+      "fields": {
+        "base_cost": "cost",
+        "base_shield_points": "base_shield",
+        "base_armor_points": "base_armor",
+        "base_speed": "speed",
+        "base_turn_rate_deg": "turn_rate",
+        "base_accel": "accel",
+        "capture_power": "crew",
+        "default_outfit_id": "default_outfit_ids",
+        "default_outfit_count": "default_outfit_counts"
+      }
+    },
+    "SystemDef": {
+      "fields": {
+        "nav_stellar_ids[*]": {
+          "path": "nav_defs[*]",
+          "add": 128,
+          "preserve": [
+            -1
+          ]
+        }
+      }
+    },
+    "StellarDef": {
+      "fields": {
+        "map_x": "pos_x",
+        "map_y": "pos_y",
+        "travel_flags": "flags",
+        "live_strength": "strength"
+      }
+    }
+  },
+  "targets": {
+    "0x0040c790": {
+      "return": {
+        "add": -128,
+        "preserve": [
+          -1
+        ]
+      },
+      "why": "Port returns a stellar resource id; original returns its zero-based index. Both return -1 for no selection."
+    }
+  }
+}

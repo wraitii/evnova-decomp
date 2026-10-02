@@ -63,6 +63,10 @@ add_executable(evnova_tests
     world_wrap_test.cpp
 )
 
+if(EVNOVA_MICROEXEC)
+    target_sources(evnova_tests PRIVATE microexec_strings_test.cpp)
+endif()
+
 target_link_libraries(evnova_tests PRIVATE Catch2::Catch2WithMain evnova_runtime)
 
 target_compile_features(evnova_tests PRIVATE cxx_std_23)

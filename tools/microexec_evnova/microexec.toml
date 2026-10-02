@@ -1,0 +1,59 @@
+# microexec project configuration for EV Nova (../microexec/README.md, "Project configuration").
+# The EV Nova-specific plugin, bridge rules and port host live alongside it in tools/microexec_evnova/.
+# Discovered from this repo as the unique tools/*/microexec.toml profile; paths are relative to `root`.
+
+root = "../.."
+name = "EV Nova"
+image = "EV Nova/EV Nova.exe"
+state_dir = "analysis/microexec"
+ghidra = "http://127.0.0.1:8166"
+plugins = ["tools/microexec_evnova/scenario.py"]
+# Verified 0.0 at 0x00575744 and 0x00575000; writable .data still contains immutable compiler constants.
+image_constants = ["FLOAT_ZERO", "FLOAT_00575000"]
+
+[prompts]
+program = "the original EV Nova executable (Ambrosia, 2002; Windows MSVC x86 build)"
+session = "a real, mid-game EV Nova session"
+state = "game state"
+hints = """
+- The stock Nova scenario is loaded. Memory holds resource ids 0-based
+  (resource id 128 is element 0); -1 marks "none". Sentinels belong in
+  `values` only when the code clearly handles them.
+- Element 0 of `g_ship_states` is the player; the other elements are NPC ships.
+"""
+sampler_yes_when = "The value depends on other state or on which array element it is: e.g. most ships are in the player's system, a count is non-zero only for the few outfits the player owns, element 0 (the player) differs from NPC elements, one field must agree with another."
+sampler_examples = """
+  read("g_ship_states[0].current_system_id") if index and chance(0.85) else integer(0, 2047)
+  log_integer(1, 20) if index in per_run("owned_outfits", lambda: sample(range(512), integer(8, 25))) else 0
+  (lambda s: s[index] if index < len(s) else 0)(per_run("condition", lambda: [ord(c) for c in choice(["b1", "b0", "(b1&b2)", "p1.5", "g0"])] + [0]))  # NUL-terminated NCB expression read byte by byte
+"""
+
+[callees]
+rng = ["NovaRandom_Range"]
+# CString_Length must scan the actual recorded string bytes, not return an invented length.
+# Pure math helpers (table lookups, atan2, distances): emulating them keeps runs comparable instead of `stubbed`.
+run = ["CString_Length", "Math_LookupAngleSine", "Math_LookupAngleCosine", "Math_AngleFromVector2D", "Math_BearingFromPointToPoint",
+       "Math_SquaredDistance"]
+
+[tracker]
+progress = "decomp-progress.tsv"
+skipped = "decomp-skipped.tsv"
+
+[references]
+dirs = ["docs"]
+globs = ["*.md", "*.html", "*.txt", "*.swift", "*.r"]
+description = "the EV Nova Bible / ResForge reference and repository docs"
+
+[port]
+language = "C++"
+src = "src"
+extensions = [".cpp", ".hpp", ".h"]
+markers = ['//\s*@port\s+[0-9a-fx,]*0x0*{addr}\b']
+citations = ['//\s*Ghidra\s+0x0*{addr}\b']
+citation_extensions = [".cpp"]
+rules = "tools/microexec_evnova/rules.json"
+hosts = [
+  "build/release/tools/microexec_evnova/host/evnova_microexec_host",
+  "build/debug/tools/microexec_evnova/host/evnova_microexec_host",
+]
+host_hint = "cmake build/release -DEVNOVA_MICROEXEC=ON && cmake --build build/release --target evnova_microexec_host"
