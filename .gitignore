@@ -30,5 +30,5 @@ pi-session-*.html
 # Distribution packages
 /dist/
 
-# Local secrets (API keys for tools/microexec, etc.)
+# Local secrets
 .env

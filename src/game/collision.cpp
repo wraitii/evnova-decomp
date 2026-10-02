@@ -200,10 +200,13 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
 }
 
 // @port 0x0046D190 100% divergence
-// Ghidra 0x0046d190 Ship_ShipsShareSquadRoot. Walks each ship's
-// squad_leader_ship_slot to a root and returns true when the roots match. The
-// walk stops at the first inactive slot and returns that node, matching the
-// original (Ghidra 0x0046d190 checks `is_active` before following a leader).
+// Ghidra 0x0046d190 Ship_ShipsShareSquadRoot. Takes two ShipState* (the
+// signature is ShipState*/*, not int/int), seeds each walk from that ship's own
+// ship_instance_id (+0x86), then follows squad_leader_ship_slot (+0x9A) to a
+// root and returns true when the roots match. The walk stops at the first
+// inactive slot and returns that node, matching the original (Ghidra 0x0046d190
+// checks `is_active` before following a leader). The port takes slot indices;
+// this is equivalent because ship_instance_id is the ship's own slot.
 // DIVERGENCE(original): the port bounds the walk by GameState::kMaxShips and
 // validates every slot before indexing; the original trusts the array and would
 // loop without bound on a malformed leader cycle. NovaShip_ShipsShareSquadRoot

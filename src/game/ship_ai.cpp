@@ -1919,7 +1919,9 @@ std::int16_t NovaAi_FindSwarmMate(const GameState &state, Ship &ship) {
 // @port 0x00411b40 100%
 // Ghidra 0x00411b40 Ship_IsSwarmMateStillValid. A non-swarming hull
 // (or an unresolvable class) reports "valid" so the caller keeps the stale
-// cache untouched, exactly as the original's flags test short-circuits.
+// cache untouched, exactly as the original's flags test short-circuits. The
+// port's SlotInRange guard is defensive: the original trusts ship_instance_id
+// to stay within the 0x40-slot table, so it never sees an out-of-range slot.
 bool NovaAiShip_IsSwarmMateStillValid(const GameState &state,
                                       const Ship &ship) {
   const ShipClass *cls = ShipClassFor(state, ship);
