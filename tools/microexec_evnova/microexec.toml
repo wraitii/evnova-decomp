@@ -12,7 +12,7 @@ plugins = ["tools/microexec_evnova/scenario.py"]
 image_constants = ["FLOAT_ZERO", "FLOAT_00575000"]
 
 [prompts]
-program = "the original EV Nova executable (Ambrosia, 2002; Windows MSVC x86 build)"
+program = "the original EV Nova executable (Ambrosia, 2002; Windows Metrowerks CodeWarrior x86 build)"
 session = "a real, mid-game EV Nova session"
 state = "game state"
 hints = """

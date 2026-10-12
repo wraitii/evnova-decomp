@@ -2,9 +2,10 @@
 
 Two related x87 topics:
 
-1. The **FIST truncation idiom** MSVC emits for implicit `(int)` / `(short)`
-   casts of floats — needed to read decompiled expressions correctly and to
-   reproduce their rounding at call sites.
+1. The **FIST truncation idiom** emitted by the original Windows Metrowerks
+   CodeWarrior build for implicit `(int)` / `(short)` casts of floats — needed
+   to read decompiled expressions correctly and reproduce their rounding at
+   call sites.
 2. **Accepted double-vs-extended-precision divergences** where the original's
    80-bit x87 accumulators are not bit-reproduced by the port.
 
@@ -12,11 +13,12 @@ Two related x87 topics:
 
 ### The idiom
 
-MSVC compiles an implicit `(int)` / `(short)` cast of a float as an x87
-`FIST` (round-to-nearest) followed by a residual/sign correction whose
-integer form is `ADD reg,0x7fffffff; SBB out,0` plus a signed branch. The
-net result is **truncation toward zero**, *not* round-to-nearest. The same
-idiom is documented in `src/game/ship_ai_behaviors.cpp` (`RoundedAxisDistanceSquared`).
+The original CodeWarrior build compiles an implicit `(int)` / `(short)` cast
+of a float as an x87 `FIST` (round-to-nearest) followed by a residual/sign
+correction whose integer form is `ADD reg,0x7fffffff; SBB out,0` plus a signed
+branch. The net result is **truncation toward zero**, *not* round-to-nearest.
+The same idiom is documented in `src/game/ship_ai_behaviors.cpp`
+(`RoundedAxisDistanceSquared`).
 
 A genuinely different pattern, `ROUND(f) + (0 < frac)`, nets to ceil and
 must not be confused with this one. `ROUND(f)` alone (no correction) is
