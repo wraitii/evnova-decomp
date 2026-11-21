@@ -158,7 +158,7 @@ jobs:
             test_exe="build/release/tests/evnova_tests"
           fi
           "$test_exe" --filenames-as-tags \
-            '[#collision_test],[#command_input_test],[#flight_automation_test],[#impact_effects_test],[#mission_script_test]~"mission payload context expands Q message text tags",[#movement_test],[#nova_command_test],[#nova_font_test],[#outfit_clamp_test],[#outfit_ionization_test],[#placement_test],[#render_clip_scope_test],[#sdl_audio_test],[#services_buttons_test],[#ship_visual_test],[#spaceflight_player_state_test],[#sprite_test]' \
+            '[junk-priority],[#collision_test],[#command_input_test],[#flight_automation_test],[#impact_effects_test],[#mission_script_test]~"mission payload context expands Q message text tags",[#movement_test],[#nova_command_test],[#nova_font_test],[#outfit_clamp_test],[#outfit_ionization_test],[#placement_test],[#render_clip_scope_test],[#sdl_audio_test],[#services_buttons_test],[#ship_visual_test],[#spaceflight_player_state_test],[#sprite_test]' \
             --reporter console --verbosity quiet
 
       - name: Package Windows

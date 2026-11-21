@@ -161,7 +161,7 @@ TradeCenterSession NovaTradeCenter_OpenSession(const GameState &state,
     row.disaster_raised = disaster.price_delta > 0;
   }
 
-  // Row 6: first junk def bought here with BuyOn passing (base * scale).
+  // Row 6: highest-ID junk def bought here with BuyOn passing (base * scale).
   for (std::size_t i = 0; i < state.scenario.junk_defs.size(); ++i) {
     const JunkDef &junk = state.scenario.junk_defs[i];
     if (!junk.present || !ContainsStellar(junk.bought_at, stellar_index) ||
@@ -172,10 +172,9 @@ TradeCenterSession NovaTradeCenter_OpenSession(const GameState &state,
     session.rows[6].trend = 4;
     session.rows[6].price =
         RoundPrice(static_cast<float>(junk.base_price) * scale_f);
-    break;
   }
 
-  // Row 7: first junk def sold here with SellOn passing (base / scale).
+  // Row 7: highest-ID junk def sold here with SellOn passing (base / scale).
   for (std::size_t i = 0; i < state.scenario.junk_defs.size(); ++i) {
     const JunkDef &junk = state.scenario.junk_defs[i];
     if (!junk.present || !ContainsStellar(junk.sold_at, stellar_index) ||
@@ -186,7 +185,6 @@ TradeCenterSession NovaTradeCenter_OpenSession(const GameState &state,
     session.rows[7].trend = 1;
     session.rows[7].price =
         RoundPrice(static_cast<float>(junk.base_price) / scale_f);
-    break;
   }
 
   return session;

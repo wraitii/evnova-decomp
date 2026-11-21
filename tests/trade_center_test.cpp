@@ -76,6 +76,26 @@ TEST_CASE("disaster and junk override the trade table", "[trade]") {
   CHECK(session.rows[7].price == 80);
 }
 
+TEST_CASE("each trade row uses its highest eligible junk ID",
+          "[trade][junk-priority]") {
+  GameState state = MakeTradeState();
+  state.scenario.junk_defs.resize(3);
+  for (JunkDef &junk : state.scenario.junk_defs) {
+    junk.present = true;
+    junk.bought_at[0] = 0;
+    junk.sold_at[0] = 0;
+  }
+  state.scenario.junk_defs[1].base_price = 200;
+  state.scenario.junk_defs[2].base_price = 100;
+  state.scenario.junk_defs[2].sell_on = "b43";
+
+  const TradeCenterSession session = NovaTradeCenter_OpenSession(state, 0x80);
+  CHECK(session.rows[6].junk_id == 2);
+  CHECK(session.rows[6].price == 125);
+  CHECK(session.rows[7].junk_id == 1);
+  CHECK(session.rows[7].price == 160);
+}
+
 TEST_CASE("trade center buy and sell move cargo and credits", "[trade]") {
   GameState state = MakeTradeState();
   state.scenario.stellars[0].flags = 0x10000000U;

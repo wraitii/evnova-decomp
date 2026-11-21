@@ -18,9 +18,9 @@ redraw `0x0048d6f0` `NovaUi_RedrawTradeCenterWindow`, selection cycler
   `system_reputation[stellar.system_id] < 0`; 1.5 when `dominated`.
 - Active `öops` (`g_disaster_defs`) bound to the landed stellar override
   `price = base + delta` (floor 5). Badge shows Higher/Lower.
-- Rows 6/7: first `jünk` def whose **BoughtAt** contains the stellar and
-  **BuyOn** passes (row 6, `base*scale`), and first whose **SoldAt** contains it
-  and **SellOn** passes (row 7, `base/scale`). Junk prices are not floored.
+- Rows 6 and 7 each use the highest eligible `jünk` ID. Row 6 checks
+  **BoughtAt** and **BuyOn** and pays `base*scale`. Row 7 checks **SoldAt**
+  and **SellOn** and charges `base/scale`. Junk prices are not floored.
 
 Buy and Sell both use the single local price (no spread). Plain action moves
 `min(10, affordable/carriable)`; shift opens `NovaUi_RunStoreQuantityPrompt`.
