@@ -1,0 +1,47 @@
+version = 1
+name = "mission-resume"
+
+[defaults]
+timeout_ms = 30000
+
+# Start a fresh process with the pilot written by mission_save.toml.
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu", "state.game_active" = true }
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "state.active_missions" = 1, "missions.missions.0.template_id" = 123, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "enter_ship"
+
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = 15
+suppress_audio = true
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "text_reader", "missions.missions.0.objective_complete" = true }
+timeout_ms = 180000
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "missions.missions" = [], "state.active_missions" = 0 }
+
+[[steps]]
+action = "quit"

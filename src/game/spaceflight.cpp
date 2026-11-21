@@ -1338,21 +1338,21 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
     // pass, with debriefs layered over the dock.
     const LandedExit exit =
         NovaLanded_RunWindow(platform, audio, state, ctx, prefs, hud);
-    if (exit == LandedExit::kQuit) {
-      return LandCommandResult::kQuit;
-    }
-    // Launch runs the launch tail below (which contains the original's
+    // Leaving the dock runs the launch tail below (which contains the original's
     // single daily world tick, 0x00456033).
     // TODO(decomp(0x0044d870)) skipped: the 15..44-day daily-driver loop
     // belongs to the death/escape-pod respawn (PlayerTick_TimedAction-
     // Transition 0x0044d490), not to launch -- previously misattributed
     // here and charging 16..45 days per landing.
-    if (exit == LandedExit::kLaunched) {
+    if (exit == LandedExit::kLaunched || exit == LandedExit::kQuit) {
       // Stellar_RunDockAndLaunchSequence launch tail (0x00455f99..0x00456268):
       // velocity/position reset, shield/armor refill, the daily world
       // tick, stat-modifier jitter/reroll, autosave, random launch
       // heading, travel-selection reset and the shot wipe.
       Stellar_Launch(state);
+      if (exit == LandedExit::kQuit) {
+        return LandCommandResult::kQuit;
+      }
       // The docked modal advances the probe's virtual frame clock. Refresh
       // the snapshot before arming the departure overlay so its deadline is
       // relative to the actual launch instant rather than modal entry.
