@@ -260,7 +260,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00448A30	NovaUi_DrawListRowCallback	src/game/nova_list_control.cpp	90%	ui
 0x00448BA0	NovaExpression_SkipWhitespace	src/game/scenario_data.cpp	100%	
 0x00448BE0	NovaExpression_EvaluateToken	src/game/scenario_data.cpp	100%	divergence
-0x00449020	NovaExpression_EvaluateBoolean	src/game/scenario_data.cpp	100%	divergence
+0x00449020	NovaExpression_EvaluateBoolean	src/game/scenario_data.cpp	100%	
 0x00449370	Mission_ExecuteMisnScriptEngine	src/game/mission_script.cpp	100%	divergence
 0x0044A4D0	Ship_ExpandStringPlaceholders	src/game/mission_text.cpp	100%	divergence
 0x0044A980	NovaParser_AllocateBuffer		0%	

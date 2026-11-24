@@ -118,8 +118,10 @@ constexpr std::uint32_t kRankResourceType = 0x728a6e6b; // r\x8ank
 // original's default). Faithful to 0x00449020, a flat chain of bare terms is
 // last-operator-wins (each `&`/`|` reloads the result from the previous
 // operand), not conventional precedence; parenthesised groups get a fresh
-// accumulator and group vs bare-token operands update state differently. See
-// docs/known_original_bugs.md (Test expressions). The
+// accumulator and group vs bare-token operands update state differently. A
+// digit run is the tokenizer's `#` compare-value token (a no-op in boolean
+// position) and `= < >` compare the last operand -- not only a `[...]`
+// count -- against it. See docs/known_original_bugs.md (Test expressions). The
 // evaluator is pure: game-state lookups are injected through the state
 // callback so scenario parsing stays independent of the game.
 struct ControlExpressionState {
@@ -138,8 +140,9 @@ struct ControlExpressionState {
 };
 
 // Evaluates a Nova control bit test expression against `state`. Returns true
-// for an empty expression. Malformed/unknown tokens evaluate as false and are
-// logged. Thread-safe (no hidden globals).
+// for an empty expression. Characters the tokenizer does not recognize are
+// consumed and ignored (the original's '?' token), not treated as false.
+// Thread-safe (no hidden globals).
 [[nodiscard]] bool
 NovaControlExpression_Evaluate(std::string_view expression,
                                const ControlExpressionState &state);

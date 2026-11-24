@@ -2435,28 +2435,48 @@ std::int32_t Outfit::PurchaseMass(std::int16_t ship_hull_mass) const {
 // ---------------------------------------------------------------------------
 namespace {
 
-// Evaluator over the Bible's NCB test-expression grammar. Its operator-chain
-// behavior is a faithful port of Ghidra 0x00449020 (NovaExpression_
-// EvaluateBoolean): not a precedence parser. The '&'/'|' handlers at
-// 0x004492c0/0x004492d0 reload EBP from ESI (MOV EBP,ESI at 0x004492c4/
-// 0x004492d4), so for a flat chain of bare terms only the final operator and
-// its two adjacent operands survive. Parentheses recurse into a fresh frame
-// (Bible `b1&(b2|b3)` workaround); group and bare tokens update ESI
-// differently (see ParseChain). Remaining divergences are tracked on
-// 0x00449020. See docs/known_original_bugs.md (Test expressions).
-//   expr   := chain
-//   chain  := operand ( ('&'|'|') operand )*
-//   operand:= '!' operand | '(' chain ')' | '[' set ']' [cmp number] | token
-//   set    := token*            (counts the number of 1-valued tokens)
-//   token  := 'B'number | 'P'number | 'G' | 'O'number | 'E'number | '0' | '1'
+// Evaluator over the Bible's NCB test-expression grammar. This mirrors the
+// original's flat token/state machine rather than a recursive-descent
+// precedence parser: Ghidra 0x00449020 (NovaExpression_EvaluateBoolean) keeps
+// one result register (EBP, initialised to 1), one last-operand register
+// (ESI), a count of true terms (EDI, used by `[...]`), a single
+// pending-negation latch (BL), and a pending operator (local_1c). Every
+// `&`/`|` reloads EBP from ESI, so a flat chain of bare terms is
+// last-operator-wins, not conventional precedence (see
+// docs/known_original_bugs.md, "Test expressions"). `(` and `[` recurse into
+// a fresh frame; the tokenizer (0x00448be0) reduces boolean terms to
+// '0'/'1', turns every digit run into the '#' compare-value token (a no-op in
+// boolean position, but the operand of `= < >`), returns the comparison
+// operators themselves, and returns '?' for an unknown character. A `[...]`
+// frame returns its true-term count (EDI) so the caller can compare it.
 class ExprParser {
 public:
   ExprParser(std::string_view text, const ControlExpressionState &state)
       : text_(text), state_(state) {}
 
-  [[nodiscard]] bool Eval() { return ParseChain(); }
+  [[nodiscard]] bool Eval() { return ParseChain() != 0; }
 
 private:
+  // Token characters returned by EvaluateToken. Values match the original's
+  // ASCII returns; kUnknown ('?') is both the unknown-token fallback and the
+  // initial pending operator.
+  enum class Token : char {
+    kOpenParen = '(',
+    kCloseParen = ')',
+    kOpenSet = '[',
+    kCloseSet = ']',
+    kNot = '!',
+    kAnd = '&',
+    kOr = '|',
+    kLess = '<',
+    kGreater = '>',
+    kEqual = '=',
+    kFalse = '0',
+    kTrue = '1',
+    kCompare = '#',
+    kUnknown = '?',
+  };
+
   // @port 0x00448BA0 100%
   // Ghidra 0x00448ba0 NovaExpression_SkipWhitespace. Advances past spaces only
   // (no tabs; matches the original).
@@ -2470,244 +2490,223 @@ private:
     return pos_ < text_.size() ? text_[pos_] : '\0';
   }
 
-  void Consume() { ++pos_; }
-
-  [[nodiscard]] std::int32_t ParseNumber() {
+  // Reads a run of decimal digits at the cursor and advances past it,
+  // returning its value (0 when no digit is present). The original's number
+  // loops default the accumulator to 0 and narrow it to a short.
+  [[nodiscard]] std::int32_t ParseDigits() {
     std::int32_t value = 0;
-    bool any = false;
     while (pos_ < text_.size() && text_[pos_] >= '0' && text_[pos_] <= '9') {
       value = value * 10 + (text_[pos_] - '0');
       ++pos_;
-      any = true;
     }
-    return any ? value : -1;
+    return value;
   }
 
-  struct Operand {
-    bool value = false;
-    // True for a parenthesised group or counted set. Bare tokens update the
-    // last-operand register to their own value; groups reload it from the
-    // result when the operator is short-circuited (see ParseChain).
-    bool from_group = false;
-  };
+  // @port 0x00448BE0 100% divergence
+  // DIVERGENCE(original): the `P` term uses the injected is_registered model
+  // (a registered game) rather than the shareware day counter and the current
+  // class's licensed-runtime flag; see docs/known_original_bugs.md.
+  // Ghidra 0x00448be0 NovaExpression_EvaluateToken. Consumes one token at the
+  // cursor and returns its character: case-insensitive B/P/G/O/E terms reduce
+  // to '0'/'1' through the injected state, comparisons return themselves, a
+  // digit run becomes '#' with its value latched in compare_value_, and an
+  // unknown character is consumed and returns '?'.
+  [[nodiscard]] Token EvaluateToken() {
+    if (pos_ >= text_.size()) {
+      return Token::kUnknown;
+    }
+    const char c = text_[pos_];
+    switch (c) {
+    case '(':
+      ++pos_;
+      return Token::kOpenParen;
+    case ')':
+      ++pos_;
+      return Token::kCloseParen;
+    case '[':
+      ++pos_;
+      return Token::kOpenSet;
+    case ']':
+      ++pos_;
+      return Token::kCloseSet;
+    case '!':
+      ++pos_;
+      return Token::kNot;
+    case '&':
+      do {
+        ++pos_;
+      } while (Peek() == '&');
+      return Token::kAnd;
+    case '|':
+      do {
+        ++pos_;
+      } while (Peek() == '|');
+      return Token::kOr;
+    case '<':
+      ++pos_;
+      return Token::kLess;
+    case '>':
+      ++pos_;
+      return Token::kGreater;
+    case '=':
+      ++pos_;
+      return Token::kEqual;
+    case 'b':
+    case 'B': {
+      ++pos_;
+      const auto bit = static_cast<std::int16_t>(ParseDigits());
+      return (bit >= 0 && bit < 10000 && state_.get_control_bit) &&
+                     state_.get_control_bit(static_cast<std::uint32_t>(bit))
+                 ? Token::kTrue
+                 : Token::kFalse;
+    }
+    case 'p':
+    case 'P': {
+      ++pos_;
+      const auto days =
+          static_cast<std::uint32_t>(static_cast<std::int16_t>(ParseDigits()));
+      return state_.is_registered && state_.is_registered(days) ? Token::kTrue
+                                                                : Token::kFalse;
+    }
+    case 'g':
+    case 'G':
+      ++pos_;
+      return state_.is_male && state_.is_male() ? Token::kTrue : Token::kFalse;
+    case 'o':
+    case 'O': {
+      ++pos_;
+      const auto id = static_cast<std::int16_t>(ParseDigits());
+      return state_.owns_outfit && state_.owns_outfit(id) ? Token::kTrue
+                                                          : Token::kFalse;
+    }
+    case 'e':
+    case 'E': {
+      ++pos_;
+      const auto id = static_cast<std::int16_t>(ParseDigits());
+      return state_.has_explored && state_.has_explored(id) ? Token::kTrue
+                                                            : Token::kFalse;
+    }
+    default:
+      if (c >= '0' && c <= '9') {
+        compare_value_ = static_cast<std::int16_t>(ParseDigits());
+        return Token::kCompare;
+      }
+      ++pos_; // unknown token: consume one character, treat as false
+      return Token::kUnknown;
+    }
+  }
 
-  // The original's EvaluateBoolean body (0x00449020). Returns one flat chain's
-  // value, stopping at end-of-text or after consuming the matching ')'.
+  // The original's EvaluateBoolean body. Returns EBP as an int so a `[...]`
+  // frame can hand its count (EDI) back for a following `= < >` comparison.
   // Transitions per operand, with `prev` = ESI entering the operand:
   //   op '&', token v: ESI=v,  EBP = v ? EBP : 0
   //   op '&', group v: ESI=v ? prev : 0, EBP = ESI  (0x00449224-0x0044922b)
   //   op '|', token v: ESI=v,  EBP = v ? 1 : EBP
   //   op '|', group v: ESI=v ? 1 : prev, EBP = ESI  (0x0044920e-0x00449219)
   //   op '?', any   : ESI=v,  EBP unchanged
-  [[nodiscard]] bool ParseChain() {
-    bool result = true;   // EBP, initialised to 1 by the original (0x004490f2)
-    bool operand = false; // ESI, the most recent operand value
-    char op = '?';        // local_1c
-    for (;;) {
-      SkipWhitespace();
-      const char c = Peek();
-      if (c == '\0') {
-        break;
-      }
-      if (c == ')') {
-        Consume();
-        break;
-      }
-      if (c == '&' || c == '|') {
-        Consume();
-        op = c;
-        result = operand; // 0x004492c4 / 0x004492d4: MOV EBP,ESI
+  [[nodiscard]] int ParseChain() {
+    int result = 1;             // EBP
+    int operand = 0;            // ESI
+    int count = 0;              // EDI, true terms for `[...]`
+    bool negate = false;        // BL, the single pending-negation latch
+    Token op = Token::kUnknown; // local_1c, the pending operator
+    while (pos_ < text_.size()) {
+      if (Peek() == ' ') {
+        SkipWhitespace();
         continue;
       }
-      const Operand value = ParseOperand();
-      if (op == '&') {
-        if (!value.value) {
-          result = false;
-          operand = false;
-        } else if (value.from_group) {
-          result = operand; // 0x0044922b: MOV EBP,ESI
-        } else {
-          operand = true; // bare true token: ESI = 1
+      const Token token = EvaluateToken();
+      if (token == Token::kOpenParen || token == Token::kOpenSet) {
+        int value = ParseChain();
+        if (negate) {
+          negate = false;
+          value = value == 0 ? 1 : 0;
         }
-      } else if (op == '|') {
-        if (value.value) {
-          result = true;
-          operand = true;
-        } else if (value.from_group) {
-          result = operand; // 0x00449219: MOV EBP,ESI
+        if (op == Token::kAnd) {
+          if (value == 0) {
+            operand = 0;
+          }
+          result = operand;
+        } else if (op == Token::kOr) {
+          if (value == 1) {
+            operand = 1;
+          }
+          result = operand;
         } else {
-          operand = false; // bare false token: ESI = 0
+          operand = value;
         }
-      } else {
-        operand = value.value;
-      }
-      // op deliberately persists across operands, matching local_1c.
-    }
-    if (op == '?') {
-      result = operand; // 0x00449357-0x00449361
-    }
-    return result;
-  }
-
-  [[nodiscard]] Operand ParseOperand() {
-    SkipWhitespace();
-    if (Peek() == '!') {
-      Consume();
-      // TODO(decomp(0x004491ac)) skipped: the original latches one pending
-      // negation (MOV BL,1), so `!!x` inverts once; this recursive form is a
-      // true toggle. Tracked on 0x00449020.
-      Operand inner = ParseOperand();
-      inner.value = !inner.value;
-      return inner;
-    }
-    if (Peek() == '(') {
-      Consume();
-      return {ParseChain(), true};
-    }
-    if (Peek() == '[') {
-      return {ParseCountedSet(), true};
-    }
-    return {ParseTokenTerm() != 0, false};
-  }
-
-  // Counted set: count the 1-valued tokens inside [ ], optionally compared to
-  // a following number with '=' / '<' / '>'. Returns nonzero if the count
-  // satisfies the comparison (or is nonzero when no comparison is given).
-  [[nodiscard]] bool ParseCountedSet() {
-    Consume(); // '['
-    std::int32_t ones = 0;
-    for (;;) {
-      SkipWhitespace();
-      const char c = Peek();
-      if (c == '\0' || c == ']') {
-        break;
-      }
-      if (c == '(') {
-        Consume();
-        ones += ParseChain() ? 1 : 0;
         continue;
       }
-      if (ParseTokenTerm() != 0) {
-        ++ones;
+      switch (token) {
+      case Token::kCloseSet:
+        // 0x00449232-0x00449238: EBP = EDI; the ']' frame returns its count.
+        return count;
+      case Token::kCloseParen:
+        return op == Token::kUnknown ? operand : result; // 0x00449153
+      case Token::kTrue:
+      case Token::kFalse: {
+        const bool effective = (token == Token::kTrue) != negate;
+        if (effective) {
+          ++count;
+          if (op == Token::kOr) {
+            result = 1;
+          }
+        } else if (op == Token::kAnd) {
+          result = 0;
+        }
+        negate = false;
+        operand = effective ? 1 : 0;
+        continue;
+      }
+      case Token::kOr:
+        op = Token::kOr;
+        result = operand; // 0x004492c4: MOV EBP,ESI
+        continue;
+      case Token::kAnd:
+        op = Token::kAnd;
+        result = operand; // 0x004492d4: MOV EBP,ESI
+        continue;
+      case Token::kLess:
+      case Token::kGreater:
+      case Token::kEqual:
+        result = 0;
+        op = token;
+        continue;
+      case Token::kCompare:
+        if (op == Token::kLess) {
+          result = operand < compare_value_ ? 1 : 0;
+        } else if (op == Token::kGreater) {
+          result = compare_value_ < operand ? 1 : 0;
+        } else if (op == Token::kEqual) {
+          result = operand == compare_value_ ? 1 : 0;
+        }
+        continue;
+      case Token::kNot:
+        negate = true;
+        continue;
+      case Token::kUnknown:
+      case Token::kOpenParen: // handled by the recursion branch above
+      case Token::kOpenSet:
+        continue;
       }
     }
-    SkipWhitespace();
-    if (Peek() == ']') {
-      Consume();
-    }
-    SkipWhitespace();
-    const char op = Peek();
-    if (op == '=' || op == '<' || op == '>') {
-      Consume();
-      SkipWhitespace();
-      const std::int32_t rhs = ParseNumber();
-      if (op == '=') {
-        return ones == rhs;
-      }
-      return op == '<' ? ones < rhs : ones > rhs;
-    }
-    return ones != 0;
-  }
-
-  // @port 0x00448BE0 100% divergence
-  // DIVERGENCE(original): digit-run compare-value token handling (see below).
-  // Ghidra 0x00448be0 NovaExpression_EvaluateToken. Case-insensitive B/P/G/O/E
-  // terms, parentheses/brackets/comparison operators, and the original's '#'
-  // compare-value token for a digit run. For the digit-run divergence see the
-  // comment below.
-  // Evaluates a single NCB term and returns 1 (true) or 0 (false). The token
-  // letter is case-insensitive; numbers may be multi-digit.
-  [[nodiscard]] int ParseTokenTerm() {
-    SkipWhitespace();
-    char c = Peek();
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-      Consume();
-    } else if (c >= '0' && c <= '9') {
-      // Digit run. A lone 0/1 is the literal boolean; a longer run is the
-      // original tokenizer's '#' compare-value token (NovaExpression_-
-      // EvaluateToken 0x00448be0 consumes all digits and returns '#'), which
-      // in boolean position is a no-op there. Consume the WHOLE run here so a
-      // malformed token (e.g. the shipped mission 428 AvailBits
-      // `!(b511 | b515) & !((b50 | 467) | b6666)`, where 467 is a missing-b
-      // typo) does not desync the parser and silently drop the rest of the
-      // expression. Divergence: the clean room evaluates such a run as false,
-      // while the original's '#' token is a no-op (it leaves the accumulator
-      // and a pending '!' untouched). That is visible only when the run is the
-      // right operand of `&` (`1 & 467` -> 1) or the direct operand of `!`
-      // (`!467` -> false, not true); no shipped expression uses either, and a
-      // run compared with `<`/`>`/`=` is still handled by ParseCountedSet.
-      Consume();
-      bool multi_digit = false;
-      while (Peek() >= '0' && Peek() <= '9') {
-        Consume();
-        multi_digit = true;
-      }
-      if (multi_digit) {
-        return 0;
-      }
-      return c == '1' ? 1 : 0;
-    } else {
-      // Unknown token: advance one char and treat as false.
-      if (c != '\0') {
-        Consume();
-      }
-      return 0;
-    }
-    switch (static_cast<unsigned char>(c)) {
-    case 'B':
-    case 'b': {
-      const std::int32_t bit = ParseNumber();
-      if (bit >= 0 && state_.get_control_bit) {
-        return state_.get_control_bit(static_cast<std::uint32_t>(bit)) ? 1 : 0;
-      }
-      return 0;
-    }
-    case 'P':
-    case 'p': {
-      const std::int32_t days = ParseNumber();
-      if (state_.is_registered) {
-        return state_.is_registered(days) ? 1 : 0;
-      }
-      return 0;
-    }
-    case 'G':
-    case 'g': {
-      return state_.is_male && state_.is_male() ? 1 : 0;
-    }
-    case 'O':
-    case 'o': {
-      const std::int32_t outfit_id = ParseNumber();
-      if (state_.owns_outfit) {
-        return state_.owns_outfit(static_cast<std::int16_t>(outfit_id)) ? 1 : 0;
-      }
-      return 0;
-    }
-    case 'E':
-    case 'e': {
-      const std::int32_t system_id = ParseNumber();
-      if (state_.has_explored) {
-        return state_.has_explored(static_cast<std::int16_t>(system_id)) ? 1
-                                                                         : 0;
-      }
-      return 0;
-    }
-    default:
-      return 0;
-    }
+    return op == Token::kUnknown ? operand : result; // 0x00449357-0x00449361
   }
 
   std::string_view text_;
   const ControlExpressionState &state_;
   std::size_t pos_ = 0;
+  std::int32_t compare_value_ = 0; // g_expression_compare_value
 };
 
 } // namespace
 
-// @port 0x00449020 100% divergence
-// DIVERGENCE(original): flat operator chain, not precedence (see ParseChain).
-// Ghidra 0x00449020 NovaExpression_EvaluateBoolean. ExprParser ports the
-// original's flat operator chain, not precedence; the remaining documented
-// divergences live on the ParseChain comment above.
+// @port 0x00449020 100%
+// Ghidra 0x00449020 NovaExpression_EvaluateBoolean. ExprParser reproduces the
+// original's flat token/state machine (see ParseChain): last-operator-wins
+// chains, the single '!' latch, digit runs as the '#' compare-value token, and
+// the generic `= < >` comparison. The only remaining divergence is the `P`
+// term's registered-game model in EvaluateToken.
 bool NovaControlExpression_Evaluate(std::string_view expression,
                                     const ControlExpressionState &state) {
   if (expression.empty()) {

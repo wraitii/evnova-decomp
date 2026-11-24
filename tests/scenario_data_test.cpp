@@ -515,6 +515,53 @@ TEST_CASE("NCB evaluator operator chains match the original accumulator",
   CHECK_FALSE(evaluate("(b1 & b2) & b3", 0b1100)); // nested: b1&b2&b3 = 0
 }
 
+TEST_CASE("NCB evaluator digit runs and comparisons match the original",
+          "[scenario][control]") {
+  using game::ControlExpressionState;
+  using game::NovaControlExpression_Evaluate;
+  ControlExpressionState state;
+  state.get_control_bit = [](std::uint32_t bit) { return bit == 5; };
+  state.is_male = [] { return true; };
+  state.owns_outfit = [](std::int16_t) { return false; };
+  state.is_registered = [](std::uint32_t) { return true; };
+  state.has_explored = [](std::int16_t) { return false; };
+
+  // A digit run is the '#' compare-value token, a no-op in boolean position,
+  // not a literal 0/1 (NovaExpression_EvaluateToken 0x00448be0). These are the
+  // inputs the microexec port comparison flagged.
+  CHECK_FALSE(NovaControlExpression_Evaluate("1", state));
+  CHECK_FALSE(NovaControlExpression_Evaluate("0", state));
+  CHECK_FALSE(NovaControlExpression_Evaluate("!)", state));
+  CHECK(NovaControlExpression_Evaluate("!(1)", state));
+  CHECK_FALSE(NovaControlExpression_Evaluate("1&(1)", state));
+  CHECK_FALSE(NovaControlExpression_Evaluate("1|(1)", state));
+  CHECK_FALSE(NovaControlExpression_Evaluate("1 & b5", state));
+  CHECK_FALSE(NovaControlExpression_Evaluate("1 | b6", state));
+  // An unrecognized character is consumed and ignored (the '?' token).
+  CHECK(NovaControlExpression_Evaluate("@b5", state));
+
+  // '!' is a single latch (BL), not a toggle: repeated '!' still negates once.
+  CHECK_FALSE(NovaControlExpression_Evaluate("!!b5", state));
+  CHECK(NovaControlExpression_Evaluate("!!b6", state));
+
+  // `= < >` compare the last operand against the following digit run, wherever
+  // the operand came from - not only a `[...]` count.
+  CHECK(NovaControlExpression_Evaluate("g>0", state));
+  CHECK(NovaControlExpression_Evaluate("b5>0", state));
+  CHECK_FALSE(NovaControlExpression_Evaluate("b5<1", state));
+  CHECK(NovaControlExpression_Evaluate("b5=1", state));
+  CHECK_FALSE(NovaControlExpression_Evaluate("b5=0", state));
+  CHECK(NovaControlExpression_Evaluate("b5<5", state));
+  CHECK(NovaControlExpression_Evaluate("<5", state)); // operand 0 < 5
+
+  // Counted sets still work, and a multi-token set returns its count.
+  ControlExpressionState bits;
+  bits.get_control_bit = [](std::uint32_t bit) { return bit == 1 || bit == 2; };
+  CHECK(NovaControlExpression_Evaluate("[b1 b2] = 2", bits));
+  CHECK(NovaControlExpression_Evaluate("[b1 b2] > 1", bits));
+  CHECK_FALSE(NovaControlExpression_Evaluate("[b1 b2] < 2", bits));
+}
+
 TEST_CASE("government table loads and decodes the Federation class",
           "[scenario][data]") {
   ScenarioData data;

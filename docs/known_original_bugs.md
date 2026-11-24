@@ -133,7 +133,7 @@ Per the discord.
 
 ## Datafile bugs
 
-* **mïsn 428 (`Federation Resupply;Fed1`) AvailBits has a missing `b` prefix**: `!(b511 | b515) & !((b50 | 467) | b6666)` uses `467` instead of `b467`. Nova's tokenizer reads a bare digit run as a `#` compare-value token that is a no-op in boolean position, so the original evaluates the expression as if the `467` were absent (`!(b511 | b515) & !(b50 | b6666)`); bit 467 is never consulted. The port reproduces this (the evaluator consumes the whole digit run) rather than silently correcting it to `b467`, which would change mission availability from the original. The nearby mïsn 150 (``!(b275 | b512) & !((b511 | b515) | b6666)``) shows the same expression shape. 
+* **mïsn 428 (`Federation Resupply;Fed1`) AvailBits has a missing `b` prefix**: `!(b511 | b515) & !((b50 | 467) | b6666)` uses `467` instead of `b467`. Nova's tokenizer reads a bare digit run as a `#` compare-value token that is a no-op in boolean position, so the original evaluates the expression as if the `467` were absent (`!(b511 | b515) & !(b50 | b6666)`); bit 467 is never consulted. The port reproduces this faithfully (the tokenizer turns the digit run into the `#` no-op; `EvaluateToken` in `src/game/scenario_data.cpp`) rather than silently correcting it to `b467`, which would change mission availability from the original. The nearby mïsn 150 (``!(b275 | b512) & !((b511 | b515) | b6666)``) shows the same expression shape. 
 * **STR# 4001 and 4002 are missing entry 80, `*Samantha`.** 
 * **Ancient Vell-os Sculpture has a typo on Windows**: `"ancient Vell-s sculpture"`. 
 * **Kymonth Station description uses “bought” instead of “brought.”** 
