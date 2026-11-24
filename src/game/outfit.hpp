@@ -141,8 +141,9 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
 //    hull tint -> consumed;
 //  - ModType 21 (kCleanRecord): clears negative system reputation (-1 = all
 //    visible systems, else the government id in ModVal) -> consumed;
-//  - otherwise: adds one to the owned inventory (via
-//    Outfit_AddInstalledOutfit) -> returns NOT consumed.
+//  - otherwise: adds one to the owned inventory as a raw increment (the
+//    original has no ownership-cap check here, so a grant can exceed Max) ->
+//    returns NOT consumed.
 // A consumed outfit is a one-shot effect item: it does not stack in the
 // inventory, matching the original (map/paint/record outfits never increment
 // g_outfit_owned_count).

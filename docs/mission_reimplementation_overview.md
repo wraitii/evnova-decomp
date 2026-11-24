@@ -56,7 +56,7 @@ Clean-room model: `src/game/scenario_data.hpp` (`MissionDef`) and
 
 ## Stellar id conventions (0x0043d240 / 0x0046efd0)
 
-Resolved mission targets (MisnActive +0x00/+0x04 and the DAT_00776b04 target
+Resolved mission targets (MisnActive +0x00/+0x04 and the g_misn_target_resolutions
 table) are **0-based stellar indices** — the original indexes `g_stellar_defs[]`
 directly. The travel/landed context (`GameState::travel.selected_stellar_id`,
 `LandedContext.stellar_id`) keeps **0x80-based resource ids**; mission APIs

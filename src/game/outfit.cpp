@@ -1269,7 +1269,16 @@ bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
   if (consumed) {
     return true;
   }
-  (void)Outfit_AddInstalledOutfit(state, outfit_zero_based_id, 1);
+  // Raw increment, exactly like the original: 0x00427770 has no ownership-cap
+  // check. Routing this through Outfit_AddInstalledOutfit would room-clamp it
+  // to the outfit's Max, but a mission-script 'G' grant or a multi-copy outfit
+  // plunder legitimately pushes owned above Max. The callers still recompute
+  // the derived stats (the port centralizes that here).
+  const std::size_t outfit_index =
+      static_cast<std::size_t>(outfit_zero_based_id);
+  std::int16_t &owned = state.inventory.outfit_owned_count[outfit_index];
+  owned = static_cast<std::int16_t>(owned + 1);
+  NovaOutfit_RecomputeOutfitDerivedState(state);
   return false;
 }
 

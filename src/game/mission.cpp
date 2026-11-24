@@ -1250,9 +1250,8 @@ void Mission_ResolveMissionStellarTargets(GameState &state,
   }
   const auto &definition =
       state.scenario.missions[static_cast<std::size_t>(mission_id)];
-  if (!definition.present) {
-    return;
-  }
+  // No `present` guard here: the original has none (its callers iterate only
+  // loaded ids) and a guard would leave the resolution block unwritten.
   auto &target =
       state.mission_target_resolutions[static_cast<std::size_t>(mission_id)];
   const auto old_deadline_year = target.deadline_year;
@@ -1267,9 +1266,8 @@ void Mission_ResolveMissionStellarTargets(GameState &state,
     target.deadline_month = old_deadline_month;
     target.deadline_day = old_deadline_day;
   }
-  // MisnDef +0x0c/+0x0e are the TravelStel/ReturnStel locators (mïsn
-  // payload +0x0c/+0x0e); the "on_fail/on_success condition" naming was a
-  // misnomer.
+  // MisnDef runtime +0x10/+0x12 are the TravelStel/ReturnStel locators
+  // (mïsn payload +0x0c/+0x0e).
   const std::int16_t reference = MissionReferenceStellar(state);
   target.travel_stellar_id =
       definition.travel_stellar_locator == -1
