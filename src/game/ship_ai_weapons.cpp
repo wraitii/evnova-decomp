@@ -660,7 +660,7 @@ bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
   return blind;
 }
 
-// @port 0x0040ce00 100% divergence
+// @port 0x0040ce00 100% divergence,bugfix
 // Ghidra 0x0040ce00 Weapon_FireTurretAtTarget (Carbon symbol AIFireTurret).
 // Turret-only bank selection for the current primary target: runs the
 // point-defense auto-fire prologue, then scans fireable mode-3/4/7/8 banks in

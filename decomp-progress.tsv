@@ -16,7 +16,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0040C790	Stellar_SelectRandomAdjacentTravelStellar	src/game/ship_ai_behaviors.cpp	100%	moddata
 0x0040CC10	Stellar_FindNearestAdjacentTravelStellar	src/game/ship_ai_behaviors.cpp	100%	
 0x0040CD80	Stellar_IsStellarAdjacentToCurrentSystem	src/game/targeting.cpp	100%	
-0x0040CE00	Weapon_FireTurretAtTarget	src/game/ship_ai_weapons.cpp	100%	divergence
+0x0040CE00	Weapon_FireTurretAtTarget	src/game/ship_ai_weapons.cpp	100%	divergence,bugfix
 0x0040D220	Weapon_SelectGuidedWeaponBankForPrimaryTarget	src/game/ship_ai_weapons.cpp	100%	moddata
 0x0040D470	Weapon_SelectDirectFireWeaponBankForPrimaryTarget	src/game/ship_ai_weapons.cpp	100%	moddata
 0x0040D7E0	Weapon_SelectUnguidedWeaponBank	src/game/ship_ai_weapons.cpp	100%	
@@ -167,7 +167,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0042EAC0	NovaUi_UpdateTravelTargetReticle	src/game/spaceflight_view.cpp	78%	ui
 0x0042EDE0	NovaUi_UpdateShipTargetReticle	src/game/spaceflight_view.cpp	92%	rendering,correctness
 0x0042F1B0	Frame_TickHudOverlayAndRouteMapTimers	src/game/hud_overlay.cpp	85%	ui,cadence
-0x0042F270	Shot_UpdateBeamHitQueue	src/game/weapon_shots.cpp	88%	gameplay,rng
+0x0042F270	Shot_UpdateBeamHitQueue	src/game/weapon_shots.cpp	88%	gameplay,rng,bugfix
 0x004311F0	Frame_UpdateCombatChatter	src/game/spaceflight.cpp	100%	
 0x004313C0	Frame_CancelCombatChatter	src/game/spaceflight.cpp	100%	
 0x00431420	Stellar_TriggerHyperspaceAudioOnce	src/game/spaceflight.cpp	40%	audio

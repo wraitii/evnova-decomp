@@ -1269,7 +1269,7 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
   return false;
 }
 
-// @port 0x0042f270 88% gameplay,rng
+// @port 0x0042f270 88% gameplay,rng,bugfix
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
   const float ticks = std::max(0.0F, elapsed_ticks);
   for (BeamHit &beam : state.beam_hit_queue) {
