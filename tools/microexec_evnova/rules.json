@@ -5,11 +5,20 @@
     "g_reaction_script_buffer": {
       "skip": "Expression/script scratch storage is local string storage in the port; gameplay effects are compared separately."
     },
+    "DAT_007cdab0": {
+      "skip": "Debug-log stream handle set by DebugLog_Open (0x00470000) and used by the NovaDebugLog_* wrappers; it is not game state, so it is neither an input nor a compared effect."
+    },
     "g_pers_defs": {
       "port": "scenario.pers_defs",
       "type": "PersDef",
       "count": 1024,
       "why": "Fixed 0x400 personality table indexed by resource id minus 0x80 in both implementations."
+    },
+    "g_dude_defs": {
+      "port": "scenario.dudes",
+      "type": "DudeDef",
+      "count": 512,
+      "why": "Fixed 0x200 dude-template table (74-byte stride) indexed by resource id minus 0x80 in both implementations."
     },
     "g_system_reputation": {
       "port": "system_reputation",
@@ -21,6 +30,18 @@
       "type": "MisnActive",
       "count": 16,
       "why": "Accepted mission slots retain the original indexing and ship goal/behavior fields."
+    },
+    "g_misn_resource_defs": {
+      "port": "scenario.missions",
+      "type": "MissionDef",
+      "count": 1000,
+      "why": "Original fixed 0x3e8-entry MisnDef table (resource ids 0x80-based); the port vector is indexed the same zero-based way, so avail_location / link_system_filter keep their offsets."
+    },
+    "g_misn_target_resolutions": {
+      "port": "mission_target_resolutions",
+      "type": "MissionTargetResolution",
+      "count": 1000,
+      "why": "Per-mission 0x20-byte resolution block written by Mission_ResolveMissionStellarTargets (0x0043d240); the port keeps the same 1000-entry indexing."
     },
     "g_active_misn_runtime_flags": {
       "port": "active_mission_runtime_flags",
@@ -57,6 +78,59 @@
       "count": 64,
       "why": "Fixed 0x40-slot array; element 0 is the player (the port's GameState.player aliases ships_[0])."
     },
+    "g_shot_states": {
+      "port": "active_shots",
+      "type": "ShotState",
+      "count": 128,
+      "why": "Slot scan in Shot_SpawnShotFromWeapon (0x0041fd30) walks 0x80 records at a 0x48-byte stride and takes the first life_time < -1; the port's active_shots vector is indexed the same and sized to 0x80 by the host."
+    },
+    "g_beam_hit_queue": {
+      "port": "beam_hit_queue",
+      "type": "BeamHit",
+      "count": 64,
+      "why": "Pointer to the fixed 0x40 immediate-beam records (0x22-byte stride) at 0x005912c4; Shot_QueueBeamHit (0x00427a90) scans it for lifetime_ticks < -1 and the port keeps the same 64-element beam_hit_queue."
+    },
+    "g_player_combat_rating_points": {
+      "port": "player_combat_rating_points",
+      "why": "Signed aggregate rating read by the post-volley NPC cooldown ladder at 0x00414ea2."
+    },
+    "DAT_005754d8": {
+      "skip": "Verified file-backed double 0.0 used by Math_AddPolarVelocityWithClamp; listed in image_constants so replay reads immutable executable bytes."
+    },
+    "DAT_00575720": {
+      "skip": "Verified file-backed double 0.0 used by Math_AngleFromVector2D; listed in image_constants so replay reads immutable executable bytes."
+    },
+    "g_angle_sine_table": {
+      "skip": "Original sine lookup storage initialized by Math_InitTrigLookupTables (0x00461830); the port computes trigonometry directly, so the table is excluded from state comparison."
+    },
+    "g_angle_cosine_table": {
+      "skip": "Original cosine lookup storage initialized by Math_InitTrigLookupTables (0x00461830); the port computes trigonometry directly, so the table is excluded from state comparison."
+    },
+    "g_angle_sine_table": {
+      "skip": "Original degree-indexed sine lookup storage; the port computes trigonometry directly."
+    },
+    "g_angle_cosine_table": {
+      "skip": "Original degree-indexed cosine lookup storage; the port computes trigonometry directly."
+    },
+    "g_gameplay_sound_handle_table": {
+      "skip": "Original mixer handle storage for active-channel checks and spatial audio calls; SDL audio uses separate handles, excluded from gameplay state comparison."
+    },
+    "g_centered_audio_gain": {
+      "skip": "Original mixer gain left/right pair consumed by NovaAudio_QueueCenteredSound; the port computes the spatial gain in NovaWeapon_ComputeSpatialFireGain without reading it."
+    },
+    "g_mixer_enabled": {
+      "skip": "Original mixer master-enable byte; the SDL audio path has no equivalent global, so the port neither seeds nor compares it."
+    },
+    "g_frame_tick_count_60hz": {
+      "port": "tick_60hz",
+      "why": "NovaTime_GetTickCount60Hz (0x004d5e10) returns this 1/60 s counter; the port re-derives GameState::tick_60hz from the gameplay clock each frame, and elapsed-time fields compare against the same counter."
+    },
+    "g_input_helper_thread_started": {
+      "skip": "Input-helper-thread latch at 0x00865864. A real session has the thread running, so pin the slot to 1 (the early-return arm) and skip it: the port has no thread and re-derives the tick from its platform clock."
+    },
+    "g_gameplay_time_frozen": {
+      "skip": "Original global pause flag at 0x00596d3b; the port models the frozen state structurally (the paused paths are not entered) instead of reading a flag."
+    },
     "g_weapon_defs": {
       "port": "scenario.weapons",
       "type": "WeaponDef",
@@ -79,8 +153,40 @@
       "port": "inventory.outfit_owned_count",
       "why": "The player's owned count per zero-based outfit id (0x200 shorts)."
     },
+    "g_nova_control_bits": {
+      "port": "control.bits",
+      "why": "Original stores one byte per control bit (b0..b9999); the port stores it as a bitset. The element index is the same bit number, so g_nova_control_bits[i] sets control.bits[i]."
+    },
+    "g_player_is_male": {
+      "port": "control.male",
+      "why": "The 'g' token's gender flag; the port keeps it on PilotControlState.male."
+    },
+    "g_current_game_year": {
+      "port": "date.year",
+      "why": "First short of the {year, month, day} calendar triple at 0x00735458; the port keeps it in GameState::date."
+    },
+    "g_current_game_month": {
+      "port": "date.month",
+      "why": "Second short of the calendar triple; 1-based and allowed past 12, matching GameState::date.month."
+    },
+    "g_current_game_day_of_month": {
+      "port": "date.day",
+      "why": "Third short of the calendar triple; GameState::date.day."
+    },
+    "g_in_flight": {
+      "port": "in_flight",
+      "why": "Transient in-flight interaction byte at 0x00773eea; the port keeps it as GameState::in_flight."
+    },
     "g_player_max_armor_cache": {
-      "unmapped": "Ship_ComputeShipMaxArmor (0x004637a0) reads the player's lazily cached max armor, while the port's NovaAi_ComputeMaxArmorPoints recomputes it from the class and outfits; the invented cache is independent of the invented class, so the run cannot be compared faithfully."
+      "skip": "Internal derived cache: the global review generator initializes it to -1.0 so Ship_ComputeShipMaxArmor (0x004637a0) computes armor from the same class/outfit inputs as the port. Cache-fill writes are internal; warm-cache reuse and the license-token override are outside this comparison policy. Do not use independently sampled populated-cache inputs with this skip."
+    },
+    "g_granted_map_outfit_latch": {
+      "port": "control.map_grant_latch",
+      "why": "Outfit_GrantOutfitToPlayer (0x00427770) sets this when a map-reveal (ModType 16) outfit is consumed, blocking further map purchases until the outfitter reopens; the port keeps the same latch on PilotControlState."
+    },
+    "g_granted_clean_record_outfit_latch": {
+      "port": "control.record_grant_latch",
+      "why": "Outfit_GrantOutfitToPlayer (0x00427770) sets this when a clean-record (ModType 21) outfit is consumed; the port keeps the same latch on PilotControlState."
     },
     "g_system_defs_ptr": {
       "port": "scenario.systems",
@@ -108,16 +214,40 @@
         "mod_val_4": "alt_mod_vals[2]"
       }
     },
+    "BeamHit": {
+      "fields": {
+        "decay_counter": "animation_counter"
+      }
+    },
+    "ShotState": {
+      "fields": {
+        "life_time": "life_ticks_remaining",
+        "sprite_ref": {
+          "skip": "Original sprite container/reference handle; the port defers shot sprite containers to rendering and looks the sprite up from weapon_id each frame."
+        },
+        "turret_tracking_roll": {
+          "skip": "Per-shot turret-tracking roll consumed by Weapon_CanWeaponHitTarget (0x00426ef0); the port computes the roll in NovaWeapon_SpawnProjectile and does not retain it on ActiveShot."
+        }
+      }
+    },
     "WeaponDef": {
       "fields": {
+        "reload_interval_ticks": "reload_ticks",
+        "effective_range_px": "range_scalar",
+        "+0x5c": "range_scalar",
+        "field_0x5c": "range_scalar",
+        "range_scalar": "trail_particle_speed_variants[0]",
         "ammo_or_energy_cost_code": "ammo_type",
         "flags_primary": "flags",
         "shot_sprite_set_id": "sprite_id",
-        "fire_sound_slot": "fire_sound"
+        "fire_sound_slot": "fire_sound",
+        "shot_random_spread": "inaccuracy"
       }
     },
     "GovtDef": {
       "fields": {
+        "rank_privileges[0]": "rank_privileges.no_auto_attack",
+        "rank_privileges[1]": "rank_privileges.always_land",
         "reinforcement_inhibited": {
           "unmapped": "The assistance port recomputes government-class inhibition from owned outfits instead of reading independently sampled cached bytes."
         }
@@ -125,9 +255,20 @@
     },
     "ShipState": {
       "fields": {
+        "license_seed": {
+          "skip": "Anti-piracy license-seed field (+0xC938), read only by the leading five-pair integrity check in NovaAi_AcquirePrimaryTarget (0x0040e020) and deliberately omitted from the clean-room Ship. The port never reads it and always treats every copy as registered, so the slot is neither an input nor a compared effect. A real mid-game session carries a random seed that does not match the five magic pair constants (the check only fires on a known tampered seed), so skipping does not change the compared behavior."
+        },
         "weapon_banks[*].mounted_count": "weapon_banks[*].mounted",
         "weapon_banks[*].fire_cooldown": "weapon_banks[*].cooldown",
-        "weapon_banks[*].burst_counter": "weapon_banks[*].burst"
+        "weapon_banks[*].burst_counter": "weapon_banks[*].burst",
+        "ai_secondary_target_slot": {
+          "path": "ai_secondary_target_slot",
+          "add": 128,
+          "preserve": [
+            -1
+          ],
+          "why": "Ghidra ShipState +0x6C holds a 0-based g_stellar_defs index (or a ship slot) while the port stores every stellar reference as a 0x80-based resource id (game_state.hpp documents the rebase, reversed only at the pilot-save boundary and in MissionReferenceStellar). Ship-slot uses share the field, so the offset only holds for the stellar case; Mission_ResolveMissionStellarTargets (0x0043d240) is currently the only target that reads it."
+        }
       }
     },
     "ShipClassDef": {
@@ -154,6 +295,35 @@
         }
       }
     },
+    "MissionDef": {
+      "fields": {
+        "cargo_type": "cargo_type_resource",
+        "pay_val": "resource_delta_or_cost",
+        "present": {
+          "skip": "Port-only loader presence flag. The original's runtime MisnDef table has no equivalent: the caller iterates only the resource ids the loader filled, and Mission_ResolveMissionStellarTargets (0x0043d240) has no presence guard at all. The port no longer guards on it there, so there is no original slot to seed or compare."
+        }
+      }
+    },
+    "MissionTargetResolution": {
+      "fields": {
+        "pay_val": "priority_payload",
+        "deadline_hour": {
+          "skip": "Sub-day deadline fields; Mission_ComputeDateAfterSteps (0x0043f080) writes only {year,month,day} and the port models only those three."
+        },
+        "deadline_minute": {
+          "skip": "Sub-day deadline field not modelled by the port."
+        },
+        "deadline_second": {
+          "skip": "Sub-day deadline field not modelled by the port."
+        },
+        "deadline_day_of_week": {
+          "skip": "Sub-day deadline field not modelled by the port."
+        },
+        "padding_1e": {
+          "skip": "Struct padding in the original; not state."
+        }
+      }
+    },
     "StellarDef": {
       "fields": {
         "map_x": "pos_x",
@@ -164,6 +334,53 @@
     }
   },
   "targets": {
+    "0x0041fd30": {
+      "args": {
+        "apply_random_spread": {
+          "const": 1,
+          "why": "NovaWeapon_SpawnProjectile splits the original's always-on spread jitter into a caller flag the original has no counterpart for. Shot_SpawnShotFromWeapon (0x0041fd30) is the fire path, so the faithful value is 1 (true)."
+        }
+      }
+    },
+    "0x0049d640": {
+      "args": {
+        "param_1": "base_price",
+        "param_2": "scale",
+        "param_3": "item_tech",
+        "param_4": "stellar_tech"
+      },
+      "why": "Outfit_ComputeScaledPurchasePrice takes (price, float scale, item tech, stellar tech); NovaLanded_ScaledStorePrice takes (price, item tech, stellar tech, float scale). Positional inference cannot map the reordered arguments."
+    },
+    "0x0046e790": {
+      "args": {
+        "stellar_id": {
+          "add": 128,
+          "preserve": [
+            -1
+          ],
+          "why": "The original compares its zero-based stellar id against the SystemDef nav ids; the port's nav_defs hold resource ids, so the argument must be rebased with the same rule as SystemDef.nav_stellar_ids[*] to stay comparable."
+        }
+      },
+      "why": "System_FindSystemContainingStellar; both the search key and the nav table carry the same zero-based id encoding, so both get add:128."
+    },
+    "0x00449020": {
+      "args": {
+        "param_1": {
+          "skip": "The cursor is in/out state into the shared NCB buffer; the port takes the expression text directly, so the cursor is neither an input nor a compared effect."
+        },
+        "param_1[*]": {
+          "skip": "The cursor's value into the shared NCB buffer; the port advances its own iterator, so it is not compared."
+        }
+      },
+      "strings": {
+        "expression": {
+          "global": "g_reaction_script_buffer",
+          "offset": "arg.param_1[*]",
+          "extent": 8192,
+          "why": "Original takes a short cursor into the shared NCB buffer (NovaExpression_EvaluateBoolean 0x00449020); the port takes the text as a string_view. At a top-level entry the cursor is always 0, so the recorded buffer from its base is the expression. Its data inputs (control bits, gender) are mapped to GameState so the host can rebuild ControlExpressionState."
+        }
+      }
+    },
     "0x0040c790": {
       "return": {
         "add": -128,

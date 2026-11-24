@@ -21,12 +21,20 @@ HAS_DATA = any((REPO / "EV Nova" / "Nova Files").glob("Nova Data *.rez"))
 
 
 class ProjectTests(unittest.TestCase):
+    def test_provider_prompt_examples_are_valid_without_cross_field_reads(self):
+        from sampler import validate
+
+        for line in PROJECT.prompts.sampler_examples.splitlines():
+            if line.strip():
+                validate(line.strip())
+        self.assertIn("construction constraints", PROJECT.prompts.sampler_yes_when)
+
     def test_profile_is_discovered_from_repo_and_nested_directory(self):
         self.assertEqual(projects.discover(REPO), HERE / projects.FILE_NAME)
         self.assertEqual(projects.discover(REPO / "src/game"), HERE / projects.FILE_NAME)
 
     def test_evnova_project_renders(self):
-        from bounds import build_prompt
+        from construction import build_prompt
         import candidates
         from judges import review_prompt, value_prior_definition
         from model import Assumption
@@ -37,15 +45,15 @@ class ProjectTests(unittest.TestCase):
                  for key in ("g_a", "g_b", "g_c")]
         context = {"g_b": {"revision_reason": "blamed"},
                    "g_c": {"revision_reason": "cov", "coverage_frontier": {"id": "e"}}}
-        bounds = build_prompt({"F": "int F() { return 1; }"}, slots, context, project=PROJECT,
-                              sections=PROJECT.sections([s.key for s in slots]))
+        construction = build_prompt({"F": "int F() { return 1; }"}, slots, context, project=PROJECT,
+                                    sections=PROJECT.sections([s.key for s in slots]))
         review = review_prompt(Path("b.md"), PROJECT)
         jev = str(value_prior_definition(PROJECT))
-        for rendered in (bounds, review, jev):
+        for rendered in (construction, review, jev):
             self.assertNotIn("{{", rendered)
         for needle in ("scenario_stats", "port_source", "reference_search",
                        "## Scenario families", "## Our C++ port"):
-            self.assertIn(needle, bounds)
+            self.assertIn(needle, construction)
         self.assertIn("mid-game EV Nova session", jev)
 
 

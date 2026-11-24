@@ -31,11 +31,26 @@ FAMILIES: dict[str, tuple[bytes, str, str]] = {
     "g_weapon_defs": (b"w\x91ap", "weapons", "DecodeWeapon"),
     "g_stellar_defs": (b"sp\x9ab", "stellars", "DecodeStellar"),
     "g_government_defs": (b"g\x9avt", "governments", "DecodeGovernment"),
+    "g_system_defs_ptr": (bytes.fromhex("73d87374"), "systems", "DecodeSystem"),
+    "g_random_encounter_fleet_defs": (b"fl\x91t", "fleets", "DecodeFleet"),
+    "g_dude_defs": (bytes.fromhex("649f6465"), "dudes", "DecodeDude"),
+    "g_pers_defs": (bytes.fromhex("70917273"), "pers", "DecodePers"),
+}
+# Ghidra field -> the port decoder's field when the two names differ.
+FIELD_ALIASES: dict[str, dict[str, str]] = {
+    "g_system_defs_ptr": {"nav_stellar_ids": "nav_defs"},
+}
+# Ghidra field -> payload value transform into the runtime table's domain. The
+# original loader rebases some fields on the way into its fixed table.
+FIELD_TRANSFORMS: dict[tuple[str, str], Callable[[int], int]] = {
+    # 0x004bd3c0: valid [0x80,0x87f] stellars are rebased to zero-based ids;
+    # anything else (including an undefined stellar) becomes -1.
+    ("g_system_defs_ptr", "nav_stellar_ids"): lambda v: v - 0x80 if 0x80 <= v <= 0x87F else -1,
 }
 SOURCE = Path("src/game/scenario_data.cpp")
 TOP_VALUES = 8
 MAX_RESOURCES = 16
-_READ = re.compile(r"ReadBe(?P<signed>I?)(?P<bits>8|16|32)\(\s*\w+\s*,\s*(?P<offset>0x[0-9a-fA-F]+|\d+)\s*\)")
+_READ = re.compile(r"ReadBe(?P<signed>I?)(?P<bits>8|16|32)\(\s*\w+\s*,\s*(?P<offset>0x[0-9a-fA-F]+|\d+)[^)]*\)")
 
 
 def _rez_module(repo: Path) -> Any:
@@ -118,15 +133,15 @@ def slot_hint(repo: Path, key: str) -> dict[str, Any] | None:
     port's decoder for that table (a renamed or derived field has no hint;
     the model can still ask for `scenario_loader` and `scenario_stats`).
     """
-    match = re.fullmatch(r"(g_\w+)\[\*\]\.(\w+)", key)
+    match = re.fullmatch(r"(g_\w+)\[\*\]\.(\w+)(?:\[\*\])?", key)
     if not match or match[1] not in FAMILIES:
         return None
     type_code, family, decoder = FAMILIES[match[1]]
     source = decoder_source(repo, decoder)
     if not source:
         return None
-    field = match[2]
-    hits = [line for line in source.splitlines() if re.search(rf"\.{re.escape(field)}(\[\d+\])?\s*=", line)]
+    field = FIELD_ALIASES.get(match[1], {}).get(match[2], match[2])
+    hits = [line for line in source.splitlines() if re.search(rf"\.{re.escape(field)}(\[\w+\])?\s*=", line)]
     reads = [found[0] for line in hits if len(found := list(_READ.finditer(line))) == 1]
     # Ghidra 0x004bd3c0: negative Holds clears +0xa40 and is negated in the signed-short capacity.
     # The second assignment is normalization, not another payload field.
@@ -136,7 +151,9 @@ def slot_hint(repo: Path, key: str) -> dict[str, Any] | None:
     read = reads[0]
     width = int(read["bits"]) // 8
     offset = int(read["offset"], 0)
-    transform = (lambda v: ((abs(v) + 32768) % 65536) - 32768) if normalized_holds else None
+    transform = FIELD_TRANSFORMS.get((match[1], match[2]))
+    if normalized_holds:
+        transform = lambda v: ((abs(v) + 32768) % 65536) - 32768
     stats = field_stats(repo, type_code, offset, width, bool(read["signed"]), transform)
     if stats is None:
         return None

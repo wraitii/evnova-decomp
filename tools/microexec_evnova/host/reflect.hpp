@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +27,7 @@
 #include <vector>
 
 #include "game/game_state.hpp"
+#include "game/landed_store.hpp"
 #include "host.hpp"
 #include "trace.hpp"
 
@@ -76,6 +78,10 @@ template <typename T> struct IsVector : std::false_type {};
 template <typename E, typename A>
 struct IsVector<std::vector<E, A>> : std::true_type {};
 
+template <typename T> struct IsBitset : std::false_type {};
+
+template <std::size_t N> struct IsBitset<std::bitset<N>> : std::true_type {};
+
 template <typename T>
 concept Text =
     std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>;
@@ -122,6 +128,8 @@ template <typename T> [[nodiscard]] std::string KindOf() {
         "array:{}:{}", std::tuple_size_v<V>, KindOf<typename V::value_type>());
   } else if constexpr (IsVector<V>::value) {
     return "vector:" + KindOf<typename V::value_type>();
+  } else if constexpr (IsBitset<V>::value) {
+    return std::format("bitset:{}", V{}.size());
   } else if constexpr (Reflected<V>) {
     return "record:" + std::string(Fields<V>::kName);
   } else {
@@ -191,6 +199,8 @@ void Collect(T &value, const std::string &path, LeafRuns &runs) {
            false,
            KindOf<V>(),
            &FormatLeaf<V>);
+  } else if constexpr (IsBitset<V>::value) {
+    return; // an unspecified word layout; the bridge sets the bits the run read
   } else if constexpr (Indexable<V>) {
     using E = std::remove_cv_t<typename V::value_type>;
     if constexpr (std::is_same_v<V, std::vector<bool>>) {
@@ -262,7 +272,23 @@ void Walk(T &target, std::span<const Step> rest, const Op &op) {
     return;
   }
   const Step &step = rest.front();
-  if constexpr (Indexable<V>) {
+  if constexpr (IsBitset<V>::value) {
+    if (step.is_index && rest.size() == 1) {
+      if (op.kind == OpKind::kSet) {
+        if constexpr (!std::is_const_v<T>) {
+          target.set(step.index, Convert<bool>(op.value));
+          return;
+        }
+      } else if (op.kind == OpKind::kSize) {
+        if (op.count != target.size()) {
+          throw CaseError(std::format("the port bitset is fixed at {} entries",
+                                      target.size()));
+        }
+        return;
+      }
+    }
+    throw Unbound{};
+  } else if constexpr (Indexable<V>) {
     if (step.is_index) {
       Walk(At(target, step.index), rest.subspan(1), op);
       return;
@@ -307,6 +333,13 @@ template <typename V>
 concept Context =
     std::is_same_v<V, game::GameState> || std::is_same_v<V, game::ScenarioData>;
 
+// A parameter the host derives from the GameState it already holds, rather
+// than from the case arguments: the callback bundle an evaluator is called
+// with. The bridge maps the original's data onto GameState, so the same
+// builders production uses can reconstruct the callbacks.
+template <typename V>
+concept DerivedContext = std::is_same_v<V, game::ControlExpressionState>;
+
 // How a parameter of type P is supplied, or why it cannot be: the whole
 // GameState (or its scenario) the bridge populated; a fresh record built from
 // the `<name>.<path>` arguments; or one scalar argument.
@@ -318,6 +351,8 @@ template <typename P> [[nodiscard]] constexpr std::string_view ParamProblem() {
   if constexpr (std::is_pointer_v<V>) {
     return "pointer parameter";
   } else if constexpr (Context<V>) {
+    return kRef ? "" : "context passed by value";
+  } else if constexpr (DerivedContext<V>) {
     return kRef ? "" : "context passed by value";
   } else if constexpr (Scalar<V>) {
     return !kRef || kConstRef ? "" : "scalar out-parameter";
@@ -336,6 +371,8 @@ template <typename P> [[nodiscard]] std::string ParamKind() {
     return "state";
   } else if constexpr (std::is_same_v<V, game::ScenarioData>) {
     return "scenario";
+  } else if constexpr (DerivedContext<V>) {
+    return "state";
   } else if constexpr (!ParamProblem<P>().empty()) {
     return "unsupported";
   } else {
@@ -365,6 +402,8 @@ public:
       context_ = &state;
     } else if constexpr (std::is_same_v<V, game::ScenarioData>) {
       context_ = &state.scenario;
+    } else if constexpr (DerivedContext<V>) {
+      owned_.emplace(NovaLanded_ControlExpressionState(state));
     } else if constexpr (Text<V>) {
       const auto it = args.find(name);
       if (it == args.end() || !it->second.bytes) {
@@ -406,7 +445,7 @@ public:
   // Appends the leaves of a record parameter the host built, under the
   // argument's name (the path the bridge uses for its inputs).
   void CollectLeaves(std::string_view name, LeafRuns &runs) {
-    if constexpr (!Context<V> && !Scalar<V> && !Text<V>) {
+    if constexpr (!Context<V> && !DerivedContext<V> && !Scalar<V> && !Text<V>) {
       Collect(*owned_, std::string(name), runs);
     }
   }

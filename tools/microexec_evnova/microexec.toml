@@ -6,10 +6,10 @@ root = "../.."
 name = "EV Nova"
 image = "EV Nova/EV Nova.exe"
 state_dir = "analysis/microexec"
-ghidra = "http://127.0.0.1:8166"
+ghidra = "http://127.0.0.1:8167"
 plugins = ["tools/microexec_evnova/scenario.py"]
-# Verified 0.0 at 0x00575744 and 0x00575000; writable .data still contains immutable compiler constants.
-image_constants = ["FLOAT_ZERO", "FLOAT_00575000"]
+# Verified file-backed zero constants; writable .data also contains immutable compiler constants.
+image_constants = ["FLOAT_ZERO", "FLOAT_00575000", "DAT_005751fc", "DAT_005754d8", "DAT_00575720"]
 
 [prompts]
 program = "the original EV Nova executable (Ambrosia, 2002; Windows Metrowerks CodeWarrior x86 build)"
@@ -20,18 +20,22 @@ hints = """
   (resource id 128 is element 0); -1 marks "none". Sentinels belong in
   `values` only when the code clearly handles them.
 - Element 0 of `g_ship_states` is the player; the other elements are NPC ships.
+- Pointer/chain fields (a system's `visible_parent_system_id`, a linked-list next,
+  a visibility root) must stay acyclic: sample a parent as -1 or a lower element
+  index so the walk terminates. A cyclic chain spins the original forever.
 """
-sampler_yes_when = "The value depends on other state or on which array element it is: e.g. most ships are in the player's system, a count is non-zero only for the few outfits the player owns, element 0 (the player) differs from NPC elements, one field must agree with another."
+sampler_yes_when = "The distribution needs a whole scenario record, a string, or element-dependent sampling: e.g. a count is non-zero only for the few outfits the player owns, or element 0 (the player) differs from NPC elements. Providers propose data without read(); cross-field relationships belong in construction constraints."
 sampler_examples = """
-  read("g_ship_states[0].current_system_id") if index and chance(0.85) else integer(0, 2047)
+  integer(0, 2047) if index else 0  # proposal only; use a constraint to place NPCs in the player's system
   log_integer(1, 20) if index in per_run("owned_outfits", lambda: sample(range(512), integer(8, 25))) else 0
   (lambda s: s[index] if index < len(s) else 0)(per_run("condition", lambda: [ord(c) for c in choice(["b1", "b0", "(b1&b2)", "p1.5", "g0"])] + [0]))  # NUL-terminated NCB expression read byte by byte
+  -1 if index == 0 or chance(0.5) else integer(0, index - 1)  # parent/next pointer: -1 or a lower element index, so chain walks stay acyclic and terminate
 """
 
 [callees]
 rng = ["NovaRandom_Range"]
 # CString_Length must scan the actual recorded string bytes, not return an invented length.
-# Pure math helpers (table lookups, atan2, distances): emulating them keeps runs comparable instead of `stubbed`.
+# All callees execute by default; retain these explicit entries for existing profiles.
 run = ["CString_Length", "Math_LookupAngleSine", "Math_LookupAngleCosine", "Math_AngleFromVector2D", "Math_BearingFromPointToPoint",
        "Math_SquaredDistance"]
 

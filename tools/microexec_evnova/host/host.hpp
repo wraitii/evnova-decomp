@@ -7,8 +7,10 @@
 // the port headers; the generated target table calls the port function cited
 // for an original address. See tools/microexec_evnova/README.md.
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <optional>
 #include <ostream>
@@ -57,7 +59,18 @@ template <typename T> [[nodiscard]] T Narrow(const Value &value) {
     return static_cast<T>(value.is_real ? value.real
                                         : static_cast<double>(value.integer));
   } else {
-    if (value.is_real || !std::in_range<T>(value.integer)) {
+    if (value.is_real) {
+      // Use an exclusive power-of-two bound: converting an integer maximum
+      // to double can round it up (notably INT64_MAX and UINT64_MAX).
+      const double upper = std::ldexp(1.0, std::numeric_limits<T>::digits);
+      const double lower = std::is_signed_v<T> ? -upper : 0.0;
+      if (!std::isfinite(value.real) || std::trunc(value.real) != value.real ||
+          value.real < lower || value.real >= upper) {
+        throw CaseError("value does not fit the port field");
+      }
+      return static_cast<T>(value.real);
+    }
+    if (!std::in_range<T>(value.integer)) {
       throw CaseError("value does not fit the port field");
     }
     return static_cast<T>(value.integer);

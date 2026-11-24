@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -51,4 +54,49 @@ TEST_CASE("Microexec byte arguments cannot become numeric fields",
   CHECK_THROWS_AS(microexec::Convert<bool>(bytes), microexec::CaseError);
   CHECK_THROWS_AS(microexec::Convert<int>(bytes), microexec::CaseError);
   CHECK_THROWS_AS(microexec::Convert<double>(bytes), microexec::CaseError);
+}
+
+TEST_CASE("Microexec real inputs narrow exactly within integer bounds",
+          "[microexec]") {
+  microexec::Value value;
+  value.is_real = true;
+  for (const double real : {0.0, -0.0, 42.0, -32768.0, 32767.0}) {
+    value.real = real;
+    CHECK(microexec::Narrow<std::int16_t>(value) ==
+          static_cast<std::int16_t>(real));
+  }
+  for (const double real : {0.5,
+                            -0.5,
+                            -32769.0,
+                            32768.0,
+                            std::numeric_limits<double>::infinity(),
+                            -std::numeric_limits<double>::infinity(),
+                            std::numeric_limits<double>::quiet_NaN()}) {
+    value.real = real;
+    CHECK_THROWS_AS(microexec::Narrow<std::int16_t>(value),
+                    microexec::CaseError);
+  }
+  value.real = -1.0;
+  CHECK_THROWS_AS(microexec::Narrow<std::uint16_t>(value),
+                  microexec::CaseError);
+  value.real = 65535.0;
+  CHECK(microexec::Narrow<std::uint16_t>(value) == 65535);
+  value.real = 65536.0;
+  CHECK_THROWS_AS(microexec::Narrow<std::uint16_t>(value),
+                  microexec::CaseError);
+
+  value.real = -std::ldexp(1.0, 63);
+  CHECK(microexec::Narrow<std::int64_t>(value) ==
+        std::numeric_limits<std::int64_t>::min());
+  value.real = std::ldexp(1.0, 63);
+  CHECK_THROWS_AS(microexec::Narrow<std::int64_t>(value), microexec::CaseError);
+  value.real = std::nextafter(value.real, 0.0);
+  CHECK(microexec::Narrow<std::int64_t>(value) ==
+        std::numeric_limits<std::int64_t>::max() - 1023);
+  value.real = std::ldexp(1.0, 64);
+  CHECK_THROWS_AS(microexec::Narrow<std::uint64_t>(value),
+                  microexec::CaseError);
+  value.real = std::nextafter(value.real, 0.0);
+  CHECK(microexec::Narrow<std::uint64_t>(value) ==
+        std::numeric_limits<std::uint64_t>::max() - 2047);
 }
