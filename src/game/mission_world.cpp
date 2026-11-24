@@ -542,6 +542,8 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
                                       MissionScriptContext{"stellar schedule"});
       }
     } else {
+      // Ghidra 0x00466cb0 inactive arm: same strength reset, then latch -1.
+      stellar.strength = stellar.strength_capacity;
       stellar.destroyed_days_remaining = -1;
     }
   }

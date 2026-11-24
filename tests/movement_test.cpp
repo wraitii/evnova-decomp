@@ -690,12 +690,15 @@ TEST_CASE("inertialess npc keeps a scalar clamped speed and applies it") {
   CHECK(ship.pos_y == Catch::Approx(-0.4F));
 }
 
-TEST_CASE("inertialess detect excludes ai_control_mode 0x0c") {
+TEST_CASE("inertialess detect excludes squad members in ai_control_mode 0x0c") {
   game::Ship ship;
   game::ShipClass cls = TestShipClass();
   cls.flags_secondary = 0x40;
   CHECK(game::NovaShip_IsInertialess(ship, cls));
+  // Ghidra 0x0046df70: mode 0x0c only vetoes a squad member.
   ship.ai_control_mode = 0x0c;
+  CHECK(game::NovaShip_IsInertialess(ship, cls));
+  ship.squad_leader_ship_slot = 3;
   CHECK_FALSE(game::NovaShip_IsInertialess(ship, cls));
 }
 
@@ -1374,13 +1377,10 @@ TEST_CASE("npc ionization ramp runs in the ship pass after decay") {
 
 // --- Cloak upkeep drain (Ghidra 0x00433050 / Ship_HandleShip) ---
 
-TEST_CASE(
-    "npc cloak upkeep drains fuel at one unit per second per drain unit") {
-  // Ghidra 0x00433050 applies the ModType-17 fuel drain while the hull is past
-  // the cloak-visibility threshold: drain_flags * g_cloak_drain_per_unit_npc
-  // (0x00575470, an x87 double = 1/30) * g_avg_frame_tick_scale. The port uses
-  // the shared kCloakDrainPerUnit; nibble value 1 (bit 0x10) is 1 unit/sec
-  // (Bible ModType 17).
+TEST_CASE("npc cloak upkeep does not drain fuel from class-default cloaks") {
+  // Ghidra 0x00433050 drains fuel by Outfit_GetCloakFuelDrainFlags, but that
+  // helper (0x00464db0) is player-only and returns 0 for NPCs, so an NPC
+  // class-default cloak with a fuel nibble never drains fuel.
   game::GameState state;
   game::Ship ship;
   game::ShipClass cls = TestShipClass();
@@ -1401,7 +1401,7 @@ TEST_CASE(
 
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 3.0F); // 0.1 s
 
-  CHECK(ship.fuel_points == Catch::Approx(10.0F - 3.0F / 30.0F));
+  CHECK(ship.fuel_points == Catch::Approx(10.0F));
   CHECK(ship.shield_points == Catch::Approx(10.0F)); // no shield nibble
 }
 

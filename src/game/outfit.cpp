@@ -506,10 +506,15 @@ bool NovaPlayer_IsInertialess(const GameState &state) {
   return Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener);
 }
 
-// @port 0x00464db0 95% correctness
-// Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags.
+// @port 0x00464db0 100%
+// Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags. Player-only: unlike the
+// shield-drain sibling (0x00465090) there is no class-default branch, so NPCs
+// always report 0.
 std::int16_t NovaOutfit_GetCloakFuelDrainFlags(const GameState &state,
                                                const Ship &ship) {
+  if (ship.ship_instance_id != 0) {
+    return 0;
+  }
   const std::optional<Effect> effect = FindCloakingEffect(state, ship);
   return effect.has_value()
              ? static_cast<std::int16_t>(
@@ -659,7 +664,8 @@ bool Outfit_HasPlayerOwnedAfterburner(const GameState &state) {
 // @port 0x0046E060 75% gameplay
 // Ghidra 0x0046e060 Ship_GetShipFuelBurnRate.
 float Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state) {
-  // _DAT_00575858 is 1/30. The original stops at the first opcode-15 slot in
+  // _DAT_00575858 is the double 0.0333 (not 1/30), narrowed to float. The
+  // original stops at the first opcode-15 slot in
   // an outfit but continues through the table, so a later owned afterburner
   // replaces an earlier value; ownership count does not multiply the rate.
   float rate = 0.0F;
@@ -671,7 +677,7 @@ float Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state) {
     }
     for (const Effect &e : OutfitEffects(state.scenario.outfits[id])) {
       if (e.type == static_cast<std::int16_t>(OutfitEffect::kAfterburner)) {
-        rate = static_cast<float>(e.val) / 30.0F;
+        rate = static_cast<float>(e.val) * static_cast<float>(0.0333);
         break;
       }
     }
@@ -1634,7 +1640,8 @@ void Player_RedistributeFleetCargoOverflow(GameState &state,
       }
       total += static_cast<std::uint16_t>(mission.cargo_qty_tons);
       mission.carrying_resources = false;
-      if ((mission.flags_primary & 0x400U) == 0U && !state.travel.engaging) {
+      if ((mission.flags_primary & 0x400U) == 0U &&
+          !state.system_transition_active) {
         if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11c)) {
           NovaHud_ShowOverlayMessage(
               state, *text, /*duration_frames=*/std::uint64_t{0xf0});
@@ -1683,7 +1690,7 @@ void Player_RedistributeFleetCargoOverflow(GameState &state,
     if (stored <= 0.0F) {
       continue;
     }
-    if (!state.travel.engaging) {
+    if (!state.system_transition_active) {
       // 0x0041f330 truncates trunc(share/5) toward zero for the visible pod
       // count, clamped [1,12].
       const int pods = std::clamp(static_cast<int>(stored / 5.0F), 1, 12);
@@ -1701,7 +1708,7 @@ void Player_RedistributeFleetCargoOverflow(GameState &state,
 
   // 5. Feedback: the jettison cue plus the cargo-jettisoned overlay unless the
   //    mission-failed overlay already fired.
-  if (static_cast<std::int16_t>(total) > 0 && !state.travel.engaging) {
+  if (static_cast<std::int16_t>(total) > 0 && !state.system_transition_active) {
     state.pending_ui_sounds.push_back(GameState::PendingUiSound{4, 1});
     if (!mission_overlay_shown) {
       const std::uint16_t entry = jettison_all ? 0x121 : 0x122;

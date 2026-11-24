@@ -958,8 +958,8 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
 
     // Regeneration shares the block's disabled gate. The capacities use the
     // personality-scaled effective maxima (Ship_ComputeShipMaxShieldPoints/
-    // MaxArmor) and the regen rates the class + class-default-outfit ModType
-    // 5/0x1d bonuses with the behavior-5 x1.333 scale; the original does not
+    // MaxArmor) and the NPC regen rates the bare class ShieldRech/ArmorRech
+    // (shield alone gets the behavior-5 x1.333 scale); the original does not
     // clamp the summed value back to the maximum.
     const float max_shield =
         static_cast<float>(NovaAi_ComputeMaxShieldPoints(state, ship));

@@ -350,9 +350,9 @@ address	name	impl_file	reimpl_pct	comment
 0x00463520	Math_MapPosToPointFloat		0%	
 0x00463550	Ship_ComputeShipMaxShieldPoints	src/game/ship_ai.cpp	100%	
 0x00463b30	Ship_ComputeShipFuelRechargeRate	src/game/ship_ai.cpp	95%	correctness
-0x00463680	Ship_ComputeShipShieldRegenRate	src/game/ship_ai.cpp	95%	correctness
+0x00463680	Ship_ComputeShipShieldRegenRate	src/game/ship_ai.cpp	100%	
 0x004637A0	Ship_ComputeShipMaxArmor	src/game/ship_ai.cpp	100%	
-0x004638E0	Ship_ComputeShipArmorRegenRate	src/game/ship_ai.cpp	95%	correctness
+0x004638E0	Ship_ComputeShipArmorRegenRate	src/game/ship_ai.cpp	100%	
 0x00463A20	Ship_ComputeShipFuelCapacity	src/game/ship_ai.cpp	100%	
 0x00463DC0	Weapon_WeaponCanTrackTarget	src/game/ship_ai_weapons.cpp	100%	
 0x00463E70	Ship_ComputeShipMaxTurnRateDeg	src/game/spaceflight_movement.cpp	55%	gameplay
@@ -369,7 +369,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00464A90	Ship_CanShipEngageTargetUnderCloakRules	src/game/ship_ai.cpp	90%	gameplay
 0x00464B50	Outfit_HasCloakingDevice	src/game/outfit.cpp	95%	correctness
 0x00464C80	Outfit_HasAreaCloakingDevice	src/game/outfit.cpp	100%	
-0x00464DB0	Outfit_GetCloakFuelDrainFlags	src/game/outfit.cpp	95%	correctness
+0x00464DB0	Outfit_GetCloakFuelDrainFlags	src/game/outfit.cpp	100%	
 0x00464E30	Outfit_HasCloakShieldDropOnActivation	src/game/outfit.cpp	95%	correctness
 0x00464F60	Outfit_HasCloakDamageDeactivateFlag	src/game/outfit.cpp	100%	
 0x00465090	Outfit_GetCloakShieldDrainFlags	src/game/outfit.cpp	100%	
@@ -492,9 +492,9 @@ address	name	impl_file	reimpl_pct	comment
 0x0046D4B0	Outfit_RecomputeOutfitDerivedState	src/game/outfit.cpp	70%	gameplay,license
 0x0046DF70	Outfit_ShipIsInertialess	src/game/outfit.cpp	70%	gameplay
 0x0046E060	Ship_GetShipFuelBurnRate	src/game/outfit.cpp	75%	gameplay
-0x0046E120	Stellar_ShipHasGravityShielding	src/game/spaceflight_player_state.cpp	25%	gameplay
+0x0046E120	Stellar_ShipHasGravityShielding	src/game/spaceflight_player_state.cpp	90%	gameplay
 0x0046E210	Stellar_ShipImmuneToStellarCrash	src/game/collision.cpp	95%	correctness
-0x0046E2F0	Ship_AccelerateShipTowardPoint	src/game/spaceflight_player_state.cpp	55%	gameplay
+0x0046E2F0	Ship_AccelerateShipTowardPoint	src/game/spaceflight_player_state.cpp	100%	
 0x0046E3C0	Stellar_IsStellarActive	src/game/targeting.cpp	100%	
 0x0046E3F0	Stellar_StellarTargetsSpriteSetActive	src/game/targeting.cpp	100%	
 0x0046E440	Stellar_IsStellarUsableForTravel	src/game/targeting.cpp	100%	
@@ -551,7 +551,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00475740	Sprite_AddFrame	src/game/sprite_world.cpp	80%	rendering
 0x00475830	Sprite_SetCurrentFrame	src/game/sprite_world.cpp	70%	rendering
 0x00475AF0	Sprite_SetPositionFromCurrentFrameAnchor	src/game/sprite_world.cpp	70%	rendering
-0x00475BE0	Sprite_TestBoundingCircleOverlap	src/game/sprite_mask.cpp	90%	gameplay
+0x00475BE0	Sprite_TestBoundingCircleOverlap	src/game/sprite_mask.cpp	100%	
 0x00475C80	Sprite_TestPixelMaskOverlap	src/game/sprite_mask.cpp	90%	gameplay
 0x00475E20	Sprite_TestOpaquePixelAtPoint	src/nova_app.cpp	80%	ui
 0x00475F70	Sprite_AssignSpriteSet	src/game/sprite_world.cpp	55%	rendering
@@ -615,7 +615,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00488080	NovaMainLoop_UpdateFrame	src/nova_app.cpp	90%	ui
 0x00488380	NovaView_UpdateGameplayViewport	src/game/gameplay_interface.cpp	45%	rendering
 0x00488650	Menu_RunSettingsDialog	src/game/preferences.cpp	95%	ui
-0x00489210	Ship_RunSpaceflightMode	src/game/spaceflight.cpp	12%	gameplay
+0x00489210	Ship_RunSpaceflightMode	src/game/spaceflight.cpp	15%	gameplay
 0x00489D70	Menu_RunNewGameFlow	src/game/new_pilot_flow.cpp	80%	gameplay
 0x0048A7E0	Menu_RunPilotSelectionDialog	src/game/new_pilot_flow.cpp	75%	gameplay,rng
 0x0048ADC0	IntroCinematic_Run	src/game/intro_cinematic.cpp	98%	ui

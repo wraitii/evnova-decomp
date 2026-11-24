@@ -3,6 +3,7 @@
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/math.hpp"
 #include "boarding_plunder.hpp"
 #include "collision.hpp"
 #include "compatibility.hpp"
@@ -15,6 +16,7 @@
 #include "impact_effects.hpp"
 #include "mission.hpp"
 #include "mission_script.hpp"
+#include "nova_math.hpp"
 #include "nova_random.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
@@ -119,8 +121,8 @@ constexpr int kAutoRepairFrameRerollRange = 500;
 namespace {
 
 // @port 0x0043ADB0 10% gameplay
-// @port 0x0046E120 25% gameplay
-// @port 0x0046E2F0 55% gameplay
+// @port 0x0046E120 90% gameplay
+// @port 0x0046E2F0 100%
 // Ghidra 0x0043adb0 Stellar_TickStellarGravityPull (player-side port; NPC
 // iteration/crash consequences not reconstructed). The protected_from_gravity
 // check below ports Stellar_ShipHasGravityShielding (0x0046e120) for the
@@ -130,35 +132,58 @@ namespace {
 // separation (with a tiny-distance floor), then adds the polar result to the
 // ship velocity. The player is exempt with either opcode 38 (inertial
 // dampener, used by Outfit_ShipIsInertialess) or opcode 41 (gravity
-// resistance, added by Stellar_ShipHasGravityShielding).
+// resistance, added by Stellar_ShipHasGravityShielding), or by the class
+// Flags3 0x20 / Flags2 0x40 bits.
 bool Ship_AccelerateShipTowardPoint(GameState &state, float elapsed_ticks) {
   const System *const system = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
-  if (system == nullptr || elapsed_ticks <= 0.0F) {
+  if (system == nullptr) {
     return false;
   }
 
-  bool gravity_present = false;
+  // Stellar_ShipHasGravityShielding (0x0046e120): class Flags3 0x20, the
+  // Outfit_ShipIsInertialess gate (class Flags2 0x40 or owned opcode 38), or
+  // an owned opcode-41 gravity resistor.
+  const ShipClass *const cls = ShipClassFor(state, state.player);
   const bool protected_from_gravity =
+      (cls != nullptr &&
+       ((cls->flags3 & 0x20) != 0 || (cls->flags_secondary & 0x40) != 0)) ||
       Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener) ||
       Outfit_HasOwnedEffect(state, OutfitEffect::kGravityResist);
+  bool gravity_present = false;
   for (const std::int16_t stellar_id : system->nav_defs) {
     const Stellar *const stellar = state.scenario.Stellar(stellar_id);
     if (stellar == nullptr || stellar->gravity == 0) {
       continue;
     }
+    // g_gravity_pull_active latches for any gravity stellar in the system.
     gravity_present = true;
     if (protected_from_gravity) {
       continue;
     }
-    const float dx = static_cast<float>(stellar->pos_x) - state.player.pos_x;
-    const float dy = static_cast<float>(stellar->pos_y) - state.player.pos_y;
-    const float distance_sq = std::max(dx * dx + dy * dy, 1.0F);
-    const float distance = std::sqrt(distance_sq);
+    // Ship_AccelerateShipTowardPoint (0x0046e2f0): separation scaled by
+    // DOUBLE_00575738 (0.01), squared distance floored at DAT_00575860
+    // (30.0f), accel = gravity * frame_scale / d2 along the integer-degree
+    // bearing ship -> stellar (Math_BearingFromPointToPoint).
+    const float target_x = static_cast<float>(stellar->pos_x);
+    const float target_y = static_cast<float>(stellar->pos_y);
+    const float sx = (state.player.pos_x - target_x) * 0.01F;
+    const float sy = (state.player.pos_y - target_y) * 0.01F;
+    const float distance_sq = std::max(sx * sx + sy * sy, 30.0F);
     const float accel =
         static_cast<float>(stellar->gravity) * elapsed_ticks / distance_sq;
-    state.player.vel_x += dx / distance * accel;
-    state.player.vel_y += dy / distance * accel;
+    const bool coincident =
+        state.player.pos_x == target_x && state.player.pos_y == target_y;
+    const int bearing_deg =
+        coincident
+            ? 0
+            : static_cast<int>(BearingDeg(
+                  state.player.pos_x, state.player.pos_y, target_x, target_y));
+    constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+    evnova::util::AddPolar(static_cast<float>(bearing_deg) * kDegToRad,
+                           accel,
+                           state.player.vel_x,
+                           state.player.vel_y);
   }
   return gravity_present;
 }

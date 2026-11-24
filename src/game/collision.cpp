@@ -2068,7 +2068,11 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     return false;
   }
   if (target.ship_class_id < 0 ||
-      target.ship_class_id == kShipClassInvalidSentinel) {
+      target.ship_class_id >= kShipClassInvalidSentinel) {
+    return false;
+  }
+  // Ghidra 0x00426ef0: shot->life_time <= DAT_005751fc (0.0) rejects.
+  if (shot.life_ticks_remaining <= 0.0F) {
     return false;
   }
 

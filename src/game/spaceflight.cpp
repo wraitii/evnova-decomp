@@ -27,6 +27,7 @@
 #include "nova_font.hpp"
 #include "nova_random.hpp"
 #include "outfit.hpp"
+#include "pilot_file.hpp"
 #include "player_info_window.hpp"
 #include "radar_panel.hpp"
 #include "route_map.hpp"
@@ -3053,7 +3054,7 @@ void NovaShip_TickNpcAi(GameState &state, float elapsed_ticks) {
 }
 
 // ---------------------------------------------------------------------------
-// @port 0x00489210 12% gameplay
+// @port 0x00489210 15% gameplay
 // Ghidra 0x00489210 Ship_RunSpaceflightMode.
 void NovaSpaceflight_Run(SdlPlatform &platform,
                          SdlAudio &audio,
@@ -3078,6 +3079,18 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   // Frame_SpaceflightLoop, then tears the mode back down to the menu shell.
   bool returning_to_menu = false;
   NovaFrame_SpaceflightLoop(platform, audio, state, returning_to_menu, prefs);
+  // Ghidra 0x00489210 (after Frame_SpaceflightLoop): Strict Play permadeath.
+  // A destroyed player ship that is not the escape pod deletes
+  // Pilots:<g_player_name>.plt via PilotFile_Delete.
+  if (state.pilot.strict_play && IsShipDestroyed(state.player) &&
+      state.player.ship_class_id != kEscapePodShipClassIndex &&
+      !state.pilot.first_name.empty()) {
+    if (const auto directory = PilotFileSaveDirectory()) {
+      NovaLog::Info("strict play: deleting pilot '{}' after ship loss",
+                    state.pilot.first_name);
+      PilotFileDelete(*directory / (state.pilot.first_name + ".plt"));
+    }
+  }
   NovaFrame_CancelCombatChatter(state, audio);
   // NovaMainLoop_Run's mode-exit teardown (0x00486c8a..0x00486cbe) raises the
   // five "clear transient sprites" latches before the menu shell resumes, so

@@ -105,7 +105,7 @@ bool SpriteMask_TestOverlap(const SpriteMask &a,
   return false;
 }
 
-// @port 0x00475be0 90% gameplay
+// @port 0x00475be0 100%
 bool SpriteMask_TestBoundingCircleOverlap(int a_width,
                                           int a_height_ignored,
                                           float a_world_x,
@@ -149,6 +149,18 @@ bool CollisionMask_TestContact(const CollisionMaskBinding &a,
                                   b.anchor_x,
                                   b.anchor_y);
   }
+  if (a.HasMask() && b.HasMask()) {
+    // Ghidra 0x00475be0: the circle is sized from each frame's own width.
+    return SpriteMask_TestBoundingCircleOverlap(a.mask->width,
+                                                a.mask->height,
+                                                a_world_x,
+                                                a_world_y,
+                                                b.mask->width,
+                                                b.mask->height,
+                                                b_world_x,
+                                                b_world_y);
+  }
+  // Mask-less fallback (archive-free tests): caller-supplied radii.
   const int dx = static_cast<int>(std::lround(a_world_x - b_world_x));
   const int dy = static_cast<int>(std::lround(a_world_y - b_world_y));
   const int radius =

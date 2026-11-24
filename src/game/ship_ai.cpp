@@ -359,44 +359,12 @@ double NovaAi_ComputeShipFuelCapacity(const GameState &state,
 
 namespace {
 
-// Sum a modifier over the class default-outfit loadout, mirroring the
-// original's four ModType/ModVal slots per outfit (OutfitDef name-0x26 stride).
-// `scale_per_unit` converts one ModVal unit into the per-frame rate.
-float SumClassDefaultOutfitMod(const GameState &state,
-                               const ShipClass &cls,
-                               std::int16_t mod_type,
-                               float scale_per_unit) {
-  float total = 0.0F;
-  for (std::size_t i = 0; i < cls.default_outfit_ids.size(); ++i) {
-    const std::int16_t count = cls.default_outfit_counts[i];
-    if (count <= 0) {
-      continue;
-    }
-    const Outfit *outfit = state.scenario.Outfit(cls.default_outfit_ids[i]);
-    if (outfit == nullptr) {
-      continue;
-    }
-    if (outfit->mod_type == mod_type) {
-      total += static_cast<float>(count) *
-               (static_cast<float>(outfit->mod_val) * scale_per_unit);
-    }
-    for (std::size_t slot = 0; slot < outfit->alt_mod_types.size(); ++slot) {
-      if (outfit->alt_mod_types[slot] == mod_type) {
-        total +=
-            static_cast<float>(count) *
-            (static_cast<float>(outfit->alt_mod_vals[slot]) * scale_per_unit);
-      }
-    }
-  }
-  return total;
-}
-
 // k_behavior5_difficulty_mult_f64 (0x00575760) = 1.333.
 constexpr float kBehavior5DifficultyMult = 1.333F;
 
 } // namespace
 
-// @port 0x00463680 95% correctness
+// @port 0x00463680 100%
 // Ghidra 0x00463680 Ship_ComputeShipShieldRegenRate.
 // NPC branch (the player's runs inside Outfit_ComputePlayerEffectiveStats).
 float NovaAi_ComputeShipShieldRegenRate(const GameState &state,
@@ -409,17 +377,16 @@ float NovaAi_ComputeShipShieldRegenRate(const GameState &state,
   if (cls == nullptr) {
     return 0.0F;
   }
-  // k_outfit_recharge_scale_f64 = 0.001: ModVal 1000 = +1 point/frame.
-  float rate =
-      cls->shield_recharge + SumClassDefaultOutfitMod(state, *cls, 5, 0.001F);
-  rate = std::max(0.0F, rate);
+  // Ghidra 0x00463680: NPCs use the bare class ShieldRech; the ModType 5
+  // outfit scan is player-only (the shp loader folds only default-outfit mass).
+  float rate = std::max(0.0F, cls->shield_recharge);
   if (ship.ai_behavior_code == 5) {
     rate *= kBehavior5DifficultyMult;
   }
   return rate;
 }
 
-// @port 0x004638e0 95% correctness
+// @port 0x004638e0 100%
 // Ghidra 0x004638e0 Ship_ComputeShipArmorRegenRate.
 // NPC branch (the player's runs inside Outfit_ComputePlayerEffectiveStats).
 float NovaAi_ComputeShipArmorRegenRate(const GameState &state,
@@ -432,13 +399,9 @@ float NovaAi_ComputeShipArmorRegenRate(const GameState &state,
   if (cls == nullptr) {
     return 0.0F;
   }
-  float rate =
-      cls->armor_recharge + SumClassDefaultOutfitMod(state, *cls, 0x1d, 0.001F);
-  rate = std::max(0.0F, rate);
-  if (ship.ai_behavior_code == 5) {
-    rate *= kBehavior5DifficultyMult;
-  }
-  return rate;
+  // Ghidra 0x004638e0: bare class ArmorRech for NPCs; unlike the shield rate
+  // there is no behavior-5 multiplier (only the player cheat-mode scale).
+  return std::max(0.0F, cls->armor_recharge);
 }
 
 // @port 0x00463b30 95% correctness

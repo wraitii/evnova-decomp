@@ -303,12 +303,16 @@ extern void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
                                                     float elapsed_ticks);
 
 // Whether an NPC ship is on the inertialess movement model: the ship-class
-// flags_secondary bit 0x40 gate (and not in ai_control_mode 0x0c). Ports the
-// NPC branch of Outfit_ShipIsInertialess (0x0046df70); the player's
-// owned-outfit branch is handled separately in the player path.
+// flags_secondary bit 0x40 gate, vetoed only for a squad member
+// (squad_leader_ship_slot != -1) in ai_control_mode 0x0c. Ports the NPC
+// branch of Outfit_ShipIsInertialess (0x0046df70); the player's owned-outfit
+// branch is handled separately in the player path.
 [[nodiscard]] inline bool NovaShip_IsInertialess(const Ship &ship,
                                                  const ShipClass &cls) {
-  return (cls.flags_secondary & 0x40) != 0 && ship.ai_control_mode != 0x0c;
+  if (ship.squad_leader_ship_slot != -1 && ship.ai_control_mode == 0x0c) {
+    return false;
+  }
+  return (cls.flags_secondary & 0x40) != 0;
 }
 
 // External test seam into the per-ship simulation pass (Ghidra scope 4/5 of

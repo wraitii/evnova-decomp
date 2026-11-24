@@ -127,7 +127,8 @@ struct OutfitModPair {
 // adds a random multiple of 1000 credits on top of the base share.
 [[nodiscard]] std::int32_t RollCredits(GameState &state, double v) {
   if (kCreditRollThreshold < v) {
-    const int bound = static_cast<int>(std::ceil(v));
+    // FIST truncation idiom: NovaRandom_Range(trunc((float)v)).
+    const int bound = static_cast<int>(static_cast<float>(v));
     const int roll = RandomBelow(state.rng, bound);
     const double raw = (static_cast<double>(roll) + v) * kCreditScale;
     return TruncToInt(static_cast<float>(raw));
@@ -362,9 +363,9 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
     }
   }
 
-  // A fleet whose accumulated strength dwarfs the player's own hull gets a
-  // flat +10% bonus (compared against the BASE player-class strength x 5).
-  if (player_class->strength * 5 < static_cast<int>(strength_acc)) {
+  // A fleet whose accumulated strength exceeds 5x the TARGET class strength
+  // gets a flat +10% (Ghidra 0x00484230: g_ship_class_defs[target].strength).
+  if (target_class->strength * 5 < static_cast<int>(strength_acc)) {
     odds += 10.0F;
   }
 
@@ -2546,12 +2547,12 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
   }
 
   // ---- Credits share (only when the victim is the player) -----------------
-  // transfer = credits * odds * 29 * 0.0001 (disasm 0x00412d6a: odds*29 then
-  // two 0.01 multiplies; the decompiler's 0x1e is a misread).
+  // transfer = credits * odds * 30 * 0.0001 (disasm 0x00412d7b: SHL 5 then
+  // SUB LEA [ECX+ECX*1] = odds*30, then two 0.01 multiplies).
   std::int32_t credits_taken = 0;
   if (boarded.ship_instance_id == 0) {
     const float raw =
-        static_cast<float>(static_cast<double>(29 * static_cast<int>(odds)) *
+        static_cast<float>(static_cast<double>(30 * static_cast<int>(odds)) *
                            0.01 * static_cast<double>(boarded.credits) * 0.01);
     credits_taken = TruncToInt(raw);
     boarder.credits += credits_taken;

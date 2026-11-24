@@ -134,7 +134,7 @@ else no cargo/credits offers from the dude path. Bits (Bible):
     005758f8 = 100).
   - + Σ `(-ModVal) * owned` for marine outfits with ModVal < 0 (negative =
     +odds, Bible "−1..−100 increase capture odds by this amount").
-  - if `player_class.strength * 5 < strength_accumulator` (the escort-boosted
+  - if `target_class.strength * 5 < strength_accumulator` (the escort-boosted
     strength sum, not crew) → +10.
   - + `5 - rand(0xb)` (±5 noise).
   - clamp [1, 75] (0x4b).
@@ -149,7 +149,7 @@ crew on both sides (not `capture_power`/crew), plus marine outfits ModType 0x19;
 `odds = crew*100/(crew*2)`, ±10 noise, clamp [10,100]. Boarder-side negative
 marines raise the odds, victim-side lowers them (16-bit wrap arithmetic
 congruent to plain signed adds). The credits share vs the player is
-`odds*29*1e-4` (disasm 0x00412d6a gives 29, not the decompiler's 0x1e=30;
+`odds*30*1e-4` (disasm 0x00412d7b: SHL 5 minus LEA [ECX+ECX*1] = 30x;
 doubles 00575020 = 0.01). The conversion roll is `odds<41 → cheat-only; else
 rand(0x65) <= odds*0.5`, converting the victim to a behavior-6 follower of the
 boarder (armor = max*0.66, shields 0, latch/AI reset). `flags_primary 0x8000`
