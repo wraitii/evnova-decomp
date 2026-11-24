@@ -182,8 +182,18 @@ TEST_CASE("wormholes distinguish linked and random-unlinked destinations") {
 
   CHECK(NovaTravel_SelectWormholeDestination(state, 0x80) == 0x81);
   source.hyperlinks.fill(-1);
-  linked.hyperlinks[0] = 0x80; // linked wormholes are excluded from fallback
+  // Ghidra 0x00456ca0: an unlinked source rejection-samples every available
+  // 0x2000 stellar in another system; drawing the linked wormhole is not
+  // re-rolled but falls back to the source (stay in the current system).
+  linked.hyperlinks[0] = 0x80;
+  for (int i = 0; i < 32; ++i) {
+    const std::int16_t pick = NovaTravel_SelectWormholeDestination(state, 0x80);
+    CHECK((pick == 0x82 || pick == 0x80));
+  }
+  linked.is_available = false;
   CHECK(NovaTravel_SelectWormholeDestination(state, 0x80) == 0x82);
+  unlinked.is_available = false;
+  CHECK(NovaTravel_SelectWormholeDestination(state, 0x80) == -1);
 }
 
 TEST_CASE("hypergate selection accepts only linked visible systems") {

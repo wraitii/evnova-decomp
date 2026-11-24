@@ -620,8 +620,15 @@ float PlayerJumpProgress(const GameState &state) {
 
 } // namespace
 
-// @port 0x00456CA0 75% rng,rendering
-// Ghidra 0x00456ca0 Stellar_EnterWormhole.
+// @port 0x00456CA0 85% rng,rendering
+// Ghidra 0x00456ca0 Stellar_EnterWormhole (destination selection; the caller
+// shows the "Unable to use this wormhole" overlay on -1).
+// Linked source: the visible-link count only gates the attempt; the pick
+// re-rolls NovaRandom_Range(8) over non-empty slots and is NOT re-tested for
+// visibility (original quirk: it can land in an invisible system).
+// Unlinked source: rejection-samples NovaRandom_Range(0x800) over available
+// 0x2000 stellars in another system; if the sample has links or an invisible
+// system the jump falls back to the source stellar in the current system.
 std::int16_t
 NovaTravel_SelectWormholeDestination(GameState &state,
                                      std::int16_t source_stellar_id) {
@@ -629,43 +636,73 @@ NovaTravel_SelectWormholeDestination(GameState &state,
   if (source == nullptr || (source->availability_flags & 0x2000U) == 0U) {
     return -1;
   }
-  std::vector<std::int16_t> candidates;
-  for (const std::int16_t link : source->hyperlinks) {
-    const std::int16_t system = StellarSystem(state, link);
-    if (system >= 0 && NovaSystem_ResolveVisibleForTravel(state, system) >= 0) {
-      candidates.push_back(link);
-    }
-  }
-  if (candidates.empty()) {
-    const bool source_has_links =
-        std::any_of(source->hyperlinks.begin(),
-                    source->hyperlinks.end(),
-                    [](std::int16_t link) { return link >= 0x80; });
-    if (source_has_links) {
+  const auto has_links = [](const Stellar &stellar) {
+    return std::any_of(stellar.hyperlinks.begin(),
+                       stellar.hyperlinks.end(),
+                       [](std::int16_t link) { return link >= 0x80; });
+  };
+  const auto is_visible = [&](std::int16_t system) {
+    return system >= 0 &&
+           NovaSystem_ResolveVisibleForTravel(state, system) >= 0;
+  };
+
+  if (has_links(*source)) {
+    const bool any_visible = std::any_of(
+        source->hyperlinks.begin(),
+        source->hyperlinks.end(),
+        [&](std::int16_t link) {
+          return link >= 0x80 && is_visible(StellarSystem(state, link));
+        });
+    if (!any_visible) {
       return -1;
     }
-    for (std::size_t i = 0; i < state.scenario.stellars.size(); ++i) {
-      const std::int16_t id = static_cast<std::int16_t>(i + 0x80);
-      const Stellar &candidate = state.scenario.stellars[i];
-      if (id == source_stellar_id || !candidate.is_available ||
-          (candidate.availability_flags & 0x2000U) == 0U ||
-          std::any_of(candidate.hyperlinks.begin(),
-                      candidate.hyperlinks.end(),
-                      [](std::int16_t link) { return link >= 0x80; })) {
-        continue;
-      }
-      const std::int16_t system = StellarSystem(state, id);
-      if (system >= 0 && system != state.player.current_system_id &&
-          NovaSystem_ResolveVisibleForTravel(state, system) >= 0) {
-        candidates.push_back(id);
+    for (;;) {
+      const std::int16_t link =
+          source->hyperlinks[static_cast<std::size_t>(RandomBelow(state, 8))];
+      if (link != -1 && StellarSystem(state, link) != -1) {
+        return link;
       }
     }
   }
-  if (candidates.empty()) {
+
+  // Base filter of the rejection loop (0x00457343..0x00457455).
+  const auto base_candidate = [&](std::int16_t id) -> const Stellar * {
+    if (id == source_stellar_id) {
+      return nullptr;
+    }
+    const Stellar *candidate = state.scenario.Stellar(id);
+    if (candidate == nullptr || !candidate->is_available ||
+        (candidate->availability_flags & 0x2000U) == 0U) {
+      return nullptr;
+    }
+    const std::int16_t system = StellarSystem(state, id);
+    if (system == -1 || system == state.player.current_system_id) {
+      return nullptr;
+    }
+    return candidate;
+  };
+  bool any_destination = false;
+  for (std::int16_t index = 0; index < 0x800 && !any_destination; ++index) {
+    const auto id = static_cast<std::int16_t>(index + 0x80);
+    const Stellar *candidate = base_candidate(id);
+    any_destination = candidate != nullptr && !has_links(*candidate) &&
+                      is_visible(StellarSystem(state, id));
+  }
+  if (!any_destination) {
     return -1;
   }
-  return candidates[std::uniform_int_distribution<std::size_t>{
-      0, candidates.size() - 1}(state.rng)];
+  for (;;) {
+    const auto id = static_cast<std::int16_t>(RandomBelow(state, 0x800) + 0x80);
+    const Stellar *candidate = base_candidate(id);
+    if (candidate == nullptr) {
+      continue;
+    }
+    if (!has_links(*candidate) && is_visible(StellarSystem(state, id))) {
+      return id;
+    }
+    // Rejected sample: stay at the source wormhole in the current system.
+    return source_stellar_id;
+  }
 }
 
 // @port 0x00456480 75% gameplay,rendering
@@ -698,8 +735,12 @@ bool NovaTravel_CompleteRestrictedTravel(GameState &state,
   const Stellar *destination = state.scenario.Stellar(destination_stellar_id);
   const std::int16_t stored_system =
       StellarSystem(state, destination_stellar_id);
+  // The hypergate resolves to a visible system; the wormhole enters the raw
+  // stellar system_id (Ghidra 0x00456ca0 sets current_system_id directly).
   const std::int16_t destination_system =
-      NovaSystem_ResolveVisibleForTravel(state, stored_system);
+      kind == RestrictedTravelKind::kHypergate
+          ? NovaSystem_ResolveVisibleForTravel(state, stored_system)
+          : stored_system;
   if (destination == nullptr || destination_system < 0) {
     return false;
   }
@@ -2004,18 +2045,21 @@ void NovaStarmap_NormalizeRoutePlan(GameState &state) {
   }
 }
 
-// @port 0x004A7FC0 90% gameplay
+// @port 0x004A7FC0 100%
 void NovaStarmap_NormalizeRouteToCurrentSystem(GameState &state) {
   auto &route = state.travel.starmap_route;
+  // Ghidra 0x004a7fc0: the comparison includes -1 == -1 (invisible current
+  // system with an empty/invisible hop), and only a raw empty hop clears.
   const std::int16_t first_hop =
-      NovaSystem_ResolveVisibleForTravel(state, route[1]);
+      route[1] == -1 ? std::int16_t{-1}
+                     : NovaSystem_ResolveVisibleForTravel(state, route[1]);
   const std::int16_t current =
       NovaSystem_ResolveVisibleForTravel(state, state.player.current_system_id);
-  if (first_hop != -1 && first_hop == current) {
+  if (first_hop == current) {
     // The ship just arrived at the plotted first hop: consume it.
     route[0] = -1;
     NovaStarmap_NormalizeRoutePlan(state);
-  } else if (first_hop == -1) {
+  } else if (route[1] == -1) {
     route.fill(-1);
   }
 }
