@@ -24,8 +24,10 @@ void WorldWrapPositionRelativeToPlayer(float &x,
                                        float player_y,
                                        float delta_x,
                                        float delta_y) {
-  if (std::abs(x - player_x) < kWorldWrapTrigger &&
-      std::abs(y - player_y) < kWorldWrapTrigger) {
+  // The deltas are truncated to int before the |d| < 15000 test (FIST idiom).
+  constexpr int kTrigger = static_cast<int>(kWorldWrapTrigger);
+  if (std::abs(static_cast<int>(x - player_x)) < kTrigger &&
+      std::abs(static_cast<int>(y - player_y)) < kTrigger) {
     x += delta_x;
     y += delta_y;
   }

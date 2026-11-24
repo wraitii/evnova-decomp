@@ -878,16 +878,18 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   // blind_spot() is false and turreted modes fire through the reach branch.
   const ShipClass *ship_cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  // Ghidra 0x0046b360: Math_ShortestAngleDeltaDeg on the truncated heading
+  // and the short target bearing.
   auto blind_spot = [&](float target_bearing_deg) {
-    const float delta = std::abs(std::remainder(
-        target_bearing_deg - ship.heading * (180.0F / 3.14159265358979323846F),
-        360.0F));
-    if (delta < 46.0F) {
+    const int delta = ShortestAngleDeltaDeg(
+        static_cast<int>(ship.heading * (180.0F / 3.14159265358979323846F)),
+        static_cast<int>(target_bearing_deg));
+    if (delta < 46) {
       return (weapon->flags & 0x1000U) != 0U ||
              (ship_cls != nullptr &&
               (ship_cls->capability_flags & 0x1000U) != 0U);
     }
-    if (delta < 136.0F) {
+    if (delta < 136) {
       return (weapon->flags & 0x2000U) != 0U ||
              (ship_cls != nullptr &&
               (ship_cls->capability_flags & 0x2000U) != 0U);
@@ -899,7 +901,10 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   // Weapon_FireShipWeapons (0x00414550) uses BeamLength + 32 for mode 3 and
   // the post-load projectile range (+0x5c) + 32 for mode 4. Modes 7/8 use the
   // same projectile range envelope for their quadrant checks.
-  const float projectile_turret_reach = weapon->range_scalar + 32.0F;
+  // The projectile envelope is truncated to int (FIST idiom) before the
+  // per-axis |d| < reach tests.
+  const auto projectile_turret_reach =
+      static_cast<float>(static_cast<int>(weapon->range_scalar + 32.0F));
   const float beam_turret_reach =
       static_cast<float>(weapon->beam_length_px) + 32.0F;
 
@@ -953,14 +958,15 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
         // Turreted beam (3) / turreted unguided (4): fire only when the target
         // is NOT in the fixed arc (the turret's relief role) but within reach.
         if (has_target && target != nullptr) {
-          const float tb =
-              BearingDeg(ship.pos_x, ship.pos_y, target->pos_x, target->pos_y);
+          // Math_BearingFromPointToPoint returns an integer (short) bearing.
+          const auto tb = static_cast<float>(static_cast<int>(BearingDeg(
+              ship.pos_x, ship.pos_y, target->pos_x, target->pos_y)));
           const float reach =
               (mode == 3) ? beam_turret_reach : projectile_turret_reach;
           if (!blind_spot(tb) && std::abs(ship.pos_x - target->pos_x) < reach &&
               std::abs(ship.pos_y - target->pos_y) < reach) {
             if (mode == 3) {
-              queue_beam(static_cast<std::int16_t>(std::lround(tb)));
+              queue_beam(static_cast<std::int16_t>(tb));
               fired = true;
             } else {
               spawn_shot(ship.primary_target_ship_slot);
@@ -974,14 +980,22 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
         // target outside the arc the NPC path holds fire -- unlike the player
         // path, Weapon_FireShipWeapons has no mode-7 dumb-fire fallback here.
         if (has_target && target != nullptr) {
-          const float tb =
-              BearingDeg(ship.pos_x, ship.pos_y, target->pos_x, target->pos_y);
+          const int tb = static_cast<int>(
+              BearingDeg(ship.pos_x, ship.pos_y, target->pos_x, target->pos_y));
           const float cur_deg =
               ship.heading * (180.0F / 3.14159265358979323846F);
-          const float reference =
-              (mode == 8) ? std::remainder(cur_deg + 180.0F, 360.0F) : cur_deg;
-          const float delta = std::abs(std::remainder(tb - reference, 360.0F));
-          if (delta < 46.0F &&
+          // Original quirk: |d| % 360 with no fold to +/-180, so an arc that
+          // straddles 0 deg misses (e.g. heading 10, bearing 350 -> 340).
+          int delta = 0;
+          if (mode == 7) {
+            delta =
+                static_cast<int>(std::abs(static_cast<float>(tb) - cur_deg)) %
+                360;
+          } else {
+            const int tail = (static_cast<int>(cur_deg) + 180) % 360;
+            delta = std::abs(tb - tail) % 360;
+          }
+          if (delta < 0x2e &&
               std::abs(ship.pos_x - target->pos_x) < projectile_turret_reach &&
               std::abs(ship.pos_y - target->pos_y) < projectile_turret_reach) {
             spawn_shot(ship.primary_target_ship_slot);
