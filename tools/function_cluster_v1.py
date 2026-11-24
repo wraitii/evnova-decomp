@@ -127,7 +127,7 @@ def parse_args() -> argparse.Namespace:
 	)
 	parser.add_argument(
 		"--ghidra-base",
-		default="http://127.0.0.1:8166",
+		default="http://127.0.0.1:8167",
 		help="Base URL for the local Ghidra API server.",
 	)
 	parser.add_argument(

@@ -24,7 +24,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-BASE = "http://127.0.0.1:8166"
+BASE = "http://127.0.0.1:8167"
 DECOMP_FILE_RE = re.compile(r"^(?P<addr>[0-9A-Fa-f]{8})_(?P<name>.+)\.c$")
 STRING_RE = re.compile(r'"([^"\\\n]*(?:\\.[^"\\\n]*)*)"')
 

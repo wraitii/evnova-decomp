@@ -18,7 +18,7 @@ import sys
 import urllib.parse
 import urllib.request
 
-BASE = "http://127.0.0.1:8166"
+BASE = "http://127.0.0.1:8167"
 RANGE_START = 0x00400000
 RANGE_END = 0x00480000
 PAGE = 1000

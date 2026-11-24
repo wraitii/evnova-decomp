@@ -50,7 +50,7 @@ GLOBAL_TOKEN_RE = re.compile(r"\b(?:g_[A-Za-z0-9_]+|_?DAT_[0-9A-Fa-f]+|PTR_[0-9A
 STRING_RE = re.compile(r'"([^"\\]*(?:\\.[^"\\]*)*)"')
 ASSIGNMENT_RE = re.compile(r"(?<![=!<>])=(?!=)")
 
-DEFAULT_GHIDRA_BASE = "http://127.0.0.1:8166"
+DEFAULT_GHIDRA_BASE = "http://127.0.0.1:8167"
 DEFAULT_OUTPUT_DIR = Path("analysis/function_clusters_v2")
 DEFAULT_JOBS = min(32, (os.cpu_count() or 4) * 2)
 DEFAULT_ADDR_WINDOW = 6

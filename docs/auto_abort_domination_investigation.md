@@ -156,7 +156,7 @@ Ghidra:
 ./tools/ghidra_api "function/0x00440410/decompile"     # success walk
 ./tools/ghidra_api "function/0x00480030/decompile"     # Demand Tribute / OnDominate
 ./tools/ghidra_api "function/0x00446150/decompile"     # player abort / 0x40 reversal
-curl -s 'http://127.0.0.1:8166/type/StellarDef/layout' # runtime offsets
+curl -s 'http://127.0.0.1:8167/type/StellarDef/layout' # runtime offsets
 ```
 
 Gameplay validation (ask the user first): use the probe harness

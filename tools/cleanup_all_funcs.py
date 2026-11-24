@@ -32,7 +32,7 @@ def main():
     else:
         # Use curl to fetch from ghidra API
         result = subprocess.run(
-            ['curl', '-s', 'http://127.0.0.1:8166/functions?name_re=.*'],
+            ['curl', '-s', 'http://127.0.0.1:8167/functions?name_re=.*'],
             capture_output=True,
             text=True
         )

@@ -2,7 +2,7 @@
 
 The Ghidra API provides access to disassembly, decompilation, and type/class data from the Ghidra database. This is essential for the reimplementation process, allowing us to reference ground truth from the original binary.
 
-API runs locally at `http://127.0.0.1:8166`.
+API runs locally at `http://127.0.0.1:8167`.
 
 ## Basic Endpoints
 
@@ -27,10 +27,10 @@ Query symbols (globals, functions, types) from the decomp. One of name/name_re i
 
 ```bash
 # Find symbols matching the pattern 'Game' or 'Init'. Regexes are case-insensitive.
-curl -s "http://127.0.0.1:8166/symbols?name_re=Game%7CInit&limit=20"
+curl -s "http://127.0.0.1:8167/symbols?name_re=Game%7CInit&limit=20"
 
 # Find symbols in address range
-curl -s "http://127.0.0.1:8166/symbols?start=0x401000&end=0x402000"
+curl -s "http://127.0.0.1:8167/symbols?start=0x401000&end=0x402000"
 ```
 
 ### GET /functions
@@ -45,10 +45,10 @@ Same as /symbols
 
 ```bash
 # Find a specific function
-curl -s "http://127.0.0.1:8166/functions?name=MapRegion::Constructor"
+curl -s "http://127.0.0.1:8167/functions?name=MapRegion::Constructor"
 
 # Find all methods in a class
-curl -s "http://127.0.0.1:8166/functions?name=MapRegion::"
+curl -s "http://127.0.0.1:8167/functions?name=MapRegion::"
 ```
 
 ### GET /types
@@ -68,7 +68,7 @@ Get basic information about a function (address, name, signature).
 **Example:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/function/0x401234"
+curl -s "http://127.0.0.1:8167/function/0x401234"
 ```
 
 **Note:** This is equivalent to `/function/{addr}/info`
@@ -86,7 +86,7 @@ Get decompiled C code for a function. Prefer the batch endpoint when decompiling
 **Example:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/function/0x401234/decompile"
+curl -s "http://127.0.0.1:8167/function/0x401234/decompile"
 ```
 
 ### GET /function/{addr}/callers
@@ -96,7 +96,7 @@ List all functions that call the specified function.
 **Example:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/function/0x401234/callers"
+curl -s "http://127.0.0.1:8167/function/0x401234/callers"
 ```
 
 ### GET /function/{addr}/callees
@@ -106,7 +106,7 @@ List all functions called by the specified function.
 **Example:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/function/0x401234/callees"
+curl -s "http://127.0.0.1:8167/function/0x401234/callees"
 ```
 
 ### GET /function/{addr}/strings
@@ -116,7 +116,7 @@ Get strings referenced in the function body.
 **Example:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/function/0x401234/strings"
+curl -s "http://127.0.0.1:8167/function/0x401234/strings"
 ```
 
 **Note:** Prefer decompilation for string analysis - this endpoint misses localized strings.
@@ -136,7 +136,7 @@ Batch decompile multiple functions.
 **Example:**
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8166/function/decompile" \
+curl -s -X POST "http://127.0.0.1:8167/function/decompile" \
   -H "Content-Type: application/json" \
   -d '{"addrs": ["0x401234", "0x401500"]}'
 ```
@@ -237,7 +237,7 @@ automatically; and a value left in the return register by the region's last call
 is not treated as an output unless forced.
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8166/function/synthetic-decompile" \
+curl -s -X POST "http://127.0.0.1:8167/function/synthetic-decompile" \
   -H "Content-Type: application/json" \
   -d '{
     "entry":"LAB_00401530",
@@ -297,7 +297,7 @@ The parent's decompilation, which the naming overlay needs, is shared across
 every region in one request rather than fetched per region.
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8166/function/parent-view" \
+curl -s -X POST "http://127.0.0.1:8167/function/parent-view" \
   -H "Content-Type: application/json" \
   -d '{
     "function":"Ship_UpdateShipAI",
@@ -392,7 +392,7 @@ Parameters:
   alternatives to list
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8166/function/synthetic-suggestions" \
+curl -s -X POST "http://127.0.0.1:8167/function/synthetic-suggestions" \
   -H "Content-Type: application/json" \
   -d '{"function":"Ship_UpdateShipAI"}'
 ```
@@ -407,7 +407,7 @@ Unified endpoint that automatically dispatches to either `/function/` or `/data/
 
 ```bash
 # Get info about an address (automatically detects function vs data)
-curl -s "http://127.0.0.1:8166/symbol/0x401234"
+curl -s "http://127.0.0.1:8167/symbol/0x401234"
 ```
 
 ### GET /data/{addr}
@@ -426,7 +426,7 @@ Get struct/class layout including members and their offsets.
 **Example:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/type/MapRegion/layout"
+curl -s "http://127.0.0.1:8167/type/MapRegion/layout"
 ```
 
 **Note:** Ghidra only shows fields that have been discovered/typed in the decomp. Some fields may be absent simply because Ghidra hasn't identified them yet.
@@ -438,7 +438,7 @@ List all methods associated with a class/type.
 **Example:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/type/MapRegion/methods"
+curl -s "http://127.0.0.1:8167/type/MapRegion/methods"
 ```
 
 ### POST /type/tag_vtable
@@ -469,7 +469,7 @@ Useful when analyzing vtables or actual data tables.
 
 ```bash
 # Analyze vtable at known location
-curl -s "http://127.0.0.1:8166/range/0x40a000/0x40a100/disasm"
+curl -s "http://127.0.0.1:8167/range/0x40a000/0x40a100/disasm"
 ```
 
 ### GET /range/{start}/{end}/bytes
@@ -515,13 +515,13 @@ happens to use it. When you know the type, prefer
 
 ```bash
 # Who writes field 0xc90a?
-curl -s "http://127.0.0.1:8166/operand_search?op=0xc90a&kind=write"
+curl -s "http://127.0.0.1:8167/operand_search?op=0xc90a&kind=write"
 
 # Virtual calls through vtable slot 0x10
-curl -s "http://127.0.0.1:8166/operand_search?op=0x10&kind=call"
+curl -s "http://127.0.0.1:8167/operand_search?op=0x10&kind=call"
 
 # Everything, as the endpoint used to behave
-curl -s "http://127.0.0.1:8166/operand_search?op=0x10&kind=any"
+curl -s "http://127.0.0.1:8167/operand_search?op=0x10&kind=any"
 ```
 
 ### GET /operand_search/disasm
@@ -536,7 +536,7 @@ decompiled once regardless of how many sites it holds.
 Adds `before?`/`after?` (default 4/2).
 
 ```bash
-curl -s "http://127.0.0.1:8166/operand_search/decomp?op=0xc90a&kind=read,write"
+curl -s "http://127.0.0.1:8167/operand_search/decomp?op=0xc90a&kind=read,write"
 ```
 
 ### GET /struct/{name}/field/{offset|fieldname}/xrefs
@@ -572,10 +572,10 @@ Each site is reported with its kind and the root the pointer came from
 **Examples:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/struct/ShipState/field/escort_command_code/xrefs"
+curl -s "http://127.0.0.1:8167/struct/ShipState/field/escort_command_code/xrefs"
 
 # Only the writes - the fastest way to learn what sets a field
-curl -s "http://127.0.0.1:8166/struct/ShipState/field/0xc90a/xrefs?kind=write"
+curl -s "http://127.0.0.1:8167/struct/ShipState/field/0xc90a/xrefs?kind=write"
 ```
 
 The same offset means different things in different structs, which is exactly
@@ -597,7 +597,7 @@ Find all cross-references to class methods.
 **Example:**
 
 ```bash
-curl -s "http://127.0.0.1:8166/type/MapRegion/xrefs"
+curl -s "http://127.0.0.1:8167/type/MapRegion/xrefs"
 ```
 
 ## Write Endpoints
@@ -732,7 +732,7 @@ Decompile every function in the current program and write one `.c` file per func
 **Example:**
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8166/full_decompile" \
+curl -s -X POST "http://127.0.0.1:8167/full_decompile" \
   -H "Content-Type: application/json" \
   -d '{"folder": "/tmp/ghidra_full_decompile"}'
 ```

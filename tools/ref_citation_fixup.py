@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BASE = "http://127.0.0.1:8166"
+BASE = "http://127.0.0.1:8167"
 ADDR_RE = re.compile(r"0x[0-9A-Fa-f]{6,8}")
 
 
