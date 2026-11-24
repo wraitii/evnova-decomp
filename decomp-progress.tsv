@@ -16,7 +16,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0040C790	Stellar_SelectRandomAdjacentTravelStellar	src/game/ship_ai_behaviors.cpp	100%	moddata
 0x0040CC10	Stellar_FindNearestAdjacentTravelStellar	src/game/ship_ai_behaviors.cpp	100%	
 0x0040CD80	Stellar_IsStellarAdjacentToCurrentSystem	src/game/targeting.cpp	100%	
-0x0040CE00	Weapon_FireTurretAtTarget	src/game/ship_ai_weapons.cpp	100%	
+0x0040CE00	Weapon_FireTurretAtTarget	src/game/ship_ai_weapons.cpp	100%	divergence
 0x0040D220	Weapon_SelectGuidedWeaponBankForPrimaryTarget	src/game/ship_ai_weapons.cpp	100%	moddata
 0x0040D470	Weapon_SelectDirectFireWeaponBankForPrimaryTarget	src/game/ship_ai_weapons.cpp	100%	moddata
 0x0040D7E0	Weapon_SelectUnguidedWeaponBank	src/game/ship_ai_weapons.cpp	100%	
@@ -58,7 +58,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00410F20	Ship_CanTargetOutrunShooter	src/game/ship_ai_weapons.cpp	100%	moddata
 0x00411270	Ship_IsShipInNonIdleAiState	src/game/ship_ai.cpp	100%	
 0x004112A0	Ship_IsShipInAiState0x02	src/game/ship_ai.cpp	100%	
-0x004112C0	Ship_ShowPlayerInterceptTauntIfEligible	src/game/ship_ai_behaviors.cpp	95%	ui
+0x004112C0	Ship_ShowPlayerInterceptTauntIfEligible	src/game/ship_ai_behaviors.cpp	100%	
 0x00411540	Ship_EscortFireAtUnprovokedTarget	src/game/ship_ai_weapons.cpp	100%	moddata
 0x004115A0	Ship_IsShipInAiState0x0D	src/game/weapon_shots.cpp	100%	
 0x004115C0	Ship_ClearShipState0x09Or0x0FToIdle	src/game/collision.cpp	100%	
@@ -311,7 +311,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0045BAA0	Ship_RecenterSpaceObjectsForWorldWrap	src/game/world_wrap.cpp	100%	
 0x0045C6D0	Ship_WorldWrapPositionRelativeToPlayer	src/game/world_wrap.cpp	100%	
 0x0045C7A0	NovaUi_MarkTravelAndStatusPanelsDirty	src/game/spaceflight.cpp	100%	divergence
-0x0045C880	Ship_CommandPlayerEscortGroup	src/game/escort_commands.cpp	85%	audio
+0x0045C880	Ship_CommandPlayerEscortGroup	src/game/escort_commands.cpp	100%	
 0x0045CFC0	NovaUi_SetupGameplayPanelColors		0%	
 0x0045D030	Frame_RollProximityScanDetection	src/game/radar_panel.cpp	100%	
 0x0045D0A0	NovaUi_RebuildStellarRadarPanel	src/game/hud_renderer.cpp	100%	divergence

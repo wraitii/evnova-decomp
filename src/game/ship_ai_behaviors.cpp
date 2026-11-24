@@ -492,10 +492,12 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
               state, ally_target, ship)) {
         continue;
       }
-      const int target_strength =
-          NovaAiShip_ComputePerceivedCombatStrength(state, ally_target);
-      const int own_strength =
-          NovaAiShip_ComputePerceivedCombatStrength(state, ship);
+      // Both strengths are compared through their low 16 bits (MOVSX of the
+      // stored word at 0x0040ec3c / 0x0040ec4d), like the later passes.
+      const auto target_strength = static_cast<std::int16_t>(
+          NovaAiShip_ComputePerceivedCombatStrength(state, ally_target));
+      const auto own_strength = static_cast<std::int16_t>(
+          NovaAiShip_ComputePerceivedCombatStrength(state, ship));
       if (static_cast<float>(target_strength) >
           static_cast<float>(own_strength) * ship_govt->max_odds) {
         continue;
@@ -866,9 +868,9 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
 // supervisors; mission and special-loadout branches remain deferred.
 void NovaAi_ReacquireTravelOrSettle(GameState &state, Ship &ship) {
   const System *sys = CurrentSystem(state, ship);
-  const bool still_at_point = sys && ship.jump_destination_stellar_id >= 0 &&
-                              NovaTargeting_IsStellarAdjacentToSystem(
-                                  *sys, ship.jump_destination_stellar_id);
+  const bool still_at_point =
+      sys && NovaTargeting_IsStellarAdjacentToSystem(
+                 *sys, ship.jump_destination_stellar_id);
   if (!still_at_point) {
     ship.ai_secondary_target_slot = -1;
     ship.ai_secondary_target_slot = NovaAi_SelectRandomAdjacentTravelStellar(
@@ -890,14 +892,12 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state, Ship &ship) {
   }
 }
 
-// @port 0x004112c0 95% ui
+// @port 0x004112c0 100%
 // Ghidra 0x004112C0 Ship_ShowPlayerInterceptTauntIfEligible. Generic
 // (non-personality) ships entering intercept state may challenge the player
 // when no HUD message is already visible. The stock challenges are the 20
-// entries in STR# 0x138b; transition-table cue 4 accompanies the message.
-// TODO(decomp(0x004112c0)): confirm the overlay tint (the original passes
-// g_hud_overlay_text_color; the port renders with the shared default tint) and
-// the cue-4 queue position relative to the overlay arm.
+// entries in STR# 0x138b; transition-table cue 4 accompanies the message,
+// which uses the shared g_hud_overlay_text_color (the duration-only form).
 void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship) {
   if (ship.pers_def_slot != -1 || state.hud_overlay.active) {
     return;
@@ -930,13 +930,16 @@ void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship) {
         state.active_missions[static_cast<std::size_t>(ship.mission_fleet_slot)]
             .mission_fleet_name;
   }
+  // Cue 4 (DAT_00591570) is queued before the message is composed.
+  state.pending_ui_sounds.push_back({4, 1});
+  // NovaRandom_Range(0x14) indexes the 20 preloaded challenge strings
+  // (DAT_005d9bcc, 0x100 bytes each); STR# entries are 1-based.
   const auto challenge_index =
-      std::uniform_int_distribution<std::uint16_t>{1, 20}(state.rng);
+      static_cast<std::uint16_t>(RandomBelow(state, 0x14) + 1);
   const std::string challenge = NovaHud_LoadStringEntry(0x138b, challenge_index)
                                     .value_or("Prepare to be destroyed!");
   NovaHud_ShowOverlayMessage(
-      state, speaker + ":  " + challenge, 0xe0, 0xe0, 0xe0, 0xf0U);
-  state.pending_ui_sounds.push_back({4, 1});
+      state, speaker + ":  " + challenge, std::uint64_t{0xf0});
 }
 
 // @port 0x00402860 100%
@@ -966,9 +969,9 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
     // valid stellar and tries to jump away; if not, it picks a fresh random
     // adjacent travel stellar to wander toward.
     const System *sys = CurrentSystem(state, ship);
-    const bool still_at_point = sys && ship.jump_destination_stellar_id >= 0 &&
-                                NovaTargeting_IsStellarAdjacentToSystem(
-                                    *sys, ship.jump_destination_stellar_id);
+    const bool still_at_point =
+        sys && NovaTargeting_IsStellarAdjacentToSystem(
+                   *sys, ship.jump_destination_stellar_id);
     if (still_at_point) {
       // Already at a valid travel stellar: settle / try to jump away. The jump
       // gate uses THIS ship's class fuel (NovaTravel_CanShipInitiateJump-
@@ -1268,8 +1271,11 @@ void NovaAi_UpdateBehavior0x02(GameState &state, Ship &ship) {
         state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
-    if (dx < 1251.0F && dy < 1251.0F && ship.hyperspace_jump_timer <= 0.0F) {
-      ship.ai_state_code = 4;
+    if (dx < 1251.0F && dy < 1251.0F) {
+      // In range but mid-jump: the original leaves the state untouched.
+      if (ship.hyperspace_jump_timer <= 0.0F) {
+        ship.ai_state_code = 4;
+      }
     } else if (ship.squad_leader_ship_slot == 0) {
       ship.ai_state_code = 10;
       ship.ai_secondary_target_slot = 0;
@@ -1487,15 +1493,15 @@ void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
       ship.ai_state_code = 4;
     }
 
+    // Each threshold is FIST + residual/sign corrected (0x004036cd,
+    // 0x0040371d, 0x0040378d): truncation toward zero, not round-to-nearest.
     const double max_shield = NovaAi_ComputeMaxShieldPoints(state, ship);
     int shield_retreat_threshold = -0x7fff;
     if (ship.pers_def_slot == -1) {
       if (ship.random_ai_render_cadence == 1) {
-        shield_retreat_threshold =
-            static_cast<int>(std::lround(max_shield * 0.3));
+        shield_retreat_threshold = static_cast<int>(max_shield * 0.3);
       } else if (ship.random_ai_render_cadence == 2) {
-        shield_retreat_threshold =
-            static_cast<int>(std::lround(max_shield * 0.15));
+        shield_retreat_threshold = static_cast<int>(max_shield * 0.15);
       }
     } else if (static_cast<std::size_t>(ship.pers_def_slot) <
                state.scenario.pers_defs.size()) {
@@ -1505,7 +1511,7 @@ void NovaAi_UpdateBehavior0x03(GameState &state, Ship &ship) {
                   .pers_defs[static_cast<std::size_t>(ship.pers_def_slot)]
                   .cowardice_pct) *
           0.01 * max_shield;
-      shield_retreat_threshold = static_cast<int>(std::lround(cowardice));
+      shield_retreat_threshold = static_cast<int>(cowardice);
     }
 
     const Government *govt = ship_government();
@@ -1889,10 +1895,9 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
       // stellar, wanders to a random adjacent one, or jumps away.
       const System *sys = state.scenario.System(
           static_cast<std::int16_t>(ship.current_system_id + 0x80));
-      const bool at_stellar = sys != nullptr &&
-                              ship.jump_destination_stellar_id >= 0 &&
-                              NovaTargeting_IsStellarAdjacentToSystem(
-                                  *sys, ship.jump_destination_stellar_id);
+      const bool at_stellar =
+          sys != nullptr && NovaTargeting_IsStellarAdjacentToSystem(
+                                *sys, ship.jump_destination_stellar_id);
       if (!at_stellar) {
         if (ship.ai_secondary_target_slot == -1) {
           ship.ai_secondary_target_slot =

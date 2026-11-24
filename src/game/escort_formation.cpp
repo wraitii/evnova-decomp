@@ -458,10 +458,12 @@ void NovaShip_ResetToDefaultCombatState(GameState &state,
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   if (refill && cls != nullptr) {
-    // Ship_ComputeShipMaxShieldPoints / MaxArmor reduce to the class base for
-    // non-mission NPC ships (attached escorts have no fleet slot).
-    ship.shield_points = static_cast<float>(cls->base_shield);
-    ship.armor_points = static_cast<float>(cls->base_armor);
+    // Ship_ComputeShipMaxShieldPoints / MaxArmor (0x00463550 / 0x004637a0):
+    // pers_def_slot was just cleared, so this is the class base, times the
+    // behavior-5 difficulty multiplier for a carried fighter.
+    ship.shield_points =
+        static_cast<float>(NovaAi_ComputeMaxShieldPoints(state, ship));
+    ship.armor_points = NovaAi_ComputeMaxArmorPoints(state, ship);
   }
   ship.current_system_id = state.player.current_system_id;
   ship.heading = state.player.heading;

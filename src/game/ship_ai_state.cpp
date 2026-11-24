@@ -58,7 +58,7 @@ constexpr float kCentreRangeSq = 1000000.0F;
 // publishing _g_avg_frame_time_ms, so the AI consumes normalized simulation
 // ticks (about 1.0 at 30 Hz), not literal milliseconds.
 // Inertialess approach multipliers (state 0xd/0xf).
-constexpr float kInertialessKeepMult = 4.0F;
+constexpr int kInertialessKeepMult = 4;
 // Combat turn-radius constants from DAT_005750a0/a4/a8/ac. The class turn
 // value is converted to the runtime degrees-per-tick value before these
 // branches use it.
@@ -126,6 +126,14 @@ std::int16_t CurrentSystemLinkSpriteWidth(const GameState &state,
   }
   width_cache[index] = width;
   return width;
+}
+
+// (kTurnRadiusBase - class turn) * scale, truncated toward zero and narrowed
+// to short (the x87 FIST + sign backoff used by every class-turn band in
+// Ship_UpdateShipAiState).
+[[nodiscard]] std::int16_t TurnRadiusBand(float class_turn_deg, float scale) {
+  return static_cast<std::int16_t>(evnova::util::TruncateToInt32(
+      (kTurnRadiusBase - class_turn_deg) * scale));
 }
 
 } // namespace
@@ -267,10 +275,12 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_control_mode = 1;
         ship.hyperspace_jump_timer = 0.0F;
         ship.ai_secondary_target_slot = -1;
-        if (!std::isfinite(ship.target_engagement_patience_timer) ||
-            ship.target_engagement_patience_timer <= 0.0F) {
-          ship.target_engagement_patience_timer = static_cast<float>(
-              std::uniform_int_distribution<int>{0, 99}(state.rng) + 100);
+        // Re-arm only on a negative (or unordered) timer; an exact 0.0 is
+        // decremented like any positive value.
+        if (std::isnan(ship.target_engagement_patience_timer) ||
+            ship.target_engagement_patience_timer < 0.0F) {
+          ship.target_engagement_patience_timer =
+              static_cast<float>(RandomBelow(state, 100) + 100);
         } else {
           ship.target_engagement_patience_timer -= elapsed_ticks;
           if (ship.target_engagement_patience_timer <= 0.0F) {
@@ -282,14 +292,16 @@ void NovaAi_UpdateShipState(GameState &state,
         }
         return;
       }
+      // No return: the original falls through, so the state-2 (or state-6)
+      // arm below selects the control mode on this same tick.
       if (!NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
         ship.ai_state_code = 6;
       } else {
         NovaAi_EnterState2ClearPrimaryTarget(state, ship);
       }
-      return;
+    } else {
+      ship.target_engagement_patience_timer = -1.0F;
     }
-    ship.target_engagement_patience_timer = -1.0F;
   }
 
   // ---- Travel to system (state 1). ----
@@ -303,22 +315,34 @@ void NovaAi_UpdateShipState(GameState &state,
       // The original clears the hyperspace jump timer here as well as in the
       // per-state preserve gate above (redundant, but part of state 1).
       ship.hyperspace_jump_timer = 0.0F;
-      // Distances to the travel stellar.
-      const float dx = static_cast<float>(target->pos_x) - ship.pos_x;
-      const float dy = static_cast<float>(target->pos_y) - ship.pos_y;
+      // Axis offsets to the travel stellar, truncated toward zero and
+      // narrowed to short like the original (x87 FIST + sign backoff).
+      const auto truncated_axis = [](float value) {
+        return static_cast<float>(
+            static_cast<std::int16_t>(evnova::util::TruncateToInt32(value)));
+      };
+      const float dx =
+          truncated_axis(static_cast<float>(target->pos_x) - ship.pos_x);
+      const float dy =
+          truncated_axis(static_cast<float>(target->pos_y) - ship.pos_y);
       // Compute the turn-radius arrive range, mirroring Ship_UpdateShipAiState
       // (0x00405590): range = (9.0 - min(Ship_ComputeShipMaxTurnRateDeg,
-      // 8.0)) * 8.0 + 32.0 px per axis. As long as the offset is larger than
-      // it, keep steering toward the stellar (control mode 2 travel).
+      // 8.0)) * 8.0 + 32.0 px per axis, truncated to short. As long as the
+      // offset is larger than it, keep steering toward the stellar (control
+      // mode 2 travel). This is the only arm here that uses the full turn-rate
+      // helper; the others read the raw class base rate.
       const auto *cls =
           scn->Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
       const float turn_deg =
-          cls ? static_cast<float>(cls->turn_rate) * 0.1F
-              : 0.0F; // Ship_ComputeShipMaxTurnRateDeg NPC branch
-      const float arrive_range =
-          (kArriveRangeBase - std::min(turn_deg, kArriveRangeTurnCap)) *
-              kArriveRangeScale +
-          kArriveRangeOffset;
+          cls ? NovaShip_ComputeEffectiveStats(state, ship, *cls)
+                    .turn_rate_deg_per_tick
+              : 0.0F;
+      const double capped_turn =
+          turn_deg < kArriveRangeTurnCap ? turn_deg : kArriveRangeTurnCap;
+      const auto arrive_range =
+          static_cast<float>(static_cast<std::int16_t>(static_cast<int>(
+              (kArriveRangeBase - capped_turn) * kArriveRangeScale +
+              kArriveRangeOffset)));
       const bool outside_range =
           std::abs(dx) > arrive_range || std::abs(dy) > arrive_range;
       if (outside_range) {
@@ -476,10 +500,9 @@ void NovaAi_UpdateShipState(GameState &state,
     } else {
       ship.ai_control_mode = 1;
     }
-    if (!NovaAiShip_IsDisabled(state, ship)) {
-      (void)NovaGovernment_TryTriggerAssistanceEncounter(
-          state, ship, /*force=*/false);
-    }
+    // The original state-2 arm has no assistance-encounter call;
+    // Government_TryTriggerGovtAssistanceEncounter is reached only from states
+    // 3 (0x004066a5) and 4/0xd (0x00406bdb) here.
     return;
   }
 
@@ -521,10 +544,6 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_control_mode = 0;
       }
     }
-    if (ship.ai_state_code == 3) {
-      (void)NovaGovernment_TryTriggerAssistanceEncounter(
-          state, ship, /*force=*/false);
-    }
     return;
   }
 
@@ -533,10 +552,16 @@ void NovaAi_UpdateShipState(GameState &state,
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
     ship.ai_control_mode = 0;
-    // The original advances position directly by g_avg_frame_time_ms * 0.7;
-    // this state does not add that step to persistent velocity.
-    ship.pos_x += std::sin(ship.heading) * (elapsed_ticks * 0.7F);
-    ship.pos_y -= std::cos(ship.heading) * (elapsed_ticks * 0.7F);
+    // The original advances position directly by g_avg_frame_time_ms * 0.7
+    // along the heading truncated to whole degrees (Math_AddPolarVelocity on
+    // the position pair); this state does not add that step to persistent
+    // velocity.
+    const int heading_deg =
+        evnova::util::TruncateToInt32(ship.heading / kDegToRad);
+    evnova::util::AddPolar(static_cast<float>(heading_deg) * kDegToRad,
+                           elapsed_ticks * 0.7F,
+                           ship.pos_x,
+                           ship.pos_y);
     if (ship.ai_maneuver_timer_ms <= 0.0F) {
       ship.ai_state_code = 0;
     }
@@ -809,20 +834,69 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Attack a stellar system (state 0x12): keep an engagement distance.
-  // ----
+  // ---- Attack a stellar (state 0x12): hold inside the anti-stellar weapon's
+  // reach. The first bank whose weapon carries flags_secondary 0x400, has a
+  // class stock count, can fire, and is a mode other than 0/3/>=8 sets the
+  // reach (range^2, or 1.0 with none). Beyond 0.75 reach (0x5750e0 = 0.5625
+  // on squares) approach with mode 2; inside 0.25 reach (0x5750e8 = 0.0625)
+  // back off with mode 3; between, brake (mode 1) or hold (mode 0x16) and damp
+  // velocity by 0.98.
   if (ship.ai_state_code == 0x12) {
-    // Weapon banks are selected by the control modes; this state just holds
-    // its engagement distance and lets the combat systems advance it later.
-    if (std::abs(ship.vel_x) >= kVerySlowSpeed ||
-        std::abs(ship.vel_y) >= kVerySlowSpeed) {
-      ship.ai_control_mode = 1;
-    } else {
-      ship.ai_control_mode = 0x16;
+    const Stellar *target =
+        StellarByResourceId(state, ship.ai_secondary_target_slot);
+    const float target_x = target ? static_cast<float>(target->pos_x) : 0.0F;
+    const float target_y = target ? static_cast<float>(target->pos_y) : 0.0F;
+    const ShipClass *cls = ShipClassFor(state, ship);
+    const auto class_stock_count = [cls](std::int16_t bank) {
+      if (cls == nullptr) {
+        return std::int16_t{0};
+      }
+      for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
+        if (stock.weapon_id == bank + 0x80) {
+          return stock.count;
+        }
+      }
+      return std::int16_t{0};
+    };
+    const Weapon *reach_weapon = nullptr;
+    for (std::int16_t bank = 0;
+         bank < static_cast<std::int16_t>(kWeaponBankCount);
+         ++bank) {
+      const Weapon *weapon =
+          scn->Weapon(static_cast<std::int16_t>(bank + 0x80));
+      if (weapon == nullptr || (weapon->flags_secondary & 0x400U) == 0U ||
+          class_stock_count(bank) <= 0 ||
+          !NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+        continue;
+      }
+      const int mode = weapon->weapon_mode_code;
+      if (mode == 0 || mode == 3 || mode >= 8) {
+        continue;
+      }
+      reach_weapon = weapon;
+      break;
     }
-    ship.vel_x *= kArrivalDamp;
-    ship.vel_y *= kArrivalDamp;
-    ship.speed *= kArrivalDamp;
+    const float distance_sq =
+        SquaredDistance(ship.pos_x, ship.pos_y, target_x, target_y);
+    const float reach_sq =
+        reach_weapon != nullptr
+            ? reach_weapon->range_scalar * reach_weapon->range_scalar
+            : 1.0F;
+    if (reach_sq * 0.5625F < distance_sq) {
+      ship.ai_control_mode = 2;
+    } else if (distance_sq < reach_sq * 0.0625F) {
+      ship.ai_control_mode = 3;
+    } else {
+      if (std::abs(ship.vel_x) >= kVerySlowSpeed ||
+          std::abs(ship.vel_y) >= kVerySlowSpeed) {
+        ship.ai_control_mode = 1;
+      } else {
+        ship.ai_control_mode = 0x16;
+      }
+      ship.vel_x *= kArrivalDamp;
+      ship.vel_y *= kArrivalDamp;
+      ship.speed *= kArrivalDamp;
+    }
     return;
   }
 
@@ -1021,8 +1095,12 @@ void NovaAi_UpdateShipState(GameState &state,
     const Ship &player = state.player;
     const auto *cls = ShipClassFor(state, ship);
     const float turn = cls ? cls->turn_rate * 0.1F : 0.0F;
-    const float outer = (kTurnRadiusBase - turn) * kAssistTurnRadiusScale;
-    const float inner = (kTurnRadiusBase - turn) * kAssistInnerTurnRadiusScale;
+    // Both bands are truncated toward zero and narrowed to short before the
+    // per-axis compares.
+    const auto outer =
+        static_cast<float>(TurnRadiusBand(turn, kAssistTurnRadiusScale));
+    const auto inner =
+        static_cast<float>(TurnRadiusBand(turn, kAssistInnerTurnRadiusScale));
     const float dx = std::abs(ship.pos_x - player.pos_x);
     const float dy = std::abs(ship.pos_y - player.pos_y);
     if (state.player.hyperspace_jump_timer > 0.0F) {
@@ -1049,15 +1127,34 @@ void NovaAi_UpdateShipState(GameState &state,
       return;
     }
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-    if (ship.squad_leader_ship_slot != -1 &&
-        (target_slot == ship.squad_leader_ship_slot ||
-         target.squad_leader_ship_slot == ship.squad_leader_ship_slot)) {
-      ship.ai_state_code = 0;
-      ship.ai_control_mode = 0;
-      ship.primary_target_ship_slot = -1;
-      return;
+    // Same squad-leader stand-down hierarchy as state 4 (0x004067b5 arm is
+    // state-4 only; this block repeats the leader / shared-leader / two-hop
+    // grand-leader checks).
+    const auto leader_of = [&](std::int16_t slot) -> std::int16_t {
+      if (slot < 0 || !state.SlotInRange(static_cast<std::size_t>(slot))) {
+        return -1;
+      }
+      return state.ShipAt(static_cast<std::size_t>(slot))
+          .squad_leader_ship_slot;
+    };
+    const std::int16_t leader = ship.squad_leader_ship_slot;
+    if (leader != -1) {
+      const std::int16_t target_leader = target.squad_leader_ship_slot;
+      const std::int16_t target_grand_leader = leader_of(target_leader);
+      const bool grand_match =
+          target_grand_leader != -1 &&
+          (target_leader == target_grand_leader ||
+           leader_of(leader_of(leader)) == target_grand_leader);
+      if (target_slot == leader || target_leader == leader || grand_match) {
+        ship.ai_state_code = 0;
+        ship.ai_control_mode = 0;
+        ship.primary_target_ship_slot = -1;
+        return;
+      }
     }
-    if (!target.is_active || NovaAiShip_IsDestroyed(target)) {
+    // Only an inactive slot drops the target here; unlike state 4 there is
+    // no Ship_IsShipDestroyed test.
+    if (!target.is_active) {
       ship.primary_target_ship_slot = -1;
       ship.ai_secondary_target_slot = -1;
       ship.ai_hostility_accumulator = 0;
@@ -1065,13 +1162,18 @@ void NovaAi_UpdateShipState(GameState &state,
       ship.ai_control_mode = 0;
       return;
     }
-    ship.ai_secondary_target_slot = -1;
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
     if (!NovaAiShip_IsDisabled(state, target)) {
+      ship.ai_secondary_target_slot = -1;
       if (dx > kCombatCloseRange || dy > kCombatCloseRange) {
         if (NovaAiShip_CanTargetOutrunShooter(state, ship)) {
-          ship.ai_control_mode = ship.ai_behavior_code < 3 ? 5 : 0xe;
+          if (ship.ai_behavior_code < 3) {
+            ship.ai_state_code = 3;
+            ship.ai_control_mode = 5;
+          } else {
+            ship.ai_control_mode = 0xe;
+          }
         } else if (ship.ai_control_mode != 0x11) {
           ship.ai_control_mode = 7;
         }
@@ -1083,13 +1185,15 @@ void NovaAi_UpdateShipState(GameState &state,
       ship.ai_secondary_target_slot = target_slot;
       const auto *cls = ShipClassFor(state, ship);
       const float turn = cls ? cls->turn_rate * 0.1F : 0.0F;
-      float range = (kTurnRadiusBase - turn) * kAssistTurnRadiusScale;
+      // Short arithmetic: truncated band, x4 when inertialess, x2 outer.
+      auto range = TurnRadiusBand(turn, kAssistTurnRadiusScale);
       if (cls != nullptr && NovaShip_IsInertialess(ship, *cls)) {
-        range *= kInertialessKeepMult;
+        range = static_cast<std::int16_t>(range * kInertialessKeepMult);
       }
-      if (dx > range || dy > range) {
-        ship.ai_control_mode =
-            (dx > range * 2.0F || dy > range * 2.0F) ? 9 : 0xb;
+      const auto near_band = static_cast<float>(range);
+      const auto far_band = static_cast<float>(range * 2);
+      if (dx > near_band || dy > near_band) {
+        ship.ai_control_mode = (dx > far_band || dy > far_band) ? 9 : 0xb;
       } else {
         ship.ai_control_mode = 0xf;
       }

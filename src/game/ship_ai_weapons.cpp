@@ -492,18 +492,23 @@ std::int32_t NovaAi_ScoreAssistTargetForShip(const GameState &state,
     return 0;
   }
 
-  std::int32_t score = static_cast<std::int32_t>(
-      TruncatedDistanceSquared(
-          helper.pos_x, helper.pos_y, candidate.pos_x, candidate.pos_y) +
-      (score_flags > 0 ? candidate_to_leader_sq : 0.0F));
+  // The leader term is already an integer, so truncating the sum equals
+  // adding the truncated helper distance; integer addition avoids the float
+  // rounding the x87 sum never had.
+  std::int32_t score =
+      static_cast<std::int32_t>(TruncatedDistanceSquared(
+          helper.pos_x, helper.pos_y, candidate.pos_x, candidate.pos_y)) +
+      (score_flags > 0 ? static_cast<std::int32_t>(candidate_to_leader_sq) : 0);
   const ShipClass *candidate_class = ShipClassFor(state, candidate);
   const ShipClass *helper_class = ShipClassFor(state, helper);
+  // Cross-category halving is a signed truncating /2 (CMP 0x80000000 / SBB
+  // -1 / SAR 1 at 0x00412244 and 0x00412264), not a round-up.
   if (candidate_class != nullptr && helper_class != nullptr &&
       candidate_class->class_category != helper_class->class_category) {
-    score = (score + 1) / 2;
+    score /= 2;
     if (candidate_class->class_category == 0 &&
         helper_class->class_category == 2) {
-      score = (score + 1) / 2;
+      score /= 2;
     }
   }
   return std::max(score, 1);
@@ -655,7 +660,7 @@ bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
   return blind;
 }
 
-// @port 0x0040ce00 100%
+// @port 0x0040ce00 100% divergence
 // Ghidra 0x0040ce00 Weapon_FireTurretAtTarget (Carbon symbol AIFireTurret).
 // Turret-only bank selection for the current primary target: runs the
 // point-defense auto-fire prologue, then scans fireable mode-3/4/7/8 banks in
@@ -711,6 +716,11 @@ void NovaAi_FireTurretAtTarget(GameState &state, Ship &ship) {
         (target_class->capability_flags & 0x400U)) {
       continue;
     }
+    // TODO(decomp(0x0040ce00)) skipped: the original computes this bearing
+    // (local_34, 0x0040d07a) only on the mode-7/8 path, so a mode-3/4 bank's
+    // blind-spot test (0x0040cfa8) reads the bearing left by an earlier
+    // mode-7/8 bank in this call, or uninitialized stack. Uninitialized stack
+    // is not reproducible; the port always uses the live bearing.
     const std::int16_t bearing = static_cast<std::int16_t>(
         BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
 

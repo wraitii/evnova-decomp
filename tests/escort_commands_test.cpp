@@ -106,13 +106,14 @@ TEST_CASE("escort order input updates the shared saved category orders",
   }
   game::PlayerTick_EscortCommands(state, input, 100);
 
+  // Unselected categories have no ship carrying escort_command_pending, so
+  // the auto-cancel arm (0x00450ee1) resets their order to Formation (0).
   for (std::size_t category = 0; category < classes.size(); ++category) {
     const auto expected =
         selected == -1 || selected == static_cast<std::int16_t>(category) ? 2
-                                                                          : -1;
+                                                                          : 0;
     CHECK(state.target_category_command[category] == expected);
-    CHECK(state.ShipAt(category + 1).escort_command_code ==
-          (expected == -1 ? 0 : expected));
+    CHECK(state.ShipAt(category + 1).escort_command_code == expected);
   }
   const auto saved = game::PilotFileCollectFromState(state);
   CHECK(saved.target_category_command == state.target_category_command);

@@ -23,6 +23,8 @@
 #include "travel.hpp"
 #include "weapon.hpp"
 
+#include "../util/math.hpp"
+
 namespace game {
 
 using namespace ship_ai_detail;
@@ -137,12 +139,17 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
   ship.ai_desired_heading_deg =
       static_cast<std::int16_t>(WrapDeg(ship.heading / kDegToRad));
 
-  // Shortest signed angle (deg) from the current heading to the desired one.
-  auto heading_delta_deg = [&]() {
-    const float cur_deg = ship.heading / kDegToRad;
-    return std::remainder(static_cast<float>(ship.ai_desired_heading_deg) -
-                              cur_deg,
+  // Shortest signed angle (deg) from the current heading to `bearing_deg`.
+  // The original truncates the heading to whole degrees before
+  // Math_ShortestAngleDeltaDeg (0x0046b210), so the delta is integral.
+  auto delta_from_heading_deg = [&](std::int16_t bearing_deg) {
+    const auto cur_deg = static_cast<std::int16_t>(
+        evnova::util::TruncateToInt32(WrapDeg(ship.heading / kDegToRad)));
+    return std::remainder(static_cast<float>(bearing_deg - cur_deg),
                           kFullCircleDeg);
+  };
+  auto heading_delta_deg = [&]() {
+    return delta_from_heading_deg(ship.ai_desired_heading_deg);
   };
 
   // Math_AddPolarVelocity (0x0043b4a0): adds speed along a game-convention
@@ -192,6 +199,92 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     return static_cast<std::int16_t>(deg);
   };
 
+  // Mode 0x10 (evasive break) and 0x11 (boost) bodies. The original is an
+  // if-chain in the order 0, 0x12, 1, 2, 3, 4, 0xd, 5, 6, 0x10, 0x11, 7, ...,
+  // so a mode-5 or mode-6 tick that switches to 0x10/0x11 also runs that
+  // block on the same tick; the switch below replays them after dispatch.
+  auto run_evasive_break = [&]() {
+    // Evasive break: fly the stored evasive heading (+/-135 deg) at 1.5x
+    // thrust with cruise 0, then drop back to combat pursuit (6) once the
+    // hull is within turn*3 deg of it (or, for inertialess ships, once the
+    // target is beyond 165 px). Arms the current-target bank while close.
+    if (fire_restricted || ship.primary_target_ship_slot == -1) {
+      return;
+    }
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    ship.ai_desired_heading_deg = ship.ai_evasive_heading_deg;
+    ship.ai_forward_thrust_cmd = eff_thrust * kEvasiveThrustFactor;
+    ship.ai_desired_speed = 0.0F;
+    if (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange &&
+        std::abs(ship.pos_y - target.pos_y) < kCombatCloseRange) {
+      // Ghidra 0x00408150 mode 0x10 arms the current-target bank only while
+      // both axes stay within 165 px (the original uses AND, not OR).
+      NovaAi_FireTurretAtTarget(state, ship);
+    }
+    const bool inertialess =
+        cls != nullptr && NovaShip_IsInertialess(ship, *cls);
+    if (!inertialess) {
+      if (std::abs(delta_from_heading_deg(ship.ai_evasive_heading_deg)) <
+          eff_turn_deg * 3.0F) {
+        ship.ai_control_mode = 6;
+      }
+    } else if (std::abs(ship.pos_x - target.pos_x) > kCombatCloseRange ||
+               std::abs(ship.pos_y - target.pos_y) > kCombatCloseRange) {
+      ship.ai_control_mode = 6;
+    }
+  };
+  auto run_boost = [&]() {
+    // Boost to target: over-speed cruise (2.75x thrust, 1.8x max speed) on
+    // the straight bearing, weapon selection at alignment, and a
+    // return to combat pursuit (6) inside 165 px (or a 1-in-100 roll further
+    // out). TODO(decomp): formation-offset mirroring.
+    if (fire_restricted || ship.primary_target_ship_slot == -1) {
+      return;
+    }
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    ship.ai_forward_thrust_cmd = eff_thrust * kBoostThrustFactor;
+    ship.ai_desired_speed = max_speed * kBoostCruiseFactor;
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
+    if (ship.swarm_mate_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.swarm_mate_ship_slot) <
+            GameState::kMaxShips) {
+      // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
+      // blocks) + glow copy: modes keep their wedge position while attacking.
+      Ship_MoveShipTowardFormationOffset(
+          state, ship, /*snap=*/false, elapsed_ticks);
+      ship.engine_glow_level =
+          state.ShipAt(static_cast<std::size_t>(ship.swarm_mate_ship_slot))
+              .engine_glow_level;
+    }
+    const float dx = std::abs(ship.pos_x - target.pos_x);
+    const float dy = std::abs(ship.pos_y - target.pos_y);
+    if (dx < kCombatCloseRange && dy < kCombatCloseRange) {
+      // Ghidra 0x00408150 mode 0x11 selects the turret current bank first,
+      // then direct-fire within turn*3 while it is close.
+      NovaAi_FireTurretAtTarget(state, ship);
+      if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
+        NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
+      }
+    } else if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
+      // Far: within turn*3 the original arms a guided bank.
+      NovaAi_SelectGuidedWeaponBankForPrimaryTarget(state, ship);
+    }
+    // The return to pursuit is inclusive at 165 px (0x00409cxx), unlike the
+    // strict weapon-selection gate above.
+    if (dx <= kCombatCloseRange && dy <= kCombatCloseRange) {
+      ship.ai_control_mode = 6;
+    } else {
+      std::uniform_int_distribution<int> roll(0, 99);
+      if (roll(state.rng) == 0) {
+        ship.ai_control_mode = 6;
+      }
+    }
+  };
+
+  const std::int16_t dispatched_mode = ship.ai_control_mode;
   switch (ship.ai_control_mode) {
   case 0:
     // Idle. The original's mode-0 arm is only the unconditional
@@ -667,89 +760,13 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
     break;
   }
 
-  case 0x10: {
-    // Evasive break: fly the stored evasive heading (+/-135 deg) at 1.5x
-    // thrust with cruise 0, then drop back to combat pursuit (6) once the
-    // hull is within turn*3 deg of it (or, for inertialess ships, once the
-    // target is beyond 165 px). Arms the current-target bank while close.
-    if (fire_restricted || ship.primary_target_ship_slot == -1) {
-      break;
-    }
-    const std::int16_t target_slot = ship.primary_target_ship_slot;
-    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-    ship.ai_desired_heading_deg = ship.ai_evasive_heading_deg;
-    ship.ai_forward_thrust_cmd = eff_thrust * kEvasiveThrustFactor;
-    ship.ai_desired_speed = 0.0F;
-    if (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange &&
-        std::abs(ship.pos_y - target.pos_y) < kCombatCloseRange) {
-      // Ghidra 0x00408150 mode 0x10 arms the current-target bank only while
-      // both axes stay within 165 px (the original uses AND, not OR).
-      NovaAi_FireTurretAtTarget(state, ship);
-    }
-    const bool inertialess =
-        cls != nullptr && NovaShip_IsInertialess(ship, *cls);
-    if (!inertialess) {
-      if (std::abs(
-              std::remainder(static_cast<float>(ship.ai_evasive_heading_deg) -
-                                 ship.heading / kDegToRad,
-                             kFullCircleDeg)) < eff_turn_deg * 3.0F) {
-        ship.ai_control_mode = 6;
-      }
-    } else if (std::abs(ship.pos_x - target.pos_x) > kCombatCloseRange ||
-               std::abs(ship.pos_y - target.pos_y) > kCombatCloseRange) {
-      ship.ai_control_mode = 6;
-    }
+  case 0x10:
+    run_evasive_break();
     break;
-  }
 
-  case 0x11: {
-    // Boost to target: over-speed cruise (2.75x thrust, 1.8x max speed) on
-    // the straight bearing, weapon selection at alignment, and a
-    // return to combat pursuit (6) inside 165 px (or a 1-in-100 roll further
-    // out). TODO(decomp): formation-offset mirroring.
-    if (fire_restricted || ship.primary_target_ship_slot == -1) {
-      break;
-    }
-    const std::int16_t target_slot = ship.primary_target_ship_slot;
-    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-    ship.ai_forward_thrust_cmd = eff_thrust * kBoostThrustFactor;
-    ship.ai_desired_speed = max_speed * kBoostCruiseFactor;
-    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
-        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
-    if (ship.swarm_mate_ship_slot > 0 &&
-        static_cast<std::size_t>(ship.swarm_mate_ship_slot) <
-            GameState::kMaxShips) {
-      // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
-      // blocks) + glow copy: modes keep their wedge position while attacking.
-      Ship_MoveShipTowardFormationOffset(
-          state, ship, /*snap=*/false, elapsed_ticks);
-      ship.engine_glow_level =
-          state.ShipAt(static_cast<std::size_t>(ship.swarm_mate_ship_slot))
-              .engine_glow_level;
-    }
-    const float dx = std::abs(ship.pos_x - target.pos_x);
-    const float dy = std::abs(ship.pos_y - target.pos_y);
-    if (dx < kCombatCloseRange && dy < kCombatCloseRange) {
-      // Ghidra 0x00408150 mode 0x11 selects the turret current bank first,
-      // then direct-fire within turn*3 while it is close.
-      NovaAi_FireTurretAtTarget(state, ship);
-      if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
-        NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
-      }
-    } else if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
-      // Far: within turn*3 the original arms a guided bank.
-      NovaAi_SelectGuidedWeaponBankForPrimaryTarget(state, ship);
-    }
-    if (dx < kCombatCloseRange && dy < kCombatCloseRange) {
-      ship.ai_control_mode = 6;
-    } else {
-      std::uniform_int_distribution<int> roll(0, 99);
-      if (roll(state.rng) == 0) {
-        ship.ai_control_mode = 6;
-      }
-    }
+  case 0x11:
+    run_boost();
     break;
-  }
 
   case 7: {
     // Combat strafe / guided approach: aim (predictive when a weapon bank is
@@ -1311,6 +1328,17 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float elapsed_ticks) {
 
   default:
     break;
+  }
+
+  // If-chain fallthrough: mode 5 -> 0x11 and mode 6 -> 0x10/0x11 transitions
+  // run the later block on the same tick in the original.
+  if (dispatched_mode == 5 || dispatched_mode == 6) {
+    if (ship.ai_control_mode == 0x10) {
+      run_evasive_break();
+    }
+    if (ship.ai_control_mode == 0x11) {
+      run_boost();
+    }
   }
 }
 
