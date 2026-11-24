@@ -1,5 +1,5 @@
 address	name	impl_file	reimpl_pct	comment
-0x00401000	Ship_UpdateShipAI	src/game/ship_ai.cpp	80%	gameplay,cadence,divergence
+0x00401000	Ship_UpdateShipAI	src/game/ship_ai.cpp	88%	gameplay,cadence,divergence
 0x00401800	Ship_ScanPlayerForContraband	src/game/government.cpp	100%	
 0x00402810	Ship_ResetShipAiBehaviorRuntimeFields	src/game/ship_ai.cpp	100%	
 0x00402860	Ship_UpdateShipAiBehavior0x01_WimpyTrader	src/game/ship_ai_behaviors.cpp	100%	

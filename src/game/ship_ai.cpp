@@ -905,7 +905,7 @@ void NovaAi_IssueEscortOrders(GameState &state, Ship &ship) {
   }
 }
 
-// @port 0x00401000 80% gameplay,cadence,divergence
+// @port 0x00401000 88% gameplay,cadence,divergence
 // DIVERGENCE(original): the per-instance AI update throttle is not modelled;
 // the port runs the heavy decision every frame.
 // ---- Ghidra 0x00401000 Ship_UpdateShipAI : the top-level dispatcher. ----
@@ -928,6 +928,31 @@ void NovaAi_UpdateShipAI(GameState &state,
   // Rare "defunct / retired" global abort (DAT_00596d3d set): skip AI.
   // (Kept as a structural no-op; the latch is not modelled.)
 
+  // Ghidra 0x00401000 head: mission-fleet maintenance. A ship whose mission
+  // slot went inactive drops it (and, if escorting, reverts to its class
+  // default behavior); a ShipBehav 1 mission ship that is not disabled is
+  // forced into a behavior-6 escort of the player every frame.
+  if (ship.mission_fleet_slot >= 0 &&
+      static_cast<std::size_t>(ship.mission_fleet_slot) <
+          state.active_missions.size()) {
+    const auto mission_slot = static_cast<std::size_t>(ship.mission_fleet_slot);
+    if (!state.active_mission_runtime_flags[mission_slot].is_active) {
+      ship.mission_fleet_slot = -1;
+      if (ship.squad_leader_ship_slot != -1) {
+        if (const ShipClass *cls = state.scenario.Ship(
+                static_cast<std::int16_t>(ship.ship_class_id + 0x80))) {
+          ship.ai_behavior_code = cls->default_ai_behavior;
+        }
+        ship.squad_leader_ship_slot = -1;
+        NovaAi_EnterState2ClearPrimaryTarget(state, ship);
+      }
+    } else if (state.active_missions[mission_slot].ship_behavior == 1 &&
+               !NovaAiShip_IsDisabled(state, ship)) {
+      ship.ai_behavior_code = 6;
+      ship.squad_leader_ship_slot = 0;
+    }
+  }
+
   // Fire-restricted ships skip the heavy behavior selection this frame.
   const bool restricted = NovaAiShip_IsDisabled(state, ship);
   // Ship_CanTargetOutrunShooter reads the ship-local weapon
@@ -947,6 +972,11 @@ void NovaAi_UpdateShipAI(GameState &state,
   if (ship.ai_selected_as_resolved_target) {
     Ship_UpdateEscortFormations(state, ship, /*snap=*/false);
   }
+  // A disabled ship abandons a running jump countdown (timer > 0 -> -1), so
+  // escorts holding in state 0x0B for it can release.
+  if (restricted && ship.hyperspace_jump_timer > 0.0F) {
+    ship.hyperspace_jump_timer = kHyperspaceJumpTimerCleared;
+  }
 
   // Ghidra 0x00401000 at 0x004011ca: mission-fleet jump-in placement does
   // not call NovaAi_EnterState8Slowdown. It writes -999 to the hyperspace
@@ -963,9 +993,28 @@ void NovaAi_UpdateShipAI(GameState &state,
   const bool entry_jump_control =
       entry_control_mode == 4 || entry_control_mode == 0xd;
 
+  const ShipClass *const marker_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const std::uint16_t sprite_flags =
+      marker_class != nullptr ? marker_class->sprite_behavior_flags : 0;
+  const int unfold_limit =
+      marker_class != nullptr ? marker_class->animation_cycle_count - 1 : 0;
+  // Fold/unfold hulls (sprite_behavior_flags 0x2) re-arm the unfold while
+  // parked; 0x80 hulls wait 45 ticks (0x2d) after their last shot.
+  auto arm_unfold = [&]() {
+    if ((sprite_flags & 0x80U) == 0U ||
+        ship.last_weapon_fire_time_ms + 0x2dU <= state.tick_60hz) {
+      ship.waypoint_arrival_marker_a = 1;
+    }
+  };
+
   if (arrival_slowdown_sentinel) {
     ship.ai_state_code = 8;
     ship.ai_control_mode = 10;
+    if (ship.waypoint_arrival_marker_b < unfold_limit &&
+        (sprite_flags & 0x2U) != 0U && ship.waypoint_arrival_marker_a == 0) {
+      arm_unfold();
+    }
   } else if (entry_jump_control) {
     // Ghidra 0x00401000 slice (disasm 0x004016b4..0x004017ec): while parked in
     // the formation control modes, state 0x0B (squad jump) exits when its
@@ -993,6 +1042,12 @@ void NovaAi_UpdateShipAI(GameState &state,
       if (!NovaAiShip_IsDisabled(state, leader) && leader.ai_state_code == 4) {
         abort_squad_jump();
       }
+    }
+    // Jump-hold control modes fold an unfolded non-0x80 hull.
+    if (ship.waypoint_arrival_marker_b > 0 &&
+        ship.waypoint_arrival_marker_a == 0 && (sprite_flags & 0x2U) != 0U &&
+        (sprite_flags & 0x80U) == 0U) {
+      ship.waypoint_arrival_marker_a = -1;
     }
   } else {
     // State 8 is valid only while its arrival sentinel is present. The
@@ -1034,11 +1089,9 @@ void NovaAi_UpdateShipAI(GameState &state,
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
     ship.ai_hostility_accumulator = 0;
+    ship.defense_fleet_home_stellar_id = -1;
     ship.ai_state_code = 0;
     ship.ai_control_mode = 0;
-    // TODO(decomp): the original also clears defense_fleet_home_stellar_id
-    // here (Ship_UpdateShipAI 0x00401000); the port leaves it set. Investigate
-    // whether dropping it is a deliberate divergence or a gap.
   }
 
   // The original sentinel and control-4/0xd arms bypass the entire
@@ -1125,6 +1178,15 @@ void NovaAi_UpdateShipAI(GameState &state,
       // its -999 arrival sentinel takes the dispatcher arm above.
       NovaAi_UpdateEscortAI(state, ship, now_ms);
     }
+  }
+
+  // Ordinary-arm tail (runs even when the behavior branch was skipped): a
+  // fold/unfold hull that is not coasting or in state 1 re-arms its unfold.
+  if (ordinary_arm && ship.ai_maneuver_timer_ms <= 0.0F &&
+      ship.ai_state_code != 1 && ship.waypoint_arrival_marker_a == 0 &&
+      ship.waypoint_arrival_marker_b < unfold_limit &&
+      (sprite_flags & 0x2U) != 0U) {
+    arm_unfold();
   }
 
   // The state machine always runs; the original only gates it on its
