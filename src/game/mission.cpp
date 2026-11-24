@@ -1399,7 +1399,9 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.return_stellar_id = target.return_stellar_id;
   active.target_ship_count = definition->target_ship_count;
   active.dude_def_index = definition->special_ship_dude;
-  if (active.dude_def_index >= kResourceIdBase) {
+  // Ghidra 0x0043f8c0 rebases any positive value (`0 < dude`), so a raw
+  // 1..127 goes negative and disables the special ship.
+  if (active.dude_def_index > 0) {
     active.dude_def_index =
         static_cast<std::int16_t>(active.dude_def_index - kResourceIdBase);
   }
@@ -1783,7 +1785,8 @@ bool Mission_DoesSystemMatchMissionLocator(const GameState &state,
     return system_id == target ||
            system_id == Misn_ResolveVisibleSystemForTravel(state, target);
   }
-  if (locator >= 5000 && locator <= 9999) {
+  // Ghidra 0x00447a30: the adjacency family is 5000..9998 (0x270e).
+  if (locator >= 5000 && locator <= 9998) {
     if (system_id == static_cast<std::int16_t>(locator - 5000)) {
       return true;
     }
@@ -1800,8 +1803,9 @@ bool Mission_DoesSystemMatchMissionLocator(const GameState &state,
     }
     return false;
   }
-  if (locator >= 10000 && locator < 15000) {
-    return govt >= 0 && govt == static_cast<std::int16_t>(locator - 10000);
+  // 9999..14999: plain government match (9999 matches independent, -1).
+  if (locator >= 9999 && locator < 15000) {
+    return govt == static_cast<std::int16_t>(locator - 10000);
   }
   if (locator >= 15000 && locator < 20000) {
     return govt >= 0 && (govt == static_cast<std::int16_t>(locator - 15000) ||

@@ -485,7 +485,7 @@ void spaceflight_detail::NovaShip_ApplyCloakShieldDrain(
   }
 }
 
-// @port 0x00463e70 55% gameplay
+// @port 0x00463e70 65% gameplay
 // @port 0x004640a0 95% correctness
 // Ghidra 0x00463e70 Ship_ComputeShipMaxTurnRateDeg (NPC branch; the player
 // path applies the same base*0.1 + opcode-9/rule inside NovaPlayer_Integrate-
@@ -524,13 +524,14 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
     }
   }
 
-  // DAT_00575788 = 1/3. A non-self velocity-match lock damps all three
-  // movement stats, including turn rate; a self-lock is deliberately neutral.
+  // DAT_00575788 is the double 0.333 (not 1/3), narrowed to float. A
+  // non-self velocity-match lock damps all three movement stats, including
+  // turn rate; a self-lock is deliberately neutral.
   const bool velocity_matched =
       ship.velocity_match_target_ship_slot != -1 &&
       ship.velocity_match_target_ship_slot != ship.ship_instance_id;
   if (velocity_matched) {
-    constexpr float kVelocityMatchScale = 1.0F / 3.0F;
+    constexpr auto kVelocityMatchScale = static_cast<float>(0.333);
     stats.max_speed_px_per_tick *= kVelocityMatchScale;
     stats.thrust_px_per_tick2 *= kVelocityMatchScale;
     stats.turn_rate_deg_per_tick *= kVelocityMatchScale;
@@ -550,8 +551,10 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
   if (ship.pers_def_slot == 0x03ff && stats.turn_rate_deg_per_tick < 6.0F) {
     stats.turn_rate_deg_per_tick += 1.0F;
   }
-  if (stats.turn_rate_deg_per_tick >= 1.0F) {
-    stats.turn_rate_deg_per_tick = std::max(stats.turn_rate_deg_per_tick, 1.0F);
+  // Floor to 1.0 only when the CLASS base rate is at least 1.0 deg/tick.
+  if (static_cast<float>(ship_class.turn_rate) * 0.1F >= 1.0F &&
+      stats.turn_rate_deg_per_tick < 1.0F) {
+    stats.turn_rate_deg_per_tick = 1.0F;
   }
   const float intensity = std::min(
       0.7F, spaceflight_detail::NovaShip_IonizationIntensity(ship, ship_class));
@@ -754,12 +757,14 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       ship.ai_behavior_code = ship_class.default_ai_behavior;
       NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
     } else if (Frame_ShouldTriggerAutoRepairTick(state, ship)) {
-      // Armor is restored to a fraction of the effective maximum: 1/3 for a
-      // normal hull, 1/10 when capability Flags 0x10, plus one point
+      // Armor is restored to a fraction of the effective maximum:
+      // k_auto_repair_armor_fraction_f64 (the double 0.3333, not 1/3) for a
+      // normal hull, 0.1 when capability Flags 0x10, plus one point
       // (DOUBLE_00575440 = 1.0).
       const float max_armor = NovaAi_ComputeMaxArmorPoints(state, ship);
-      const float armor_fraction =
-          (ship_class.capability_flags & 0x10U) != 0U ? 0.1F : (1.0F / 3.0F);
+      const float armor_fraction = (ship_class.capability_flags & 0x10U) != 0U
+                                       ? 0.1F
+                                       : static_cast<float>(0.3333);
       ship.armor_points = max_armor * armor_fraction + 1.0F;
       // The original raises g_playerShipPresentationDirty when the player's
       // HUD target is this ship; the port's HUD is immediate-mode.

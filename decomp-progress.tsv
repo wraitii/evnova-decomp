@@ -355,7 +355,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004638E0	Ship_ComputeShipArmorRegenRate	src/game/ship_ai.cpp	100%	
 0x00463A20	Ship_ComputeShipFuelCapacity	src/game/ship_ai.cpp	100%	
 0x00463DC0	Weapon_WeaponCanTrackTarget	src/game/ship_ai_weapons.cpp	100%	
-0x00463E70	Ship_ComputeShipMaxTurnRateDeg	src/game/spaceflight_movement.cpp	55%	gameplay
+0x00463E70	Ship_ComputeShipMaxTurnRateDeg	src/game/spaceflight_movement.cpp	65%	gameplay
 0x004640A0	Ship_ComputeShipEffectiveThrust	src/game/spaceflight_movement.cpp	95%	correctness
 0x004642E0	Ship_ComputeShipEffectiveMaxSpeed	src/game/spaceflight_movement.cpp	90%	gameplay
 0x004644A0	Outfit_HasEscapePodOrLaunchBay	src/game/spaceflight_player_state.cpp	100%	

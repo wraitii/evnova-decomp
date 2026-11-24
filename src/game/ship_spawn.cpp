@@ -6,6 +6,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
+#include "nova_math.hpp"
 #include "nova_random.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
@@ -114,21 +115,26 @@ void PlaceMissionFleetRespawn(GameState &state, Ship &ship, float bearing) {
       ship.hyperspace_jump_timer);
 }
 
+// Ghidra 0x004259b0 no-adjacent-stellar arm: Ship_EnterShipAiState0x08_-
+// Slowdown runs first (its rand(10) precedes the rand(0x168) angle draw), then
+// the ship is placed on the 2102.64-unit ring and faces the system centre at
+// an integer-degree bearing (Math_BearingFromPointToPoint returns a short).
 void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
-  const float angle =
-      static_cast<float>(RandomBelow(state, 0x168)) * 0.017453292519943295F;
-  const float spawn_radius = RandomPolarArrivalRadius();
-  ship.pos_x = std::sin(angle) * spawn_radius;
-  ship.pos_y = -std::cos(angle) * spawn_radius;
-  ship.heading = std::atan2(-ship.pos_x, ship.pos_y);
+  NovaAi_EnterState8Slowdown(state, ship);
   ship.vel_x = 0.0F;
   ship.vel_y = 0.0F;
   ship.speed = 0.0F;
-  // heading points from the spawn point back to the system centre, so this
-  // initial 50-unit velocity is inward, matching Math_AddPolarVelocity in the
-  // original spawn path.
+  const float spawn_radius = RandomPolarArrivalRadius();
+  constexpr float kDegToRad = 0.017453292519943295F;
+  const float angle = static_cast<float>(RandomBelow(state, 0x168)) * kDegToRad;
+  ship.pos_x = std::sin(angle) * spawn_radius;
+  ship.pos_y = -std::cos(angle) * spawn_radius;
+  const int bearing_deg =
+      static_cast<int>(BearingDeg(ship.pos_x, ship.pos_y, 0.0F, 0.0F));
+  ship.heading = static_cast<float>(bearing_deg) * kDegToRad;
+  ship.hyperspace_jump_timer = kHyperspaceJumpTimerArrived;
+  // The inward 50-unit velocity (Math_AddPolarVelocity at the heading).
   AddArrivalSlowdownVelocity(ship);
-  NovaAi_EnterState8Slowdown(state, ship);
 }
 
 } // namespace
@@ -393,6 +399,15 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   ship.heading = 0.0F;
   ship.ai_state_code = 0;
 
+  // Ghidra 0x004259b0 order: cargo-bin roll (slot draw before quantity),
+  // then the adjacent-stellar select, then placement.
+  if (def->HasCargoFlag() && cls != nullptr && cls->default_ai_behavior < 3) {
+    const std::int16_t bin = RandomBelow(state, 6);
+    const std::int16_t qty = RandomBelow(state, cls->cargo_holds);
+    ship.cargo_bins[static_cast<std::size_t>(bin)] =
+        static_cast<std::int16_t>(qty + 1);
+  }
+
   const std::int16_t entry_stellar =
       NovaAi_SelectRandomAdjacentDestination(state, ship);
   if (entry_stellar >= 0) {
@@ -402,11 +417,6 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
     NovaAi_EnterState15EmergeFromHypergate(state, ship, entry_stellar);
   } else {
     PlaceRandomPolarSlowdown(state, ship);
-  }
-
-  if (def->HasCargoFlag() && cls != nullptr && cls->default_ai_behavior < 3) {
-    ship.cargo_bins[static_cast<std::size_t>(RandomBelow(state, 6))] =
-        static_cast<std::int16_t>(RandomBelow(state, cls->cargo_holds) + 1);
   }
   NovaWeapon_EnsureNpcWeaponBanks(state, ship);
 
@@ -458,30 +468,34 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
       escort.resolved_squad_leader_ship_slot = static_cast<std::int16_t>(slot);
       escort.ai_selected_as_resolved_target = true;
       NovaWeapon_EnsureNpcWeaponBanks(state, escort);
+      // Ghidra 0x004259b0 escort order: the +/-150 scatter is drawn on both
+      // arms (the hypergate arm overwrites it), then the cargo roll, then
+      // the arrival state.
+      const float scatter_x = static_cast<float>(RandomBelow(state, 300));
+      escort.pos_x = (scatter_x + ship.pos_x) - 150.0F;
+      const float scatter_y = static_cast<float>(RandomBelow(state, 300));
+      escort.pos_y = (scatter_y + ship.pos_y) - 150.0F;
       if (def->HasCargoFlag() && escort_class->default_ai_behavior < 3) {
-        escort.cargo_bins[static_cast<std::size_t>(RandomBelow(state, 6))] =
-            static_cast<std::int16_t>(
-                RandomBelow(state, escort_class->cargo_holds) + 1);
+        const std::int16_t bin = RandomBelow(state, 6);
+        const std::int16_t qty = RandomBelow(state, escort_class->cargo_holds);
+        escort.cargo_bins[static_cast<std::size_t>(bin)] =
+            static_cast<std::int16_t>(qty + 1);
       }
 
       if (entry_stellar < 0) {
-        escort.pos_x =
-            ship.pos_x + static_cast<float>(RandomBelow(state, 300) - 150);
-        escort.pos_y =
-            ship.pos_y + static_cast<float>(RandomBelow(state, 300) - 150);
+        escort.hyperspace_jump_timer = kHyperspaceJumpTimerArrived;
         NovaAi_EnterState8Slowdown(state, escort);
       } else {
+        NovaAi_EnterState15EmergeFromHypergate(state, escort, entry_stellar);
         const Stellar *stellar = state.scenario.Stellar(entry_stellar);
         if (stellar != nullptr) {
           escort.pos_x = static_cast<float>(stellar->pos_x);
           escort.pos_y = static_cast<float>(stellar->pos_y);
         }
-        NovaAi_EnterState15EmergeFromHypergate(state, escort, entry_stellar);
-        escort.heading =
-            ship.heading + static_cast<float>(RandomBelow(state, 15) + 5) *
-                               (3.14159265358979323846F / 180.0F);
+        escort.heading = ship.heading;
         escort.ai_maneuver_timer_ms +=
             static_cast<float>(RandomBelow(state, 15) + 5);
+        escort.jump_destination_stellar_id = -2;
       }
     }
   }
@@ -1954,17 +1968,20 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
     // only proceeds when the draw is exactly 1.
     bool ambient_spawned = false;
     if (RandomBelow(state, 500) == 1) {
-      const bool has_encounters =
-          sys->encounter_fleet_count >= 1 && sys->encounter_chance_percent > 0;
-      // Second gate: a uniform draw in [0, encounter_chance_percent).
-      if (has_encounters &&
+      // Second gate: NovaRandom_Range(100) is drawn whenever the system has
+      // encounter fleets (even at 0% chance); pass when roll + 1 <= chance.
+      if (sys->encounter_fleet_count >= 1 &&
           RandomBelow(state, 100) < sys->encounter_chance_percent) {
         const int fleet = NovaEncounter_SelectFleetDefWeighted(
             *sys, state.scenario, state.rng);
         if (fleet >= 0) {
-          // Original intercept: EncounterFleet_SpawnRandomEncounterFleet.
+          // EncounterFleet_SpawnRandomEncounterFleet(system, fleet, -1, 1).
           (void)NovaEncounter_SpawnFleetLeadShip(
-              state, system_id, static_cast<std::int16_t>(fleet));
+              state,
+              system_id,
+              static_cast<std::int16_t>(fleet),
+              -1,
+              /*ignore_ship_availability=*/true);
           ambient_spawned = true;
         }
       }

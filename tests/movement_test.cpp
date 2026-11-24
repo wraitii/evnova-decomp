@@ -1143,9 +1143,9 @@ TEST_CASE("npc effective stats port the high-confidence modifier branches") {
   ship.ship_instance_id = 3;
   ship.velocity_match_target_ship_slot = 7;
   const auto matched = game::NovaShip_ComputeEffectiveStats(state, ship, cls);
-  CHECK(matched.thrust_px_per_tick2 == Catch::Approx(0.1F / 3.0F));
-  CHECK(matched.max_speed_px_per_tick == Catch::Approx(4.0F / 3.0F));
-  CHECK(matched.turn_rate_deg_per_tick == Catch::Approx(4.0F / 3.0F));
+  CHECK(matched.thrust_px_per_tick2 == Catch::Approx(0.1F * 0.333F));
+  CHECK(matched.max_speed_px_per_tick == Catch::Approx(4.0F * 0.333F));
+  CHECK(matched.turn_rate_deg_per_tick == Catch::Approx(4.0F * 0.333F));
 
   ship.velocity_match_target_ship_slot = -1;
   ship.pers_def_slot = 0x03ff;

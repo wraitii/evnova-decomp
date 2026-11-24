@@ -1290,6 +1290,12 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
           game::PilotFileLoadSave(*selection->path, runtime.game);
       if (result == game::PilotLoadError::kOk ||
           result == game::PilotLoadError::kRepairsApplied) {
+        if (result == game::PilotLoadError::kOk) {
+          // Ghidra 0x004c9e90: an exact load clears a saved death timer and
+          // timed action so ENTER SHIP is not refused.
+          runtime.game.player.death_timer_active = -1.0F;
+          runtime.game.player.timed_action_counter = -1;
+        }
         runtime.game.game_active = true;
         runtime.game.player.is_active = true;
         runtime.game_active = true;
@@ -1339,6 +1345,11 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
         NovaLog::Error("could not open pilot file '{}': loader error {}",
                        selection->path->string(),
                        static_cast<int>(result));
+        if (result == game::PilotLoadError::kInvalidFleetBlock) {
+          // TODO(decomp): 0x004c9e90 shows STR# 0x8c entry 0x22 in a dialog.
+          NovaLog::Todo("Open Pilot invalid-file dialog (STR# 0x8c entry "
+                        "0x22) is not ported");
+        }
       }
     }
   }

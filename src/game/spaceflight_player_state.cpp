@@ -62,12 +62,12 @@ constexpr float kJumpTurnaroundTurnRateAddend = 1.0F;
 // 0x0044af17 reads the 4-byte float.
 constexpr float kPlayerDeathInactiveTimerFloor = -240.0F;
 // Disabled auto-repair armor restore: max_armor * fraction + addend.
-// g_auto_repair_armor_fraction (DAT_00575588, double 1/3) is the standard
+// g_auto_repair_armor_fraction (DAT_00575588, double 0.3333) is the standard
 // rate, g_auto_repair_armor_fraction_0x10 (DAT_00575578, double 0.1) the Ship
 // Flags 0x10 variant, g_armor_state_addend (DAT_00575580, double 1.0) the
 // shared addend. The +1 lifts the hull just above the disable threshold so
 // the ship un-disables after the repair.
-constexpr float kAutoRepairArmorFraction = 1.0F / 3.0F;
+constexpr auto kAutoRepairArmorFraction = static_cast<float>(0.3333);
 constexpr float kAutoRepairArmorFractionFlag0x10 = 0.1F;
 constexpr float kAutoRepairArmorAddend = 1.0F;
 // Bomb-detonation self-damage roll: max_armor * 0.5 + 1.0

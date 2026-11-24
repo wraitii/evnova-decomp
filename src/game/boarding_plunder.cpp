@@ -918,9 +918,11 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
             static_cast<std::int8_t>(target.fleet_recovery_hint == 1 ? 1 : 0);
         target.fleet_recovery_hint = -1;
         const float max_armor = NovaAi_ComputeMaxArmorPoints(state, target);
+        // g_auto_repair_armor_fraction (0x00575588) is the double 0.3333.
         const float armor_fraction =
-            (target_class->capability_flags & 0x10U) != 0U ? 0.1F
-                                                           : (1.0F / 3.0F);
+            (target_class->capability_flags & 0x10U) != 0U
+                ? 0.1F
+                : static_cast<float>(0.3333);
         target.armor_points = max_armor * armor_fraction + 1.0F;
         NovaShip_ResetAiBehaviorRuntimeFields(target);
         for (std::size_t bin = 0; bin < target.cargo_bins.size(); ++bin) {
