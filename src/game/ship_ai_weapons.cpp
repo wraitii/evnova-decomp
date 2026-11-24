@@ -720,7 +720,14 @@ void NovaAi_FireTurretAtTarget(GameState &state, Ship &ship) {
     bool barrier = false;
     if (mode == 7 || mode == 8) {
       int delta = 0;
-      if (mode == 7) {
+      if (state.bugfixes.safe) {
+        // BUGFIX(original): |d| % 360 with no fold rejects an arc straddling
+        // 0 deg (heading 10, bearing 350 -> 340). Use the shortest angle, as
+        // the player path (0x00455150) does; mirrors Weapon_FireShipWeapons.
+        const int arc_center =
+            mode == 7 ? heading_deg : (heading_deg + 0xb4) % 0x168;
+        delta = ShortestAngleDeltaDeg(arc_center, bearing);
+      } else if (mode == 7) {
         // Truncate the continuous |bearing - heading| difference toward zero
         // (x87 FIST + residual/sign correction) before the mod-360 wrap.
         delta = static_cast<int>(

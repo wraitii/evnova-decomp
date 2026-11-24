@@ -1432,12 +1432,23 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
               beam_length + static_cast<float>((scaled_extent + 1) / 2)) {
             continue;
           }
-          const float target_bearing = BearingDeg(
-              beam.source_x, beam.source_y, candidate.pos_x, candidate.pos_y);
-          const float delta =
-              std::remainder(target_bearing - bearing_deg, 360.0F);
-          if (std::abs(delta) >
-              static_cast<float>(scaled_extent) * 10.0F / 32.0F) {
+          // Ghidra 0x0042f270 cone: abs(diff - angle) <= trunc(span*0.66)*10/32
+          // on 16-bit integer bearings, with no +/-180 fold.
+          const int target_bearing = static_cast<int>(BearingDeg(
+              beam.source_x, beam.source_y, candidate.pos_x, candidate.pos_y));
+          const int beam_bearing = static_cast<int>(bearing_deg);
+          int delta = 0;
+          if (state.bugfixes.safe) {
+            // BUGFIX(original): the unfolded difference misses a target
+            // across the 0/360 seam (beam 5, target 355 -> 350). Use the
+            // shortest angle, as for the quadrant turrets. The jittered beam
+            // bearing may sit outside [0,360), so wrap it first.
+            delta = ShortestAngleDeltaDeg(((beam_bearing % 360) + 360) % 360,
+                                          target_bearing);
+          } else {
+            delta = std::abs(target_bearing - beam_bearing);
+          }
+          if (delta > scaled_extent * 10 / 32) {
             continue;
           }
           if (hit_slot == -1 || distance < best_distance) {

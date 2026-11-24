@@ -1706,6 +1706,54 @@ TEST_CASE("mode-zero beams stay on the owner heading and stop at BeamLength",
 // source + polar(bearing, truncated distance) and falls back to BeamLength when
 // nothing is in reach, so an off-range turreted beam must not run to the
 // target.
+TEST_CASE("beam cone across the 0/360 seam follows the bugfix policy",
+          "[weapon][beam]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &beam = state.scenario.weapons[0];
+  beam.weapon_mode_code = 0;
+  beam.beam_length_px = 100;
+  beam.lifetime_ticks = 10;
+  beam.beam_falloff = 0x10;
+  state.scenario.ships.resize(1);
+  state.player.current_system_id = 0;
+
+  Ship &owner = state.ShipAt(0);
+  owner.is_active = true;
+  owner.ship_instance_id = 0;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 200.0F;
+  owner.heading = 0.0F;
+
+  // 60 px away at bearing ~355: 5 deg off a beam aimed at 0, inside the
+  // trunc(75*0.66)*10/32 = 15 deg cone once the difference is folded.
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+  target.pos_x = 100.0F - 60.0F * std::sin(5.0F * 3.14159265F / 180.0F);
+  target.pos_y = 200.0F - 60.0F * std::cos(5.0F * 3.14159265F / 180.0F);
+
+  SECTION("original: unfolded difference 355 misses") {
+    state.bugfixes.safe = false;
+    REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+    NovaWeapon_TickBeamHitQueue(state, 1.0F);
+    CHECK(state.beam_hit_queue[0].target_y == Catch::Approx(100.0F));
+  }
+  SECTION("BUGFIX(original): shortest angle 5 hits") {
+    state.bugfixes.safe = true;
+    REQUIRE(NovaWeapon_QueueBeamHit(state, 0, 1, 0, -1, 0));
+    NovaWeapon_TickBeamHitQueue(state, 1.0F);
+    // Contact length trunc(60 - 75*0.2) = 45 along the 0 deg beam.
+    CHECK(state.beam_hit_queue[0].target_y == Catch::Approx(155.0F));
+  }
+}
+
 TEST_CASE("turreted beams aim at the target but stop at BeamLength",
           "[weapon][beam]") {
   GameState state;
