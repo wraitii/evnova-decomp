@@ -6,9 +6,12 @@
     "sdl3",
     {
       "name": "sdl3-ttf",
-      "features": ["harfbuzz"]
+      "features": [
+        "harfbuzz"
+      ]
     },
     "catch2",
     "fmt"
-  ]
+  ],
+  "builtin-baseline": "432d982fb917e1d9b032197b01572b83bcb02a75"
 }
