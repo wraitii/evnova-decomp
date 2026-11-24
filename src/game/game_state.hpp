@@ -1009,6 +1009,9 @@ struct ActiveShot {
   // life_frames is retained as the rounded/debug-facing view used by the
   // renderer and existing tests.
   float life_ticks_remaining = 0.0F;
+  // ShotState +0x42 turret_tracking_roll: Guidance 4/9 shots seed
+  // Random(owner class rating)+1 at spawn; every other mode stores -1.
+  std::int16_t turret_tracking_roll = -1;
   // Provisional circle envelope replacing the original shot sprite half-span
   // and pixel-mask test when the shot sprite mask has not been resolved by the
   // collision refresh pass.

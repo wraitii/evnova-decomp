@@ -364,6 +364,16 @@ struct ShipClass {
   // Bible EscortType, normalized by the loader to 0 Fighter, 1 Medium Ship,
   // 2 Warship, or 3 Freighter (including its runtime inference for -1).
   std::int16_t class_category = 0;
+
+  // Hardcoded turret_tracking_rating the shp loader (0x004bd3c0) derives from
+  // class_category: Fighter 80, Medium 90, Warship/Freighter 100.
+  [[nodiscard]] std::int16_t TurretTrackingRating() const {
+    if (class_category == 0) {
+      return 80;
+    }
+    return class_category == 1 ? 90 : 100;
+  }
+
   std::int16_t crew = 0; // Crew (Ghidra ShipClassDef.capture_power +0x9f2:
                          // ships with 0 crew cannot be boarded nor capture;
                          // the AI boarding selector reads it as capture_power)

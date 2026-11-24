@@ -236,14 +236,17 @@ bool NovaTradeCenter_CanBuyRow(const GameState &state,
                                const TradeCenterSession &session,
                                int row) {
   const TradeCenterRow *slot = session.Row(row);
-  if (slot == nullptr || slot->price <= 0) {
+  if (slot == nullptr) {
     return false;
   }
   if (state.player.credits < slot->price) {
     return false;
   }
-  const std::int32_t capacity = Player_ComputeFleetCargoCapacity(state);
-  const std::int32_t used = Player_ComputeCargoAndJunkTotal(state);
+  // The original compares the two totals as 16-bit shorts.
+  const auto capacity =
+      static_cast<std::int16_t>(Player_ComputeFleetCargoCapacity(state));
+  const auto used =
+      static_cast<std::int16_t>(Player_ComputeCargoAndJunkTotal(state));
   return capacity > used;
 }
 

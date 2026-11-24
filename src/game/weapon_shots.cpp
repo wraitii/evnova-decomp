@@ -200,7 +200,7 @@ void NovaWeapon_ClearTransientCombatState(GameState &state) {
   state.pending_impact_sounds.clear();
 }
 
-// @port 0x0041fd30 95% gameplay,rng
+// @port 0x0041fd30 97% gameplay,rng
 int NovaWeapon_SpawnProjectile(GameState &state,
                                std::int16_t owner_ship_slot,
                                std::int16_t target_ship_slot,
@@ -329,6 +329,22 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   }
 
   shot.heading_deg = static_cast<float>(RoundHeadingDeg(heading));
+
+  // Turret tracking roll (0x0041fd30): owned Guidance 4/9 shots draw
+  // Random(owner class rating)+1 (Random(100)+1 for a rating < 1) before the
+  // frame-cycle draw; other owned shots store -1.
+  if (owner_in_range && !spawn_without_owner) {
+    if (mode == 4 || mode == 9) {
+      const ShipClass *owner_cls = ShipClassFor(
+          state, state.ShipAt(static_cast<std::size_t>(owner_ship_slot)));
+      const std::int16_t rating =
+          owner_cls != nullptr ? owner_cls->TurretTrackingRating() : 0;
+      shot.turret_tracking_roll = static_cast<std::int16_t>(
+          RandomBelow(state, rating < 1 ? 100 : rating) + 1);
+    } else {
+      shot.turret_tracking_roll = -1;
+    }
+  }
 
   // Shot_SpawnShotFromWeapon seeds the animated sprite cycle from Random(0x24);
   // flags_primary 0x4 (a fixed/heading sprite set) pins it to 0. Drawn before

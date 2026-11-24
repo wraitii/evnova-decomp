@@ -2121,24 +2121,17 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
             owner.defense_fleet_home_stellar_id) {
       return false;
     }
-    // TODO(decomp) unported: turret tracking gate (Ghidra
-    // Weapon_CanWeaponHitTarget 0x00426ef0). Only Guidance 4 (turreted unguided
-    // projectile) and Guidance 9 (point-defense turret) shots carry a per-shot
-    // turret_tracking_roll, seeded at spawn as Random(shooter class
-    // turret_tracking_rating)+1; every other mode stores 0xffff/-1, so beams
-    // and quadrant turrets are exempt. This predicate rejects a non-disabled
-    // target whose own class rating is below that roll:
-    // target_class.turret_tracking_rating < shot.turret_tracking_roll. The
-    // rating is a hardcoded engine table derived from the hull's
-    // EscortType/class_category (Fighter 80, Medium 90, Warship/Freighter 100),
-    // not a ship resource field. Net effect: a larger hull's turret/PD
-    // projectiles probabilistically pass through an active smaller hull, but
-    // still hit it once disabled. The rating table is not loaded
-    // (ShipClass) and the roll is not seeded (NovaWeapon_SpawnProjectile,
-    // src/game/weapon_shots.cpp). See Ghidra plates on 0x0041fd30/0x00426ef0.
-    // When porting, record this as an engine eccentricity (a larger hull's
-    // turret/PD fire can pass through an active smaller hull) in
-    // docs/known_original_bugs.md so players see it documented.
+    // Turret tracking gate (0x00426ef0): a Guidance 4/9 shot whose roll
+    // exceeds the target class rating passes through unless the target is
+    // disabled (rating 80/90/100 by class category; other modes roll -1).
+    // Engine eccentricity: larger hulls' turret/PD fire can pass through an
+    // active smaller hull (docs/known_original_bugs.md).
+    if (const ShipClass *target_cls = ShipClassFor(state, target);
+        target_cls != nullptr &&
+        target_cls->TurretTrackingRating() < shot.turret_tracking_roll &&
+        !NovaAiShip_IsDisabled(state, target)) {
+      return false;
+    }
 
     const bool owner_chain_to_player =
         OwnerChainReachesPlayer(state, owner_slot);

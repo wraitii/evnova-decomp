@@ -335,8 +335,6 @@ BuildOutfitterIds(GameState &state,
     if (!owned && (outfit.flags & 0x0100U) != 0U)
       visible =
           visible && MeetsRequire(state, outfit.require_lo, outfit.require_hi);
-    if (owned && (outfit.flags & 0x0800U) != 0U)
-      visible = true;
     // Daily in-stock gate (Outfit_RebuildAvailableOutfitListForTravelStellar
     // 0x0046a220): an unowned outfit shows only while the per-day stock roll
     // is non-zero and <= the def's In-Stock percent; owning a visible one
@@ -352,6 +350,10 @@ BuildOutfitterIds(GameState &state,
         }
       }
     }
+    // The owned 0x800 promotion runs after the stock block, so it does not
+    // zero the stock roll of an owned outfit that failed the earlier gates.
+    if (owned && (outfit.flags & 0x0800U) != 0U)
+      visible = true;
     if (visible)
       ids.push_back(static_cast<std::int16_t>(i + 0x80));
   }
