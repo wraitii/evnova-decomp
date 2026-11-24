@@ -620,7 +620,7 @@ float PlayerJumpProgress(const GameState &state) {
 
 } // namespace
 
-// @port 0x00456CA0 85% rng,rendering
+// @port 0x00456CA0 85% rng,rendering,bugfix
 // Ghidra 0x00456ca0 Stellar_EnterWormhole (destination selection; the caller
 // shows the "Unable to use this wormhole" overlay on -1).
 // Linked source: the visible-link count only gates the attempt; the pick
@@ -656,10 +656,17 @@ NovaTravel_SelectWormholeDestination(GameState &state,
     if (!any_visible) {
       return -1;
     }
+    // BUGFIX(original): under BugFixPolicy::safe the pick also re-rolls
+    // invisible links, so the jump never lands in an invisible system.
+    const bool require_visible = state.bugfixes.safe;
     for (;;) {
       const std::int16_t link =
           source->hyperlinks[static_cast<std::size_t>(RandomBelow(state, 8))];
-      if (link != -1 && StellarSystem(state, link) != -1) {
+      if (link == -1) {
+        continue;
+      }
+      const std::int16_t system = StellarSystem(state, link);
+      if (system != -1 && (!require_visible || is_visible(system))) {
         return link;
       }
     }
@@ -700,8 +707,11 @@ NovaTravel_SelectWormholeDestination(GameState &state,
     if (!has_links(*candidate) && is_visible(StellarSystem(state, id))) {
       return id;
     }
-    // Rejected sample: stay at the source wormhole in the current system.
-    return source_stellar_id;
+    // BUGFIX(original): the original stays at the source wormhole when the
+    // sample is linked or invisible; under BugFixPolicy::safe keep sampling.
+    if (!state.bugfixes.safe) {
+      return source_stellar_id;
+    }
   }
 }
 
@@ -735,10 +745,11 @@ bool NovaTravel_CompleteRestrictedTravel(GameState &state,
   const Stellar *destination = state.scenario.Stellar(destination_stellar_id);
   const std::int16_t stored_system =
       StellarSystem(state, destination_stellar_id);
-  // The hypergate resolves to a visible system; the wormhole enters the raw
-  // stellar system_id (Ghidra 0x00456ca0 sets current_system_id directly).
+  // The hypergate resolves to a visible system; the original wormhole enters
+  // the raw stellar system_id (0x00456ca0 sets current_system_id directly).
+  // BUGFIX(original): BugFixPolicy::safe resolves the wormhole too.
   const std::int16_t destination_system =
-      kind == RestrictedTravelKind::kHypergate
+      kind == RestrictedTravelKind::kHypergate || state.bugfixes.safe
           ? NovaSystem_ResolveVisibleForTravel(state, stored_system)
           : stored_system;
   if (destination == nullptr || destination_system < 0) {

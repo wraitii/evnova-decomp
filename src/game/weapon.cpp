@@ -984,15 +984,19 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
               BearingDeg(ship.pos_x, ship.pos_y, target->pos_x, target->pos_y));
           const float cur_deg =
               ship.heading * (180.0F / 3.14159265358979323846F);
-          // Original quirk: |d| % 360 with no fold to +/-180, so an arc that
-          // straddles 0 deg misses (e.g. heading 10, bearing 350 -> 340).
+          const int tail = (static_cast<int>(cur_deg) + 180) % 360;
           int delta = 0;
-          if (mode == 7) {
+          if (state.bugfixes.safe) {
+            // BUGFIX(original): the NPC path tests |d| % 360 with no fold, so
+            // an arc straddling 0 deg misses (heading 10, bearing 350 -> 340).
+            // Use the shortest angle, as the player path (0x00455150) does.
+            delta = ShortestAngleDeltaDeg(
+                mode == 7 ? static_cast<int>(cur_deg) : tail, tb);
+          } else if (mode == 7) {
             delta =
                 static_cast<int>(std::abs(static_cast<float>(tb) - cur_deg)) %
                 360;
           } else {
-            const int tail = (static_cast<int>(cur_deg) + 180) % 360;
             delta = std::abs(tb - tail) % 360;
           }
           if (delta < 0x2e &&

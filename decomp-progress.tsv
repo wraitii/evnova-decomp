@@ -304,7 +304,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00455150	Weapon_FirePlayerWeaponBank	src/game/weapon.cpp	88%	gameplay,audio,bugfix
 0x00455E10	Stellar_RunDockAndLaunchSequence	src/game/landed_window.cpp	70%	rendering,bugfix
 0x00456480	Stellar_EnterHypergate	src/game/travel.cpp	75%	gameplay,rendering
-0x00456CA0	Stellar_EnterWormhole	src/game/travel.cpp	85%	rng,rendering
+0x00456CA0	Stellar_EnterWormhole	src/game/travel.cpp	85%	rng,rendering,bugfix
 0x00457580	Stellar_HandleStellarEntryAndExit	src/game/landed_window.cpp	60%	gameplay,cadence,rendering
 0x00459950	NovaUi_UpdateTravelEngagementProgress	src/game/travel.cpp	95%	gameplay,ui
 0x0045A3D0	Player_HandleBoardTargetCommand	src/game/boarding_plunder.cpp	92%	cadence

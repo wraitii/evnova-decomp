@@ -67,15 +67,22 @@ constexpr float kDisableArmorPinFractionCap0x10 = 0.1F;
 
 // Asteroid debris particle constants from Asteroid_SpawnDestructionPackage
 // (0x00462550): speed DAT_00575740 = 0.2 px/tick, speed scatter 0x28, lifetime
-// [0xf0, 0x1e0], and position scatter = sprite frame width / 3. Every shipped
-// asteroid spin set (800..815) is 50x50, so the original's
-// Sprite_GetFrameFullWidth(*asteroid)/3 reduces to 16
-// (AsteroidState.collision_radius_px records the 25 px half-span).
+// [0xf0, 0x1e0], and position scatter = Sprite_GetFrameFullWidth / 3
+// (truncating), taken from the asteroid's resolved frame mask. Without a mask
+// (archive-free tests) the shipped 50 px spin-set width (800..815) is assumed.
 constexpr float kAsteroidDebrisParticleSpeed = 0.2F;
 constexpr std::int16_t kAsteroidDebrisParticleScatter = 0x28;
 constexpr std::int16_t kAsteroidDebrisLifeBase = 0xf0;
 constexpr std::int16_t kAsteroidDebrisLifeMax = 0x1e0;
-constexpr std::int16_t kAsteroidDebrisPositionScatter = 16;
+constexpr int kShippedAsteroidFrameWidth = 50;
+
+[[nodiscard]] std::int16_t
+AsteroidDebrisPositionScatter(const AsteroidState &asteroid) {
+  const int width = asteroid.collision_mask.HasMask()
+                        ? asteroid.collision_mask.mask->width
+                        : kShippedAsteroidFrameWidth;
+  return static_cast<std::int16_t>(width / 3);
+}
 
 // @port 0x004115c0 100%
 // Ghidra 0x004115c0 Ship_ClearShipState0x09Or0x0FToIdle.
@@ -1678,17 +1685,18 @@ void ResolveAsteroidDestructionPackage(GameState &state,
     }
   }
   // Debris SWParticle burst (part_count, part_color).
-  NovaEffects_SpawnWeaponImpactParticleBurst(state,
-                                             asteroid.target_pos_x,
-                                             asteroid.target_pos_y,
-                                             kAsteroidDebrisParticleSpeed,
-                                             kAsteroidDebrisParticleScatter,
-                                             kAsteroidDebrisLifeBase,
-                                             kAsteroidDebrisLifeMax,
-                                             def->part_color,
-                                             /*blend_mode=*/0x20,
-                                             def->part_count,
-                                             kAsteroidDebrisPositionScatter);
+  NovaEffects_SpawnWeaponImpactParticleBurst(
+      state,
+      asteroid.target_pos_x,
+      asteroid.target_pos_y,
+      kAsteroidDebrisParticleSpeed,
+      kAsteroidDebrisParticleScatter,
+      kAsteroidDebrisLifeBase,
+      kAsteroidDebrisLifeMax,
+      def->part_color,
+      /*blend_mode=*/0x20,
+      def->part_count,
+      AsteroidDebrisPositionScatter(asteroid));
   if (def->explode_type != -1) {
     NovaEffects_SpawnAreaImpact(state,
                                 asteroid.target_pos_x,
@@ -2100,12 +2108,8 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   } else {
     const std::int16_t owner_slot = shot.owner_ship_slot;
     const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_slot));
-    // Clean-room guard: the original relies on shot lifetime to drop dead or
-    // departed owners; the explicit checks keep stale shots from damaging
-    // across systems in this simplified model.
-    if (owner.current_system_id != shot.system_id || IsShipDestroyed(owner)) {
-      return false;
-    }
+    // No owner liveness/system check: shots outlive a destroyed or departed
+    // owner and keep evaluating its (possibly stale) slot, as in 0x00426ef0.
     if (owner.squad_leader_ship_slot != -1 &&
         target.squad_leader_ship_slot != -1 &&
         target.squad_leader_ship_slot == owner.squad_leader_ship_slot) {

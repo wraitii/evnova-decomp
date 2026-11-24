@@ -186,9 +186,15 @@ TEST_CASE("wormholes distinguish linked and random-unlinked destinations") {
   // 0x2000 stellar in another system; drawing the linked wormhole is not
   // re-rolled but falls back to the source (stay in the current system).
   linked.hyperlinks[0] = 0x80;
+  state.bugfixes.safe = false;
   for (int i = 0; i < 32; ++i) {
     const std::int16_t pick = NovaTravel_SelectWormholeDestination(state, 0x80);
     CHECK((pick == 0x82 || pick == 0x80));
+  }
+  // BUGFIX(original) under BugFixPolicy::safe: rejected samples re-roll.
+  state.bugfixes.safe = true;
+  for (int i = 0; i < 32; ++i) {
+    CHECK(NovaTravel_SelectWormholeDestination(state, 0x80) == 0x82);
   }
   linked.is_available = false;
   CHECK(NovaTravel_SelectWormholeDestination(state, 0x80) == 0x82);
