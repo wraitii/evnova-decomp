@@ -119,6 +119,16 @@ recheck timer). An offer whose mïsn Flags 0x0004 is set ("can't refuse", e.g.
 the shipped storyline missions) publishes no `decline` element — it must be
 accepted; `decline_mission` will wait out its timeout if one appears.
 
+### Quit and resume a docked pilot
+
+Run `tests/scenarios/mission_save.toml` against a fresh game using a disposable
+pilot profile. It creates a pilot, accepts Barry's first mission, lands on Mars
+and quits from the spaceport. Wait for that process to exit. Start a second game
+with the same profile and run `tests/scenarios/mission_resume.toml`. It checks
+the system and mission before entering the ship, then completes the delivery
+on Earth. On Linux, set `XDG_DATA_HOME` to the same temporary directory for
+both launches to keep the pilot separate from your own.
+
 ### Callable scenario fragments
 
 Any scenario can be invoked as a reusable, parameterized function from another

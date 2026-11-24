@@ -1,0 +1,29 @@
+version = 1
+name = "mission-save"
+
+[defaults]
+timeout_ms = 30000
+
+[[steps]]
+action = "call"
+scenario = "fragments/new_pilot"
+
+[[steps]]
+action = "call"
+scenario = "fragments/tutorial_reach_sol"
+
+# Stop short of Earth so Barry's first mission stays active across the save.
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Mars"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.system" = "Sol", "missions.missions.0.template_id" = 123 }
+timeout_ms = 180000
+
+# Quitting while docked runs the spaceport exit and autosave.
+[[steps]]
+action = "quit"
