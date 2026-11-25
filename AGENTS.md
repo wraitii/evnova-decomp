@@ -12,6 +12,7 @@ Escape Velocity Nova is Ambrosia Software's 2002 open-world 2D space-trading and
 - Always improve ghidra when possible.
 - Check the EVN bible ("EV Nova Bible.html") for information.
 - ResForge, an extensive EVN resource editor, is bundled at docs/assets/ResForge. Check its source for .rez reference.
+- docs/assets/EVNovaDecompile is a third-party matching C decompilation of EV Nova 1.0.10 (Windows/Mac) and 1.1.1 (Mac). Its `// FUNCTION: EVNOVA 0x…` tags match our Ghidra addresses, so grep `sources/engine/` for readable cross-checks. Treat its names and comments as provisional; Ghidra remains ground truth.
 - The pilot format is documented at docs/reference/pilotformat.txt
 - Reference decompiled / disassembled ground truth from the Ghidra API.
 - Be conservative with speculative renames. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.
